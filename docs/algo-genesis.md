@@ -16,7 +16,7 @@ description: EvoX Genesis (persistent recursive worlds) as pluggable AgentDescen
 | **Paper** | *Persistent Recursive Worlds Enable Autonomous Software Evolution* — Beichen Huang, Zhenyu Liang, Bowen Zheng, Ran Cheng, 2026 ([arXiv:2608.10450](https://arxiv.org/abs/2608.10450)) |
 | **Upstream code** | [`EMI-Group/genesis`](https://github.com/EMI-Group/genesis) @ v0.12.6 (Elixir, AGPL-3.0) |
 | **Example** | [`examples/genesis/genesis_recursive_worlds.py`](https://github.com/Birfy/agentdescent/blob/main/examples/genesis/genesis_recursive_worlds.py) |
-| **Domain** | A compact formation run: a language toolchain grown from an implementation-empty repository against a frozen staged suite |
+| **Domains** | Two compact formation runs, `--domain`: **minilang** (an integer expression language, 2 nodes deep, 4 files) and **stackvm** (a stack machine and its assembler, 4 nodes deep, 10 files), each grown from an implementation-empty repository against a frozen staged suite |
 | **Layer** | L2 (`blast_radius=0.2`) — the evaluator is outside the artifact |
 | **Fidelity** | `mechanism_microport` — [what the classes mean](port-fidelity.md) |
 
@@ -79,13 +79,35 @@ Every piece is a seam the engine already had. Nothing in `agentdescent/` changed
 | [`RecursiveDelegation`](https://github.com/Birfy/agentdescent/blob/main/examples/genesis/_delegation.py) | `Policies(proposal=)` | One rollout is a whole episode tree at **one** version: manager → children → leaf executors → the parent's verdict → the merged edit set. |
 | [`OctopusConflict`](https://github.com/Birfy/agentdescent/blob/main/examples/genesis/_octopus.py) | `Policies(conflict=)` | Three-way merges the contested values, so two agents editing two functions of one file both survive. Real overlaps fall through to the shipped rule. |
 | [`ParentJudge`](https://github.com/Birfy/agentdescent/blob/main/examples/genesis/_judge.py) | `Policies(acceptance=)` | Upstream's monotone rule: *partial progress is accepted*; a regression is refused; a tie commits and sends more work to that subtree. |
-| [`suite_review`](https://github.com/Birfy/agentdescent/blob/main/examples/genesis/_domain.py) | `RecursiveDelegation(review=)` | The parent's own test run on **one child's** contribution, inside the episode — the tests and integration evidence of paper §3.3, which the acceptance gate cannot see because it only ever sees what the whole episode returned. |
+| [`Suite.review`](https://github.com/Birfy/agentdescent/blob/main/examples/genesis/_suite.py) | `RecursiveDelegation(review=)` | The parent's own test run on **one child's** contribution, inside the episode — the tests and integration evidence of paper §3.3, which the acceptance gate cannot see because it only ever sees what the whole episode returned. |
 | [`LocalWorld` / `WorldLog`](https://github.com/Birfy/agentdescent/blob/main/examples/genesis/_world.py) | — | `(v,p)` itself; the `CONTEXT.md` chain an entering agent is given; `routing()`, the table that decides where a manager may delegate; and the archive that outlives the agents. |
 
 `--keyed-union` and `--engine-gate` turn the third and fourth rows back into the
 engine's own defaults, which is how the rows below were measured.
 
-## Measured results — compact formation domain
+## Two domains, because one had nowhere for the recursion to go
+
+`--domain minilang` is the original: a lexer, a parser and an evaluator under
+`src/frontend` and `src/backend`, two nodes deep, four files for the agents to
+write. It exercises every mechanism, and its recursion bottoms out at depth 2 —
+which is fine for a merge comparison and thin for a system whose whole claim is
+recursive organisation.
+
+`--domain stackvm` grows a stack machine and its assembler: labels the assembler
+resolves to instruction indices, a dispatch table that depends on three sibling
+modules, and a loop in the suite. `src/vm/ops` is a node whose **parent is itself a
+child**, so an episode reaches depth 3 on the way to a leaf, and `arith.py` holds
+one independently-fillable function per opcode — so two agents working from two
+different failing programs edit two different parts of one file, which is the case
+a keyed union cannot fuse and a three-way merge can.
+
+What the two share is in [`_suite.py`](https://github.com/Birfy/agentdescent/blob/main/examples/genesis/_suite.py):
+the child-process harness, the loader that computes every expectation from the
+reference, the frozen-file restore, the parent's integration check and the LLM
+actors. A domain is data on top of it — which is also why the second one could be
+added without touching a single mechanism.
+
+## Measured results — compact formation domains
 
 ### With a real model
 
@@ -93,17 +115,38 @@ engine's own defaults, which is how the rows below were measured.
 --workers 4 --no-thinking`, three seeds. The repository starts implementation-empty
 and the model writes every line of what comes out.
 
-| seed | held-out | accepted events | agent episodes | observed depth | model calls | wall-clock |
-|---|---|---|---|---|---|---|
-| 0 | **1.000** | 5 | 34 | 3 | 284 | 135 s |
-| 1 | **1.000** | 5 | — | 3 | 306 | 173 s |
-| 2 | **1.000** | 5 | — | 2 | 242 | 100 s |
+| domain | seed | held-out | accepted | episodes | depth | calls | wall-clock |
+|---|---|---|---|---|---|---|---|
+| `minilang` | 0 | **1.000** | 5 | 34 | 3 | 284 | 135 s |
+| `minilang` | 1 | **1.000** | 5 | — | 3 | 306 | 173 s |
+| `minilang` | 2 | **1.000** | 5 | — | 2 | 242 | 100 s |
+| `stackvm` (`--episodes 160`) | 0 | **1.000** | 12 | 114 | 3 | 659 | 902 s |
 
-Seed 0's repository was re-scored independently from what `--write-repo` wrote:
-**30/30 cases**. What it grew is `src/__init__.py` plus
-`frontend/{lexer,parser}.py` and `backend/evaluator.py`, and the `__init__.py`
-imports each stage lazily because the specification says to — so the agents read
-the contract rather than guessing it.
+Both seed-0 repositories were re-scored independently from what `--write-repo`
+wrote: **30/30** each. On `minilang` it grew `src/__init__.py` plus
+`frontend/{lexer,parser}.py` and `backend/evaluator.py`, with each stage imported
+lazily because the specification says to — so the agents read the contract rather
+than guessing it.
+
+!!! note "The suite constrains the surface, not the structure — and `stackvm` shows it"
+    The `stackvm` run passes every case and the repository it wrote is **not** the
+    one the `CONTEXT.md` tree proposed. The agents moved the tokenizer and the
+    interpreter to `src/tokenize.py` and `src/run.py` (their own node's files, in
+    the accountability turn), made `src/asm/parser` a package, and gave the
+    opcodes a calling convention of their own — consistently, and the public
+    surface honours the frozen spec exactly, which is why it scores 1.000.
+
+    It also left two pieces of dead code behind: `src/asm/lexer.py`, shadowed by
+    the `src/asm/lexer/` package that took its place, and `src/vm/machine.py`,
+    which imports `op_add` from a module that defines `add` and would raise on
+    import — nothing imports it, because `src/run.py` became the real interpreter.
+
+    This is the organization working as specified, not failing: acceptance is
+    gated on **validation**, the validation checks three entry points and the data
+    shapes, and anything the suite cannot see is not something any gate here can
+    refuse. Upstream has the same property, with a suite that checks far more. It
+    is worth stating plainly because "held-out 1.000" and "no dead code" are
+    different claims and only the first one is measured.
 
 Three defects of this port stood between a model and that result, each invisible
 until the one before it was gone; they are the section below, and none of them was

@@ -452,9 +452,11 @@ passed.
   other labels are implementation labels; the code has ten agent modules. Two are
   ported.
 * **Departures**: the benchmark is not reproduced and is not claimed — upstream's
-  formation run is 123.4 h, US$44.38 and **one sample**, so the domain is a
-  compact formation stand-in and the fidelity class is `mechanism_microport` for
-  that reason alone. Multi-repository work, the desktop shell, the dashboard and
+  formation run is 123.4 h, US$44.38 and **one sample**, so the domains are
+  compact formation stand-ins and the fidelity class is `mechanism_microport` for
+  that reason alone. There are two of them because the first had nowhere for the
+  recursion to go: `minilang` bottoms out at depth 2, `stackvm` at depth 3 with a
+  node whose parent is itself a child. Multi-repository work, the desktop shell, the dashboard and
   peak-hour scheduling are out of scope. Observed recursion depth is 2 here and
   4–8 upstream, because the domain's decomposition is three nodes deep.
 * **Two engine boundaries it ran into, recorded rather than routed around.**

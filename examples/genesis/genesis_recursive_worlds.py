@@ -84,13 +84,28 @@ from examples._common import (add_standard_args, budget_kwargs, completion_for,
                               confirm, report_engine, score_tasks, worker_count)
 
 from ._delegation import RecursiveDelegation
-from ._domain import (FROZEN, build_tasks, initial_files, llm_executor,
-                      llm_manager, make_runner, offline_executor,
-                      offline_manager, reward, suite_review)
+from . import _domain as minilang
+from . import _stackvm as stackvm
 from ._judge import ParentJudge
 from ._octopus import OctopusConflict, git_available
 from ._spatial import SpatialContract
 from ._world import WorldLog
+
+#: The formation domains. Two, because one was not enough to show the recursion
+#: going anywhere: minilang is two nodes deep and four files, stackvm is four and
+#: ten. Both are stand-ins for upstream's 123.4-hour compiler run and say so.
+DOMAINS = {"minilang": minilang, "stackvm": stackvm}
+
+DOMAIN_BLURB = {
+    "minilang": "an integer expression language (2 nodes deep, 4 files)",
+    "stackvm": "a stack machine and its assembler (4 nodes deep, 10 files)",
+}
+
+
+def build_tasks(domain: str = "minilang"):
+    """The selected domain's loader -- the boundary ``--dry-run`` must not cross."""
+    return DOMAINS[domain].build_tasks()
+
 
 PORT_NAME = "EvoX Genesis (persistent recursive worlds)"
 PORT_AUTHOR = "chendanyang"
@@ -107,6 +122,9 @@ def build_parser() -> argparse.ArgumentParser:
     # a round or a generation, so that is the flag -- and because a root episode
     # is one rollout it is already the rollout budget, which is why `--workers`
     # divides it rather than multiplying it.
+    parser.add_argument("--domain", default="minilang", choices=sorted(DOMAINS),
+                        help=("which software world to grow: minilang is two "
+                              "nodes deep, stackvm four"))
     parser.add_argument("--episodes", type=int, default=24,
                         help="total ROOT episodes; one root episode is one rollout")
     parser.add_argument("--workers", type=int, default=4)
@@ -149,7 +167,8 @@ def main(argv=None) -> None:
             else "parent (partial progress accepted)")
     print(f"Algorithm: {PORT_NAME} (port author: {PORT_AUTHOR})")
     print(f"Upstream : {UPSTREAM_RELEASED_CODE}")
-    print("Dataset  : compact formation domain (minilang, staged suite) -- "
+    print(f"Dataset  : compact formation domain -- {args.domain}: "
+          f"{DOMAIN_BLURB[args.domain]}, staged suite; "
           "NOT upstream's 123.4h C-compiler run")
     print(f"Plan     : model={args.model or 'offline rule-based actors'}, "
           f"episodes={args.episodes} root ({rounds} rounds x {args.workers} workers), "
@@ -168,14 +187,17 @@ def main(argv=None) -> None:
         print("\n[dry-run] plan only; no dataset or model API was accessed.")
         return
 
-    tasks = build_tasks()
+    spec = DOMAINS[args.domain]
+    tasks = build_tasks(args.domain)
     artifact = EvolvingArtifact("world", blast_radius=SKILL_BLAST_RADIUS)
     print(f"Governance: world blast_radius={artifact.blast_radius} -> "
           f"{classify(artifact).name} (the agents cannot reach the evaluator: the "
           f"suite lives outside the artifact); frozen to every proposal: "
-          f"{', '.join(FROZEN)}")
-    print(f"Loaded   : {len(tasks)} validation cases over 3 stages; "
-          f"{len(initial_files())} files in the repository, none of them implementation")
+          f"{', '.join(spec.FROZEN)}")
+    print(f"Loaded   : {len(tasks)} validation cases over "
+          f"{len(set(t.meta['kind'] for t in tasks))} stages; "
+          f"{len(spec.initial_files())} files in the repository, "
+          "none of them implementation")
 
     usage = Usage()
     complete = None
@@ -185,21 +207,20 @@ def main(argv=None) -> None:
         complete = completion_for(args, usage=usage)
 
     log = WorldLog()
-    strategy = SpatialContract(initial_files=initial_files(), frozen=FROZEN, log=log,
-                               max_files_per_diff=6)
+    strategy = SpatialContract(initial_files=spec.initial_files(), frozen=spec.FROZEN,
+                               log=log, max_files_per_diff=6)
     delegation = RecursiveDelegation(
-        manager=llm_manager(complete) if complete else offline_manager,
-        executor=(llm_executor(complete, frozen=FROZEN) if complete
-                  else offline_executor),
-        log=log, max_depth=args.depth, max_edits=4, contracts=FROZEN,
+        manager=spec.llm_manager(complete) if complete else spec.offline_manager,
+        executor=(spec.llm_executor(complete) if complete else spec.offline_executor),
+        log=log, max_depth=args.depth, max_edits=4, contracts=spec.FROZEN,
         # The parent's own test run, inside the episode, on one child's work --
         # the half of the upstream rule the acceptance gate cannot see.
-        review=None if args.no_parent_tests else suite_review(tasks),
+        review=None if args.no_parent_tests else spec.suite_review(tasks),
         accountability=not args.no_accountability)
     judge = ParentJudge(log=log, enabled=not args.engine_gate)
     octopus = None if args.keyed_union else OctopusConflict()
 
-    run = make_runner()
+    run = spec.make_runner()
 
     def _superseded(rendered, task, output, reward_):
         # `evolve()` requires a `propose` before it installs the bundle's
@@ -211,7 +232,7 @@ def main(argv=None) -> None:
     print(f"\nGrowing the world ({args.workers} workers, "
           f"{'barrier-free' if args.asynchronous else 'synchronous DP'})...\n")
     result = evolve(
-        tasks, reward, run=run, propose=_superseded, strategy=strategy,
+        tasks, spec.reward, run=run, propose=_superseded, strategy=strategy,
         artifact_id="world", blast_radius=SKILL_BLAST_RADIUS,
         rounds=rounds, n_workers=args.workers,
         max_concurrency=1 if args.asynchronous else args.workers,

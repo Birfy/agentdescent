@@ -86,7 +86,7 @@ above would make that table's opening sentence false.
 
 | Algorithm | Port author | Fidelity class | Domain | `evolve()` plug-ins | Page |
 |---|---|---|---|---|---|
-| **Genesis** (Persistent Recursive Worlds) | chendanyang | `mechanism_microport` | compact formation run (a toolchain grown from an empty repository) | `strategy` + `Policies(proposal=, acceptance=, conflict=)` | [→](algo-genesis.md) |
+| **Genesis** (Persistent Recursive Worlds) | chendanyang | `mechanism_microport` | two compact formation runs (`--domain minilang` / `stackvm`), each grown from an implementation-empty repository | `strategy` + `Policies(proposal=, acceptance=, conflict=)` | [→](algo-genesis.md) |
 
 ### The shared command line
 
@@ -285,23 +285,28 @@ that establish the port works end to end, not a comparison.
 | [OpenEvolve](algo-openevolve.md#measured-results-function-minimization) | function minimization | combined score 0.9638 → **1.4995** against a 1.5 ceiling, held-out seeds | async N=4, 24 rollouts |
 | [ERA](algo-era.md#measured-results-playground-s3e1) | Kaggle Playground S3E1 | test RMSE 0.7297 → **0.5913** (−19.0%) on 2,476 unseen rows; 7-node tree, all valid | async N=3, 6 expansions |
 
-### The twentieth, on a formation run
+### The twentieth, on two formation runs
 
-Three seeds, `--episodes 96`, offline rule-based actors. The repository starts
-with no implementation in it, so "before" is 0.000 by construction rather than by
-a weak baseline.
+The repository starts with no implementation in it, so "before" is 0.000 by
+construction rather than by a weak baseline. Model rows are three seeds at
+`--episodes 60 --workers 4`; offline rows are `--episodes 96` (`minilang`) and
+`160` (`stackvm`).
 
 | Method | Domain | held-out, before → after | accepted events | notes |
 |---|---|---:|---:|---|
-| [Genesis](algo-genesis.md#measured-results-compact-formation-domain) | compact formation run | 0.000 → **1.000** ×3 | 6 serial / 6 at N=4 / **4** at N=8 | the three-way merge saves two accepted events at N=8; the engine's Beta gate reaches 0.000–0.750 on the same budget |
+| [Genesis](algo-genesis.md#with-a-real-model) · `minilang`, deepseek-v4-flash | compact formation run, 2 nodes deep | 0.000 → **1.000** ×3 | 5 | the model writes every line; seed 0 re-scored independently at 30/30, observed depth 3, 284 calls in 135 s |
+| [Genesis](algo-genesis.md#with-the-offline-actors) · `minilang`, offline actors | the same | 0.000 → **1.000** ×3 | 6 serial / 6 at N=4 / **4** at N=8 | the three-way merge saves two accepted events at N=8; the engine's Beta gate reaches 0.000–0.750 on the same budget |
+| [Genesis](algo-genesis.md#with-a-real-model) · `stackvm`, deepseek-v4-flash | compact formation run, 4 nodes deep | 0.000 → **1.000** | 12 | re-scored independently at 30/30; it invented its own decomposition and left two pieces of dead code the suite cannot see — see the page |
+| [Genesis](algo-genesis.md#with-the-offline-actors) · `stackvm`, offline actors | the same | 0.000 → **1.000** | 6 at N=8 | ten files the agents write, observed depth 3, one three-way merge inside `arith.py` |
 
 !!! warning "One run per seed, and one seed on the bottom table"
     Nothing here is a paper-scale result. The eleven and Genesis carry three
     seeds and report the spread on their own pages; the eight carry one, and a
     single run does not pin a number on a sampled model. The quality columns are
     evidence the mechanism runs and moves the metric it should, not evidence about
-    how much. Genesis's rows are offline and deterministic, which makes their
-    spread a statement about scheduling rather than about a model.
+    how much. Genesis carries both kinds: its model rows are three seeds on one
+    model and one endpoint, and its offline rows are deterministic, which makes
+    *their* spread a statement about scheduling rather than about a model.
 
 ---
 

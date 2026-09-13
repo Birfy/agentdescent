@@ -19,6 +19,7 @@ from agentdescent.filetree import canonical
 from agentdescent.policies import MergeContext, Policies, ProposalContext
 
 from examples.genesis import _domain as domain
+from examples.genesis import _stackvm as stackvm
 from examples.genesis._delegation import (Brief, Delegation, Edit,
                                           RecursiveDelegation, render_edits)
 from examples.genesis._judge import ParentJudge
@@ -635,6 +636,36 @@ def test_an_outstanding_rework_request_is_taken_before_a_free_choice():
 # ---------------------------------------------------------------------------
 # The domain, and one end-to-end formation
 # ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("spec", [domain, stackvm], ids=["minilang", "stackvm"])
+def test_every_formation_domain_agrees_with_its_own_oracle(spec):
+    """A suite that disagrees with its oracle scores a correct candidate wrong."""
+    tasks, run = spec.build_tasks(), spec.make_runner()
+    rendered = canonical(spec._reference_tree())
+    assert sum(spec.reward(t, run(rendered, t)) for t in tasks) == len(tasks)
+
+
+@pytest.mark.parametrize("spec", [domain, stackvm], ids=["minilang", "stackvm"])
+def test_every_formation_domain_starts_with_no_implementation(spec):
+    files = spec.initial_files()
+    assert files and all(p.endswith(".md") for p in files)
+    tasks, run = spec.build_tasks(), spec.make_runner()
+    assert sum(spec.reward(t, run(canonical(files), t)) for t in tasks) == 0
+
+
+def test_stackvm_is_deeper_than_minilang_which_is_why_it_exists():
+    """The second domain is not "harder code" -- it is somewhere for the
+    recursion to go. `src/vm/ops` is a node whose parent is itself a child."""
+    def node_depth(files):
+        # the nodes are where the CONTEXT.md records are; the skill directory is
+        # deep in both domains and is not a node.
+        return max(p.count("/") for p in files if p.endswith(CONTEXT_FILE))
+    assert node_depth(stackvm.initial_files()) == 3        # src/vm/ops/CONTEXT.md
+    assert node_depth(domain.initial_files()) == 2         # src/frontend/CONTEXT.md
+    assert "src/vm/ops/CONTEXT.md" in stackvm.initial_files()
+    routes = LocalWorld(version=1, path="src/vm").routing(stackvm.initial_files())
+    assert routes == ["src/vm/ops"]
+
 
 def test_the_frozen_suite_agrees_with_its_own_oracle():
     tasks = domain.build_tasks()
