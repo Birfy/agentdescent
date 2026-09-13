@@ -30,8 +30,9 @@ from __future__ import annotations
 import json
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
-from ._world import (CONTEXT_FILE, LocalWorld, ROUTING_HEADING, STANDARD_SECTIONS,
-                     normalise, parse_routing)
+from ._world import (CONTEXT_FILE, LocalWorld, ROUTING_HEADING,
+                     STANDARD_SECTIONS, looks_like_file, normalise,
+                     parse_routing)
 
 __all__ = ["ARCHITECT_PROMPT", "ArchitectPhase"]
 
@@ -58,6 +59,10 @@ Keep it short. An agent that arrives here inherits the whole chain from the root
 so add one layer of specificity and do not repeat the parent. The routing table is not \
 documentation: it is the map a manager delegates by, so every entry has to be specific \
 enough to route work without investigating the subtree.
+
+**A node is a directory, never a file.** `src/frontend` is a node; \
+`src/frontend/lexer.py` is a file belonging to the agent situated at `src/frontend`. \
+Name directories in the routing table and files in the API Surface.
 
 Decompose only where the work genuinely separates. A node with one child is a node that \
 should not exist; a leaf is a node whose files one agent can write.
@@ -88,6 +93,7 @@ class ArchitectPhase:
         self.nodes: List[str] = []
         self.depth = 0
         self.refused = 0
+        self.mistaken_nodes = 0
         self.unparsed = 0
 
     def design(self, given: Mapping[str, str], objective: str) -> Dict[str, str]:
@@ -107,6 +113,13 @@ class ArchitectPhase:
                 continue
             world = LocalWorld(version=0, path=path)
             for child in children:
+                if looks_like_file(child["path"]):
+                    # One architect designed `observables/observables.py` as a node and
+                    # hung two children under it. The delegation policy refuses a path
+                    # that is an existing file; a designed tree contains nothing that
+                    # exists yet, so the shape is all there is to go on.
+                    self.mistaken_nodes += 1
+                    continue
                 try:
                     world.delegate(child["path"])       # the spatial contract, early
                 except ValueError:
@@ -117,7 +130,9 @@ class ArchitectPhase:
 
     def summary(self) -> str:
         return (f"designed {len(self.nodes)} nodes, deepest {self.depth}"
-                + (f", {self.refused} child paths refused" if self.refused else "")
+                + (f", {self.refused} outside their subtree" if self.refused else "")
+                + (f", {self.mistaken_nodes} file paths refused as nodes"
+                   if self.mistaken_nodes else "")
                 + (f", {self.unparsed} replies unusable" if self.unparsed else ""))
 
     # -- internals ---------------------------------------------------------

@@ -43,7 +43,8 @@ from agentdescent.filetree import parse_tree
 from ._octopus import three_way
 
 from ._world import (CONTEXT_FILE, KNOWN_ISSUES, EpisodeRecord, LocalWorld,
-                     WorldLog, directly_at, normalise, owns, resolve_edit_path,
+                     WorldLog, directly_at, looks_like_file, normalise, owns,
+                     resolve_edit_path,
                      routing_entry, under_heading)
 
 __all__ = ["Brief", "Delegation", "Edit", "RecursiveDelegation", "render_edits"]
@@ -489,7 +490,9 @@ class RecursiveDelegation:
         path = normalise(delegation.path)
         if not owns(world.path, path) or path == world.path:
             return False
-        if path in state:
+        if path in state or looks_like_file(path):
+            # `in state` catches a file that exists; the shape catches one that does
+            # not yet, which is every file in a formation run until someone writes it.
             self.mistaken_nodes += 1
             return False
         return True

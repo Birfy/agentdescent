@@ -39,8 +39,8 @@ from examples.genesis._suite import cold_start, preflight
 from examples.genesis._world import (CONTEXT_FILE, KNOWN_ISSUES, ROUTING_HEADING,
                                      SKILLS_DIR, TRUNCATED,
                                      LocalWorld, WorldLog, owns, parse_routing,
-                                     resolve_edit_path, routing_entry,
-                                     under_heading)
+                                     looks_like_file, resolve_edit_path,
+                                     routing_entry, under_heading)
 
 
 # ---------------------------------------------------------------------------
@@ -1366,6 +1366,38 @@ def test_a_record_an_agent_writes_itself_is_counted_separately():
     policy.propose(_proposal_ctx({CONTEXT_FILE: "# root\n", f"src/{CONTEXT_FILE}": "# src\n"},
                                  Task(id="t", prompt="x")))
     assert policy.record_updates == 1
+
+
+def test_a_file_shaped_path_is_not_a_node_even_before_it_exists():
+    """"A node is a **directory**, never a file" -- `agents/manager.ex`, twice.
+
+    The delegation policy refused a path that was already a file in the tree, which is
+    the case a real run hit (`src/frontend/lexer.py`, and the child wrote `CONTEXT.md`
+    *inside* it). A designed tree contains nothing that exists yet, so that check sees
+    nothing: an architect produced `observables/observables.py` as a node and hung two
+    children under it. The shape is what is left to go on.
+    """
+    assert looks_like_file("src/frontend/lexer.py")
+    assert looks_like_file("observables/observables.py")
+    assert not looks_like_file("src/frontend") and not looks_like_file("src")
+
+    log = WorldLog()
+    policy = RecursiveDelegation(
+        manager=lambda b: ([Delegation("src/observe.py", "measuring")]
+                           if not b.world.path else []),
+        executor=lambda b: [Edit(b.world.path, f"{b.world.path or '.'}/x.py", "x = 1\n")],
+        log=log, max_depth=3)
+    policy.propose(_proposal_ctx({CONTEXT_FILE: "# root\n"}, Task(id="t", prompt="x")))
+    assert policy.mistaken_nodes == 1
+
+    phase = ArchitectPhase(_scripted_architect({
+        "": {"record": "# root\n", "children": [{"path": "observables.py", "objective": "no"},
+                                                {"path": "observe", "objective": "yes"}]}}),
+        max_depth=2)
+    tree = phase.design({CONTEXT_FILE: "# root\n"}, "o")
+    assert phase.mistaken_nodes == 1
+    assert "observe/" + CONTEXT_FILE in tree
+    assert "observables.py/" + CONTEXT_FILE not in tree
 
 
 def test_stackvm_is_deeper_than_minilang_which_is_why_it_exists():

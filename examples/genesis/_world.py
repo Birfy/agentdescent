@@ -119,6 +119,21 @@ def parse_routing(body: str) -> List[str]:
     return out
 
 
+def looks_like_file(path: str) -> bool:
+    """Does this path name a file rather than a directory?
+
+    Upstream states the rule in prose and states it twice: "A node is a **directory**,
+    never a file. `src/frontend` is a node; `src/frontend/lexer.py` is a file that
+    belongs to the agent situated at `src/frontend`, and delegating to it is refused."
+    A path that does not exist yet cannot be checked against the tree, and an architect
+    designing a repository names nothing that exists yet -- one produced
+    `observables/observables.py` as a node and hung two children under it. So: a last
+    segment with a suffix on it is a file.
+    """
+    tail = normalise(path).rsplit("/", 1)[-1]
+    return "." in tail.strip(".") and not tail.startswith(".")
+
+
 def under_heading(body: str, heading: str, line: str) -> str:
     """``body`` with ``line`` appended under ``heading``, creating it if need be.
 
