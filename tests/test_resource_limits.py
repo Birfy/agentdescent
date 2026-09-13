@@ -30,18 +30,18 @@ def _verifier(budget: int):
 
 
 def test_oracle_budget_actually_caps_spending():
-    """Past the budget, oracle_eval must not run another full held-out sweep."""
+    """Past the budget, full_eval must not run another full held-out sweep."""
     for budget in (0, 2, 5):
         v, _ = _verifier(budget)
         for _ in range(8):
-            v.oracle_eval(_Art())
+            v.full_eval(_Art())
         assert v.budget.oracle_calls_used == min(budget, 8)
         assert v.budget.oracle_calls_remaining >= 0
 
 
-def test_oracle_eval_degrades_instead_of_raising_when_exhausted():
+def test_full_eval_degrades_instead_of_raising_when_exhausted():
     v, _ = _verifier(0)
-    assert isinstance(v.oracle_eval(_Art()), float)      # falls back to the cheap layer
+    assert isinstance(v.full_eval(_Art()), float)        # falls back to the cheap layer
 
 
 def test_audit_queue_is_bounded():

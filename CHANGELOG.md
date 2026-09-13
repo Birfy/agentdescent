@@ -61,6 +61,715 @@ All notable changes to AgentDescent are documented here. The format follows
   on whatever path it was handed. The lock now lives inside `checkpoints/`,
   which also means checkpoints work on a plain directory with no git repo.
 
+- **Sparse audit: a cheap verifier paired against ground truth
+  (`agentdescent.audit`).** When `reward` is an agent judging an output rather
+  than a fact about it, the loop optimises a proxy, and every gate reads the same
+  proxy -- so a change that games it is indistinguishable from a change that
+  improves. `AuditedReward` wraps the cheap scorer, hands a sampled minority of
+  its work to a truth source, and records the pair: `GoldAnswer` for truth that
+  returns now, `DeferredOracle` for an experiment that returns next week and is
+  resolved from another process against a JSONL that outlives the run.
+
+  It hooks the **reward**, not the verifier. The verifier's layers score
+  `(artifact, tasks) -> float`, an aggregate that has already averaged away the
+  pairing a bias estimate needs, and a verifier-level oracle would be asked for a
+  *fresh* measurement, folding rollout variance into the residual. At the reward
+  level both sides score the same output. That placement also makes two
+  properties structural rather than remembered: enabling the audit cannot change
+  a run (`__call__` returns the verifier's score; tested end to end against the
+  same seed with the audit off and on), and it cannot block the merge path.
+
+  Records carry the three things that cannot be reconstructed later -- the
+  `inclusion_prob` that drew the unit, the `verifier_version` that scored it, and
+  the output itself. Calibration and improvement labels go into disjoint pools
+  and `for_calibration` asserts the split rather than filtering for it. The
+  estimator, the allocation and the gate that spends the answer are the entries
+  below. [docs/audit.md](docs/audit.md)
+
+- **Mutation tests for every statistic added after `ppi.py`.** The plan's rule
+  is that new statistical logic ships with a test that fails when the logic is
+  written wrong -- a test of the *suite*, not of the code. Four mutations, three
+  of which were mistakes actually made here:
+
+  | | the wrong way | what it does |
+  |---|---|---|
+  | A | discount a *posterior* variance, prior included | past ~40 commits the audit becomes a blanket veto: `p_improve` 0.51 for every candidate, which looks exactly like a mature artifact that stopped improving |
+  | B | average the strata's own residual sds | reports `sigma = 0` for a verifier that is +0.4 generous in one stratum and exact in another -- the gate then spends the held-out set as if an oracle had scored it |
+  | C | forget to divide `sigma_eps ** 2` by `n` | the discount falls with `n`: the more the run measured, the less of it the gate may believe |
+  | D | a control band from one fixed sigma | alarms on a generation that merely bought fewer labels |
+
+- **`EvolveSpec.audit` -- the audit reachable from the CLI and the MCP server.**
+  Everything in the package was reachable only from Python, so a run started by
+  `agentdescent evolve spec.json` or by the MCP `start` tool could not create an
+  audit store -- which left the seven `audit_*` tools able to read a file that
+  path could not produce.
+
+  `"audit": {"oracle": "mypkg:exact_match", "sample_rate": 0.1}` is the whole
+  minimum. Two of the defaults are decisions: the store is **derived**, landing
+  at `audit.jsonl` beside the run's ledger, because `audit_status` takes a path
+  and not a run id and a run that wrote its audit somewhere only the caller
+  knows is a run whose audit nobody reads; and `enabled` is **false**, because
+  collecting records is free while correcting the gate changes what commits, and
+  a spec that merely names an oracle has not asked for that. `plan` reports the
+  block before anything runs and `status <run_id>` reports `audit_store` once
+  records exist -- only once, since a path to a file that was never written
+  invites `audit_status` to report an empty store as an answer.
+
+  `oracle` and `stratify` are refs through the spec's own allowlist, an
+  acceptance policy the spec already named is wrapped rather than replaced, and
+  a mistyped key is an error with the key list beside it -- otherwise
+  `sample-rate` is a setting that silently did nothing.
+  [docs/audit.md](docs/audit.md#from-a-spec-the-cli-and-mcp)
+
+- **`attach()` -- one call that wires the six pieces.** Everything in this
+  package is opt-in and nothing in the shipped runtimes builds any of it, so
+  switching the audit on meant assembling `AuditStore`, `AuditedReward`,
+  `Calibrator`, `RectifiedAcceptance`, `VerifierWatch` and `RenderTap` plus four
+  cross-references, every one of which is silent when wrong: a
+  `verifier_version` copied by hand and later changed leaves the gate asking
+  about a verifier that never ran and getting a *stale* rectification, which
+  reads exactly like "not enough labels yet"; a calibrator pointed at a second
+  store is stale forever; a `RenderTap` around a different `run` records an
+  empty signature on every unit; a bare oracle not wrapped in `GoldAnswer` can
+  fail the rollout it was auditing.
+
+  It changes no default -- not calling it is the current behaviour -- and
+  `enabled=False` collects records while correcting nothing, which is the honest
+  way to run a first round.
+
+  With it, the plan's last acceptance criterion is a test rather than a plan: a
+  whole `evolve()` with a string-similarity judge against exact match, so
+  `f > Y` structurally. From nothing but the store -- 114 units seen, 75
+  audited, `delta_hat` **+0.35**, `resid_sd` 0.38 -- and the acceptance rate over
+  a fixed grid of merge decisions falls **0.60 -> 0.37**.
+  [docs/audit.md](docs/audit.md#switching-it-on)
+
+- **The audited units are not independent, and the estimator said they were.**
+  `estimate.py` had a cluster bootstrap from Phase 0; `ppi.py` did not, so the
+  *refinement* was less robust than the baseline on the one axis Phase 0 had
+  already measured. A run scores the same task again for every artifact version,
+  and a task the verifier is generous about it is generous about every time.
+
+  On 200 tasks scored under four artifacts each, at a nominal 0.95:
+
+  | treatment | coverage |
+  |---|---|
+  | independent (as shipped) | **0.79** |
+  | cluster-robust variance | 0.91 |
+  | cluster-robust, halves from disjoint tasks | **0.945** |
+
+  `Stratum(clusters_lab=...)` makes the labelled term cluster-robust, the
+  cross-fitting folds hold out whole groups, and the degrees of freedom count
+  groups rather than units. `Calibrator` passes `task_id` by default: on the
+  real Phase 0 records that widens `se` from 0.0363 to 0.0523, **44%**, with
+  `delta_hat` unmoved. `cluster_var_of_mean` reduces to `s**2 / n` *exactly* on
+  singleton groups, which is why the golden vectors did not move a digit -- two
+  new fields appeared and every number stayed.
+
+  **The last row is a sampling design, not an arithmetic fix**, and two
+  alternatives were measured so nobody retries them: an exact unlabelled design
+  effect instead of the borrowed one moves coverage 0.912 -> 0.921, and
+  group-aware folds are worth well under a point. PPI assumes the two halves are
+  independent samples and a per-unit draw puts the same task in both.
+
+  So `AuditedReward` gained `draw_by`, **defaulting to `"task"`**: a task is
+  audited whole or not at all. It is identical to the old per-unit draw when
+  each task is scored once and differs exactly where the difference matters. It
+  also makes the two pools disjoint at the task level, where a per-unit split
+  had one task's units informing the improvement pool about a task the
+  calibration pool was measuring.
+  [docs/audit.md](docs/audit.md#the-audited-units-are-not-independent)
+
+- **Phase 0 on a second workload, and the judge fails differently there.**
+  `--workload bbh` runs the kill test on BIG-Bench Hard, sampled across six
+  subtasks chosen for the *shape* of their answers.
+  [reports/README.md](reports/README.md) (full report at `c86e216`).
+
+  | | HotpotQA | BBH |
+  |---|---|---|
+  | `Delta` | +0.175 | **+0.327** |
+  | `sigma` | 0.381 | 0.469 |
+  | disagreement | 17.5% | 32.7% |
+  | \|Delta\|/gate sd | 1.99 | **5.55** |
+
+  PROCEED on both, and the second is not a second sample of the first. The
+  residual is **entirely** in the two label-shaped subtasks --
+  `salient_translation_error_detection` at +0.90 and `date_understanding` at
+  +0.70 -- while `object_counting`, `word_sorting` and both Yes/No subtasks sit
+  at `Delta` 0, `sigma` 0, zero disagreement. The judge's error is a property of
+  the shape of the answer, so the report splits by subtask rather than quoting
+  one average of two unrelated phenomena.
+
+  And the failure is not the benign one. Exact match refuses
+  `(B) Numerical Values` against a gold of `(B)`, and a judge accepting that is
+  what this experiment was built to measure. Forgiving every formatting
+  difference the judge is *told* to forgive -- comparing option labels alone --
+  it still says right on **7 of 20** labelled-answer units where that lenient
+  oracle says wrong. A merely generous judge scores near zero there. This one has
+  stopped discriminating on label-shaped answers, which is a different failure
+  from the one `Delta` describes and is **indistinguishable from it in
+  `Delta`**.
+
+  Also `audit-limited` is **True** on this workload: `SE(Delta)^2 > var_p`, so
+  buying more in-loop evaluation cannot improve the criterion and the budget
+  belongs on oracle labels.
+
+- **A run can span a restart now, so the verifier watch outlives the process.**
+  `evolve(checkpointing=True)` arrived on `main` while this branch was open,
+  and it makes a latent gap reachable: a restart used to mean a new run, so
+  "did the verifier change while we were down?" was not a question anyone
+  could ask. `VerifierWatch` held its baseline in memory and `attach()` calls
+  `check()` to *establish* one, so on a resume it re-baselined silently --
+  measured, the same judge with an edited prompt came back `831c0a65` ->
+  `103a89aa` with `check()` returning `False`.
+
+  The correction was never at risk. Records are keyed by `verifier_version`,
+  so the forty labels from before the restart were not applied to the new
+  judge and the gate widened on its own. What was lost is the **diagnosis**:
+
+  | | stale reason after a resume with an edited judge |
+  |---|---|
+  | before | `0 calibration labels for '103a89aa...'; 30 needed` |
+  | after | `verifier fingerprint changed '831c0a65...' -> '103a89aa...'` |
+
+  The first reads as "not enough labels yet", which is exactly the confusion
+  `VerifierWatch`'s own docstring says a stale rectification causes.
+
+  `AuditStore.remember_fingerprint` persists it, out-of-band like the
+  priorities and for the same reason -- it belongs to the run, not to a unit --
+  and writes only on a change, so a watch checked every round does not grow
+  the file. A resume that changed nothing keeps its calibration.
+
+- **The judge evolved against ground truth, live.**
+  `scripts/audit_evolve_judge.py` run on MBPP: `sigma` **0.4747 -> 0.2549**
+  (-46%), disagreement 29.9% -> 6.9%, false negatives 3.2% -> **0.0%**, fixed 21
+  and broke 1 against a noise floor of 10. **Nothing blocks.** Two rules, both
+  naming the dominant failure -- a candidate that is the expected *value* rather
+  than an implementation.
+  [reports/README.md](reports/README.md) (full report at `c86e216`)
+
+  Run twice, and the pair is the result rather than either half:
+
+  | | small pool | larger pool |
+  |---|---|---|
+  | the loop's own gate | 9 units (resolution 1/9) | **30** |
+  | reward over ten rounds | 0.778, never moved | 0.800 -> **0.967** |
+  | rules accepted | 7 | **2** |
+  | scorecard | refused | **nothing blocks** |
+
+  Fewer rules, more improvement. A gate that cannot see below 1/9 was selecting
+  on noise, and the seven rules it took were never shown to be signal.
+
+  The larger pool's `P(new error mode)` is **0.0000** -- no variety left at all
+  -- and it passed on sufficiency alone, 15 examples of one mode. Under the
+  variety-only gate this branch shipped earlier the same morning, the run that
+  produced the cleanest result in the sequence would have been refused.
+
+  Bounds, because the numbers above are narrower than they look: one model; a
+  noise floor of **11.5%** (the judge disagrees with itself on more than a tenth
+  of re-runs); an ordering "pair" between an artifact 70.5% right and one 0.0%
+  right, where the report's own note says Kendall tau is uninformative; and a
+  dominant error mode that is partly a distribution artifact -- see the entry
+  below on the artifact/judge coupling.
+
+- **One interface, one pipeline** -- the docs said ladder, the code never had
+  one. `diagnose()` measures, something produces a
+  `fix(record, task) -> float`, and `evaluate_fix` + `scorecard` + `rescan`
+  verify it. A hand-written predicate, a `search` over combinations, a re-scored
+  prompt and an evolved rubric are all that one type and all end at the same
+  three functions. The only choice a caller makes is how to express the fix: a
+  hard rule is cheap, attributable and mechanical; prompt text can express a
+  semantic judgement and is a bundle by nature, so it changes one clause at a
+  time. `diagnose()` is not a way to improve the verifier at all -- it says
+  whether improving is worth it and where the floor is.
+  [docs/audit.md](docs/audit.md)
+
+  Also: the YES/NO reply parser existed in three scripts, identical in all
+  three, and `verdict` meant two different things in two of them. One
+  `read_verdict`, and the name no longer collides with Phase 0's own verdict.
+  [reports/README.md](reports/README.md) indexes the twelve experiment reports,
+  which nothing linked to.
+
+- **A third workload, and the rung of the ladder it unblocks.**
+  `scripts/audit_evolve_judge.py` evolves the judge's *rubric* with `evolve()`:
+  the artifact is the rubric, the reward is agreement with ground truth on one
+  judging decision, and the labels come from the improvement pool. It is the
+  automated form of `scripts/audit_judge_repair.py`, which measured **one**
+  hand-written clause -- that worked, and the next clause also has to be thought
+  of.
+
+  The rung sat unbuilt because the pool was **saturated**: across HotpotQA and
+  BBH, `P(the next label shows an error mode nobody has seen)` had fallen to
+  **0.0169** over nine and four disagreements, every one a shape already
+  understood. More labels on those two shapes cannot move that. A third *shape*
+  can, so `--workload gsm8k` came first:
+
+  | workload | what the judge gets wrong there | the other two |
+  |---|---|---|
+  | HotpotQA | forgives paraphrase, extra words, partial names | -- |
+  | BBH | stops discriminating on option labels | cannot produce it |
+  | GSM8K | wrong final number, marked right because the working reads correctly | cannot produce it -- neither output carries a derivation |
+
+  Adding it turned three single-workload assumptions into bugs, each of which
+  had looked like shared code: the oracle (`exact_match` scores `18.00` wrong
+  against `18`, so a workload whose oracle refuses its own correct answers
+  measures the oracle), the dry run's near-miss (`The answer is 18.` is a
+  near-miss for exact match and simply *correct* for `number_match`, so the
+  GSM8K rehearsal had no disagreements to rehearse on), and the report's oracle
+  label, which was a string literal reading "normalized exact match" over GSM8K
+  numbers.
+
+  Four refusals are built into the rung, each one an earlier finding turned into
+  a gate:
+
+  | | the refusal | what it stops |
+  |---|---|---|
+  | saturation | `--min-unseen`, default 0.25 | a rubric fitted to the thirteen errors that happen to be in hand |
+  | task overlap | held-out is the calibration pool **minus every task the training set touched** | purpose is drawn per unit and inclusion per task, so a purpose-only split trains and tests on the same question |
+  | class balance | the training set is down-sampled to equal right/wrong | agreement with the oracle rewards "reject everything" on a pool where most answers are wrong: 0.836 on the HotpotQA improvement pool, which is *exactly* the real judge's rate on those 55 units |
+  | the noise floor | the control arm re-runs the **starting** rubric | on BBH the unchanged prompt scored a smaller residual than the run it was copied from |
+
+  It hands back a `scorecard()` and a `rescan()`, never a judge: swapping the
+  verifier invalidates the run's history in a way nothing in the run can see.
+
+  Error modes moved to `scripts/audit_modes.py`, one definition per workload.
+  The coverage number decides whether the improvement pool still gets budget,
+  and two copies that drifted would answer that in two files with no way to tell
+  which one ran. `reports/verifier_diagnosis_f55dec40cec559f7.md` regenerates
+  byte-identical after the move, which is what makes the dedup safe to claim.
+  [docs/audit.md](docs/audit.md)
+
+- **`agentdescent.audit.propose` -- something that proposes a fix, not only
+  scores one.** `diagnose` sorted the verifier's errors and measured a proposed
+  rule; nothing proposed one, so the improvement pool's labels were paying for a
+  diagnosis nobody acted on. `search` is the plan's first rung automated:
+  enumerate the hard rules a person reaches for, score every combination on the
+  whole labelled set, rank by the residual. No model, no training.
+
+  On the Phase 0 audit, seven rules two at a time:
+
+  | `sigma` | fixed | broke | FN | rules |
+  |---|---|---|---|---|
+  | 0.3812 | -- | -- | -- | *as it is* |
+  | **0.2421** | 20 | **0** | 0% | `far-shorter(0.6)` + `far-longer(1.6)` |
+  | 0.2521 | 19 | 0 | 0% | `far-shorter(0.6)` + `shares-no-token-with-reference` |
+
+  The best pair cuts the residual **36% and breaks nothing** -- better than
+  either rule picked by hand -- and `echoes-the-question`, the rule that cuts the
+  bias 74% while making the verifier worse, ranks **28 of 28**. Nobody had to
+  remember not to ship it. It lands 0.02 above the `floor_sigma` the classifier
+  predicted, and the remainder is the AMBIGUOUS bucket.
+
+  Three disciplines, each of which was a way to be wrong: a search is a bundle
+  generator and a bundle launders whatever is in it, so every member is also
+  scored alone and a combination carrying a non-helping member is flagged; a
+  rule may only **reject**, never raise a score, or it could buy a lower
+  residual with a higher false-negative rate in one move; and going below the
+  floor is a warning rather than a result, because on a few hundred labels it is
+  far more likely to be fitting the sample.
+  [docs/audit.md](docs/audit.md#searching-for-a-fix-instead-of-guessing-one)
+
+- **`agentdescent.audit.coverage` -- the improvement pool is not allocated like
+  the calibration pool.** Neyman (`n_h ~ W_h * sd_h` on the residual) minimises
+  the variance of the correction. The improvement pool's job is to find as many
+  *distinct* things wrong with the verifier as possible, and the same rule keeps
+  sending labels to the layer where the residual is largest long after the
+  thirtieth example of the same formatting bug. `plan_coverage` allocates by
+  Good-Turing unseen mass instead -- the share of observed items seen exactly
+  once estimates `P(the next label shows something new)`.
+
+  Validated against the Phase 0 audit, where all 31 disagreements are in hand so
+  the true discovery rate is computable:
+
+  | labels drawn | 5 | 10 | 15 | 20 | 25 | 30 |
+  |---|---|---|---|---|---|---|
+  | modes found | 3.13 | 4.41 | 5.15 | 5.82 | 6.37 | 6.89 |
+  | Good-Turing | 0.360 | 0.192 | 0.143 | 0.123 | 0.109 | 0.099 |
+  | **true** P(new) | 0.312 | 0.177 | 0.138 | 0.122 | 0.108 | 0.110 |
+
+  Six times the labels for 2.2 times the modes. And frequency is not value: the
+  most common mode in that audit is `echoes-question`, whose obvious hard rule is
+  the one that cuts the bias 74% and makes the verifier worse.
+
+  **A label on which the two scorers agreed is still a draw**, counted in the
+  denominator as the species "no error". The first version counted only the
+  disagreements, which made a layer with ninety-seven agreeing labels and no
+  errors look *unsampled* -- it scored 1.0 and drew the whole budget. Ninety-
+  seven labels that found nothing is strong evidence there is little to find; an
+  absence of labels is no evidence at all.
+
+  `plan.done` is a stopping rule: on the Phase 0 records overall P(new) is
+  **0.0169**, so the improvement pool has learnt what it can and the budget
+  belongs in the calibration pool, which never saturates.
+  [docs/audit.md](docs/audit.md#where-the-improvement-labels-go)
+
+- **`rebalance()` -- the calibration share stops being a constant.** Only one of
+  the two pools saturates: calibration keeps buying a narrower interval forever
+  at the usual `1/sqrt(n)`, and improvement stops buying anything once the
+  labels stop showing new error modes. `plan.done` already said when that
+  happened and nothing moved the budget.
+
+  | P(new) | calibration share |
+  |---|---|
+  | >= 0.25 | 0.50 |
+  | 0.10 | 0.77 |
+  | **0.0169** (the Phase 0 audit) | **0.92** |
+  | 0.0 | 0.95 |
+
+  `Audit.rebalance(unseen)` sets it, for a round hook. All three dials are
+  policy, not measurement -- what a label is worth in each pool depends on
+  whether you are trying to fix the verifier or to correct for it -- and no
+  labels yet returns the floor, because no evidence that the pool is done is not
+  evidence that it is.
+
+- **Constraint 7 is locked by a test, not by a convention.**
+  `tests/test_gate_reads_the_full_set.py`. The repository shipped the violation
+  once -- the regression guard read `cheap_eval`, so lowering `cheap_eval_tasks`
+  silently made "quality dropped" a judgement from four tasks. `MergeContext`
+  names the two differently to make it awkward to write again; awkward is not
+  impossible. The cheap numbers set to nonsense in both directions must not move
+  a verdict, and `cheap_eval_tasks` must not move a single commit across a whole
+  six-round run whose trajectory is mid-climb -- which is what makes an
+  identical history mean something.
+
+- **`agentdescent.audit.queue` -- the merge path's ranking finally reaches
+  someone.** `AuditScheduler` has ranked every merge decision since the
+  beginning and nothing has ever popped its heap. That was right: `force_oracle`
+  is a threshold, and on the shipped verifier an audit is free (`full_eval`
+  measures the set the acceptance test just measured), so every qualifying merge
+  gets one and a ranking has nothing to do. It starts mattering exactly where
+  this package lives -- an oracle that is a wet-lab run or a person -- where the
+  budget is smaller than the number of qualifying merges.
+
+  `drain(scheduler, signature_of=...)` turns the heap into
+  `artifact_signature -> priority`; `AuditStore.remember_priorities` persists it
+  as a snapshot line; `audit_pending(path, order="priority")` hands a person the
+  queue in that order, in another process, from nothing but the JSONL. The
+  highest priority per signature wins rather than the latest, a diff whose
+  signature the caller cannot resolve is counted rather than guessed, and asking
+  for priority order with nothing drained says so instead of silently returning
+  dispatch order.
+  [docs/audit.md](docs/audit.md#which-pending-unit-to-do-first)
+
+- **`agentdescent.audit.ranking` -- can the verifier order things at all?**
+  Everything else in this package measures how *far* the verifier is from the
+  truth: `delta_hat` its mean error, `resid_sd` the spread, `gain_factor` how
+  much an estimator can borrow. The acceptance gate does one thing and it is not
+  that -- it decides whether a candidate beats a baseline. A verifier can be
+  badly wrong on all three and order every comparison correctly (add 0.2 to
+  every score and nothing the gate decides changes), or close on all three and
+  pick the wrong winner.
+
+  On the Phase 0 audit, five artifacts from one run: **eight of ten pairs
+  ordered the same way, two reversed.** The artifact the verifier ranks first
+  (0.714) is third by ground truth, and one reversal is on an apparent 12-point
+  improvement -- the size of gap the gate commits on.
+
+  Unit-level Kendall tau is nearly uninformative here and is the number people
+  ask for: 4753 concordant pairs, **zero** discordant, `tau_b = 0.681`. That is
+  a restatement of the bias being one-directional, not evidence of ordering --
+  two units are discordant only when the verifier prefers one and the truth
+  prefers the other, and a verifier that answered 1.0 to everything scores zero
+  discordant pairs too. `RankReport.one_directional` flags it and the report
+  says it in place.
+
+  `RankReport.above(gap)` filters to pairs whose *verifier* gap the gate could
+  act on, because a reversal below the gate's own noise costs nothing. The
+  scorecard carries an `ordering agreement` row that deliberately **does not
+  block**: five artifacts from one run are a lineage, ten pairs is not a sample,
+  and a binomial interval on 2-of-10 spans 0.03 to 0.56.
+  [docs/audit.md](docs/audit.md#can-it-order-things-at-all)
+
+- **`agentdescent.audit.drift` -- watching the correction over generations
+  without alarming every generation.** One rectification says how biased the
+  verifier is; a sequence says whether the loop is *finding* its blind spots,
+  which is the failure no single measurement shows. `DriftMonitor` is an EWMA
+  control chart, and the plan is explicit that a test per generation is the
+  wrong instrument. Measured over two thousand runs of a hundred in-control
+  generations:
+
+  | | alarms per 100 generations | clean runs that alarm |
+  |---|---|---|
+  | a two-sided test per generation | 4.95 | **99.3%** |
+  | this chart (lam=0.2, L=3) | 0.27 | 16.2% |
+
+  Two departures from the textbook chart, both because the inputs are estimates.
+  The limits are **recursive** -- `Var(z) = lam**2 se**2 + (1-lam)**2 Var(z_prev)`
+  -- because each `delta_hat` arrives with its own standard error and the closed
+  form assumes one shared sigma; the band widens after a noisy generation and
+  narrows after a well-audited one. And **overlapping label sets invalidate the
+  chart and are the default**: `Calibrator` recomputes from the whole store, so
+  consecutive points share most of their labels, are positively correlated, and
+  the true spread of `z` is wider than the recursion -- the limits are too tight
+  and the chart alarms on a verifier that never moved. The monitor reads
+  `Rectification.covers`, notices, and says so rather than charting silently.
+
+  `gain_factor` is smoothed against a threshold rather than charted with limits,
+  because it has no standard error. Below it the signal says what the number
+  implies: replace the verifier, not buy more labels.
+
+- **`agentdescent.audit.service` and the `audit_*` MCP tools.** `audit_status`,
+  `audit_pending`, `audit_resolve`, `audit_recompute`, `audit_scorecard`,
+  `audit_rescan`, `audit_drift`. They take a JSONL **path**, not a `run_id`,
+  because constraint 2 of this package is that truth may take days: the process
+  that dispatched a record is gone when a wet-lab result comes back, and the
+  resolver has a file and nothing else. They never raise -- a tool call that
+  throws gives a model a stack trace and no way to act.
+
+  Three decisions rather than plumbing. A **missing file is an error**, not an
+  empty store: `AuditStore` treats an absent path as one about to be written,
+  which is right for a run and wrong for a question about one, and reading a
+  typo as "no records yet" is how a caller tells a user their verifier is
+  unbiased. `version=None` means the **busiest** version and the reply always
+  names which it picked. And `audit_rescan` resolves a `module:attribute`
+  reference through the same allowlist the spec system uses -- resolution runs
+  whatever it imports, so widening it is the operator's decision and not one a
+  calling model can make by naming a module.
+
+  The tool descriptions carry the two warnings a model needs and cannot derive:
+  `audit_resolve` REFUSES to overwrite a result, and `audit_scorecard` says in
+  as many words not to recommend a verifier change because `delta_hat` fell.
+  [docs/audit.md](docs/audit.md#watching-it-over-generations)
+
+- **`agentdescent.audit.scorecard` -- what has to be true before a new verifier
+  replaces the old one.** A verifier is the instrument every other number in a
+  run is measured with, so changing it invalidates the run's history in a way
+  nothing in the run can see. `verifier_scorecard` fills the plan's Phase 5 card
+  -- with the top row changed.
+
+  The plan leads with `delta_hat`, "the only real target: it should fall". That
+  is the row the harmful rule above wins, so the card leads with `sigma`, treats
+  a rise in it as a blocker, and reports `delta_hat` below it, never scored.
+  `blockers` is the whole verdict rather than a weighted total, because a total
+  would let a large fall in the metric that lies buy a small rise in the one that
+  does not.
+
+  `rescan` re-scores the outputs the audit store kept and reports the agreement
+  rate, the per-artifact shift, and how many artifact *pairs* reverse order --
+  the plan calls this a Ledger replay and says it is nearly free, but the Ledger
+  stores artifact states and the outputs a verifier scores were never kept, so a
+  true re-decide needs the rollouts back. Re-scoring the audited sample is what
+  is free; it comes with an `n` and is weighted by `inclusion_prob`.
+
+  `scripts/audit_diagnose.py` runs the whole Phase 5 diagnosis offline against
+  the committed Phase 0 records and writes
+  [reports/verifier_diagnosis_f55dec40cec559f7.md](reports/verifier_diagnosis_f55dec40cec559f7.md).
+  [docs/audit.md](docs/audit.md#the-scorecard--before-a-new-verifier-replaces-the-old-one)
+
+- **`agentdescent.audit.gate` -- the audit reaching the decision that commits.**
+  `RectifiedAcceptance` wraps any acceptance policy and discounts the held-out
+  evidence by however much the verifier disagrees with ground truth. On the
+  Phase 0 audit that discount is **0.60**: thirty-two tasks judged by an LLM
+  carry the information of nineteen judged by exact match, and a candidate
+  scoring 0.625 -> 0.750 commits without the audit and does not commit with it.
+
+  The plan's Phase 4 formula, `var_true = var_p + se(delta) ** 2`, is aimed at
+  the wrong term. `delta_hat` is one number subtracted from **both** sides of a
+  comparison, so it cancels out of `cand - base` exactly, and so does its
+  standard error: a gate asking "is this better than that" is nearly immune to a
+  uniformly generous verifier. What does not cancel is the *spread* of the
+  verifier's error, `resid_sd ** 2 / n`, which each side carries independently
+  -- and which the gate had been spending as evidence. Measured: 0.00454 against
+  0.00082, **5.5x larger** than the term the plan carries.
+
+  So `Rectification` gained `resid_sd`, the population sd of `f - Y` pooled
+  across strata with the between-stratum term included (a verifier uniformly
+  +0.4 generous in one stratum and exact in another has zero spread inside each
+  and plenty across them). `delta_hat` is still applied, for the two smaller
+  reasons that are real -- the Beta spread `p(1-p)` is 2.2x wrong when read at
+  an uncorrected rate, and the rates in a refusal are read by a person -- and
+  `se(delta)` is carried once rather than twice, named `drift`: the allowance
+  for `delta` differing between the two sides, which is the failure this package
+  exists to catch.
+
+  Applied by **discounting the counts**, so the rate is untouched and the
+  regression guard, `observed_delta` and the artifact's prior all see exactly
+  what they saw before. `enabled=False` returns `inner.accept(ctx)` on the
+  untouched context -- the same call, not an equivalent one -- so the audit can
+  be switched on mid-run. A stale rectification widens instead of correcting; a
+  rectification with no `resid_sd` is treated as stale, because the missing term
+  is the one the variance is mostly made of. `VerifierWatch` withdraws the
+  calibration when the instrument may have moved, by fingerprint, artifact id,
+  governance layer or glob over a diff's keys.
+  [docs/audit.md](docs/audit.md#spending-it--the-gate)
+
+- **`agentdescent.audit.diagnose` -- what the verifier gets wrong, and whether a
+  fix helps.** `classify_disagreements` sorts the residual into what it would
+  take to fix -- FORMATTING (normalise), SPEC_GAP (a hard rule), AMBIGUOUS (a
+  second oracle would disagree too; **not fixable**), JUDGMENT (a better judge) --
+  and records the **direction** of each error beside its kind.
+
+  `report.floor_sigma` is what the residual would be if every non-ambiguous
+  disagreement were fixed. It is not zero, and aiming below it is a plan to
+  redefine correctness rather than to improve the verifier.
+
+  `evaluate_fix` scores a proposed change against **every** labelled pair rather
+  than the disagreements it targets, and `FixReport.helps` reads the residual
+  rather than the bias. Both because of what a real audit produced -- see
+  `scripts/audit_diagnose.py`, which re-derives it offline from the committed
+  Phase 0 records:
+
+  | rule | fixed | broke | `sigma` | `delta` | false negatives | |
+  |---|---|---|---|---|---|---|
+  | A: answer echoes the question | 12 | 11 | 0.381 -> **0.410** | -74% | 0% -> **22.4%** | *does not help* |
+  | B: answer far shorter than the gold | 10 | 0 | 0.381 -> **0.324** | -32% | 0% -> 0% | helps |
+  | A + B | 19 | 11 | 0.381 -> **0.362** | -97% | 0% -> **22.4%** | helps |
+
+  Rule A cuts the bias by three quarters and makes the verifier worse; restricted
+  to the disagreements it targets it removes twelve errors and breaks nothing, a
+  clean win by every number a person reaches for. And bundled with a rule that
+  works it *passes* -- the bundle's residual improves, so nothing in the bundle's
+  own numbers shows that it still rejects 22.4% of correct answers. A bundle
+  launders whatever is in it, so `evaluate_fix` is meant to be run one rule at a
+  time.
+
+  The lesson is in the API: **do not optimise the verifier against `delta_hat`**.
+  A mean can be driven to zero by adding errors in the opposite direction. The
+  bias is what the calibrator already handles; optimising it breaks the residual,
+  which is what the calibrator cannot handle.
+
+  `FixReport.breakage_rate` and `FixReport.false_negative_before/after` were one
+  field called `false_negative_rate` until the same data put them side by side at
+  7.5% and 22.4%: the denominators are the judgements that were right and the
+  *answers* that were right, and those differ whenever the verifier errs in one
+  direction only -- the normal case.
+
+- **`agentdescent.audit.sampler` -- Neyman allocation, as inclusion
+  probabilities.** A flat rate spends the oracle budget where the *units* are;
+  what sets the width of the correction is where the verifier is *unreliable*.
+  `plan_audit` allocates `n_h` proportional to `W_h * sd_h` on the residual
+  `f - Y`, converts it to a per-stratum rate, and hands it to the tap.
+  `boundary_stratifier` splits units around the acceptance threshold, where a
+  verifier's disagreement with the truth concentrates.
+
+  `target_halfwidth` is a specification, not a wish: under Neyman allocation
+  `se = sum(W_h sd_h) / sqrt(n)`, so the label budget follows from the requested
+  half-width and halving it costs four times the labels.
+
+  The plan called for a batch sampler that takes a generation's units and returns
+  which to send. That does not fit the tap, which decides per unit from a
+  unit-seeded draw -- the property that makes inclusion independent of thread
+  scheduling. The allocation survives the translation: `n_h` out of an expected
+  `W_h * N` is an inclusion probability, and per-stratum rates are what the tap
+  already takes.
+
+  Three decisions with reasons: floors are applied **after** allocation, so a
+  bound stratum does not scale the others down; a stratum with no residual
+  history is filled at the **largest measured** sd, because under-sampling an
+  unmeasured stratum is self-perpetuating while over-sampling self-corrects; and
+  a stratum the plan never saw gets a rate of **zero**, since sampling it would
+  record an inclusion probability nobody chose.
+
+- **`agentdescent.audit.calibrator` -- the join.** `Calibrator.current(version)`
+  reads the store, assembles the strata, runs the estimator and returns a
+  `Rectification`: `delta_hat = E[f] - E[Y]` with the standard error the
+  acceptance gate adds to its own variance.
+
+  `E[f]` is a **count**, not an estimate -- the tap saw every unit the run
+  scored -- so only `E[Y]` carries sampling error, which is why `delta_se` and
+  `se` are the same number and would stop being so if `E[f]` were ever computed
+  from a subsample.
+
+  Every failure returns a **stale** rectification rather than a number or an
+  exception, because the caller is a merge decision and one has to be made: too
+  few labels, an unknown verifier version, a `mark_stale()` after the verifier
+  changed, or a converged run where both scorers saturate and there is no
+  variance to estimate from. That last is not a correction of zero -- a converged
+  run has no evidence about the verifier either way.
+
+  Thin strata are **merged, not dropped**: records and their unlabelled moments
+  together, pooled with Chan's parallel form. Dropping would remove those units
+  from the population the estimate describes, turning the question into "the bias
+  among units we sampled enough of" -- flattering exactly when the thin stratum
+  is where the verifier is worst.
+
+- **The store keeps the unlabelled half as three numbers per stratum.** PPI's
+  entire dependence on the units nobody audited is a count, a mean and a
+  variance, so `AuditStore` accumulates them in a Welford and never stores an
+  unlabelled score. At a 1% sampling rate that is three numbers instead of a
+  hundred thousand. Snapshots share the records' JSONL under a `kind` key and
+  reconcile last-wins; `Stratum.from_moments` is the constructor that takes them.
+
+- **`agentdescent.audit.ppi` -- the calibration estimator.** Prediction-powered
+  inference for a stratified mean: `theta = lam * mean(f_unlab) + mean(y_lab -
+  lam * f_lab)`, with `lam` chosen to minimise the variance and **cross-fitted**
+  so the interval is honest. At `lam = 0` it degenerates to the labelled-only
+  mean, so a useless verifier costs nothing; `gain_factor` reports the factor by
+  which the oracle budget was effectively multiplied, and `1.0` means the
+  verifier is buying nothing.
+
+  Guarded three ways, because a wrong interval here makes the acceptance gate
+  confident about a number it should be hedging. Coverage over 400 replications,
+  with the reported SE checked against the actual spread. Three mutation tests
+  whose coverage must collapse -- ignoring stratum weights (0.94 -> 0.01),
+  imputing the verifier as truth (-> 0.00), dropping `lam**2 Var(f_unlab)/N`
+  (-> 0.91) -- which test the coverage suite rather than the estimator. And six
+  golden vectors exact to 1e-12, spanning the regimes coverage cannot separate.
+
+  **This introduces numpy as the package's first runtime dependency.**
+
+- **`numpy` is a dependency of the core.** `dependencies` was empty and
+  `docs/plugin-design.md` said it must stay that way; the estimator above is the
+  reason to change that, and the doc now says what is true. Everything else in
+  the package, and the CLI, still run on the standard library alone.
+
+  Installing it un-skipped `tests/test_era_srbench.py`, which gated on numpy
+  alone while also needing scipy and sympy -- three tests that had never run
+  failed immediately. The guards now name every optional dependency they use,
+  matching how the same file already handles `pyarrow`.
+
+- **`anthropic_compatible` -- an Anthropic-format endpoint with no SDK
+  dependency.** The twin of `openai_compatible` on the other wire format.
+  Anthropic-format endpoints now serve models that are not Claude, and reaching
+  one meant either `pip install anthropic` -- an optional dependency, for a
+  `base_url` override on a client whose retry and timeout defaults then have to
+  be undone -- or nothing. Base URL and key are read from the environment at call
+  time. Only `text` blocks are returned: a reasoning model answers with
+  `thinking` blocks first, and concatenating them would put the reasoning into
+  the artifact's output, where a scorer grades it and a diff might commit it.
+
+- **`agentdescent.audit.estimate` -- the design-based bias estimator.** A Hajek
+  (inclusion-probability-weighted) mean of `f - Y` with a percentile bootstrap
+  interval, plus `residual_bias(records)` to read it straight off a store.
+  Weighted from the start although every current sampler uses one probability:
+  an unweighted mean is correct exactly while that stays true, and plausible
+  either way once it stops.
+
+  Two intervals are reported. The unit bootstrap is what a reader expects and is
+  **too narrow for a run**, because the same task is scored again for every
+  artifact version and those pairs are not independent draws. `ci_clustered`
+  resamples tasks, and the gap between the two is the size of that dependence --
+  on the Phase 0 run it is about 1.6x.
+
+  Not included, still: prediction-powered inference. The two are a baseline and
+  a refinement rather than alternatives, so PPI gets measured against this one.
+
+- **`scripts/audit_phase0.py` -- the audit plan's kill test, and
+  `reports/audit_phase0_*.md`.** Not the plan's original Phase 0, which replays
+  the Ledger for past accept decisions: no run ever recorded an independent
+  second opinion to replay against. It is a fresh measurement on HotpotQA with an
+  LLM judge as the cheap verifier and normalized exact match as ground truth.
+
+### Changed
+
+- **`ThreeLayerVerifier.oracle_eval` is now `full_eval`**, and
+  `oracle_shares_full_set` is now `full_eval_matches_counts`. The old name
+  promised an independent source of truth and the method delivers the same
+  `eval_fn` every other layer calls, differing only in **how many tasks** it
+  scores -- so it bounds sampling error and is structurally unable to detect that
+  the scorer is biased. Reading it as ground truth is what let the docs claim the
+  loop audits itself against something outside itself, which it does not.
+
+  Both old names still work, once, with a `DeprecationWarning`, and are removed
+  in 0.7. `VerifierProtocol` declares `full_eval`; the engine reads a custom
+  verifier through `verifier.full_eval_of` / `verifier.shares_eval_counts`, which
+  accept either spelling -- so a verifier written against the pre-0.6 page keeps
+  running instead of raising `AttributeError` in the middle of a merge. The
+  `oracle_budget` argument, `VerifierBudget.oracle_calls_*` and the
+  `oracle-rejected` merge outcome keep their names: they are the public spelling
+  of a knob and a result category, and renaming them would break callers for no
+  gain this rename has not already delivered.
+
 ## [0.5.0] — 2026-09-07
 
 ### Added

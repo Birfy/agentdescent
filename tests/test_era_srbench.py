@@ -543,6 +543,7 @@ _SMOOTH_PROGRAM = ("import numpy as np\n\n\n"
 
 def test_the_harness_fits_the_constants_the_way_upstream_fits_them():
     """One BFGS from all ones, over ten parameters -- `searcher.py` verbatim."""
+    pytest.importorskip("scipy", reason="upstream fits constants with scipy.optimize")
     rng = np.random.default_rng(0)
     x = rng.uniform(1.0, 4.0, size=(500, 2))
     y = 2.5 * x[:, 0] + 1.5 * np.sin(x[:, 1]) - 0.75
@@ -562,6 +563,7 @@ def test_branching_on_a_parameter_fits_badly_under_upstreams_optimiser():
     the branch is removed. This is what alignment costs, and a candidate that
     branches on its own constants is choosing it.
     """
+    pytest.importorskip("scipy", reason="upstream fits constants with scipy.optimize")
     rng = np.random.default_rng(0)
     x = rng.uniform(1.0, 4.0, size=(500, 2))
     y = 2.5 * x[:, 0] + 1.5 * np.sin(x[:, 1]) - 0.75
@@ -639,7 +641,7 @@ def test_both_roots_exist_in_both_formats():
 
 def test_a_damaged_ground_truth_is_not_scorable_and_is_not_a_miss():
     """Both defects are the published copy's, not any answer's."""
-    pytest.importorskip("sympy")
+    pytest.importorskip("sympy", reason="symbolic-accuracy scoring parses with sympy")
     from tools import score_symbolic_accuracy as sa
     assert not sa.scorable("-0.19*A(t)**2 + 0.19_z*A(t)**2", ["t", "A"])
     assert not sa.scorable("F0*sin(t) - beta*sin(v(t))", ["x", "t", "v"])

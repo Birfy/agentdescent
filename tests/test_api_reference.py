@@ -131,3 +131,48 @@ def test_no_sphinx_roles_leak_into_the_page():
 def test_every_module_section_links_to_a_real_guide(page):
     """Each API section points at the page explaining *why*; those must exist."""
     assert (ROOT / "docs" / page).exists(), f"api.md links to a missing page: {page}"
+
+
+def test_a_constant_is_not_documented_with_its_type_s_docstring():
+    """A value has no docstring, so `getdoc` reports its *type*'s.
+
+    Every constant on the page was documented with builtin boilerplate --
+    `SOLVED` as "Convert a string or number to a floating point number, if
+    possible", `LAYOUTS` as "dict() -> new empty dictionary". That says nothing
+    about the constant, and CPython rewords those strings between *patch*
+    releases: "floating point" became "floating-point" in 3.12.11, so the page
+    depended on the interpreter that wrote it and this file's sync test called a
+    clean tree stale -- green on 3.9 and 3.11, red on 3.12, one unchanged tree.
+    """
+    from tools.gen_api_docs import _summary
+
+    assert _summary(0.95) == ""
+    assert _summary({"a": 1}) == ""
+    assert _summary((1, 2)) == ""
+    assert _summary("text") == ""
+    assert _summary(frozenset()) == ""
+    # A module owns its docstring, and a class and a function still report theirs.
+    assert _summary(agentdescent).strip()
+    assert _summary(agentdescent.evolve).strip()
+
+
+def test_a_constant_is_documented_from_the_comment_above_it():
+    """`#:` in the source is the only prose a constant has; the page reads it.
+
+    Copying it into `CONSTANTS` instead would be a second copy of every
+    sentence -- the failure this generator exists to prevent.
+    """
+    from tools.gen_api_docs import _source_comments
+
+    comments = _source_comments()
+    assert "policy choices" in comments["CALIBRATION_FLOOR"]
+    # Two constants under one comment: the second inherits rather than vanishes.
+    assert comments["CALIBRATION_CEILING"] == comments["CALIBRATION_FLOOR"]
+    assert "rarefaction" in comments["MIN_UNSEEN"]
+    assert not any(c.startswith("Convert a string") for c in comments.values())
+
+
+def test_every_constant_on_the_page_says_something():
+    """A reference whose constants read "—" has documented nothing."""
+    text = API.read_text(encoding="utf-8")
+    assert "\n—\n" not in text, "a constant on the page has no prose at all"

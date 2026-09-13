@@ -326,12 +326,20 @@ class VerifierProtocol(Protocol):
     """Four methods, from ``grep 'self\\.verifier\\.' agentdescent/aggregator.py``.
 
     Not three. `docs/verifier.md` said three for a while, and a verifier written
-    from that page fails in the middle of a merge rather than at startup."""
+    from that page fails in the middle of a merge rather than at startup.
+
+    ``full_eval`` was ``oracle_eval`` until 0.6. The engine still reads the old
+    name, once, with a `DeprecationWarning`
+    (:func:`~agentdescent.verifier.full_eval_of`), so an implementation written
+    against the old page keeps working until 0.7. The rename is a correction:
+    every method here calls the caller's one scorer and they differ only in how
+    many tasks they score, so none of them is an oracle in the sense of an
+    independent source of truth. :mod:`agentdescent.audit` is that."""
 
     def cheap_eval(self, artifact: "Evolvable") -> float: ...
     def learned_eval(self, artifact: "Evolvable") -> Tuple[float, float]: ...
     def eval_counts(self, artifact: "Evolvable") -> Tuple[float, float]: ...
-    def oracle_eval(self, artifact: "Evolvable") -> float: ...
+    def full_eval(self, artifact: "Evolvable") -> float: ...
 
 
 @runtime_checkable

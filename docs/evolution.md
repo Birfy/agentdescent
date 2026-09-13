@@ -711,7 +711,7 @@ carries forward so early stopping still has something to compare.
 **Every *evaluation* is retried at one choke point.** A held-out score runs the
 agent, so it is a backend call — and the engine makes them in more places than is
 obvious: each round's measurement, the final measurement, and the aggregator's own
-accept/reject comparisons (`cheap_eval`, `eval_counts`, `oracle_eval`). A
+accept/reject comparisons (`cheap_eval`, `eval_counts`, `full_eval`). A
 they all funnel through one memoised evaluation, which retries there — so a retry
 re-runs only the task that actually failed, and every call site is covered at
 once.

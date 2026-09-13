@@ -407,9 +407,18 @@ def plan_payload(spec: EvolveSpec, *, usd_per_call: Optional[float] = None) -> D
     selection = _selection_not_merging(comp)
     if selection:
         warnings.append(selection)
+    audit = None
+    if comp.audit is not None:
+        audit = {"store": comp.audit.store.path,
+                 "enabled": comp.audit.enabled,
+                 "verifier_version": comp.audit.verifier_version,
+                 "oracle": type(comp.audit.reward.oracle).__name__,
+                 "sample_rate": comp.audit.reward.sample_rate,
+                 "draw_by": comp.audit.reward.draw_by}
     return {"ok": True, "spec": spec.to_dict(), "tasks": len(comp.tasks),
             "warnings": warnings,
             "artifact_id": spec.artifact_id(),
+            **({"audit": audit} if audit else {}),
             "evolve_kwargs": {k: (v if isinstance(v, (int, float, str, bool, type(None)))
                                   else type(v).__name__)
                               for k, v in comp.kwargs.items()},
@@ -475,6 +484,10 @@ def status_payload(run_id: Optional[str], *, store: Optional[str] = None,
         rd = runstore.get(run_id, store=store)
         st = rd.status().to_dict()
         st["recent_rounds"] = rd.rounds()[-recent_rounds:]
+        if os.path.exists(rd.audit_path):
+            # Only once it exists: a path to a file that was never written
+            # invites `audit_status` to report an empty store as an answer.
+            st["audit_store"] = rd.audit_path
         st["checkpoint"] = _checkpoint_summary(rd)
         return st
     return [st.to_dict() for st in runstore.list_runs(store=store)]

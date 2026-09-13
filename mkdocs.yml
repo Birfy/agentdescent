@@ -73,6 +73,7 @@ nav:
     - The aggregator (the optimizer): aggregator.md
     - The ledger: ledger.md
     - The verifier: verifier.md
+    - Sparse audit (cheap verifier vs truth): audit.md
     - The data layer: dataloader.md
     - Rewards: rewards.md
     - Reference orchestrator & domain: orchestrator.md

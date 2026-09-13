@@ -16,3 +16,10 @@ site/
 
 # Local PR description drafts — never push these to the remote
 .pr-description.md
+
+# An audit store a spec wrote with no run directory to put it beside.
+# `build_audit` used to fall back to an in-memory store here, which meant the
+# audit ran, paid for every oracle call and dropped the records at exit; it
+# writes a real file now, and a run that has a ledger still gets it beside
+# that. This is the fallback landing in whatever directory the caller was in.
+/audit.jsonl

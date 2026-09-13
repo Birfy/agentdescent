@@ -12,7 +12,7 @@ The per-bucket pipeline (design doc, section 4):
     3. conflict resolution     (section 4.3)  semantic contradiction / PCGrad-drop
        + candidate fusion tournament          (model-soup style)
     4. audit gate              (section 5.3)  high blast radius / low trust -> the
-       oracle decides, and can veto here      optimizer audits itself
+       full-set scorer decides, and can veto  optimizer audits itself
     5. Beta-posterior accept   (section 4.4)  P(delta > 0) > 1 - delta
     6. CAS / 2PC commit        (section 4.1)
     7. dual-branch promotion   (section 4.5)  EMA-style dev -> stable, after K
@@ -22,6 +22,12 @@ The audit is stage **4**, not a post-commit spot-check. It runs before the
 acceptance test and returns ``oracle-rejected`` outright, so it is a blocking gate
 on the accept path -- the diagrams used to draw it after the commit with a dotted
 "spot-check" arrow, which reads as advisory when it holds a veto.
+
+Note what this stage does *not* do. It re-reads the caller's own scorer over the
+whole held-out set (``full_eval``, called ``oracle_eval`` until 0.6), so it can
+catch a verdict that rested on too few tasks and cannot catch one that rested on a
+biased scorer -- the outcome name outlived the rename and overstates the check.
+:mod:`agentdescent.audit` is the second source.
 """
 
 from __future__ import annotations
@@ -51,7 +57,7 @@ from .policies import (
 from .scheduler import AuditScheduler
 from .staleness import StaleAction, StalenessPolicy, get_policy
 from .stats import BetaPosterior
-from .verifier import ThreeLayerVerifier
+from .verifier import ThreeLayerVerifier, full_eval_of, shares_eval_counts
 
 
 @runtime_checkable
@@ -881,20 +887,27 @@ class Aggregator:
             self.audit.update_trust(
                 artifact_id, (cand_full > base_full) == (cand_score > base_score))
         if self.audit.force_oracle(artifact.blast_radius, artifact_id):
-            # A verifier whose oracle scores the same set `eval_counts` does has
-            # already been paid for: `base_full` / `cand_full` ARE that
-            # measurement. Re-buying it was not merely wasteful -- `oracle_eval`
+            # A verifier whose full-set scorer measures the same set `eval_counts`
+            # does has already been paid for: `base_full` / `cand_full` ARE that
+            # measurement. Re-buying it was not merely wasteful -- `full_eval`
             # degrades to `rule_eval` once the budget is gone, so past that point
             # the gate vetoed on the cheap SUB-SAMPLE. Measured: a candidate that
             # took the full-set rate from 0.5 to 1.0 came back `oracle-rejected`
             # because the two-task sample scored both at 0.5. The verifier page
             # promises in two places that sub-sampling can never decide a commit;
             # this was the path that made it false.
-            if getattr(self.verifier, "oracle_shares_full_set", False):
+            #
+            # Read through the two helpers rather than by attribute: a verifier
+            # is whatever the caller handed us, including one written against the
+            # pre-0.6 `oracle_eval` / `oracle_shares_full_set` names. Reading the
+            # new name directly would have made an old custom verifier fail here,
+            # mid-merge, several minutes into a run.
+            if shares_eval_counts(self.verifier):
                 oracle_base, oracle_cand = base_full, cand_full
             else:
-                oracle_base = self.verifier.oracle_eval(artifact)
-                oracle_cand = self.verifier.oracle_eval(best_state)
+                full_eval = full_eval_of(self.verifier)
+                oracle_base = full_eval(artifact)
+                oracle_cand = full_eval(best_state)
             agreed = (oracle_cand > oracle_base) == (cand_score > base_score)
             self.audit.update_trust(artifact_id, agreed)
             if oracle_cand <= oracle_base:

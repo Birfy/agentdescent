@@ -16,6 +16,8 @@ that is not regenerated fails the suite rather than shipping a stale page.
 from __future__ import annotations
 
 import argparse
+import ast
+import difflib
 import enum
 import inspect
 import os
@@ -29,6 +31,10 @@ import agentdescent  # noqa: E402
 
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                    "docs", "api.md")
+
+#: How much of the diff `--check` prints before truncating. Enough to see the
+#: shape of a real drift; short enough that a CI log stays readable.
+MAX_DIFF_LINES = 60
 
 #: Module -> (title, one-line role, doc page). Order here is the order on the
 #: page: the things you touch first come first.
@@ -62,6 +68,63 @@ SECTIONS: List[Tuple[str, str, str, str]] = [
     ("agentdescent.verifier", "The verifier",
      "Rule / learned / oracle, and the budget that bounds the expensive one.",
      "verifier.md"),
+    ("agentdescent.audit.tap", "The sparse audit layer",
+     "Pair a cheap verifier against ground truth without paying for truth.",
+     "audit.md"),
+    ("agentdescent.audit.wiring", "Switching the audit on",
+     "One call that assembles the six pieces and the four cross-references.",
+     "audit.md"),
+    ("agentdescent.audit.sources", "Audit oracle sources",
+     "Where ground truth comes from, and how long it takes to arrive.",
+     "audit.md"),
+    ("agentdescent.audit.store", "The audit store",
+     "Append-only persistence for paired observations, and the two pools.",
+     "audit.md"),
+    ("agentdescent.audit.diagnose", "Diagnosing the verifier",
+     "Sort the residual by what fixing it would cost, and measure a proposed fix.",
+     "audit.md"),
+    ("agentdescent.audit.propose", "Searching for a fix",
+     "Enumerate the hard rules, score every combination, rank by the residual.",
+     "audit.md"),
+    ("agentdescent.audit.scorecard", "The verifier scorecard",
+     "What has to be true before a new verifier replaces the old one.",
+     "audit.md"),
+    ("agentdescent.audit.ranking", "Ordering agreement",
+     "Can the verifier put candidates in the right order -- the only thing the "
+     "gate uses.",
+     "audit.md"),
+    ("agentdescent.audit.drift", "Drift monitoring",
+     "EWMA control charts on the correction, without an alarm every generation.",
+     "audit.md"),
+    ("agentdescent.audit.coverage", "Coverage allocation",
+     "Where the improvement labels go: Good-Turing unseen mass, not Neyman.",
+     "audit.md"),
+    ("agentdescent.audit.queue", "The merge path's ranking",
+     "Draining the audit scheduler into the queue a person works from.",
+     "audit.md"),
+    ("agentdescent.audit.sampler", "Audit allocation",
+     "Neyman allocation, as per-stratum inclusion probabilities.",
+     "audit.md"),
+    ("agentdescent.audit.calibrator", "The calibrator",
+     "Turns a store of audited pairs into a correction the acceptance gate applies.",
+     "audit.md"),
+    ("agentdescent.audit.gate", "Spending the correction",
+     "The only place the audit changes an outcome: evidence discounted by "
+     "verifier noise.",
+     "audit.md"),
+    ("agentdescent.audit.ppi", "Prediction-powered inference",
+     "The calibration estimator: a stratified mean that borrows the unlabelled scores.",
+     "audit.md"),
+    ("agentdescent.audit.estimate", "Audit estimation",
+     "The design-based baseline: a weighted mean of the residual, with an interval.",
+     "audit.md"),
+    ("agentdescent.audit.service", "The audit out of process",
+     "The audit's verbs as JSON, for the MCP surface and anything resolving "
+     "truth later.",
+     "audit.md"),
+    ("agentdescent.audit.records", "Audit records",
+     "What one audited measurement is, and how a verifier is versioned.",
+     "audit.md"),
     ("agentdescent.governance", "Governance",
      "L0 frozen / L1 slow / L2 fast, assigned by blast radius.", "governance.md"),
     ("agentdescent.staleness", "Staleness policies",
@@ -164,6 +227,19 @@ def _summary(obj: Any) -> str:
     # that has none, so `vars()` cannot see the difference there. It is the same
     # non-information, so drop it by name.
     if _is_enum(obj) and doc.strip() == "An enumeration.":
+        return ""
+    # Same rule once more, for a value. A plain constant -- a float, a dict, a
+    # tuple -- carries no docstring of its own, so `getdoc` reports its *type*'s:
+    # `SOLVED` came out as "Convert a string or number to a floating point
+    # number, if possible" and `LAYOUTS` as "dict() -> new empty dictionary".
+    # That is a fact about the type, not about the constant, and CPython rewords
+    # those builtin strings between *patch* releases -- "floating point" became
+    # "floating-point" in 3.12.11 -- so the page depended on the interpreter that
+    # wrote it and the sync test called a clean tree stale. `CONSTANTS` carries
+    # the prose that is actually worth printing; a module owns its docstring and
+    # is unaffected. Only a class, a routine or a module can own one here.
+    if not (inspect.isclass(obj) or inspect.isroutine(obj)
+            or inspect.ismodule(obj)):
         return ""
     para: List[str] = []
     for line in doc.splitlines():
@@ -419,6 +495,11 @@ def _methods(cls: type) -> List[Tuple[str, str]]:
 #: the top level. They have doc pages and a public API, so leaving them out of
 #: the reference because of an import style would be a hole in it.
 SUBMODULES: List[Tuple[str, str, str, str]] = [
+    # Collected for its `__all__`; every name lands in one of the four
+    # `agentdescent.audit.*` sections above, so this bucket itself stays empty.
+    ("agentdescent.audit", "The sparse audit package",
+     "Pair a cheap verifier against ground truth, and correct for the gap.",
+     "audit.md"),
     ("agentdescent.backends", "Document backends",
      "A tool-using agent over a document that is too big for a prompt.",
      "backends.md"),
@@ -440,9 +521,67 @@ def _public_names(module) -> Dict[str, Any]:
     return {n: getattr(module, n) for n in names}
 
 
+def _source_comments() -> Dict[str, str]:
+    """The ``#:`` comment above each module-level constant, by name.
+
+    A constant has no docstring, so the only prose about it lives in the source,
+    as the ``#:`` comment Sphinx reads. Copying that prose into ``CONSTANTS``
+    would make a second copy of every sentence -- which is the failure this
+    generator exists to prevent, one that ends with the page explaining what the
+    constant used to mean. Read it from the source instead, so there is one copy.
+
+    Two constants sharing one comment (``CALIBRATION_FLOOR`` and
+    ``CALIBRATION_CEILING``, whose comment says "Both are policy choices") is
+    how the sources already write them, so an assignment on the line directly
+    after a documented one inherits its comment rather than being dropped.
+    """
+    import importlib
+
+    out: Dict[str, str] = {}
+    for module_name in dict.fromkeys(
+            [m for m, _, _, _ in SECTIONS + SUBMODULES] + ["agentdescent"]):
+        try:
+            path = inspect.getsourcefile(importlib.import_module(module_name))
+            source = open(path, encoding="utf-8").read()
+            tree = ast.parse(source)
+        except (ImportError, OSError, SyntaxError, TypeError):
+            continue
+        lines = source.splitlines()
+        previous_line, previous_text = -2, ""
+        for node in tree.body:
+            if isinstance(node, ast.Assign):
+                targets = node.targets
+            elif isinstance(node, ast.AnnAssign):
+                targets = [node.target]
+            else:
+                continue
+            names = [t.id for t in targets if isinstance(t, ast.Name)]
+            if not names:
+                continue
+            comment = []
+            index = node.lineno - 2                  # the line above, 0-based
+            while index >= 0 and lines[index].startswith("#:"):
+                comment.insert(0, lines[index][2:].strip())
+                index -= 1
+            text = _clean(" ".join(comment))
+            if not text and node.lineno == previous_line + 1:
+                text = previous_text                 # a shared comment
+            previous_line, previous_text = node.lineno, text
+            for name in names:
+                if text and name not in out:
+                    out[name] = text
+    return out
+
+
+def _value_doc(name: str, obj: Any, comments: Dict[str, str]) -> str:
+    """What to print under a constant: the override, the source, or nothing."""
+    return CONSTANTS.get(name) or comments.get(name) or _summary(obj) or "—"
+
+
 def render() -> str:
     import importlib
 
+    comments = _source_comments()
     exported = {name: getattr(agentdescent, name) for name in agentdescent.__all__}
     for module_name, _, _, _ in SUBMODULES:
         exported.update(_public_names(importlib.import_module(module_name)))
@@ -486,7 +625,7 @@ def render() -> str:
             kind = _kind(obj)
             if kind == "value":
                 lines += [f"### `{name}`", "",
-                          CONSTANTS.get(name, _summary(obj) or "—"), ""]
+                          _value_doc(name, obj, comments), ""]
                 continue
             lines += [f"### `{_signature(name, obj)}`", ""]
             summary = _summary(obj)
@@ -512,7 +651,7 @@ def render() -> str:
                   "Values rather than classes or functions.", ""]
         for name in leftovers:
             lines += [f"### `{name}`", "",
-                      CONSTANTS.get(name, _summary(exported[name]) or "—"), ""]
+                      _value_doc(name, exported[name], comments), ""]
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -527,6 +666,19 @@ def main() -> int:
         if current != generated:
             print("docs/api.md is out of date; run: python -m tools.gen_api_docs",
                   file=sys.stderr)
+            # Print the diff, not just the verdict. This check fails on CI far
+            # more often than locally -- it is the one test whose result depends
+            # on the interpreter -- and a bare "out of date" from a matrix leg
+            # that passes everywhere else says nothing about which line moved or
+            # why. A float constant rendering `float.__doc__` cost a round trip
+            # through CI to identify, because the log had only this sentence.
+            diff = list(difflib.unified_diff(
+                current.splitlines(), generated.splitlines(),
+                "docs/api.md", "generated", lineterm=""))
+            head, rest = diff[:MAX_DIFF_LINES], len(diff) - MAX_DIFF_LINES
+            print("\n".join(head), file=sys.stderr)
+            if rest > 0:
+                print(f"... and {rest} more diff lines", file=sys.stderr)
             return 1
         print("docs/api.md is up to date")
         return 0

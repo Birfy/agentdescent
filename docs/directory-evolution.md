@@ -277,7 +277,7 @@ One rollout is one real agent invocation. Count them per round:
 
 Two counter-intuitive points, both verified against the engine:
 
-1. **The oracle gate is free.** `oracle_eval` and `eval_counts` call the same
+1. **The audit gate is free.** `full_eval` and `eval_counts` call the same
    `eval_fn` over the same held-out set, and the evaluation cache is keyed on
    `(render(), task.id)` — so L1's forced audit spends `oracle_budget` counter,
    not agent calls. Evolving an agent directory is not more expensive than

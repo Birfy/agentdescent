@@ -27,6 +27,11 @@ from .ledger import (
     Ledger, Snapshot, CASConflict, ContractRejected, GitError, LedgerFailure,
 )
 from .verifier import ThreeLayerVerifier, VerifierBudget
+from .audit import (
+    AuditedReward, AuditRecord, AuditStore, DeferredOracle, GoldAnswer,
+    NullOracle, Purpose, RenderTap, resolve_from_mapping, verifier_fingerprint,
+    residual_bias,
+)
 from . import backends, dataloader          # submodules: agentdescent.dataloader.hf_rows(...)
 from .dataloader import Dataset, split_dataset
 from .advantage import (
@@ -157,6 +162,7 @@ from .agents import (
     opencode,
     metered,
     openai_compatible,
+    anthropic_compatible,
     with_retries,
 )
 from .agents import WorkspaceAgent, worker_env
@@ -350,6 +356,7 @@ __all__ = [
     "echo",
     "from_callable",
     "openai_compatible",
+    "anthropic_compatible",
     "with_retries",
     "Agent",
     "LLMAgent",
@@ -421,4 +428,16 @@ __all__ = [
     "async_evolve",
     "claude_agent",
     "rule_id",
+    # the sparse audit layer: a cheap verifier paired against ground truth
+    "AuditedReward",
+    "AuditRecord",
+    "AuditStore",
+    "DeferredOracle",
+    "GoldAnswer",
+    "NullOracle",
+    "Purpose",
+    "RenderTap",
+    "resolve_from_mapping",
+    "verifier_fingerprint",
+    "residual_bias",
 ]

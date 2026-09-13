@@ -555,7 +555,7 @@ class _Runtime:
     #: Attempts per (artifact, task) evaluation before the failure is raised.
     #: Every evaluation the engine makes funnels through here -- a round's held-out
     #: score, the final score, and the aggregator's own accept/reject measurements
-    #: (`cheap_eval`, `eval_counts`, `oracle_eval`) -- and each of those *runs the
+    #: (`cheap_eval`, `eval_counts`, `full_eval`) -- and each of those *runs the
     #: agent*, so each is a backend call that can hit a transient. Retrying at the
     #: single choke point covers all of them at once, and it is nearly free: the
     #: result is memoised, so a retry re-runs only what actually failed.
