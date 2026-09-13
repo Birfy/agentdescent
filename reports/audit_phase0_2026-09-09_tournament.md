@@ -1,5 +1,10 @@
 # Sparse audit -- Phase 0 report (2026-09-09)
 
+> **This run's store is not kept.** Nothing recomputes a claim from it: the
+> numbers below are self-contained, and no script, test or document reads the
+> file. Every other Phase 0 store *is* kept, because some committed claim can
+> only be recomputed from it.
+
 **Verdict: PROCEED.** the bias is real and larger than the gate's sampling noise (|delta|/sd = 1.97). A correction changes decisions.
 
 ## What was measured
