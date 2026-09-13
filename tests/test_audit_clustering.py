@@ -409,3 +409,60 @@ def test_a_skipped_unit_never_reaches_the_moments_ppi_borrows():
     recorded = sum(int(m["n"]) for m in moments.values())
     assert recorded == len(seen), "n counts observed scores and nothing else"
     assert sum(int(m["skipped"]) for m in moments.values()) == tap.skipped
+
+
+def test_a_rate_of_one_says_it_has_emptied_the_unlabelled_half():
+    """The partition is right; the consequence is total and was silent.
+
+    A unit is recorded unlabelled exactly when its draw clears `_max_rate`. At
+    a rate of 1.0 no draw clears it, so *every* task is audited somewhere and
+    nothing can be recorded unlabelled without landing on both sides. Measured:
+    `rates={'boundary': 1.0, 'accepted': 0.05}` over 2000 units leaves
+    `n_unlab=0` in every stratum, so PPI has nothing to borrow and reports a
+    gain of 1.0 -- which reads as "the verifier was no help" rather than "there
+    was nothing to borrow from". The sampler raises every planned rate by
+    1/`calibration_fraction`, so the 1.0 clamp is not a remote case.
+    """
+    import warnings
+
+    from agentdescent.audit import AuditedReward
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        AuditedReward(lambda task, out: 1.0, sample_rate=0.05,
+                      stratify=lambda t, o, s: "b",
+                      rates={"boundary": 1.0, "accepted": 0.05})
+    assert any("empties the unlabelled half" in str(w.message) for w in caught)
+
+
+def test_a_sample_rate_above_every_planned_rate_is_called_out():
+    """It sets the bar a unit must clear to be recorded unlabelled, and no
+    stratum audits at it -- so units are dropped for a stratum that may not
+    exist. Measured: 249 of 4000 at sample_rate 0.1 over rates 0.05 and 0.02.
+    `plan()` avoids it by setting `default_rate` to 0.0."""
+    import warnings
+
+    from agentdescent.audit import AuditedReward
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        AuditedReward(lambda task, out: 1.0, sample_rate=0.1,
+                      stratify=lambda t, o, s: "b",
+                      rates={"boundary": 0.05, "accepted": 0.02})
+    assert any("above every rate in" in str(w.message) for w in caught)
+
+
+def test_a_settled_rate_configuration_stays_quiet():
+    """Both warnings are about a band between rates. Without one, no warning."""
+    import warnings
+
+    from agentdescent.audit import AuditedReward
+
+    for kwargs in ({"sample_rate": 0.1},
+                   {"sample_rate": 0.1, "rates": {"a": 0.1, "b": 0.1}},
+                   {"sample_rate": 0.0, "rates": {"a": 0.05, "b": 0.2}}):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            AuditedReward(lambda task, out: 1.0,
+                          stratify=lambda t, o, s: "a", **kwargs)
+        assert not caught, (kwargs, [str(w.message) for w in caught])

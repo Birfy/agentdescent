@@ -35,6 +35,7 @@ decision on the untouched context -- the same call, not an equivalent one.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, Optional, Sequence, Union
 
@@ -105,8 +106,34 @@ class Audit:
         from .coverage import rebalance as _rebalance
 
         share = _rebalance(unseen, **kw)
+        was = self.reward.calibration_fraction
         self.reward.calibration_fraction = share
+        # The plan's rates were solved for `was`: `plan()` divides by the split
+        # because only that fraction of audited units becomes a calibration
+        # label, and the calibrator reads nothing else. Moving the split without
+        # moving the rates reintroduces exactly the shortfall that division
+        # fixes -- at 0.7 -> 0.3 the run delivers 43% of `target_n`. Rescale, so
+        # the labels per unit the plan asked for survive the move.
+        if share > 0.0 and was > 0.0 and share != was:
+            self._rescale_rates(was / share)
         return share
+
+    def _rescale_rates(self, factor: float) -> None:
+        """Multiply every inclusion rate, clamping at 1.0 and saying if it bit."""
+        capped = []
+        for stratum, rate in list(self.reward.rates.items()):
+            scaled = rate * factor
+            if scaled > 1.0:
+                capped.append(stratum)
+                scaled = 1.0
+            self.reward.rates[stratum] = scaled
+        self.reward.sample_rate = min(1.0, self.reward.sample_rate * factor)
+        if capped:
+            warnings.warn(
+                f"the calibration split moved far enough that strata {sorted(capped)} "
+                "would need to audit more than every unit to keep the planned "
+                "label count; they are capped at 1.0 and will fall short.",
+                RuntimeWarning, stacklevel=3)
 
     def status(self) -> Dict[str, Any]:
         """What the audit knows, for a round hook or a log line."""
@@ -115,9 +142,11 @@ class Audit:
             "verifier_version": self.verifier_version,
             "seen": self.reward.seen,
             "audited": len(self.store),
-            # Without this, `seen` stops equalling audited + unlabelled the
-            # moment two strata have different rates, and a reader has no way
-            # to tell a dropped unit from one that was never scored.
+            # Units this run's tap dropped so a task could not land in both
+            # halves -- see `AuditedReward._maybe_audit`. Zero unless two strata
+            # differ in rate, and worth reporting because a `gain_factor` near
+            # 1.0 next to a large `skipped` says the unlabelled half was spent
+            # on the partition rather than that the verifier was uninformative.
             "skipped": self.reward.skipped,
             "pending": len(self.store.pending()),
             "delta_hat": rect.delta_hat,

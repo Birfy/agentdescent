@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import hashlib
 import threading
+import warnings
 from typing import Any, Callable, Dict, Optional
 
 from .records import (AuditRecord, Purpose, new_record_id, output_digest,
@@ -188,6 +189,7 @@ class AuditedReward:
             verifier, extra=version_extra)
         #: Units seen, and units audited. A sample rate that never fires is the
         #: quiet failure this makes loud.
+        self._warn_about_the_rates()
         self.seen = 0
         self.audited = 0
         #: Units dropped to keep a task out of both halves at once -- see
@@ -210,6 +212,39 @@ class AuditedReward:
         return score
 
     # -- sampling ------------------------------------------------------------
+
+    def _warn_about_the_rates(self) -> None:
+        """Two rate configurations that cost the unlabelled half, quietly.
+
+        Both follow from the partition in `_maybe_audit`: a unit is recorded
+        unlabelled exactly when its draw clears `_max_rate`, because a task that
+        is audited in *any* stratum cannot appear in the unlabelled half without
+        putting itself on both sides. Neither is wrong, and both are invisible
+        -- PPI simply reports a `gain_factor` of 1.0, which reads as "the
+        verifier was no help" rather than "there was nothing to borrow from".
+        """
+        if self.draw_by != "task":
+            return                       # a per-unit draw has no shared band
+        effective = set(self.rates.values()) | {self.sample_rate}
+        if len(effective) < 2:
+            return                       # one rate everywhere: no band at all
+        if self._max_rate >= 1.0:
+            warnings.warn(
+                "a stratum rate of 1.0 with other rates below it empties the "
+                "unlabelled half: every task is audited somewhere, so no unit "
+                "can be recorded unlabelled without putting its task on both "
+                "sides. PPI then has nothing to borrow from and reports a gain "
+                "of 1.0. Lower the rate, or pass draw_by='output' if each task "
+                "is scored once.", RuntimeWarning, stacklevel=3)
+        elif self.rates and self.sample_rate > max(self.rates.values()):
+            warnings.warn(
+                f"sample_rate={self.sample_rate} is above every rate in "
+                f"`rates` (max {max(self.rates.values())}), so it sets the "
+                "threshold a unit must clear to be recorded unlabelled -- and "
+                "no stratum audits at it. Units are dropped for a stratum that "
+                "may not exist. Pass sample_rate=0.0 when `rates` already "
+                "covers every stratum your stratifier can name, which is what "
+                "`plan()` does.", RuntimeWarning, stacklevel=3)
 
     def rate_for(self, stratum: str) -> float:
         return self.rates.get(stratum, self.sample_rate)

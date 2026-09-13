@@ -490,14 +490,27 @@ def test_the_skipped_count_survives_a_reload(tmp_path):
     assert AuditStore(str(path)).unlabelled_moments(tap.verifier_version) == before
 
 
-def test_a_store_written_before_skipping_existed_still_loads():
-    """`skipped` is absent from every moments line already on disk."""
-    from agentdescent.audit.store import _Welford
+def test_a_store_written_before_skipping_existed_still_loads(tmp_path):
+    """`skipped` is absent from every moments line already on disk.
 
-    line = {"kind": "unlabelled_moments", "verifier_version": "v1",
-            "stratum": "all", "moments": _Welford().to_dict()}
-    assert "skipped" not in line
-    assert int(line.get("skipped", 0)) == 0
+    Written as a real file rather than a dict literal: the first version of this
+    test asserted `dict.get` semantics on an object it had just built, which is
+    a property of Python and not of the loader it was supposed to cover.
+    """
+    import json
+
+    from agentdescent.audit import AuditStore
+
+    path = tmp_path / "old.jsonl"
+    path.write_text(json.dumps({
+        "kind": "unlabelled_moments", "verifier_version": "v1",
+        # The on-disk shape is Welford's, so `m2` and not `var`: 9.75 / 39.
+        "stratum": "all", "moments": {"n": 40, "mean": 0.5, "m2": 9.75},
+    }) + "\n", encoding="utf-8")
+
+    moments = AuditStore(str(path)).unlabelled_moments("v1")
+    assert moments["all"]["n"] == 40 and moments["all"]["mean"] == 0.5
+    assert moments["all"]["skipped"] == 0, "absent must read as none, not raise"
 
 
 def test_pooling_two_strata_adds_their_skipped_counts():

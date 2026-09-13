@@ -235,3 +235,40 @@ def test_the_assembled_object_is_what_evolve_takes():
     assert isinstance(audit, Audit)
     assert callable(audit.reward) and callable(audit.run)
     assert hasattr(audit.acceptance, "accept")
+
+
+def test_rebalancing_the_split_carries_the_rates_with_it():
+    """`plan()` divides the rate by the calibration split; `rebalance` moves it.
+
+    The rate is `target_n / split / expected`, because only that fraction of
+    audited units becomes a calibration label and the calibrator reads nothing
+    else. `rebalance` assigns a new split to the live tap -- its own docstring
+    recommends doing so from a round hook -- which reintroduces the shortfall
+    that division exists to fix: at 0.7 -> 0.3 the run delivers 43% of the
+    labels the plan solved for. Rescaling the rates by the same ratio keeps the
+    plan's promise across the move.
+    """
+    import warnings
+
+    from agentdescent.audit import attach
+    from agentdescent.audit.sampler import AuditPolicy
+
+    audit = attach(lambda task, out: 1.0,
+                   policy=AuditPolicy(enabled=True, calibration_fraction=0.7))
+    audit.reward.rates = {"boundary": 0.07, "accepted": 0.02}
+    audit.reward.sample_rate = 0.0
+
+    audit.rebalance(0.0, floor=0.3, ceiling=0.3)
+
+    assert audit.reward.calibration_fraction == 0.3
+    # 0.7 / 0.3: the same labels per unit the plan asked for.
+    assert audit.reward.rates["boundary"] == pytest.approx(0.07 * 0.7 / 0.3)
+    assert audit.reward.rates["accepted"] == pytest.approx(0.02 * 0.7 / 0.3)
+
+    # A move too large to absorb is capped and said out loud, not silently.
+    audit.reward.rates = {"boundary": 0.9}
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        audit.rebalance(1.0, floor=0.05, ceiling=0.05)
+    assert audit.reward.rates["boundary"] == 1.0
+    assert any("capped at 1.0" in str(w.message) for w in caught)
