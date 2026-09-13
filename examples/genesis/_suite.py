@@ -34,7 +34,8 @@ from typing import (Callable, Dict, List, Mapping, Optional, Sequence,
                     Tuple)
 
 from agentdescent.evolution import Task
-from agentdescent.filetree import match_any, materialize, parse_tree
+from agentdescent.filetree import (canonical, match_any, materialize,
+                                   parse_tree)
 
 from ._delegation import Brief, Delegation, Edit
 from ._spatial import SITUATED_EDIT_PROTOCOL, parse_situated_edits
@@ -671,11 +672,61 @@ class TestSuite:
     #: :meth:`initial_files`: frozen stops a file being written, not read, and an
     #: audit test in the repository is an audit test the executor can read.
     audit: Mapping[str, str] = field(default_factory=dict)
+    #: ``name -> file overrides``: implementations that are **deliberately wrong**,
+    #: applied on top of the reference. A suite is only as good as what it rejects,
+    #: and nothing else in this design checks that. See :meth:`kill_report`.
+    baselines: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
     #: Seconds one test may take.
     timeout: float = 60.0
 
     def initial_files(self) -> Dict[str, str]:
         return dict(self.given)
+
+    def kill_report(self, reference: Mapping[str, str], *,
+                    stop_after: int = 0) -> Dict[str, List[str]]:
+        """``baseline -> the task ids that fail on it``. Empty list means survived.
+
+        This is the mechanism the md domain was missing, and the cost of missing it
+        was a run that reported 1.000 with no force field in it. A suite validated
+        only against a *correct* implementation is not validated: it has been shown
+        to accept the right answer, and nothing has been shown about what it
+        refuses. A field that returns zero everywhere satisfies every invariant --
+        zero sums to zero, zero is the gradient of a constant, nothing moves so
+        nothing drifts -- so a suite of invariants is exactly the shape that looks
+        thorough and rejects nothing.
+
+        Mutation testing is the standard answer and this is its small form: keep the
+        wrong implementations, score each, and require every one of them to die.
+        Note what this does *not* need: a reference in the **scoring** path. The
+        reference exists beside the domain for jobs that are not scoring -- driving
+        the offline actor, proving the suite passable -- and suite QA is a third one.
+
+        Coverage, for the record, would not have caught it. The zero field executes
+        every line of every test.
+
+        This is the **harness**'s honesty check, not the algorithm's. Upstream has no
+        objective function at all -- ``grep -rio 'fitness|reward|score'`` over
+        ``apps/evo_git`` returns one hit, ``oom_score_adjust`` -- and what stands in
+        its place is a parent that reviews the diff and runs the tests
+        (``agents/manager.ex``). A reviewer reading the change is what rejects a
+        registry that pushes every pair past the cutoff; a scalar cannot. Both belong
+        in the port, in different places: this one keeps the *measurement* honest.
+
+        ``stop_after`` stops scoring a baseline once that many tests have killed it,
+        which is all a pass/fail guard needs and is much cheaper than the full grid.
+        """
+        run, tasks = self.make_runner(), self.build_tasks()
+        report: Dict[str, List[str]] = {}
+        for name, overrides in self.baselines.items():
+            rendered = canonical(dict(reference, **overrides))
+            killers: List[str] = []
+            for task in tasks:
+                if reward_test(task, run(rendered, task)) == 0.0:
+                    killers.append(task.id)
+                    if stop_after and len(killers) >= stop_after:
+                        break
+            report[name] = killers
+        return report
 
     def held_out_frac(self) -> float:
         """The ``held_out_frac`` that puts exactly the audit tasks in the tail.

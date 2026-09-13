@@ -1,7 +1,7 @@
 """md: Lennard-Jones molecular dynamics, grown from an empty repository.
 
 The fourth formation domain, the largest, and the only one with **no oracle in the
-scoring path**. A frozen test suite is the whole of the reward: sixty-two test
+scoring path**. A frozen test suite is the whole of the reward: sixty-five test
 functions over six files, one task each, and a task's prompt is that test's own
 source. Nothing here is compared against a reference implementation, because asking
 a system to grow software you had to write first proves nothing. Upstream validates
@@ -26,11 +26,17 @@ Invariants alone are not enough, which a real run demonstrated: a field that ret
 **zero everywhere** satisfies every one of them (zero sums to zero, zero is the
 gradient of a constant, nothing moves so nothing drifts), and a run shipped exactly
 that from a minimum-image expression whose ``// 1`` bound after the multiplication.
-Forty-two of the then forty-four tests passed. The suite pins values in a periodic
-box now, and ``tests/test_genesis_example.py`` holds both guards: the zero field is
-rejected, and so is Euler dressed as Verlet.
+Forty-two of the then forty-four tests passed, and the only test that noticed was the
+negative control.
 
-The held-out tail is an **audit set**, not a validation split. Fourteen further
+So the suite is checked against :data:`BASELINES` -- six deliberately wrong
+implementations that all have to die, and to at least two tests each, because one
+test between a false 1.000 and the truth is not a margin. Writing that check found
+two more holes immediately: a ``round``-based geometry, the one thing the spec
+explicitly forbids, passed everything; and the centre-of-mass-corrected temperature
+died to a single test.
+
+The held-out tail is an **audit set**, not a validation split. Fifteen further
 tests live outside the repository entirely -- ``frozen`` stops a file being written,
 not read, and the executor is handed the source of the test it is failing, so an
 audit test in the tree is one it can write to. They are injected only while a
@@ -54,7 +60,8 @@ from ._suite import llm_executor as _llm_executor
 from ._suite import llm_manager as _llm_manager
 from ._world import SKILLS_DIR, normalise
 
-__all__ = ["CASE_NOUN", "FROZEN", "GROUP_NOUN", "HELD_OUT_FRAC", "MD",
+__all__ = ["BASELINES", "CASE_NOUN", "FROZEN", "GROUP_NOUN", "HELD_OUT_FRAC",
+           "MD",
            "SCORING", "build_tasks", "initial_files",
            "llm_executor", "llm_manager", "make_runner", "offline_executor",
            "offline_manager", "reference_tree", "reward", "suite_review"]
@@ -610,6 +617,18 @@ def test_wrap_folds_a_point_into_the_box():
 
 def test_wrap_leaves_an_interior_point_alone():
     assert wrap([1.0, 2.0, 3.0], BOX) == [1.0, 2.0, 3.0]
+
+
+def test_a_separation_of_exactly_half_a_box_takes_the_negative_image():
+    """The one place two correct-looking implementations disagree.
+
+    This is why the spec pins `floor(d/L + 0.5)` and forbids `round`: Python's round
+    is banker's rounding, so `round(0.5)` is 0 and `round(2.5)` is 2, and the sign of
+    the image comes out the other way. Nothing else in the suite can tell the two
+    apart -- a `round`-based geometry passed every other test here.
+    """
+    assert displacement([0.0, 0.0, 0.0], [3.0, 0.0, 0.0], BOX)[0] == -3.0
+    assert displacement([0.0, 0.0, 0.0], [15.0, 0.0, 0.0], BOX)[0] == -3.0
 ''',
     'tests/test_integration.py': r'''"""Velocity Verlet. The invariants here are what makes an integrator correct."""
 
@@ -752,6 +771,18 @@ def test_the_histogram_uses_the_nearest_image():
     positions = [[0.1, 0.0, 0.0], [5.9, 0.0, 0.0]]     # 0.2 apart across the seam
     counts = rdf(positions, [6.0, 6.0, 6.0], 6, 3.0)   # bins 0.5 wide
     assert counts[0] == 1 and sum(counts) == 1, counts
+
+
+def test_temperature_divides_by_three_n_and_not_by_the_degrees_of_freedom():
+    """`T = 2 KE / (3N)`, with no centre-of-mass correction.
+
+    The corrected form divides by `3N - 3`, which differs by `N / (N - 1)` -- 1.5 at
+    N = 3. A ratio test between two temperatures cancels the factor and cannot see
+    it, so the number is pinned here.
+    """
+    obs = observables([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], [1.0] * 3)
+    assert abs(obs["kinetic"] - 1.5) < 1e-12, obs
+    assert abs(obs["temperature"] - 1.0 / 3.0) < 1e-12, obs      # 2 * 1.5 / 9, not / 6
 ''',
     'tests/test_pair_potentials.py': r'''"""The pair interactions, probed through two-particle configurations."""
 
@@ -1028,6 +1059,21 @@ def test_the_field_in_a_non_cubic_box_is_not_identically_zero():
     s6 = (1.0 / 0.25) ** 6
     shift = 4.0 * ((1.0 / 2.5) ** 12 - (1.0 / 2.5) ** 6)
     assert abs(u - (4.0 * (s6 * s6 - s6) - shift)) / u < 1e-9, u
+
+
+def test_half_a_box_takes_the_negative_image_on_every_axis():
+    """The banker's-rounding trap again, on a box with three different sides.
+
+    `floor(d/L + 0.5)` at `d = L/2` gives `floor(1.0) = 1` and the image is `-L/2`;
+    `round(0.5)` is 0 and it comes out `+L/2`. The magnitude is the same either way,
+    so only a signed displacement can see this -- no distance, energy or histogram
+    can. It is in the audit set as well as the suite because a requirement the spec
+    states explicitly should not hang on one test.
+    """
+    for axis, length in enumerate(BOX):
+        b = [0.0, 0.0, 0.0]
+        b[axis] = length / 2.0
+        assert displacement([0.0, 0.0, 0.0], b, BOX)[axis] == -length / 2.0
 ''',
 }
 
@@ -1050,7 +1096,180 @@ def initial_files() -> Dict[str, str]:
     return files
 
 
-MD = TestSuite(name="md", given=initial_files(), frozen=FROZEN, audit=_AUDIT)
+# ---------------------------------------------------------------------------
+# Deliberately wrong implementations, for checking the suite rejects them
+# ---------------------------------------------------------------------------
+# Not scoring, and not the algorithm: upstream has no objective function at all,
+# and what stands in its place is a parent that reads the diff and runs the tests.
+# This is the harness checking its own measurement. Every one of these has to die,
+# and to more than one test -- the zero field originally died to exactly one, which
+# is how close this domain came to reporting 1.000 for a repository with no force
+# field in it.
+
+_ZERO_FIELD = r'''"""The cheapest way to pass a suite of invariants: compute nothing."""
+
+from ..core.vectors import minimum_image, norm2
+from .pair import harmonic, lennard_jones
+
+TABLE = {"lennard_jones": lennard_jones.pair, "harmonic": harmonic.pair}
+
+
+def get(name):
+    if name not in TABLE:
+        raise ValueError("unknown potential: " + str(name))
+    return TABLE[name]
+
+
+def evaluate(system, spec):
+    get(spec["name"])
+    return 0.0, [[0.0, 0.0, 0.0] for _ in system.positions]
+'''
+
+_BANKERS_ROUNDING = r'''"""Geometry with `round` where the spec says `floor(x + 0.5)`."""
+
+import math
+
+
+def minimum_image(a, b, box):
+    out = []
+    for i in range(3):
+        d = b[i] - a[i]
+        length = box[i]
+        if length > 0.0:
+            d -= length * round(d / length)
+        out.append(d)
+    return out
+
+
+def norm2(v):
+    return v[0] * v[0] + v[1] * v[1] + v[2] * v[2]
+
+
+def norm(v):
+    return math.sqrt(norm2(v))
+
+
+def wrap(point, box):
+    out = []
+    for i in range(3):
+        length = box[i]
+        out.append(point[i] - length * math.floor(point[i] / length)
+                   if length > 0.0 else point[i])
+    return out
+'''
+
+_PRECEDENCE_BUG = r'''"""The real one, from a real run: `// 1` binding after the multiplication.
+
+`floor(d + L/2)` instead of `L * floor(d/L + 0.5)`, which pushes every pair in a
+periodic box past the cutoff and leaves the force field identically zero.
+"""
+
+import math
+
+
+def minimum_image(a, b, box):
+    out = []
+    for i in range(3):
+        d = b[i] - a[i]
+        length = box[i]
+        if length > 0.0:
+            d -= length * (d / length + 0.5) // 1
+        out.append(d)
+    return out
+
+
+def norm2(v):
+    return v[0] * v[0] + v[1] * v[1] + v[2] * v[2]
+
+
+def norm(v):
+    return math.sqrt(norm2(v))
+
+
+def wrap(point, box):
+    out = []
+    for i in range(3):
+        length = box[i]
+        out.append(point[i] - length * math.floor(point[i] / length)
+                   if length > 0.0 else point[i])
+    return out
+'''
+
+_UNSHIFTED_LJ = r'''"""Lennard-Jones without the shift: discontinuous at the cutoff."""
+
+
+def pair(r2, spec):
+    cutoff = spec["cutoff"]
+    if r2 >= cutoff * cutoff:
+        return 0.0, 0.0
+    epsilon, sigma = spec["epsilon"], spec["sigma"]
+    s6 = (sigma * sigma / r2) ** 3
+    s12 = s6 * s6
+    u = 4.0 * epsilon * (s12 - s6)
+    dudr_over_r = -24.0 * epsilon * (2.0 * s12 - s6) / r2
+    return u, dudr_over_r
+'''
+
+_EULER = r'''"""One force evaluation per step: stable, plausible, first-order, irreversible."""
+
+from ..core.vectors import wrap
+from ..potentials.registry import evaluate
+
+
+def step(system, spec, dt):
+    _, forces = evaluate(system, spec)
+    for i, mass in enumerate(system.masses):
+        for axis in range(3):
+            system.velocities[i][axis] += dt * forces[i][axis] / mass
+            system.positions[i][axis] += dt * system.velocities[i][axis]
+        system.positions[i] = wrap(system.positions[i], system.box)
+    return system
+
+
+def run(system, spec, dt, steps):
+    for _ in range(steps):
+        step(system, spec, dt)
+    return system
+'''
+
+_NO_COM_DRIFT = r'''"""Temperature with a centre-of-mass correction the spec says not to apply."""
+
+
+def kinetic(velocities, masses):
+    total = 0.0
+    for v, mass in zip(velocities, masses):
+        total += 0.5 * mass * (v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
+    return total
+
+
+def temperature(velocities, masses):
+    n = len(masses)
+    if n == 0:
+        return 0.0
+    return 2.0 * kinetic(velocities, masses) / (3.0 * n - 3.0) if n > 1 else 0.0
+
+
+def momentum(velocities, masses):
+    total = [0.0, 0.0, 0.0]
+    for v, mass in zip(velocities, masses):
+        for axis in range(3):
+            total[axis] += mass * v[axis]
+    return total
+'''
+
+#: Each of these must fail at least two tests. See :meth:`TestSuite.kill_report`.
+BASELINES = {
+    "zero-field": {REGISTRY: _ZERO_FIELD},
+    "precedence-bug": {VECTORS: _PRECEDENCE_BUG},
+    "bankers-rounding": {VECTORS: _BANKERS_ROUNDING},
+    "unshifted-lennard-jones": {LJ: _UNSHIFTED_LJ},
+    "euler-not-verlet": {VERLET: _EULER},
+    "com-corrected-temperature": {THERMO: _NO_COM_DRIFT},
+}
+
+
+MD = TestSuite(name="md", given=initial_files(), frozen=FROZEN, audit=_AUDIT,
+               baselines=BASELINES)
 
 build_tasks = MD.build_tasks
 make_runner = MD.make_runner

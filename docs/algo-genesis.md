@@ -154,8 +154,20 @@ The lesson is not "add more invariants". A suite of invariants needs **value
 anchors**, and this one was missing the ones that matter: not a single driven test
 pinned a nonzero number in a periodic box. It does now — a pair in mid-box and a
 pair across the seam against the closed form, a large box against no box, and an
-explicit "this field is not identically zero" — and the repository's own tests hold
-the guard by scoring a zeroed registry and checking the suite rejects it.
+explicit "this field is not identically zero".
+
+And the mechanism, rather than my having noticed: `TestSuite.baselines` holds
+**deliberately wrong implementations**, and a test requires every one of them to fail
+the suite — to at least two tests each, because the zero field died to exactly one
+and that one was the negative control. Six for md: the zero field, the real
+precedence bug, `round` for `floor`, an unshifted Lennard-Jones, Euler dressed as
+Verlet, and a centre-of-mass-corrected temperature. Writing it found two further
+holes in the same sitting: the `round` geometry — *the one thing the specification
+explicitly forbids* — passed the entire suite, and the temperature requirement hung
+on a single test. It is mutation testing in its small form, and note what it does not
+need: no reference in the **scoring** path. The reference sits beside the domain for
+jobs that are not scoring, and suite QA is one of them. Coverage would have caught
+none of it; the zero field executes every line of every test.
 
 A reference implementation still exists next to the domain, for two jobs that are
 not scoring: driving the offline rule-based actor, and letting a test prove the

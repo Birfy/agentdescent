@@ -743,57 +743,6 @@ def test_the_md_audit_tests_are_injected_only_while_they_are_scored():
     assert sum(md.reward(t, run(rendered, t)) for t in audited) == len(audited)
 
 
-def test_the_md_suite_rejects_a_force_field_that_is_identically_zero():
-    """The cheapest way to pass a suite of invariants, and a run found it.
-
-    Zero sums to zero, zero is the gradient of a constant, nothing moves so nothing
-    drifts, and reversing nothing retraces it. A real run shipped exactly that -- a
-    minimum-image expression whose `// 1` bound after the multiplication, so every
-    pair in a periodic box landed past the cutoff -- and 42 of its 44 tests passed.
-    The suite pins values in a box now, and this is the guard that says so.
-    """
-    zeroed = dict(md.reference_tree())
-    zeroed[md.REGISTRY] = (
-        'def get(name):\n'
-        '    if name not in ("lennard_jones", "harmonic"):\n'
-        '        raise ValueError(name)\n'
-        '    return name\n'
-        '\n'
-        '\n'
-        'def evaluate(system, spec):\n'
-        '    get(spec["name"])\n'
-        '    return 0.0, [[0.0, 0.0, 0.0] for _ in system.positions]\n')
-    run, rendered = md.make_runner(), canonical(zeroed)
-    failed = [t.id for t in md.build_tasks() if md.reward(t, run(rendered, t)) == 0.0]
-    assert any("identically_zero" in t for t in failed), failed
-    assert any("closed_form" in t for t in failed), failed
-    # the audit set catches it too, which is what the audit set is for
-    assert any(t.startswith("audit:") for t in failed), failed
-
-
-def test_the_md_suite_catches_an_integrator_that_is_only_stable():
-    """Euler with one force evaluation per step is stable, plausible, and wrong.
-
-    This is what the invariants are for, and what an oracle over sampled values
-    would not reliably catch: the trajectory stays bounded, so a sampled position
-    often agrees to six places, but the scheme is first-order and not reversible.
-    """
-    broken = dict(md.reference_tree())
-    broken[md.VERLET] = broken[md.VERLET].replace(
-        "    _, forces = evaluate(system, spec)\n"
-        "    for i, mass in enumerate(system.masses):\n"
-        "        for axis in range(3):\n"
-        "            system.velocities[i][axis] += half * forces[i][axis] / mass\n"
-        "    return system\n",
-        "    return system\n")
-    assert broken[md.VERLET] != md.reference_tree()[md.VERLET]
-    run, rendered = md.make_runner(), canonical(broken)
-    failed = [t.id for t in md.build_tasks()
-              if md.reward(t, run(rendered, t)) == 0.0]
-    assert any("reversing" in t for t in failed), failed
-    assert any("conserved" in t for t in failed), failed
-
-
 def test_the_contract_reaches_the_agent_even_when_a_bigger_frozen_file_sorts_first():
     """Sorted order made *which* contract an agent sees depend on filenames.
 
@@ -929,6 +878,43 @@ def test_a_cold_started_world_writes_the_decomposition_it_was_not_given():
     assert written, "the run never recorded a node of its own"
     assert any(parse_routing(records[p]) for p in records), "no routing table grew"
     assert log.contract_violations == 0
+
+
+def test_the_md_suite_rejects_every_deliberately_wrong_implementation():
+    """A suite is only as good as what it refuses, and nothing else here checked that.
+
+    The md domain was validated only against a *correct* implementation -- the suite
+    accepts the right answer, and nothing was known about what it rejects. A field
+    that returns zero everywhere satisfies every invariant in it (zero sums to zero,
+    zero is the gradient of a constant, nothing moves so nothing drifts), and a real
+    run shipped exactly that: `d -= box * (d / box + 0.5) // 1`, where the `// 1`
+    binds after the multiplication. It reported audit reward 1.000.
+
+    So: keep the wrong implementations, and require every one of them to die. Writing
+    this found two more holes in the same sitting. A `round`-based geometry -- the one
+    thing the spec explicitly forbids, because Python's round is banker's rounding --
+    passed the entire suite; and the centre-of-mass-corrected temperature died to
+    exactly one test.
+
+    **Two killers, not one.** The zero field originally died to a single test, and
+    that test was the negative control (`a_far_too_large_timestep_does_not_conserve_
+    energy`), which exists only because "the conservation tests must be able to fail,
+    or they assert nothing". One test between a false 1.000 and the truth is not a
+    margin.
+
+    This is the harness keeping its own measurement honest, and it is not what
+    upstream relies on: Genesis has no objective function at all -- `grep -rio
+    'fitness|reward|score'` over `apps/evo_git` returns `oom_score_adjust` and nothing
+    else -- and in its place is a parent that reads the diff and runs the tests
+    (`agents/manager.ex`). Coverage, for the record, would not have caught any of
+    this: the zero field executes every line of every test.
+    """
+    report = md.MD.kill_report(md.reference_tree(), stop_after=2)
+    assert set(report) == set(md.BASELINES)
+    survived = sorted(name for name, killers in report.items() if not killers)
+    assert not survived, f"the suite accepts these wrong implementations: {survived}"
+    fragile = {name: killers for name, killers in report.items() if len(killers) < 2}
+    assert not fragile, f"only one test stands between these and a false pass: {fragile}"
 
 
 def test_stackvm_is_deeper_than_minilang_which_is_why_it_exists():
