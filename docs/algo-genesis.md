@@ -504,6 +504,64 @@ also splits "files AT this node (yours to write)" from "files below it (each
 child's own)", because an agent is bad at noticing an absence inside a long list
 and the absence is the actionable part.
 
+## Where the Context Tree comes from — both of upstream's modes
+
+`Genesis.run` branches on one question, and the two answers are two different root
+agents:
+
+```elixir
+if mode == :new do
+  run_new_codebase(...)       # Mode B: Architect, then Manager
+else
+  run_existing_codebase(...)  # Mode A: ContextExtractor
+end
+```
+
+`--mode` is that branch. **`b`** is the formation path: an architect designs the tree —
+intent, API surface, constraints, routing table, one node at a time, recursively — and
+the implementation phase then grows what it designed. **`a`** is the existing-codebase
+path, and its root agent is the *ContextExtractor*: a repository with code and no
+`CONTEXT.md` cannot be worked on by recursive delegation at all, because the routing
+table is the map, so the first thing Genesis does to such a repository is read it and
+write the tree over it. **`given`**, the default, is what this port did before either
+existed: the domain's hand-written records, which is Phase 1 done by a person and
+leaves only Phase 2 to measure.
+
+The difference between the two agents is where children come from. An architect
+**invents** them — nothing exists yet, and the decomposition *is* the product. An
+extractor **finds** them: the directories are already there, and inventing one would be
+describing a repository that does not exist. Extraction is the easier job and it shows:
+`--mode a` over the md reference produced a tree whose routing tables name the real
+directories at every level, with the classes, the signatures and even the
+`floor(x + 0.5)`-not-`round` constraint read off the code. `--mode b` on the same model
+took three attempts to stop producing degenerate trees, and the reason is the row below
+about what an episode is: architecture is exactly the task that wants iteration and
+review, and upstream's architect has both — 2 048 turns, file and shell tools, and a
+Phase 1 (cont.) that reviews its sub-architects and re-spawns refinement architects
+where a node misaligns. One completion per node has none of that.
+
+## The episode, and `--executor claude-code`
+
+The gap that produced that result is the one the table below calls the largest, so the
+port now offers the other side of it. `--executor claude-code` makes an executor episode
+**one headless Claude Code session** in a throwaway worktree: it can read the failing
+test, open the module next door, run the suite and fix what it broke — the loop a single
+completion cannot have — and what it did is recovered by diffing the worktree rather
+than parsed out of a reply.
+
+The contract does not move. Three fences, none of which replaces the others:
+
+1. **the session's own** — `Read`, `Write`, `Edit`, `Glob`, `Grep`, `Bash`, with the
+   network tools off and a settings file denying every frozen glob by name, so the suite
+   cannot be edited even by accident;
+2. **the sandbox** — cwd is a throwaway copy of the accepted version, never a real
+   repository, and nothing survives except through the diff;
+3. **the port's own, unchanged and last** — an edit outside the node is an upward
+   *request* rather than an error, and a write to a frozen path is dropped and counted.
+
+It signs in with the local `claude` CLI's credentials rather than the `--model`
+endpoint, which is why it is opt-in and why the run header says so.
+
 ## The paper's numbers, and this port's
 
 The mechanism is the thing being ported; the numbers are not, and putting them side by

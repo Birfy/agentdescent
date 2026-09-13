@@ -22,6 +22,9 @@ python -m examples.genesis.genesis_recursive_worlds --domain jqx          # a pr
 python -m examples.genesis.genesis_recursive_worlds --domain md           # scored by tests, no oracle
 python -m examples.genesis.genesis_recursive_worlds --cold-start          # no node records: it writes its own
 python -m examples.genesis.genesis_recursive_worlds --worktrees           # a worktree and a commit per episode
+python -m examples.genesis.genesis_recursive_worlds --mode b --model ...  # an architect designs the tree first
+python -m examples.genesis.genesis_recursive_worlds --mode a --continue-from DIR --model ...   # extract a tree
+python -m examples.genesis.genesis_recursive_worlds --executor claude-code --model ...         # session per episode
 python -m examples.genesis.genesis_recursive_worlds --complete-task --model ...  # the root agent decides when it is done
 python -m examples.genesis.genesis_recursive_worlds --episodes 96 --workers 8
 python -m examples.genesis.genesis_recursive_worlds --keyed-union         # control: no three-way merge
@@ -49,6 +52,9 @@ the path, an accepted event moves the version. Each piece is one file here.
 | [`_judge.py`](_judge.py) | `AcceptancePolicy`: the parent's rule — *partial progress is accepted* | `agents/manager.ex:58` |
 | [`_review.py`](_review.py) | the parent **reading** its child's change, and the root agent's `complete_task` | `agents/manager.ex` "Validation", `agents/architect.ex` Phase 3, `runtime/genesis.ex` |
 | [`_worktree.py`](_worktree.py) | a worktree per episode, a commit per episode, the worktree removed after — and the phylogenetic graph as real git history | `agents/manager.ex` yielding model, `Git.merge_octopus/2`, `core/phylo_graph_node.ex` |
+| [`_architect.py`](_architect.py) | **Mode B**, phase 1: an agent designs the `CONTEXT.md` tree before any code | `runtime/genesis.ex` `run_new_codebase`, `agents/architect.ex` |
+| [`_extract.py`](_extract.py) | **Mode A**: an agent reads an existing repository and writes the tree over it | `runtime/genesis.ex` `run_existing_codebase`, `agents/context_extractor.ex` |
+| [`_claude_code.py`](_claude_code.py) | an episode as a **tool-using session** rather than one completion, fenced three ways | the paper's "multiple model–tool turns", 2 048 root / 128 child turns |
 | [`_suite.py`](_suite.py) | the machinery a domain needs and does not own: the harness, both loaders (`Suite` scores against a reference, `TestSuite` against a frozen test suite with no reference in the loop), the runner, the parent's integration check, the LLM actors | — |
 | [`_domain.py`](_domain.py) | **minilang** — an integer expression language, 2 nodes deep, 4 files | — |
 | [`_stackvm.py`](_stackvm.py) | **stackvm** — a stack machine and its assembler, 4 nodes deep, 10 files | — |
