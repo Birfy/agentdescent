@@ -743,6 +743,34 @@ def test_the_md_audit_tests_are_injected_only_while_they_are_scored():
     assert sum(md.reward(t, run(rendered, t)) for t in audited) == len(audited)
 
 
+def test_the_md_suite_rejects_a_force_field_that_is_identically_zero():
+    """The cheapest way to pass a suite of invariants, and a run found it.
+
+    Zero sums to zero, zero is the gradient of a constant, nothing moves so nothing
+    drifts, and reversing nothing retraces it. A real run shipped exactly that -- a
+    minimum-image expression whose `// 1` bound after the multiplication, so every
+    pair in a periodic box landed past the cutoff -- and 42 of its 44 tests passed.
+    The suite pins values in a box now, and this is the guard that says so.
+    """
+    zeroed = dict(md.reference_tree())
+    zeroed[md.REGISTRY] = (
+        'def get(name):\n'
+        '    if name not in ("lennard_jones", "harmonic"):\n'
+        '        raise ValueError(name)\n'
+        '    return name\n'
+        '\n'
+        '\n'
+        'def evaluate(system, spec):\n'
+        '    get(spec["name"])\n'
+        '    return 0.0, [[0.0, 0.0, 0.0] for _ in system.positions]\n')
+    run, rendered = md.make_runner(), canonical(zeroed)
+    failed = [t.id for t in md.build_tasks() if md.reward(t, run(rendered, t)) == 0.0]
+    assert any("identically_zero" in t for t in failed), failed
+    assert any("closed_form" in t for t in failed), failed
+    # the audit set catches it too, which is what the audit set is for
+    assert any(t.startswith("audit:") for t in failed), failed
+
+
 def test_the_md_suite_catches_an_integrator_that_is_only_stable():
     """Euler with one force evaluation per step is stable, plausible, and wrong.
 

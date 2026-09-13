@@ -1,7 +1,7 @@
 """md: Lennard-Jones molecular dynamics, grown from an empty repository.
 
 The fourth formation domain, the largest, and the only one with **no oracle in the
-scoring path**. A frozen test suite is the whole of the reward: fifty-seven test
+scoring path**. A frozen test suite is the whole of the reward: sixty-two test
 functions over six files, one task each, and a task's prompt is that test's own
 source. Nothing here is compared against a reference implementation, because asking
 a system to grow software you had to write first proves nothing. Upstream validates
@@ -22,7 +22,15 @@ and momentum must survive a trajectory, reversing the velocities must retrace it
 and one test asserts that a far-too-large timestep does *not* conserve energy, so an
 implementation that fakes conservation fails.
 
-The held-out tail is an **audit set**, not a validation split. Thirteen further
+Invariants alone are not enough, which a real run demonstrated: a field that returns
+**zero everywhere** satisfies every one of them (zero sums to zero, zero is the
+gradient of a constant, nothing moves so nothing drifts), and a run shipped exactly
+that from a minimum-image expression whose ``// 1`` bound after the multiplication.
+Forty-two of the then forty-four tests passed. The suite pins values in a periodic
+box now, and ``tests/test_genesis_example.py`` holds both guards: the zero field is
+rejected, and so is Euler dressed as Verlet.
+
+The held-out tail is an **audit set**, not a validation split. Fourteen further
 tests live outside the repository entirely -- ``frozen`` stops a file being written,
 not read, and the executor is handed the source of the test it is failing, so an
 audit test in the tree is one it can write to. They are injected only while a
@@ -181,6 +189,11 @@ and momentum survive a trajectory, and reversing the velocities retraces it.
 They cannot be satisfied by a lookup table, and one of them deliberately asserts
 that a far-too-large timestep does *not* conserve energy -- so an implementation
 that fakes conservation fails it.
+
+Others pin **values in a periodic box**, because every invariant above is also
+satisfied by a force field that returns zero everywhere. If `energy(..., box=L)`
+comes out at zero for particles a sigma apart, the minimum image is wrong, however
+many invariants still pass.
 '''
 
 _ROOT_CONTEXT = r'''# md -- root
@@ -509,6 +522,50 @@ def test_an_unknown_potential_is_refused():
     except Exception:
         return
     raise AssertionError("an unknown potential name should raise")
+
+
+def lj_closed_form(r, cutoff=2.5):
+    """u(r) for epsilon = sigma = 1, shifted at `cutoff`."""
+    s6 = (1.0 / r) ** 6
+    sc6 = (1.0 / cutoff) ** 6
+    return 4.0 * (s6 * s6 - s6) - 4.0 * (sc6 * sc6 - sc6)
+
+
+def test_the_field_in_a_periodic_box_is_not_identically_zero():
+    """Non-vacuity, stated as a test because it had to be.
+
+    Every invariant above is satisfied by a field that returns zero everywhere:
+    zero sums to zero, zero is the gradient of a constant, and nothing moves so
+    nothing drifts. A run produced exactly that -- a minimum-image expression whose
+    `// 1` bound after the multiplication, computing `floor(d + L/2)` instead of
+    `L * floor(d/L + 0.5)`, which pushed every pair in a box past the cutoff. Two
+    tests out of forty-four noticed.
+    """
+    u = energy(CONFIG, box=BOX)
+    f = forces(CONFIG, box=BOX)
+    # 1.1 and 1.2 sigma are just past the minimum at 2**(1/6), so this
+    # configuration is bound: the energy is around -2 and the forces are order 1.
+    assert u < -0.5, u
+    assert max(abs(c) for vector in f for c in vector) > 1.0, f
+
+
+def test_a_periodic_pair_in_the_middle_of_the_box_matches_the_closed_form():
+    """A box must not change a pair that is nowhere near a boundary."""
+    got = energy([[3.0, 3.0, 3.0], [4.1, 3.0, 3.0]], box=BOX)
+    assert abs(got - lj_closed_form(1.1)) < 1e-9, (got, lj_closed_form(1.1))
+
+
+def test_a_periodic_pair_across_the_seam_matches_the_closed_form():
+    """5.9 to 0.3 is 0.4 the short way and 5.6 the long way."""
+    got = energy([[5.9, 2.0, 2.0], [0.3, 2.0, 2.0]], box=BOX)
+    assert abs(got - lj_closed_form(0.4)) < 1e-6, (got, lj_closed_form(0.4))
+
+
+def test_a_pair_in_a_large_box_is_the_same_as_a_pair_in_no_box():
+    """Periodicity that cannot be reached is periodicity that changes nothing."""
+    pair = [[10.0, 10.0, 10.0], [11.3, 10.0, 10.0]]
+    assert abs(energy(pair, box=[20.0, 20.0, 20.0])
+               - energy(pair, box=[0.0, 0.0, 0.0])) < 1e-12
 ''',
     'tests/test_geometry.py': r'''"""Periodic geometry. Nothing here needs a force field."""
 
@@ -957,6 +1014,20 @@ def test_the_histogram_agrees_with_distances_computed_through_displacement():
             if r < rmax:
                 expect[int(r / (rmax / bins))] += 1
     assert rdf(config, BOX, bins, rmax) == expect
+
+
+def test_the_field_in_a_non_cubic_box_is_not_identically_zero():
+    """The same non-vacuity check the driven suite makes, in a box with three
+    different side lengths and across the shortest axis' seam."""
+    close = [[1.0, 1.0, 5.3], [1.0, 1.0, 0.15]]        # 0.25 apart across z = 5.4
+    u = energy(close, box=BOX)
+    f = forces(close, box=BOX)
+    assert u > 1000.0, u                                # deep in the repulsive core
+    assert abs(f[0][2]) > 1000.0, f
+    # and the closed form, to pin the number rather than its sign
+    s6 = (1.0 / 0.25) ** 6
+    shift = 4.0 * ((1.0 / 2.5) ** 12 - (1.0 / 2.5) ** 6)
+    assert abs(u - (4.0 * (s6 * s6 - s6) - shift)) / u < 1e-9, u
 ''',
 }
 

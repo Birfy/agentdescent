@@ -131,7 +131,7 @@ reference. This is also what upstream does: Genesis validates against c-testsuit
 LLVM and Csmith, which are assertions, with no reference compiler anywhere in the
 loop.
 
-What that buys is assertions an oracle cannot make. Most of `md`'s tests are
+What that buys is assertions an oracle cannot make. Many of `md`'s tests are
 **invariants**: the forces sum to zero, every force component matches a central
 difference of the energy, energy and momentum survive a trajectory, reversing the
 velocities retraces it. One of them asserts that a far-too-large timestep does
@@ -139,6 +139,23 @@ velocities retraces it. One of them asserts that a far-too-large timestep does
 with a single force evaluation is stable, plausible, and caught — `tests/test_genesis_example.py`
 breaks the integrator that way and checks the suite notices, because a sampled
 position from a bounded trajectory often agrees to six decimal places.
+
+It also buys a trap, and a real run walked into it. **A field that returns zero
+everywhere satisfies every invariant above**: zero sums to zero, zero is the
+gradient of a constant, nothing moves so nothing drifts, and reversing nothing
+retraces it. A run shipped exactly that — `d -= box * (d / box + 0.5) // 1`, where
+the `// 1` binds after the multiplication, computing `floor(d + L/2)` instead of
+`L * floor(d/L + 0.5)` and pushing every pair in a periodic box past the cutoff —
+and 42 of the then 44 tests passed. Two noticed: the harmonic gradient, because
+harmonic has no cutoff, and the negative control, whose whole docstring is *the
+conservation tests must be able to fail, or they assert nothing*.
+
+The lesson is not "add more invariants". A suite of invariants needs **value
+anchors**, and this one was missing the ones that matter: not a single driven test
+pinned a nonzero number in a periodic box. It does now — a pair in mid-box and a
+pair across the seam against the closed form, a large box against no box, and an
+explicit "this field is not identically zero" — and the repository's own tests hold
+the guard by scoring a zeroed registry and checking the suite rejects it.
 
 A reference implementation still exists next to the domain, for two jobs that are
 not scoring: driving the offline rule-based actor, and letting a test prove the
