@@ -562,6 +562,40 @@ The contract does not move. Three fences, none of which replaces the others:
 It signs in with the local `claude` CLI's credentials rather than the `--model`
 endpoint, which is why it is opt-in and why the run header says so.
 
+## Synchronous or barrier-free, and which one is upstream's
+
+`--async` switches `evolve()` to its barrier-free runtime, and it is a fair question
+which of the two this port should be run in, because upstream has **no round barrier at
+all**: an agent commits, releases its worktree, is re-queued, and the archive shows up
+to 22 episodes overlapping. Measured offline, same seed, same budget, deterministic
+actors:
+
+| | `md`, sync | `md`, `--async` | `minilang`, sync | `minilang`, `--async` |
+|---|---|---|---|---|
+| held-out / audit | **1.000** | **1.000** | **1.000** | **1.000** |
+| accepted events | **5** | 10 | **3** | 7 |
+| agent episodes | 84 | 214 | 87 | 218 |
+| stale considered / discarded | 15 / **0** | 40 / **20** | 22 / 0 | 56 / 1 |
+| wall clock | 7.2 s | 8.2 s | 2.9 s | 5.1 s |
+
+Same destination, twice the accepted events and two and a half times the episodes to
+get there. That is the cost of no barrier, and the mechanism is visible in the row
+above it: a proposal built on a version that has since moved is **discarded** —
+20 whole episode trees on `md`, thrown away for being stale.
+
+Which raises the thing worth saying, because it is a difference in kind rather than in
+tuning. **Neither mode is upstream's concurrency**, because upstream's concurrency is
+not between rollouts at all: it is a parent and its children, inside one episode tree,
+merged by that parent with an octopus merge — and this port does exactly that in the
+proposal policy, in *both* modes. The engine's round barrier is a property of how
+`evolve()` searches, not of Genesis.
+
+So `--async` is closer in shape (no barrier) and introduces a behaviour upstream does
+not have (discard on staleness — upstream never discards for lag; the parent merges
+what comes back, which is what `Git.merge_octopus/2` is for), while sync is further in
+shape and closer in outcome. The port defaults to sync and reports both, which is the
+only honest arrangement when the faithful answer is "the question does not map".
+
 ## The paper's numbers, and this port's
 
 The mechanism is the thing being ported; the numbers are not, and putting them side by
