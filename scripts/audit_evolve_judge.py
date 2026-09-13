@@ -55,8 +55,8 @@ instrument every other number in a run is measured with, so swapping it
 invalidates the run's history in a way nothing in the run can see. The output is
 `scorecard()` plus `rescan()` -- what would have flipped -- and a person decides.
 
-    python -m scripts.audit_evolve_judge --workload gsm8k \\
-        --records reports/audit_phase0_gsm8k.jsonl --model deepseek-v4-flash
+    python -m scripts.audit_evolve_judge --workload hotpot \\
+        --records reports/audit_phase0_2026-09-09.jsonl --model deepseek-v4-flash
 
 `--dry-run` uses an offline judge whose behaviour depends on the rubric in a
 known way, so the whole path can be rehearsed without a key.

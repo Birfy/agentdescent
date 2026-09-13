@@ -130,7 +130,7 @@ All notable changes to AgentDescent are documented here. The format follows
 - **Phase 0 on a second workload, and the judge fails differently there.**
   `--workload bbh` runs the kill test on BIG-Bench Hard, sampled across six
   subtasks chosen for the *shape* of their answers.
-  [reports/audit_phase0_bbh_2026-09-10.md](reports/audit_phase0_bbh_2026-09-10.md).
+  [reports/README.md](reports/README.md) (full report at `c86e216`).
 
   | | HotpotQA | BBH |
   |---|---|---|
@@ -167,7 +167,7 @@ All notable changes to AgentDescent are documented here. The format follows
   and broke 1 against a noise floor of 10. **Nothing blocks.** Two rules, both
   naming the dominant failure -- a candidate that is the expected *value* rather
   than an implementation.
-  [reports/audit_evolve_judge_mbpp_big_2026-09-13.md](reports/audit_evolve_judge_mbpp_big_2026-09-13.md)
+  [reports/README.md](reports/README.md) (full report at `c86e216`)
 
   Run twice, and the pair is the result rather than either half:
 
