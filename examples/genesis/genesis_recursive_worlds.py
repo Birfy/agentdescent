@@ -89,10 +89,11 @@ from . import _jqx as jqx
 from . import _md as md
 from . import _stackvm as stackvm
 from ._judge import ParentJudge
-from ._review import ParentCodeReview, chain_reviews
+from ._review import CompletionJudge, ParentCodeReview, chain_reviews
 from ._suite import cold_start, preflight
 from ._octopus import OctopusConflict, git_available
 from ._spatial import SpatialContract
+from ._worktree import Rollout, WorktreeLedger, git_worktrees_available
 from ._world import CONTEXT_FILE, WorldLog
 
 #: The formation domains. Four, and each answers something the one before could
@@ -164,6 +165,16 @@ def build_parser() -> argparse.ArgumentParser:
                         help=("make a manager a pure router: skip upstream's "
                               "review-and-accountability turn at its own node "
                               "after its children return"))
+    parser.add_argument("--worktrees", action="store_true",
+                        help="give every episode its own git worktree, commit its "
+                             "work there, and remove the worktree after -- upstream's "
+                             "scheduling model. The run then leaves a real "
+                             "phylogenetic graph: one commit per episode, a parent's "
+                             "merge carrying every child commit as a parent")
+    parser.add_argument("--complete-task", action="store_true",
+                        help="let the root agent end the run when it judges the "
+                             "objective delivered, instead of exhausting the round "
+                             "budget. Asked only once every test it can see passes")
     parser.add_argument("--no-parent-review", action="store_true",
                         help="skip the parent reading its child's diff (one model "
                              "call per returned child). The tests alone cannot see "
@@ -202,6 +213,12 @@ def main(argv=None) -> None:
     print(f"Merge    : {merge}" + ("" if git_available() else
                                    "  [git missing: every contested file falls back]"))
     print(f"Gate     : {gate}")
+    print("Workspace: " + ("a git worktree per episode, a commit per episode, and "
+                           "the worktree removed after" if args.worktrees else
+                           "in-memory states (--worktrees for upstream's model)"))
+    print("Ends when: " + ("the root agent says the objective is delivered, or the "
+                           "rounds run out" if args.complete_task and args.model else
+                           "the rounds run out (--complete-task asks the root agent)"))
     print("Parent   : scope check"
           + ("" if args.no_parent_tests else " + integration test on each child's work")
           + ("" if args.no_parent_review or not args.model else
@@ -266,7 +283,12 @@ def main(argv=None) -> None:
     # that cost. Both now, tests first because they are free.
     code_review = (None if args.no_parent_review or complete is None else
                    ParentCodeReview(complete, contracts=spec.CONTRACTS))
+    ledger = WorktreeLedger() if args.worktrees else None
+    if ledger is not None and not git_worktrees_available():
+        print("Worktrees: git worktree is unavailable here -- running without it")
+        ledger = None
     delegation = RecursiveDelegation(
+        rollout_factory=(None if ledger is None else lambda: Rollout(ledger)),
         manager=spec.llm_manager(complete) if complete else spec.offline_manager,
         executor=(spec.llm_executor(complete) if complete else spec.offline_executor),
         log=log, max_depth=args.depth, max_edits=4, contracts=spec.CONTRACTS,
@@ -278,6 +300,17 @@ def main(argv=None) -> None:
     octopus = None if args.keyed_union else OctopusConflict()
 
     run = spec.make_runner()
+
+    # Upstream nothing watches a number: an agent decides its objective is met and
+    # calls `complete_task`. Asked only when every test the agents can see passes,
+    # which is upstream's own precondition, and never shown the held-out reward --
+    # that is this port's measurement, computed from tests no agent may read.
+    completion = None
+    if args.complete_task and complete is not None:
+        completion = CompletionJudge(
+            complete, tasks=tasks, run=run, reward=spec.reward,
+            state_of=lambda: delegation.last_state, contracts=spec.CONTRACTS,
+            objective=DOMAIN_BLURB[args.domain])
 
     def _superseded(rendered, task, output, reward_):
         # `evolve()` requires a `propose` before it installs the bundle's
@@ -299,6 +332,7 @@ def main(argv=None) -> None:
         # and the parent judges it. Re-running every proposal here would also
         # double the number of child processes the domain spawns.
         self_verify=False,
+        stop_when=completion,
         held_out_frac=spec.HELD_OUT_FRAC,
         eval_concurrency=args.eval_concurrency or 8,
         seed=args.seed, usage=usage,
@@ -311,7 +345,11 @@ def main(argv=None) -> None:
     print(f"{label:<16}: {result.final_reward:.3f}"
           + ("   (tests no agent ever saw)" if audited else ""))
     print(f"outcomes        : {result.outcomes()}")
-    print(f"stop reason     : {result.stop_reason}")
+    print(f"stop reason     : {result.stop_reason}"
+          + ("" if completion is None else
+             f"  (root agent asked {completion.asked}x, last said "
+             f"{completion.verdict or 'nothing'}"
+             + (f": {completion.reason}" if completion.reason else "") + ")"))
     print(f"error           : {result.error or 'none'}")
     print(f"world           : root episodes={result.rollouts}  {log.summary()}  "
           f"truncated_edits={delegation.truncated}  "
@@ -324,6 +362,8 @@ def main(argv=None) -> None:
           f"node_relative_paths={delegation.resolved_relative}  "
           f"accountability={delegation.accountability_edits}/"
           f"{delegation.accountability_declined}")
+    if ledger is not None:
+        print(f"workspace       : {ledger.summary()}")
     if code_review is not None:
         print(f"parent review   : read={code_review.reviewed} "
               f"rejected={code_review.rejected} unparsed={code_review.unparsed}")

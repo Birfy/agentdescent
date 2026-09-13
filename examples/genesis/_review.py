@@ -36,7 +36,8 @@ from typing import Callable, Mapping, Optional, Sequence, Tuple
 from ._delegation import Edit
 from ._world import normalise
 
-__all__ = ["CODE_REVIEW_PROMPT", "ParentCodeReview", "chain_reviews"]
+__all__ = ["CODE_REVIEW_PROMPT", "COMPLETE_TASK_PROMPT", "CompletionJudge",
+           "ParentCodeReview", "chain_reviews"]
 
 #: Upstream's questions, and nothing else. "Missing test coverage" is in
 #: ``manager.ex``'s list and is left out here on purpose: in this port the suite is
@@ -177,3 +178,116 @@ def _parse(reply: str) -> Tuple[Optional[str], str]:
     if verdict not in ("accept", "reject"):
         return None, reason
     return verdict, reason
+
+
+#: What the root agent is asked, once the tests it can see are all passing. Upstream's
+#: own bar, from ``runtime/genesis.ex``: "Call complete_task only when the codebase is
+#: complete, functional, and polished -- when you can confidently say the original
+#: objective has been 100% delivered."
+COMPLETE_TASK_PROMPT = """You are the root agent of this task, deciding whether it is \
+finished.
+
+{context}
+
+The original objective:
+{objective}
+
+The given test suite is the definition of done for your work, and **all {total} of \
+its tests now pass**. That is necessary and it is not sufficient: a suite passes on \
+stubs if the stubs are shaped right.
+
+Look at what is in the tree above and answer for the codebase, not for the suite:
+
+1. Is every part the objective asked for actually implemented, with real working code
+   rather than a stub, a placeholder, or a hard-coded answer?
+2. Is anything there that should not be -- a dead module shadowed by another, a file
+   that cannot be imported, a leftover scaffold?
+3. Would you hand this to someone as finished?
+
+Reply with ONE JSON object and nothing else:
+{{"complete": true | false, "reason": "<one sentence>"}}
+
+`false` is the safe answer and costs only more rounds. Say `true` only when you can \
+say the objective has been 100% delivered."""
+
+
+class CompletionJudge:
+    """``stop_when(info)`` -- the run ends when the root agent says it is done.
+
+    Upstream nothing watches a number. An agent decides its objective is met and calls
+    ``complete_task``; the root agent's completion ends the phase, and a human merges
+    or rejects afterwards on the dashboard. This port ends when ``evolve()``'s round
+    budget ends, which is why a finished domain still reports ``stop reason: rounds``
+    -- nobody decided it was done.
+
+    So: ask. Two gates, in upstream's order, and the cheap one first.
+
+    * **The tests it can see must all pass.** "When tests are given to guide
+      development, aim for a 100% pass rate on the given test suites if possible --
+      treat them as the definition of done for your work" (``runtime/genesis.ex``).
+      Below that, the question is not asked and no call is spent.
+    * **Then the root agent judges the codebase**, not the suite. A suite passes on
+      stubs if the stubs are shaped right, and this port has measured exactly that
+      twice -- a shadowed lexer and an unimportable module on stackvm, a zero force
+      field on md.
+
+    The held-out reward is deliberately **not** shown to it: that number is this
+    port's measurement, it is computed from tests no agent may see, and handing it
+    over would make the decision a threshold again.
+    """
+
+    def __init__(self, complete, *, tasks, run, reward, state_of,
+                 contracts: Sequence[str] = (), root_path: str = "",
+                 objective: str = ""):
+        self._complete = complete
+        self._driven = [t for t in tasks if not t.meta.get("audit")]
+        self._run = run
+        self._reward = reward
+        self._state_of = state_of
+        self._contracts = tuple(contracts)
+        self._root = root_path
+        self._objective = objective
+        #: Rounds where the suite was green and the question was therefore asked.
+        self.asked = 0
+        #: What it said, the last time it said anything.
+        self.verdict = ""
+        self.reason = ""
+
+    def __call__(self, info) -> bool:
+        state = self._state_of()
+        if state is None:
+            return False
+        from agentdescent.filetree import canonical
+        from ._world import LocalWorld
+
+        rendered = canonical(state)
+        failing = [t.id for t in self._driven
+                   if self._reward(t, self._run(rendered, t)) < 1.0]
+        if failing:
+            return False                     # not the question yet -- and no call
+        self.asked += 1
+        world = LocalWorld(version=int(getattr(info, "round", 0)), path=self._root)
+        try:
+            reply = self._complete(COMPLETE_TASK_PROMPT.format(
+                context=world.situate(state, contracts=self._contracts),
+                objective=self._objective, total=len(self._driven))) or ""
+        except Exception:  # noqa: BLE001 - a dead call is not a completion
+            return False
+        verdict, reason = _parse_flag(reply, "complete")
+        self.verdict, self.reason = ("complete" if verdict else
+                                     ("incomplete" if verdict is not None else
+                                      "unparsed")), reason
+        return bool(verdict)
+
+
+def _parse_flag(reply: str, key: str) -> Tuple[Optional[bool], str]:
+    match = re.search(r"\{.*\}", reply, re.S)
+    if not match:
+        return None, ""
+    try:
+        data = json.loads(match.group(0))
+    except Exception:  # noqa: BLE001 - malformed model output, not a bug
+        return None, ""
+    if not isinstance(data, Mapping) or not isinstance(data.get(key), bool):
+        return None, " ".join(str(data.get("reason", "")).split())[:240]
+    return bool(data[key]), " ".join(str(data.get("reason", "")).split())[:240]

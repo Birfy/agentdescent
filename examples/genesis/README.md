@@ -21,6 +21,8 @@ python -m examples.genesis.genesis_recursive_worlds --domain stackvm      # the 
 python -m examples.genesis.genesis_recursive_worlds --domain jqx          # a program, not a package
 python -m examples.genesis.genesis_recursive_worlds --domain md           # scored by tests, no oracle
 python -m examples.genesis.genesis_recursive_worlds --cold-start          # no node records: it writes its own
+python -m examples.genesis.genesis_recursive_worlds --worktrees           # a worktree and a commit per episode
+python -m examples.genesis.genesis_recursive_worlds --complete-task --model ...  # the root agent decides when it is done
 python -m examples.genesis.genesis_recursive_worlds --episodes 96 --workers 8
 python -m examples.genesis.genesis_recursive_worlds --keyed-union         # control: no three-way merge
 python -m examples.genesis.genesis_recursive_worlds --engine-gate         # control: the Beta gate
@@ -45,7 +47,8 @@ the path, an accepted event moves the version. Each piece is one file here.
 | [`_spatial.py`](_spatial.py) | `Strategy`: an agent writes only inside its own subtree | `agents/manager.ex:179` |
 | [`_octopus.py`](_octopus.py) | `ConflictPolicy`: three-way merge, so two agents in one file both survive | `Git.merge_octopus/2` |
 | [`_judge.py`](_judge.py) | `AcceptancePolicy`: the parent's rule — *partial progress is accepted* | `agents/manager.ex:58` |
-| [`_review.py`](_review.py) | the parent **reading** its child's change — upstream's code-quality rejection, the half a pass count cannot see | `agents/manager.ex` "Validation", `agents/architect.ex` Phase 3 |
+| [`_review.py`](_review.py) | the parent **reading** its child's change, and the root agent's `complete_task` | `agents/manager.ex` "Validation", `agents/architect.ex` Phase 3, `runtime/genesis.ex` |
+| [`_worktree.py`](_worktree.py) | a worktree per episode, a commit per episode, the worktree removed after — and the phylogenetic graph as real git history | `agents/manager.ex` yielding model, `Git.merge_octopus/2`, `core/phylo_graph_node.ex` |
 | [`_suite.py`](_suite.py) | the machinery a domain needs and does not own: the harness, both loaders (`Suite` scores against a reference, `TestSuite` against a frozen test suite with no reference in the loop), the runner, the parent's integration check, the LLM actors | — |
 | [`_domain.py`](_domain.py) | **minilang** — an integer expression language, 2 nodes deep, 4 files | — |
 | [`_stackvm.py`](_stackvm.py) | **stackvm** — a stack machine and its assembler, 4 nodes deep, 10 files | — |

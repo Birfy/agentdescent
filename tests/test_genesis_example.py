@@ -13,7 +13,7 @@ import pytest
 
 from agentdescent.aggregator import AggregatorConfig, MergeOutcome, diffs_contradict
 from agentdescent.defaults import DefaultAcceptance, DefaultConflict
-from agentdescent.evolution import EvolvingArtifact, Task, evolve
+from agentdescent.evolution import EvolvingArtifact, RoundInfo, Task, evolve
 from agentdescent.evolvable import Diff, EvidenceCard
 from agentdescent.filetree import canonical, match_any
 from agentdescent.policies import MergeContext, Policies, ProposalContext
@@ -25,9 +25,12 @@ from examples.genesis import _stackvm as stackvm
 from examples.genesis._delegation import (Brief, Delegation, Edit,
                                           RecursiveDelegation, render_edits)
 from examples.genesis._judge import ParentJudge
-from examples.genesis._review import ParentCodeReview, chain_reviews
+from examples.genesis._review import (CompletionJudge, ParentCodeReview,
+                                      chain_reviews)
 from examples.genesis._octopus import OctopusConflict, git_available, three_way
 from examples.genesis._spatial import SpatialContract, parse_situated_edits
+from examples.genesis._worktree import (Rollout, WorktreeLedger,
+                                        git_worktrees_available)
 from examples.genesis._suite import cold_start, preflight
 from examples.genesis._world import (CONTEXT_FILE, KNOWN_ISSUES, ROUTING_HEADING,
                                      SKILLS_DIR, TRUNCATED,
@@ -511,12 +514,23 @@ def test_one_rollout_is_a_tree_of_episodes_at_one_version():
 
 
 def test_a_child_that_returns_nothing_is_sent_back_rather_than_annotated():
-    """"Try again" is queued; only a refusal is written into the world."""
+    """"Try again" is queued; only a refusal is written into the world.
+
+    The node it opened is still recorded, and that is upstream's order rather than an
+    exception to this rule: the architect creates the child directory and its
+    CONTEXT.md with `make_dir` (which auto-commits) and *then* spawns the subagent, so
+    the node exists whether or not the work does. What is not written is any remark
+    about the attempt.
+    """
     log = WorldLog()
     policy = RecursiveDelegation(manager=lambda b: [Delegation("src", "do nothing")],
                                  executor=lambda b: [], log=log, max_depth=2)
-    assert policy.propose(_proposal_ctx({CONTEXT_FILE: "# root"},
-                                        Task(id="t", prompt="x"))) == []
+    proposals = policy.propose(_proposal_ctx({CONTEXT_FILE: "# root"},
+                                             Task(id="t", prompt="x")))
+    edits = parse_situated_edits(proposals[0]) if proposals else []
+    assert [e["path"] for e in edits] == [CONTEXT_FILE]       # the routing entry only
+    assert "refused" not in (edits[0]["content"] if edits else "")
+    assert log.pending_rework                                 # queued instead
     assert [e.verdict for e in log.episodes if e.path == "src"] == ["rework"]
     assert set(log.pending_rework) == {"src"}
 
@@ -536,8 +550,11 @@ def test_a_refused_child_leaves_its_reason_in_the_nodes_context_md():
     proposals = policy.propose(_proposal_ctx({CONTEXT_FILE: "# root"},
                                              Task(id="t", prompt="x")))
     edits = parse_situated_edits(proposals[0])
-    assert [e["path"] for e in edits] == [f"src/{CONTEXT_FILE}"]
-    assert "refused: it breaks the build" in edits[0]["content"]
+    # The refusal at the child's own node, and the entry for the node the manager
+    # opened -- written before the child was briefed, as upstream's `make_dir` is.
+    assert [e["path"] for e in edits] == [CONTEXT_FILE, f"src/{CONTEXT_FILE}"]
+    assert "refused: it breaks the build" in edits[1]["content"]
+    assert KNOWN_ISSUES in edits[1]["content"]
     assert [e.verdict for e in log.episodes if e.path == "src"] == ["rejected"]
 
 
@@ -1045,6 +1062,145 @@ def test_every_node_record_carries_upstreams_four_standard_sections(spec):
         assert "## API Surface" in body, f"{path} says nothing about what it exposes"
     assert any(ROUTING_HEADING in body for body in records.values())
     assert any("## Constraints" in body for body in records.values())
+
+
+# ---------------------------------------------------------------------------
+# The scheduling model: a worktree per episode, a commit, and the worktree gone
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not git_worktrees_available(), reason="git worktree unavailable")
+def test_a_parents_merge_commit_carries_every_child_commit_as_a_parent():
+    """The phylogenetic graph, as git history rather than as a diagram.
+
+    `Git.merge_octopus/2` leaves a merge commit whose parents are the base and every
+    child; `phylo_graph_node.ex` then has a `find_merge_base/2` worth calling. With
+    the states kept in memory there was nothing for either to see.
+    """
+    ledger = WorktreeLedger()
+    with Rollout(ledger) as rollout:
+        base = rollout.commit("M0001", {CONTEXT_FILE: "# root\n"}, "before delegating")
+        left = rollout.commit("E0002", {CONTEXT_FILE: "# root\n", "src/a.py": "a\n"},
+                              "child a", [base])
+        right = rollout.commit("E0003", {CONTEXT_FILE: "# root\n", "src/b.py": "b\n"},
+                               "child b", [base])
+        merge = rollout.commit("M0001.merge",
+                               {CONTEXT_FILE: "# root\n", "src/a.py": "a\n",
+                                "src/b.py": "b\n"}, "merge 2 children",
+                               [base, left, right])
+        graph = {line.split()[0]: line.split()[1:] for line in rollout.history()}
+        assert merge[:7] in graph
+        assert len(graph[merge[:7]]) >= 3          # parents, then the subject words
+        assert base[:7] in graph and left[:7] in graph and right[:7] in graph
+    assert (ledger.created, ledger.removed) == (4, 4)
+    assert ledger.merge_commits == 1 and ledger.max_parents == 3
+    assert ledger.leaked == 0
+
+
+@pytest.mark.skipif(not git_worktrees_available(), reason="git worktree unavailable")
+def test_every_episode_commits_in_its_own_worktree_and_the_worktree_is_removed():
+    """"Commit your changes, release your worktree, and wait" -- `agents/manager.ex`.
+
+    The release is not optional upstream: an unreleased worktree is an agent that
+    never yielded, and the scheduler is cooperative. So the ledger has to balance.
+    """
+    ledger = WorktreeLedger()
+    log = WorldLog()
+    seen = []
+    policy = RecursiveDelegation(
+        rollout_factory=lambda: Rollout(ledger),
+        manager=lambda b: ([Delegation("src/frontend", "lex"),
+                            Delegation("src/backend", "eval")] if b.world.path == "src"
+                           else ([Delegation("src", "all of it")] if not b.world.path
+                                 else [])),
+        executor=lambda b: (seen.append(b.world.path) or
+                            [Edit(b.world.path, f"{b.world.path}/x.py", "x = 1\n")]),
+        log=log, max_depth=3)
+    policy.propose(_proposal_ctx({CONTEXT_FILE: "# root\n"}, Task(id="t", prompt="x")))
+
+    # the two leaves first, then each manager's accountability turn at its own node
+    assert seen[:2] == ["src/frontend", "src/backend"] and "src" in seen[2:]
+    assert ledger.created == ledger.removed > 0, ledger.summary()
+    assert ledger.leaked == 0
+    assert ledger.commits >= 4            # two leaves, the base, and the merges
+    assert ledger.max_parents >= 3        # a parent, and the two children it kept
+    # and every episode carries the sha it could be resurrected from
+    assert all(e.commit for e in log.episodes), [e.agent_id for e in log.episodes
+                                                 if not e.commit]
+
+
+def test_a_child_sees_the_node_record_its_parent_wrote_before_briefing_it():
+    """"Create the child directory with CONTEXT.md via `make_dir` (auto-commits),
+    **then** spawn the subagent" -- `agents/architect.ex`, Phase 1. A child briefed
+    before that write arrives at a node its own parent's routing table does not
+    mention, which is exactly the thing the routing table exists to prevent.
+    """
+    briefs = {}
+    policy = RecursiveDelegation(
+        manager=lambda b: [Delegation("src", "do it")] if not b.world.path else [],
+        executor=lambda b: (briefs.__setitem__(b.world.path, b.context) or []),
+        log=WorldLog(), max_depth=3)
+    policy.propose(_proposal_ctx({CONTEXT_FILE: "# root\n"}, Task(id="t", prompt="x")))
+    assert "src" in briefs
+    assert "`./src/` -> do it" in briefs["src"], briefs["src"]
+
+
+# ---------------------------------------------------------------------------
+# complete_task: the run ends when an agent says so, not when the budget does
+# ---------------------------------------------------------------------------
+
+def _completion_judge(complete, state):
+    return CompletionJudge(complete, tasks=domain.build_tasks(),
+                           run=domain.make_runner(), reward=domain.reward,
+                           state_of=lambda: state, contracts=domain.CONTRACTS,
+                           objective="an integer expression language")
+
+
+def test_the_root_agent_is_not_asked_while_a_test_it_can_see_still_fails():
+    """Upstream's own precondition: "aim for a 100% pass rate on the given test
+    suites -- treat them as the definition of done". Below that the question is not
+    asked, and no model call is spent asking it."""
+    judge = _completion_judge(lambda prompt: pytest.fail("asked too early"),
+                              domain.initial_files())
+    assert judge(RoundInfo(round=1, held_out_reward=0.0, n_items=0, committed=0,
+                           rejected=0)) is False
+    assert judge.asked == 0
+
+
+def test_the_run_ends_when_the_root_agent_says_the_objective_is_delivered():
+    prompts = []
+
+    def complete(prompt):
+        prompts.append(prompt)
+        return '{"complete": true, "reason": "every module is implemented"}'
+
+    judge = _completion_judge(complete, domain.reference_tree())
+    info = RoundInfo(round=4, held_out_reward=1.0, n_items=4, committed=3, rejected=0)
+    assert judge(info) is True
+    assert judge.asked == 1 and judge.verdict == "complete"
+    # the decision is about the codebase, and the port's own measurement is not shown:
+    # that number comes from tests no agent may read, and handing it over would turn
+    # the judgment back into a threshold.
+    assert "1.0" not in prompts[0] and "held-out" not in prompts[0]
+    assert "src/__init__.py" in prompts[0]          # the tree is what it judges
+
+
+def test_an_unparseable_or_negative_answer_keeps_the_run_going():
+    green = domain.reference_tree()
+    assert _completion_judge(lambda p: "not sure yet", green)(
+        RoundInfo(round=1, held_out_reward=1.0, n_items=1, committed=1,
+                  rejected=0)) is False
+    judge = _completion_judge(lambda p: '{"complete": false, "reason": "stubs left"}',
+                              green)
+    assert judge(RoundInfo(round=1, held_out_reward=1.0, n_items=1, committed=1,
+                           rejected=0)) is False
+    assert (judge.verdict, judge.reason) == ("incomplete", "stubs left")
+
+    def dead(prompt):
+        raise RuntimeError("502")
+
+    assert _completion_judge(dead, green)(
+        RoundInfo(round=1, held_out_reward=1.0, n_items=1, committed=1,
+                  rejected=0)) is False
 
 
 def test_stackvm_is_deeper_than_minilang_which_is_why_it_exists():

@@ -560,16 +560,42 @@ so would a reader of this page without this paragraph.
   test at a time in the task prompt. `FROZEN` (what may not be written), `CONTRACTS`
   (what is pushed) and `readonly` (where a manager may not be sent) are three sets for
   three jobs; conflating the first two is how `md.py` once crowded out the spec.
-* **Termination is the engine's, not an agent's judgment.** Upstream an agent calls
-  `complete_task` when it believes the objective is met, and a human merges or rejects
-  afterwards. Here the run ends when the round budget ends, and `stop reason: rounds`
-  on a finished domain means exactly that — nobody decided it was done.
-* **Parallelism is the engine's workers, not worktrees.** Upstream isolates every
-  subagent in its own git worktree and requires "commit before delegating" so children
-  branch from a committed SHA; concurrency is unbounded and conflicts are resolved by
-  the spawning agent. Here `evolve()`'s workers propose concurrently against one
-  accepted version and `OctopusConflict` does the three-way merge in the parent, which
-  is `Git.merge_octopus/2`'s job. The observable consequence is the same — two children
+* **Termination can be an agent's judgment, with `--complete-task`.** Upstream an
+  agent calls `complete_task` when it believes the objective is met, and a human merges
+  or rejects afterwards on the dashboard; here the run ends when the round budget ends,
+  which is why a finished domain still reports `stop reason: rounds` — nobody decided
+  it was done. `CompletionJudge` asks instead, through `evolve(stop_when=)`, with
+  upstream's two gates in upstream's order: every test the agents can see must pass
+  first ("treat them as the definition of done"), and below that the question is not
+  asked and no model call is spent; then the root agent judges the **codebase** —
+  stubs, dead modules, anything it would not hand over as finished. It is never shown
+  the held-out reward: that number is this port's measurement, computed from tests no
+  agent may read, and handing it over would turn the judgment back into a threshold.
+  The human review at the end of upstream's chain is still out of scope.
+* **Worktree isolation and "commit before delegating", with `--worktrees`.** Upstream
+  this is the scheduling model, not a detail of it: "commit your changes, release your
+  worktree, and wait... If you don't commit, your changes are invisible to subagents."
+  Each episode now gets a git worktree of its own, commits its work there on a branch
+  of its own, and the worktree is **removed** — the release a cooperative scheduler
+  requires — with a ledger that has to balance. What that buys is not correctness:
+  siblings here branch from the same base by construction because the episode tree is
+  a pure function over a state dict, and a test holds that property directly. It buys
+  three things that were missing. The **phylogenetic graph becomes git history** — one
+  commit per episode, and a parent that kept three children leaves a four-parent merge
+  commit, so `Git.merge_octopus/2`'s shape is there and `phylo_graph_node.ex`'s
+  `find_merge_base/2` has something to find. "Commit before delegating" becomes
+  **checkable**, and acting on it found a real gap: a manager that opens a node now
+  writes that node into its routing table *before* briefing the child, which is what
+  `make_dir` (auto-commits) then spawn means, and before this the child arrived at a
+  node its own parent's table did not mention. And every episode record carries the
+  sha it could be **resurrected** from, which is the third field of upstream's
+  `(node_path, commit_sha, objective)` tuple and the one this port did not have.
+  Measured on md offline: 98 worktrees created, 98 removed, 98 commits, 41 of them
+  merges, five parents at the widest, same reward, 4% wall-clock.
+* **Parallelism is still the engine's workers.** Upstream's concurrency is unbounded
+  and each subagent's worktree is where its commands run; here `evolve()`'s workers
+  propose concurrently against one accepted version and `OctopusConflict` does the
+  three-way merge in the parent. The observable consequence is the same — two children
   editing one file both survive — and the measurement of that is in the table above.
 * **Skills are inherited but never extracted.** `LocalWorld.skills()` collects
   `.agents/skills/` along the node chain and puts the *names* in the brief, which

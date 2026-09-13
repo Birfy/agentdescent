@@ -113,6 +113,18 @@ Executor = Callable[[Brief], Sequence[Edit]]
 Review = Callable[[Brief, Sequence[Edit]], Optional[Tuple[str, str]]]
 
 
+def apply_edits(state: Mapping[str, str],
+                edits: Sequence[Edit]) -> Dict[str, str]:
+    """``state`` with ``edits`` applied. What a commit of this episode contains."""
+    out = dict(state)
+    for edit in edits:
+        if edit.content is None:
+            out.pop(edit.path, None)
+        else:
+            out[edit.path] = edit.content
+    return out
+
+
 def render_edits(edits: Sequence[Edit], rationale: str) -> str:
     """Serialise an edit set into the situated proposal protocol."""
     return "<EDITS>" + json.dumps({
@@ -148,6 +160,11 @@ class RecursiveDelegation:
     #: paper's agent may inspect the whole project; one with no read tool can only
     #: inspect what the brief carries.
     contracts: Sequence[str] = ()
+    #: ``() -> Rollout`` (see :mod:`examples.genesis._worktree`) or ``None``. When
+    #: set, every episode commits its work in a worktree of its own and the worktree
+    #: is removed afterwards, which is upstream's scheduling model rather than a
+    #: detail of it: "commit your changes, release your worktree, and wait".
+    rollout_factory: Optional[Callable[[], object]] = None
     #: Globs that are read-only. Routing must not send a manager into a directory
     #: where nothing is writable; separate from :attr:`contracts`, which is what
     #: gets *pushed into the brief*. Upstream an agent pulls files with tools, so
@@ -164,6 +181,10 @@ class RecursiveDelegation:
     #: history at all -- not the same thing as the acceptance gate, which sees
     #: only what the whole episode returned. ``None`` runs the scope check alone.
     review: Optional[Review] = None
+    #: The version the most recent rollout branched from -- the latest accepted state,
+    #: as the engine handed it over. Read by `CompletionJudge`, which has to look at
+    #: the codebase to answer upstream's question and is not given the reward.
+    last_state: Optional[Dict[str, str]] = None
     truncated: int = 0
     #: Child nodes opened at a path their parent did not yet route to, and
     #: therefore written into the parent's routing table.
@@ -191,20 +212,32 @@ class RecursiveDelegation:
 
     def propose(self, ctx) -> Sequence[str]:
         state = _state_of(ctx.rendered)
+        self.last_state = dict(state)
         root = LocalWorld(version=int(ctx.base_version or 0), path=self.root_path,
                           readonly=tuple(self.readonly or self.contracts))
+        # The workspace of a transient agent tree: created for this rollout, gone
+        # with it. `None` when worktrees are off, and every use of it is guarded.
+        rollout = self.rollout_factory() if self.rollout_factory else None
+        try:
+            return self._rollout(ctx, root, state, rollout)
+        finally:
+            if rollout is not None:
+                rollout.close()
 
+    def _rollout(self, ctx, root: LocalWorld, state: Mapping[str, str],
+                 rollout) -> Sequence[str]:
         # A parent that asked for more work gets it before anything else is
         # chosen: this is the third verdict, arriving one round later because
         # `AcceptDecision` cannot carry it (see examples/genesis/_judge.py).
         pending = self.log.take_rework()
         if pending is not None and owns(root.path, pending[0]):
             world, objective = root.delegate(pending[0]), f"rework: {pending[1]}"
-            edits, unmet, _ = self._episode(world, objective, state, ctx, depth=1)
+            edits, unmet, _ = self._episode(world, objective, state, ctx, depth=1,
+                                            rollout=rollout)
             rationale = f"rework at {pending[0] or './'}"
         else:
             edits, unmet, _ = self._episode(root, self._objective(ctx), state, ctx,
-                                            depth=0)
+                                            depth=0, rollout=rollout)
             rationale = f"episode at {root.path or './'}"
         # A need that reached the top of this episode's chain and still fell
         # outside its root's authority. Counted rather than dropped quietly: it
@@ -219,7 +252,8 @@ class RecursiveDelegation:
     # -- the recursion -----------------------------------------------------
 
     def _episode(self, world: LocalWorld, objective: str, state: Mapping[str, str],
-                 ctx, *, depth: int) -> "tuple[List[Edit], List[Edit], EpisodeRecord]":
+                 ctx, *, depth: int, rollout=None,
+                 base: str = "") -> "tuple[List[Edit], List[Edit], EpisodeRecord]":
         """One finite-lived agent: what it proposes, what it asks for, its record.
 
         The record travels back with the work because the verdict on an episode
@@ -260,6 +294,10 @@ class RecursiveDelegation:
                 agent_id=self.log.next_id("executor"), role="executor",
                 path=world.path, depth=depth, version=world.version,
                 objective=objective, n_edits=len(edits)))
+            # "Commit Your Work: Once the objective is satisfied, commit your
+            # changes" -- `agents/executor.ex`. In its own worktree, off its
+            # parent's commit, and the worktree is released when it returns.
+            record.commit = self._commit(rollout, record, state, edits, base)
             return edits, requests, record
 
         record = self.log.record(EpisodeRecord(
@@ -271,11 +309,29 @@ class RecursiveDelegation:
         notes: List[Edit] = []
         pending: List[Edit] = []              # needs this node cannot meet either
         routed = world.routing(state)
-        opened: List[Delegation] = []         # children this node had not routed to
+        opened = [d for d in delegations if normalise(d.path) not in routed]
+
+        # Upstream's order, from the architect's Phase 1: "Create `/backend` and
+        # `/frontend` directories with CONTEXT.md via `make_dir` (**auto-commits**),
+        # **then** spawn `subagent_architect` for each child." So a node this manager
+        # is opening is recorded *before* its child is briefed -- otherwise the child
+        # arrives at a node its own parent's routing table does not mention -- and
+        # that record is what the children branch from. "If you don't commit, your
+        # changes are invisible to subagents."
+        routing = self._routing_note(world, state, opened)
+        if routing is not None:
+            state = dict(state, **{routing.path: routing.content or ""})
+        child_base = base
+        if routing is not None or not base:
+            child_base = self._commit(rollout, record, state, (), base) or base
+
+        children: List[EpisodeRecord] = []
         for delegation in delegations:
             child = world.delegate(delegation.path)
             returned, asked, child_record = self._episode(
-                child, delegation.objective, state, ctx, depth=depth + 1)
+                child, delegation.objective, state, ctx, depth=depth + 1,
+                rollout=rollout, base=child_base)
+            children.append(child_record)
             child_record.verdict, child_record.reason = self._judge(
                 child, returned, asked, brief)
             if child_record.verdict != "rejected" and asked:
@@ -317,9 +373,6 @@ class RecursiveDelegation:
                     f"{conflicts[0]} was also written by a sibling at "
                     f"{owner_of.get(conflicts[0], '?')}, and the two edits overlap")
                 self.log.request_rework(child.path, child_record.reason)
-            if normalise(delegation.path) not in routed:
-                opened.append(delegation)
-
         # Upstream's third phase. An Architect works "architecture & design ->
         # implementation delegation -> **review & accountability**" and is
         # "ACCOUNTABLE for all code in its node path" (`agents/architect.ex:23`):
@@ -334,15 +387,20 @@ class RecursiveDelegation:
                 self._fold(held, owner_of, own, world, state)
 
         merged: List[Edit] = list(held.values()) + notes
-
         # A node whose parent does not route to it is a node later agents cannot
-        # find. Upstream the manager that opens one writes the entry at its own
-        # level; here the same write, from the same agent, on its own CONTEXT.md.
-        routing = self._routing_note(world, state, opened)
+        # find, so the entry travels with the work as well as with the base its
+        # children saw: the base is this episode's, and only an accepted episode
+        # puts it in the version everyone else will see.
         if routing is not None:
             merged.append(routing)
 
         record.n_edits = len(merged)
+        # The parent's merge. Its parents are the base it delegated from and every
+        # child commit it kept, which is what makes this a phylogenetic graph rather
+        # than a list -- `Git.merge_octopus/2` leaves the same shape.
+        kept = [r.commit for r in children if r.commit and r.verdict != "rejected"]
+        record.commit = self._commit(rollout, record, apply_edits(state, merged), (),
+                                     child_base, kept) or record.commit
         return merged, pending, record
 
     def _accountability_pass(self, world: LocalWorld, objective: str,
@@ -500,6 +558,31 @@ class RecursiveDelegation:
             return None
         return Edit(owner=child.path, path=key, kind="context",
                     content=under_heading(body, KNOWN_ISSUES, line))
+
+    # -- the workspace -----------------------------------------------------
+
+    def _commit(self, rollout, record: EpisodeRecord, state: Mapping[str, str],
+                edits: Sequence[Edit], base: str,
+                parents: Sequence[str] = ()) -> str:
+        """Commit what this episode produced, in a worktree of its own.
+
+        Returns the sha, or ``""`` when the run is not using worktrees. Never raises:
+        a git failure costs the history of one episode, not the episode.
+        """
+        if rollout is None:
+            return ""
+        from ._worktree import edited
+        lineage = [p for p in ([base] + list(parents)) if p]
+        try:
+            return rollout.commit(record.agent_id, edited(state, edits),
+                                  f"{record.role} {record.agent_id} at "
+                                  f"{record.path or './'}: {record.objective[:60]}",
+                                  lineage)
+        except Exception:  # noqa: BLE001 - the work stands even if git does not
+            ledger = getattr(rollout, "_ledger", None)
+            if ledger is not None:
+                ledger.failures += 1
+            return ""
 
     # -- bounds ------------------------------------------------------------
 

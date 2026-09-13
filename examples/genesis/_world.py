@@ -493,6 +493,11 @@ class EpisodeRecord:
     verdict: str = "accepted"    # "accepted" | "rejected" | "rework"
     n_edits: int = 0
     reason: str = ""
+    #: The commit this episode left behind, when the run is using worktrees.
+    #: Upstream an agent "can always be resurrected from a (node_path, commit_sha,
+    #: objective) tuple" (``agents/manager.ex``) -- these three fields are that
+    #: tuple, and this is the field that was missing from it.
+    commit: str = ""
 
 
 class WorldLog:
