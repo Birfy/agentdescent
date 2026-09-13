@@ -477,6 +477,36 @@ also splits "files AT this node (yours to write)" from "files below it (each
 child's own)", because an agent is bad at noticing an absence inside a long list
 and the absence is the actionable part.
 
+## The paper's numbers, and this port's
+
+The mechanism is the thing being ported; the numbers are not, and putting them side by
+side is the clearest way to say which is which. Upstream's figures are the formation
+run — the one `md` stands in for — from §4.1 and the appendix tables.
+
+| | paper, formation run | this port, `md` | comparable? |
+|---|---|---|---|
+| wall clock | **123.402 h** (666.385 h of agent time) | 0.6 h | no — the domain is a stand-in, by design |
+| archived agent episodes | **1,019** | 237 (from ~42 proposals over 4 000 rollouts) | in kind only |
+| observed delegation depth | **5** (configured max 8, retries 15) | 3 (configured max 4) | in kind — both bottom out below their ceiling |
+| what one episode *is* | a supervised session of **up to 2 048 root turns / 128 child turns**, with file, shell and test tools | **one model call** (plus one for a manager's accountability turn, one for the parent's review) | **no**, and this is the largest single gap |
+| result size | 750 tracked files, **248 989** physical lines | 25 files, ~700 lines | no |
+| model-token cost | **US$44.3760** | not billed by this endpoint; 2.9 M prompt + 0.15 M completion tokens | no |
+| concurrency | max **22** overlapping episodes | 4 workers | in kind |
+| validation | complete c-testsuite, most LLVM and Csmith | a 67-task frozen suite, 16 of them held out | in kind |
+| `CONTEXT.md` maintenance | 26 files created, **62 later accepted updates affecting 19 files** | creations, plus routing entries and refusals; no other updates | **no** — and this is the second gap |
+
+Two of those rows are gaps rather than scale differences, and both are recorded below:
+an episode here is a single completion rather than a tool-using session, and the
+context records are written on two occasions rather than maintained. Everything else
+in the table differs by three orders of magnitude because the domain was chosen to
+finish in an afternoon, which is what `mechanism_microport` means.
+
+What *is* aligned is the shape: `(v,p)`, delegation that moves the path and not the
+version, the spatial contract, the parent's three-part validation, partial progress
+accepted, the octopus merge, `CONTEXT.md` as the routing mechanism, a worktree and a
+commit per episode with the worktree released, and termination by an agent's judgment.
+Each has its own row in the table at the top of this page and a test behind it.
+
 ## Honesty boundary
 
 `--offline` — the default — proposes with rule-based actors that reveal
@@ -625,6 +655,18 @@ so would a reader of this page without this paragraph.
   is missing is the other end: upstream's `SkillExtractor` distils a completed
   contribution into a new skill, and nothing here does. The domain ships one
   human-written skill so the inheritance path is live rather than decorative.
+* **An episode here is one model call; upstream it is a session.** The paper is
+  explicit — "the agent can execute multiple model–tool turns during one supervised
+  episode" — and the runs are configured at **2 048 root turns and 128 turns per
+  non-root episode**, with file, shell and test tools inside each one. Here an episode
+  is a single completion with no tools: the manager is asked once where to delegate,
+  the executor is asked once for whole files, and the brief has to carry everything
+  either of them could otherwise have fetched (which is what `situate(contracts=)` is
+  for). Everything downstream of that follows from it — why the domains are small, why
+  the actors cannot run the tests themselves, why a "rework" costs a whole new episode
+  rather than another turn. It is the largest single distance between this port and
+  the system it ports, and it is a property of the harness rather than of the
+  algorithm: `evolve()` proposes with one completion per rollout.
 * **Only two roles are ported.** The released code has ten agent modules; the
   paper's appendix §1.3 says the model has two — manager and leaf executor — and
   that "codebase lead / investigator / task scheduler are implementation labels,
