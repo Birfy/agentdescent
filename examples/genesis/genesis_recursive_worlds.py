@@ -360,9 +360,11 @@ def main(argv=None) -> None:
           f"{len(set(t.meta['kind'] for t in tasks))} {spec.GROUP_NOUN}; "
           f"{len(initial)} files in the repository, "
           "none of them implementation")
-    print("Start    : " + (f"{len(initial)} files from {args.continue_from}, contract "
-                           "restored" if args.continue_from and args.mode != "a" else
-                           "")
+    print("Start    : " + (f"{len(initial)} files from {args.continue_from}, its own "
+                           "records stripped -- phase A writes the tree over it"
+                           if args.continue_from and args.mode == "a" else
+                           f"{len(initial)} files from {args.continue_from}, contract "
+                           "restored" if args.continue_from else "")
           + ("designed in phase 1 by an architect agent, from the goal, "
                            "the contract and the suite" if args.architect else
                            "cold -- the goal, the contract and the suite; no node "
