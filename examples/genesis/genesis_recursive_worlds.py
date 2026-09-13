@@ -81,6 +81,7 @@ from agentdescent.evolution import EvolvingArtifact
 from agentdescent.agents import Usage
 from agentdescent.filetree import load_tree, match_any
 from agentdescent.governance import SKILL_BLAST_RADIUS, classify
+from agentdescent.staleness import get_policy
 from examples._common import (add_standard_args, budget_kwargs, completion_for,
                               confirm, report_engine, worker_count)
 
@@ -179,6 +180,14 @@ def build_parser() -> argparse.ArgumentParser:
                              "scheduling model. The run then leaves a real "
                              "phylogenetic graph: one commit per episode, a parent's "
                              "merge carrying every child commit as a parent")
+    parser.add_argument("--staleness", choices=("guarded", "full", "reflective"),
+                        default="guarded",
+                        help="what happens to a proposal built on a version that has "
+                             "since moved. The engine's default discards it beyond a "
+                             "lag budget; `full` never discards for lag, which is "
+                             "upstream's behaviour -- a parent merges what its child "
+                             "returns, whatever it branched from, and that is what "
+                             "the octopus merge is for. Only reachable under --async")
     parser.add_argument("--executor", choices=("completion", "claude-code"),
                         default="completion",
                         help="what one episode is. `completion` (default): one model "
@@ -251,6 +260,10 @@ def main(argv=None) -> None:
     print(f"Plan     : model={args.model or 'offline rule-based actors'}, "
           f"episodes={args.episodes} root ({rounds} rounds x {args.workers} workers), "
           f"max depth={args.depth}")
+    print(f"Staleness: {args.staleness}"
+          + ("" if args.asynchronous else " (no effect: nothing is stale at a barrier)")
+          + ("  -- a lagging proposal is merged, not dropped, which is what a parent "
+             "does upstream" if args.staleness == "full" else ""))
     print(f"Merge    : {merge}" + ("" if git_available() else
                                    "  [git missing: every contested file falls back]"))
     print(f"Gate     : {gate}")
@@ -460,6 +473,7 @@ def main(argv=None) -> None:
         eval_concurrency=args.eval_concurrency or 8,
         seed=args.seed, usage=usage,
         policies=Policies(proposal=delegation, acceptance=judge,
+                          staleness=get_policy(args.staleness),
                           **({} if octopus is None else {"conflict": octopus})),
         **budget_kwargs(args),
     )

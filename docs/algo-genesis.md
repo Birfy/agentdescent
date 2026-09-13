@@ -591,10 +591,38 @@ proposal policy, in *both* modes. The engine's round barrier is a property of ho
 `evolve()` searches, not of Genesis.
 
 So `--async` is closer in shape (no barrier) and introduces a behaviour upstream does
-not have (discard on staleness — upstream never discards for lag; the parent merges
-what comes back, which is what `Git.merge_octopus/2` is for), while sync is further in
-shape and closer in outcome. The port defaults to sync and reports both, which is the
-only honest arrangement when the faithful answer is "the question does not map".
+not have: discard on staleness. Upstream never discards for lag — the parent merges what
+its child returns, whatever the child branched from, and that is what
+`Git.merge_octopus/2` is for.
+
+Which the engine already has a seam for, and it is the obvious arrangement once it is
+put that way: `Policies(staleness=)`. `FullStaleness` never discards for lag, and a
+Genesis diff is never contract-breaking (`SpatialContract` marks nothing so), so
+`--async --staleness full` is barrier-free *and* discards nothing.
+
+| | sync | `--async` | `--async --staleness full` |
+|---|---|---|---|
+| `md` — accepted / discarded / episodes | 5 / **0** / 84 | 10 / **22** / 198 | 22 / **0** / 183 |
+| `minilang` — accepted / discarded / episodes | 3 / **0** / 87 | 7 / **6** / 202 | 13 / **0** / 154 |
+| held-out / audit | 1.000 | 1.000 | 1.000 |
+
+Nothing is thrown away and the episode count does not rise to pay for it — the work was
+always being done, the question was only whether a proposal that arrived late was kept.
+What does rise is the number of accepted events, and that is the same fact seen from the
+other side: each proposal the guarded policy dropped now lands as a version of its own.
+So "accepted events to reach 1.000" stops being a cost and starts being a count of
+commits, which is worth saying because that number is the merge comparison's cost metric
+two sections up, and the two are not measured under the same policy.
+
+One thing this does **not** show: that the three-way merge rescues a *contested* stale
+edit. `merged` is 0 on `md` and 2 on `minilang` here, so in these runs almost nothing
+landed on a file another proposal had touched. The claim measured is narrower and it is
+the one that matters for fidelity — under `--async --staleness full` nothing is
+discarded for being late, which is upstream's rule.
+
+The port still defaults to sync, because that is what every published number on this
+page was measured under; the faithful arrangement is one flag away and now printed in
+the header.
 
 ## The paper's numbers, and this port's
 
