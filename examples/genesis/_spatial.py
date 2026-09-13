@@ -189,6 +189,10 @@ class SpatialContract:
     #: its own in a test without building a log first.
     log: Optional[WorldLog] = None
 
+    #: The most recent state the engine asked this strategy to render. Not part of
+    #: the contract -- a watcher's window, see :meth:`render`.
+    last_rendered: Optional[Dict[str, str]] = None
+
     def __post_init__(self) -> None:
         self.initial_files = {safe_relpath(k): v for k, v in dict(self.initial_files).items()}
 
@@ -198,6 +202,13 @@ class SpatialContract:
         return dict(self.initial_files)
 
     def render(self, state: Mapping[str, str]) -> str:
+        # The engine renders the **accepted** artifact every time it evaluates it,
+        # which is once a round whether or not anything was proposed. That makes this
+        # the one place a watcher can see the current version: the proposal policy
+        # only sees a state when it is asked for a proposal, and it stops being asked
+        # exactly when the run is finished -- which is how `--complete-task` came to
+        # score a stale tree forever and ask nobody anything.
+        self.last_rendered = dict(state)
         return canonical(state)
 
     def to_diff(self, state, proposal, author, base_version, target) -> Optional[Diff]:

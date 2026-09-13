@@ -309,7 +309,15 @@ def main(argv=None) -> None:
     if args.complete_task and complete is not None:
         completion = CompletionJudge(
             complete, tasks=tasks, run=run, reward=spec.reward,
-            state_of=lambda: delegation.last_state, contracts=spec.CONTRACTS,
+            # The strategy's window, not the proposal policy's: the engine renders the
+            # accepted artifact every round, while a proposal policy sees a state only
+            # when it is asked for a proposal -- and it stops being asked exactly when
+            # the run is finished. Scoring `delegation.last_state` meant scoring a
+            # stale tree forever, which is why the first run with --complete-task
+            # asked nobody anything.
+            state_of=lambda: (strategy.last_rendered if strategy.last_rendered
+                              is not None else delegation.last_state),
+            contracts=spec.CONTRACTS,
             suite_failures=getattr(spec, "suite_failures", None),
             objective=DOMAIN_BLURB[args.domain])
 
