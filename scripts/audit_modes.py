@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Error-mode signatures, one per workload, in one place.
+"""What the audit scripts share: error-mode signatures, and reading a store.
 
 An *error mode* is the species Good--Turing counts: a coarse label for **what a
 person would have to fix**, deliberately coarser than the record and coarser
@@ -28,11 +28,25 @@ import ast
 import os
 import re
 import sys
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from agentdescent.audit import AuditRecord, AuditStore  # noqa: E402
 from scripts.audit_phase0 import final_number, normalize  # noqa: E402
+
+
+def resolved_records(path: Any) -> List[AuditRecord]:
+    """Every resolved pair in an audit JSONL.
+
+    `AuditStore` already reads the file and already applies the last-occurrence
+    -per-`record_id` rule, so the two hand-rolled readers this replaces were
+    reimplementing the store's own parser next to it -- verified
+    record-for-record identical before they were deleted. What is left is the
+    filter, which is the only thing any caller actually wanted on top.
+    """
+    return [r for r in AuditStore(str(path)).all()
+            if r.oracle_score is not None]
 
 #: The oracle's own normalisation, imported rather than reimplemented. This was
 #: a second copy for one commit, and the copy replaced punctuation with a space

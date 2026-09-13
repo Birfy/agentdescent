@@ -30,25 +30,8 @@ from agentdescent.audit.propose import length_rules, search
 from agentdescent.audit.scorecard import rescan, scorecard
 from scripts.audit_modes import (ERROR_MODES, context_for,  # noqa: F401
                                  echoes_the_question,
-                                 far_shorter_than_reference, normalise)
-
-
-def load_records(path: pathlib.Path) -> List[AuditRecord]:
-    """Last occurrence per ``record_id`` wins, matching the store's own rule."""
-    by_id: Dict[str, dict] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        row = json.loads(line)
-        if row.get("kind"):                       # a moments snapshot, not a record
-            continue
-        by_id[row["record_id"]] = row
-    out = []
-    for row in by_id.values():
-        row.pop("kind", None)
-        row["purpose"] = Purpose(row["purpose"])
-        out.append(AuditRecord(**row))
-    return out
+                                 far_shorter_than_reference, normalise,
+                                 resolved_records)
 
 
 # -- the two rules a person reaches for first --------------------------------
@@ -92,8 +75,7 @@ def main() -> None:
                          "max(tasks * 2, 40) of them")
     args = ap.parse_args()
 
-    records = [r for r in load_records(pathlib.Path(args.records))
-               if r.oracle_score is not None]
+    records = resolved_records(args.records)
     if not records:
         raise SystemExit(f"{args.records} holds no resolved pairs")
     version = records[0].verifier_version

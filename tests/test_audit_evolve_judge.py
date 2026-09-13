@@ -13,10 +13,10 @@ import pytest
 
 from agentdescent.audit import AuditRecord, Purpose
 from agentdescent.strategies import AppendRules
-from scripts.audit_evolve_judge import (_TITLE, _rubric_body, as_tasks,
-                                        balanced, disjoint_heldout,
-                                        judging_prompt, offline_judge,
-                                        saturation, verdict)
+from scripts.audit_evolve_judge import (_TITLE, MIN_EXAMPLES, _rubric_body,
+                                        as_tasks, assess, balanced,
+                                        disjoint_heldout, judging_prompt,
+                                        offline_judge, verdict)
 from scripts.audit_phase0 import _JUDGE_TMPL, final_number, number_match
 
 
@@ -138,20 +138,19 @@ def _context(n):
 
 
 def test_a_pool_whose_errors_are_all_one_mode_reports_no_unseen_mass():
-    """The condition that blocked this rung: nine and four disagreements across
-    two workloads, every one a shape already understood, P(new) = 0.0169."""
+    """The condition that first blocked this rung: nine and four disagreements
+    across two workloads, every one a shape already understood."""
     pool = [_rec(1.0, 0.0, out="17", task=f"t{i}") for i in range(6)]
-    unseen, bands = saturation(pool, _context(6), "gsm8k")
-    assert unseen == 0.0
-    assert sum(b["labels"] for b in bands.values()) == 6
+    got = assess(pool, _context(6), "gsm8k")
+    assert got.unseen == 0.0
+    assert sum(b["labels"] for b in got.bands.values()) == 6
 
 
 def test_a_pool_with_a_mode_seen_once_has_unseen_mass():
     pool = [_rec(1.0, 0.0, out="17", task="t0"),
             _rec(1.0, 0.0, out="17", task="t1"),
             _rec(1.0, 0.0, out="no idea at all", task="t2")]
-    unseen, _ = saturation(pool, _context(3), "gsm8k")
-    assert unseen > 0.0
+    assert assess(pool, _context(3), "gsm8k").unseen > 0.0
 
 
 def test_an_agreeing_label_counts_as_a_draw_and_lowers_the_unseen_mass():
@@ -160,9 +159,64 @@ def test_an_agreeing_label_counts_as_a_draw_and_lowers_the_unseen_mass():
     unsampled and send it the whole budget."""
     errs = [_rec(1.0, 0.0, out="no idea at all", task="t0")]
     agree = [_rec(1.0, 1.0, out="18", task=f"t{i}") for i in range(1, 9)]
-    alone, _ = saturation(errs, _context(9), "gsm8k")
-    with_agreement, _ = saturation(errs + agree, _context(9), "gsm8k")
+    alone = assess(errs, _context(9), "gsm8k").unseen
+    with_agreement = assess(errs + agree, _context(9), "gsm8k").unseen
     assert with_agreement < alone
+
+
+# -- variety is not the only way a pool can be worth training on -------------
+
+def test_enough_of_one_mode_is_worth_training_on_with_no_variety_left():
+    """The refusal this criterion exists to overturn. A mode function has a
+    bounded range, so `unseen` goes to zero after enough labels whatever the
+    pool holds -- MBPP's reached 0.02 while holding six examples of one mode,
+    which is plenty to write a clause against."""
+    pool = [_rec(1.0, 0.0, out="17", task=f"t{i}") for i in range(MIN_EXAMPLES)]
+    got = assess(pool, _context(MIN_EXAMPLES), "gsm8k")
+
+    assert got.unseen == 0.0                      # no variety at all
+    assert got.largest == MIN_EXAMPLES
+    assert got.worth_training
+    assert "enough of one mode" in got.reason
+
+
+def test_one_example_short_is_refused():
+    pool = [_rec(1.0, 0.0, out="17", task=f"t{i}")
+            for i in range(MIN_EXAMPLES - 1)]
+    got = assess(pool, _context(MIN_EXAMPLES), "gsm8k")
+    assert not got.worth_training
+    assert "Neither varied enough" in got.reason
+
+
+def test_variety_alone_is_still_enough():
+    """A pool still turning up new kinds is worth labelling even when no single
+    mode has piled up yet."""
+    pool = [_rec(1.0, 0.0, out=o, task=f"t{i}") for i, o in enumerate(
+        ["17", "no idea at all", "18 (over 7 days)"])]
+    got = assess(pool, _context(3), "gsm8k", min_unseen=0.5, min_examples=99)
+    assert got.unseen >= 0.5
+    assert got.worth_training
+    assert "variety left" in got.reason
+
+
+def test_the_sufficiency_threshold_is_derived_not_chosen():
+    """A clause that fixes all `k` examples has a one-sided p of `0.5 ** k`
+    under a coin-flip null. Five is the smallest k clearing 0.05; four does
+    not. Nothing about a particular pool went into it -- MBPP happens to have
+    six, and a threshold picked to match it would be worth nothing."""
+    assert 0.5 ** MIN_EXAMPLES < 0.05
+    assert 0.5 ** (MIN_EXAMPLES - 1) > 0.05
+
+
+def test_only_disagreements_count_toward_the_largest_mode():
+    """A label the two scorers agreed on is not an example of anything to fix,
+    however many of them there are."""
+    # Task ids the context actually holds -- `_context` keys them `t0..tN`, and
+    # a record it cannot join has no mode at all, which would pass this test for
+    # the wrong reason.
+    pool = [_rec(1.0, 1.0, out="18", task=f"t{i}") for i in range(40)]
+    pool += [_rec(1.0, 0.0, out="17", task=f"t{40 + i}") for i in range(2)]
+    assert assess(pool, _context(50), "gsm8k").largest == 2
 
 
 # -- the offline stand-in is a control ----------------------------------------
@@ -263,11 +317,9 @@ def test_always_no_ties_the_real_judge_on_the_pool_this_rung_trains_on():
     better argument and was not the one being made. A search that ties the
     incumbent while being trivially simpler has gone nowhere and cannot tell.
     """
-    import pathlib
+    from scripts.audit_modes import resolved_records
 
-    from scripts.audit_judge_repair import load_records
-
-    records = load_records(pathlib.Path("reports/audit_phase0_2026-09-09.jsonl"))
+    records = resolved_records("reports/audit_phase0_2026-09-09.jsonl")
     pool = [r for r in records if r.purpose is Purpose.IMPROVEMENT]
     assert len(pool) == 55
 
@@ -283,11 +335,9 @@ def test_balancing_removes_the_tie():
     """Whatever the pool's class ratio, the balanced set puts the constant
     rubric at 0.5 -- which is the point of doing it rather than arguing about
     how close the tie was."""
-    import pathlib
+    from scripts.audit_modes import resolved_records
 
-    from scripts.audit_judge_repair import load_records
-
-    records = load_records(pathlib.Path("reports/audit_phase0_2026-09-09.jsonl"))
+    records = resolved_records("reports/audit_phase0_2026-09-09.jsonl")
     train, _ = balanced([r for r in records
                          if r.purpose is Purpose.IMPROVEMENT], seed=0)
     always_no = sum(1 for r in train if r.oracle_score == 0.0) / len(train)

@@ -69,7 +69,8 @@ import pathlib
 import random
 import sys
 import time
-from dataclasses import replace
+from collections import Counter
+from dataclasses import dataclass, replace
 from datetime import date
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -84,8 +85,8 @@ from agentdescent.audit.diagnose import evaluate_fix, residual_stats  # noqa: E4
 from agentdescent.audit.scorecard import rescan, scorecard  # noqa: E402
 from agentdescent.evolution import LLMAgent  # noqa: E402
 from agentdescent.strategies import AppendRules  # noqa: E402
-from scripts.audit_judge_repair import load_records  # noqa: E402
-from scripts.audit_modes import ERROR_MODES, context_for  # noqa: E402
+from scripts.audit_modes import (ERROR_MODES, context_for,  # noqa: E402
+                                 resolved_records)
 from scripts.audit_phase0 import _JUDGE_TMPL  # noqa: E402
 
 #: The last line of the shipped judge template, and the seam the rubric is
@@ -147,21 +148,74 @@ def score_band(record: AuditRecord) -> str:
     return "high" if record.verifier_score >= 0.5 else "low"
 
 
-def saturation(records: Sequence[AuditRecord], context, workload: str
-               ) -> Tuple[float, Dict[str, Any]]:
-    """`P(new error mode)` over the improvement pool, and the per-band detail.
+#: Examples of one error mode below which a rubric clause cannot be *shown* to
+#: work. Derived rather than chosen: a clause that fixes all `k` of them has a
+#: one-sided p of `0.5 ** k` under a coin-flip null, and `k = 5` is the smallest
+#: that clears 0.05 (0.031; `k = 4` gives 0.062). Nothing about a particular
+#: pool went into it.
+MIN_EXAMPLES = 5
 
-    The number this rung is gated on. A pool whose next label is unlikely to
-    show anything new cannot teach a rubric anything new either, and running
-    anyway produces a prompt fitted to the errors that happen to be in hand.
+
+@dataclass(frozen=True)
+class Pool:
+    """Whether the improvement pool is worth evolving a rubric against.
+
+    **Two ways to be worth it, and the gate needs both questions asked.**
+
+    `unseen` is Good--Turing: the chance the next label shows an error mode
+    nobody has seen. High means keep labelling -- there is variety left to find.
+
+    `largest` is the biggest single mode. That is *sufficiency*, and it is the
+    question variety cannot answer: a mode function has a bounded range, so
+    after enough labels `unseen` goes to zero whatever the pool holds. MBPP's
+    pool reached `unseen = 0.02` while holding six examples of one mode --
+    plenty to write a clause against, and refused by a variety test alone.
     """
+
+    unseen: float
+    largest: int
+    largest_mode: Optional[str]
+    bands: Dict[str, Any]
+    min_unseen: float
+    min_examples: int
+
+    @property
+    def worth_training(self) -> bool:
+        return self.unseen >= self.min_unseen or self.largest >= self.min_examples
+
+    @property
+    def reason(self) -> str:
+        if self.unseen >= self.min_unseen:
+            return (f"P(new error mode) = {self.unseen:.4f}, at or above "
+                    f"{self.min_unseen}: there is variety left to learn from")
+        if self.largest >= self.min_examples:
+            return (f"{self.largest} examples of `{self.largest_mode}`, at or "
+                    f"above {self.min_examples}: enough of one mode to write a "
+                    f"clause against and show it worked")
+        return (f"P(new error mode) = {self.unseen:.4f} (below "
+                f"{self.min_unseen}) and the largest mode has {self.largest} "
+                f"example(s) (below {self.min_examples}). Neither varied enough "
+                f"to keep learning from nor concentrated enough to fix.")
+
+
+def assess(records: Sequence[AuditRecord], context, workload: str, *,
+           min_unseen: float = 0.25,
+           min_examples: int = MIN_EXAMPLES) -> Pool:
+    """Measure the improvement pool both ways."""
     mode = ERROR_MODES[workload]
     coverage = coverage_of(records, score_band,
                            lambda r: mode(r, context.get(r.task_id)))
-    detail = {k: {"labels": c.labels, "modes": c.modes,
-                  "singletons": c.singletons, "unseen": c.unseen}
-              for k, c in coverage.items()}
-    return unseen_mass_overall(coverage), detail
+    counts = Counter(
+        m for m in (mode(r, context.get(r.task_id)) for r in records
+                    if r.oracle_score is not None
+                    and r.verifier_score != r.oracle_score) if m)
+    top, n = counts.most_common(1)[0] if counts else (None, 0)
+    return Pool(unseen=unseen_mass_overall(coverage), largest=n,
+                largest_mode=top, min_unseen=min_unseen,
+                min_examples=min_examples,
+                bands={k: {"labels": c.labels, "modes": c.modes,
+                           "singletons": c.singletons, "unseen": c.unseen}
+                       for k, c in coverage.items()})
 
 
 # ---------------------------------------------------------------------------
@@ -413,8 +467,15 @@ def main() -> None:
                          "modes and the gold answers")
     ap.add_argument("--model", default="deepseek-v4-flash")
     ap.add_argument("--min-unseen", type=float, default=0.25,
-                    help="refuse to train when P(new error mode) is below this. "
-                         "The pool that blocked this rung measured 0.0169")
+                    help="a pool still finding new error modes at this rate is "
+                         "worth training on. The pool that first blocked this "
+                         "rung measured 0.0169")
+    ap.add_argument("--min-examples", type=int, default=MIN_EXAMPLES,
+                    help="...and so is one holding this many examples of a "
+                         "single mode, however little variety is left. A clause "
+                         "fixing all k has a one-sided p of 0.5**k, so 5 is the "
+                         "smallest k that clears 0.05. The pool is refused only "
+                         "when it fails both tests")
     ap.add_argument("--rounds", type=int, default=10,
                     help="a proposal is only requested on a rollout the judge "
                          "got wrong, so a loop sized by the usual 4-5 rounds "
@@ -434,7 +495,7 @@ def main() -> None:
                          "override in the report; it does not remove it")
     args = ap.parse_args()
 
-    records = load_records(pathlib.Path(args.records))
+    records = resolved_records(args.records)
     if not records:
         raise SystemExit(f"{args.records} holds no resolved pairs")
     context = context_for(args.workload, limit=args.limit)
@@ -445,14 +506,15 @@ def main() -> None:
             "no improvement-pool labels. The pool is chosen at audit time by "
             "`calibration_fraction`; a run that set it to 1.0 kept none")
 
-    unseen, bands = saturation(improvement, context, args.workload)
-    if unseen < args.min_unseen and not args.force:
+    pool = assess(improvement, context, args.workload,
+                  min_unseen=args.min_unseen, min_examples=args.min_examples)
+    if not pool.worth_training and not args.force:
         raise SystemExit(
-            f"P(new error mode) = {unseen:.4f} over {len(improvement)} "
-            f"improvement labels, below --min-unseen {args.min_unseen}.\n"
-            "This pool has learnt what it can: a rubric evolved against it "
-            "would be fitted to the errors that happen to be in hand.\n"
-            "The fix is a new *workload*, not more labels on this one -- see "
+            f"{len(improvement)} improvement labels. {pool.reason}\n"
+            "A rubric evolved against this pool would be fitted to the errors "
+            "that happen to be in hand.\n"
+            "The fix is usually a workload where *grading* is hard rather than "
+            "more labels on one where it is not -- see "
             "`scripts/audit_phase0.py --workload`. Pass --force to override.")
 
     train, balance = balanced(improvement, seed=args.seed)
@@ -497,8 +559,11 @@ def main() -> None:
 
     payload = {
         "workload": args.workload, "records": args.records,
-        "unseen": unseen, "bands": bands, "min_unseen": args.min_unseen,
-        "forced": bool(args.force and unseen < args.min_unseen),
+        "unseen": pool.unseen, "bands": pool.bands,
+        "min_unseen": args.min_unseen, "min_examples": args.min_examples,
+        "largest_mode": pool.largest_mode, "largest": pool.largest,
+        "pool_reason": pool.reason,
+        "forced": bool(args.force and not pool.worth_training),
         "balance": balance, "n_train": len(tasks),
         "n_calibration": len(calibration), "n_heldout": len(held),
         "dropped_for_task_overlap": dropped,
@@ -543,8 +608,10 @@ def markdown(p: Dict[str, Any], card) -> str:
         "| | |",
         "|---|---|",
         f"| records | `{p['records']}` |",
-        f"| P(new error mode) | **{p['unseen']:.4f}** "
-        f"(gate: {p['min_unseen']}) |",
+        f"| P(new error mode) | {p['unseen']:.4f} "
+        f"(worth training at {p['min_unseen']}) |",
+        f"| largest error mode | **{p['largest']}** x "
+        f"`{p['largest_mode']}` (worth training at {p['min_examples']}) |",
         f"| training units | {p['n_train']} "
         f"({p['balance']['kept_each']} right + {p['balance']['kept_each']} "
         f"wrong, from {p['balance']['right']}/{p['balance']['wrong']}) |",
@@ -580,9 +647,8 @@ def markdown(p: Dict[str, Any], card) -> str:
         card.to_markdown(),
     ]
     if p["forced"]:
-        lines.insert(3, "> Trained on a saturated pool under `--force`. The "
-                        "rubric below is fitted to the errors that were in "
-                        "hand.\n")
+        lines.insert(3, f"> Trained under `--force` on a pool the gate "
+                        f"refused: {p['pool_reason']}\n")
     if p["dry_run"]:
         lines.insert(3, "> `--dry-run`: the judge is an offline stand-in. This "
                         "exercises the path and measures nothing.\n")

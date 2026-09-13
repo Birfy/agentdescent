@@ -10,12 +10,11 @@ other in every analysis and mean opposite things.
 """
 
 import os
-import pathlib
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scripts.audit_judge_repair import load_records  # noqa: E402
+from scripts.audit_modes import resolved_records  # noqa: E402
 
 STORES = [
     ("HotpotQA", "reports/audit_phase0_2026-09-09.jsonl"),
@@ -29,7 +28,7 @@ STORES = [
 def main() -> None:
     print(f"{'workload':10} {'n':>4} {'solver right':>13} {'disagreement':>13}")
     for label, path in STORES:
-        records = load_records(pathlib.Path(path))
+        records = resolved_records(path)
         if not records:
             print(f"{label:10} {'--':>4}  (no resolved pairs)")
             continue

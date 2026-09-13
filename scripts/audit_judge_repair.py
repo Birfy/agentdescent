@@ -53,6 +53,7 @@ from agentdescent.audit import AuditRecord, Purpose
 from agentdescent.audit.diagnose import evaluate_fix, residual_stats
 from agentdescent.evolution import Task
 
+from scripts.audit_modes import resolved_records
 from scripts.audit_phase0 import (_JUDGE_TMPL, label_agreement,
                                   task_index)
 
@@ -82,23 +83,6 @@ WORKLOADS = {
     "hotpot": "reports/audit_phase0_2026-09-09.jsonl",
     "bbh": "reports/audit_phase0_bbh_2026-09-10.jsonl",
 }
-
-
-def load_records(path: pathlib.Path) -> List[AuditRecord]:
-    """Last occurrence per ``record_id`` wins, matching the store's own rule."""
-    by_id: Dict[str, dict] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        row = json.loads(line)
-        if row.get("kind"):
-            continue
-        by_id[row["record_id"]] = row
-    out = []
-    for row in by_id.values():
-        row["purpose"] = Purpose(row["purpose"])
-        out.append(AuditRecord(**row))
-    return [r for r in out if r.oracle_score is not None]
 
 
 def judge_for(template: str, complete) -> Any:
@@ -325,7 +309,7 @@ def main() -> None:
 
     data: Dict[str, Tuple[List[AuditRecord], Dict[str, Task]]] = {}
     for name in args.workloads.split(","):
-        records = load_records(pathlib.Path(WORKLOADS[name]))
+        records = resolved_records(WORKLOADS[name])
         if args.limit:
             records = records[:args.limit]
         context = task_index(name, rows=args.index_rows)

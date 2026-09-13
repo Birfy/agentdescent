@@ -13,8 +13,9 @@ import pytest
 
 from agentdescent.audit import AuditRecord, Purpose
 from agentdescent.audit.diagnose import evaluate_fix
+from scripts.audit_modes import resolved_records
 from scripts.audit_diagnose import (echoes_the_question,
-                                    far_shorter_than_reference, load_records,
+                                    far_shorter_than_reference,
                                     make_fix, normalise)
 
 
@@ -137,6 +138,10 @@ def test_the_bundle_hides_a_rule_that_does_not_help():
 
 
 # -- loading -----------------------------------------------------------------
+#
+# The scripts used to carry two hand-rolled JSONL readers, which were
+# reimplementing `AuditStore`'s parser next to it. They are gone; these tests
+# now pin the properties the scripts *depend on*, against `resolved_records`.
 
 def _line(**kw):
     row = dict(record_id="r1", task_id="t", artifact_signature="s", output="o",
@@ -148,28 +153,49 @@ def _line(**kw):
     return json.dumps(row)
 
 
+def _resolved(**kw):
+    return _line(oracle_score=0.0, resolved_at=2.0, **kw)
+
+
 def test_the_last_occurrence_of_a_record_wins(tmp_path):
     """Resolution is an append in the store's own format, so a naive reader
     would report every audited unit as still pending."""
     path = tmp_path / "a.jsonl"
-    path.write_text("\n".join([_line(), _line(oracle_score=0.0, resolved_at=2.0)]))
-    got = load_records(path)
+    path.write_text("\n".join([_line(), _resolved()]))
+    got = resolved_records(path)
     assert len(got) == 1 and got[0].oracle_score == 0.0
 
 
+def test_an_unresolved_record_is_not_returned(tmp_path):
+    """Every caller filtered for this itself; the filter is the only thing any
+    of them wanted on top of the store's own reader."""
+    path = tmp_path / "a.jsonl"
+    path.write_text(_line())
+    assert resolved_records(path) == []
+
+
 def test_moments_snapshots_are_not_records(tmp_path):
+    """A store holds unlabelled-moment snapshots alongside records, and they
+    must not come back as audited units.
+
+    The snapshot here is the **real** shape. The version this replaces was a
+    stub -- `kind` plus three fields, no `moments` -- which the hand-rolled
+    reader accepted because it only ever looked at `kind`. `AuditStore` parses
+    it, so a malformed snapshot now raises instead of being silently skipped,
+    and the fixture had to become a real one to keep the test honest."""
     path = tmp_path / "a.jsonl"
     path.write_text("\n".join([
-        _line(),
-        json.dumps({"kind": "unlabelled_moments", "record_id": "m1",
-                    "verifier_version": "v1", "stratum": "all", "n": 10}),
+        _resolved(),
+        json.dumps({"kind": "unlabelled_moments", "verifier_version": "v1",
+                    "stratum": "all",
+                    "moments": {"n": 10, "mean": 0.5, "m2": 2.0}}),
         "",
     ]))
-    got = load_records(path)
+    got = resolved_records(path)
     assert len(got) == 1 and got[0].record_id == "r1"
 
 
 def test_the_purpose_comes_back_as_the_enum(tmp_path):
     path = tmp_path / "a.jsonl"
-    path.write_text(_line(purpose="improvement"))
-    assert load_records(path)[0].purpose is Purpose.IMPROVEMENT
+    path.write_text(_resolved(purpose="improvement"))
+    assert resolved_records(path)[0].purpose is Purpose.IMPROVEMENT

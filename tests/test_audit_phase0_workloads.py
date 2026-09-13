@@ -15,22 +15,25 @@ def _task(gold, *, meta=None):
                   meta={"gold": gold, "expected": gold, **(meta or {})})
 
 
-def test_every_workload_has_an_oracle_a_label_a_near_miss_and_an_indexer():
-    """Six tables keyed by workload, and a workload missing from any one of them
-    fails at a different point -- the oracle at the first score, the label only
-    in the written report, and `_INDEXERS` not until something asks for that
-    workload's gold answers, which is *after* its run has finished and paid for
-    itself. `gsm_hard` shipped with a loader, four table entries and no indexer
-    branch; it would have failed at `context_for` with the records already
-    written, which is why `task_index` dispatches through a table now."""
-    for table in (P.ORACLES, P._ORACLE_LABELS, P._WORKLOAD_LABELS,
-                  P._NEAR_MISS, P._WRONG, P._INDEXERS):
-        assert set(table) == set(P.WORKLOADS)
+def test_a_workload_cannot_be_half_registered():
+    """This was seven parallel dicts kept in agreement by a test that checked
+    they had the same keys. The test was not enough: `gsm_hard` shipped with six
+    entries and no indexer, and nothing failed until something asked for its
+    gold answers -- after a paid run had finished. One object per workload
+    cannot be half-registered, and this test now only has to confirm the
+    object is whole."""
+    for name, w in P.WORKLOADS.items():
+        assert w.label and w.oracle_label, name
+        assert callable(w.oracle) and callable(w.near_miss), name
+        assert w.wrong and all(callable(f) for f in w.wrong), name
+        # Either a dataset to read rows from, or its own sampler and indexer.
+        assert (w.dataset and w.to_task) or (w.sample_with and w.index_with), name
 
 
 def test_the_free_text_oracle_is_shared_and_the_numeric_one_is_not():
-    assert P.ORACLES["hotpot"] is P.ORACLES["bbh"] is P.exact_match
-    assert P.ORACLES["gsm8k"] is P.number_match
+    assert (P.WORKLOADS["hotpot"].oracle is P.WORKLOADS["bbh"].oracle
+            is P.exact_match)
+    assert P.WORKLOADS["gsm8k"].oracle is P.number_match
 
 
 def test_exact_match_would_have_scored_gsm8ks_own_answers_wrong():
@@ -49,7 +52,8 @@ def test_each_workloads_near_miss_is_one_its_own_oracle_refuses():
     for `number_match`, so the shared string gave the GSM8K dry run no
     disagreements -- a rehearsal that exercises none of the paths it exists to
     rehearse."""
-    for workload, oracle in P.ORACLES.items():
+    for name, w in P.WORKLOADS.items():
+        oracle, workload = w.oracle, name
         # A gold its own oracle can actually score. Picked by the oracle rather
         # than by the workload's name -- a numeric oracle scores "Ottawa" wrong
         # against itself, which would pass the near-miss assertion below for the
@@ -60,7 +64,7 @@ def test_each_workloads_near_miss_is_one_its_own_oracle_refuses():
         else:
             gold = "18" if oracle is P.number_match else "Ottawa"
             task = _task(gold)
-        near = P._NEAR_MISS[workload](gold)
+        near = w.near_miss(gold)
         assert oracle(task, near) == 0.0, f"{workload}: near-miss was accepted"
         assert oracle(task, gold) == 1.0, f"{workload}: gold was refused"
 
@@ -100,7 +104,7 @@ def test_gsm8k_wrong_answers_span_more_than_one_error_mode():
 
     rng = random.Random(0)
     modes = {gsm8k_error_mode(_Rec(shape("18", rng)), ("q", "18", None))
-             for shape in P._WRONG["gsm8k"] for _ in range(20)}
+             for shape in P.WORKLOADS["gsm8k"].wrong for _ in range(20)}
     assert len(modes) >= 3
 
 

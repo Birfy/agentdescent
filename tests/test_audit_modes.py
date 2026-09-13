@@ -36,7 +36,6 @@ def test_the_normaliser_is_still_the_oracles_own_object():
 
 def test_every_workload_has_a_mode_function():
     assert set(audit_modes.ERROR_MODES) == set(audit_phase0.WORKLOADS)
-    assert set(audit_modes.ERROR_MODES) == set(audit_phase0.ORACLES)
 
 
 # -- the GSM8K modes ----------------------------------------------------------

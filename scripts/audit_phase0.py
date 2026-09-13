@@ -63,8 +63,9 @@ import sys
 import tempfile
 import time
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -203,24 +204,6 @@ def tests_pass(task: Task, output: str) -> float:
     return 1.0 if run_tests(extract_code(output), tests) else 0.0
 
 
-#: The oracle each workload is scored against. A single module-level oracle was
-#: right while both workloads were free-text and wrong the moment one of them
-#: answered with a quantity.
-ORACLES = {"hotpot": exact_match, "bbh": exact_match, "gsm8k": number_match,
-           "gsm_hard": number_match, "mbpp": tests_pass}
-
-#: What the report calls each oracle. Hard-coded as "normalized exact match" for
-#: two workloads that both used it, and a report naming the wrong oracle is the
-#: one error in a measurement nobody can catch later from the file.
-_ORACLE_LABELS = {
-    "hotpot": "normalized exact match against the reference",
-    "bbh": "normalized exact match against the reference",
-    "gsm8k": "the final number in the answer, compared as a quantity",
-    "gsm_hard": "the final number in the answer, compared as a quantity",
-    "mbpp": "the task's own asserts, executed against the candidate",
-}
-
-
 _JUDGE_TMPL = """You are grading an answer to a question.
 
 Question: {question}
@@ -321,6 +304,27 @@ def _bbh_task(subtask: str, row: Dict) -> Optional[Task]:
                 meta={"gold": answer, "expected": answer, "subtask": subtask})
 
 
+#: BBH subtasks, chosen for the *shape* of their answers rather than for
+#: difficulty. The phenomenon under study is a judge accepting what exact match
+#: refuses, so a subtask whose only correct string is ``True`` or ``False``
+#: contributes nothing: the two scorers cannot disagree there. These can.
+#:
+#: ``date_understanding`` and ``salient_translation_error_detection`` want a
+#: label -- ``(B)`` -- where a model naturally answers with the content;
+#: ``object_counting`` wants ``8`` where a model may write ``eight``;
+#: ``word_sorting`` wants an exact sequence a model may punctuate. The Yes/No
+#: pair is in for contrast: it is most of BBH, and a workload where the two
+#: scorers *cannot* differ is worth having in the same measurement.
+BBH_SUBTASKS = (
+    "date_understanding",
+    "object_counting",
+    "word_sorting",
+    "salient_translation_error_detection",
+    "causal_judgement",
+    "sports_understanding",
+)
+
+
 def _gsm8k_task(row: Dict) -> Optional[Task]:
     """One GSM8K row as a task. The only place a GSM8K task id is constructed.
 
@@ -345,167 +349,6 @@ def _gsm8k_task(row: Dict) -> Optional[Task]:
                       "worked": answer.rsplit("####", 1)[0].strip()})
 
 
-def task_index(workload: str, *, rows: int = 400) -> Dict[str, Task]:
-    """``task_id -> Task`` for re-joining records to their gold answers.
-
-    **Not** ``{t.id: t for t in <loader>(n)}``, and the difference is the point.
-    A loader draws a *sample*: it shuffles and truncates, so which tasks come
-    back depends on ``n`` and ``seed``, and reconstructing a past run's sample
-    means knowing the exact arguments it was called with. An index does not
-    sample -- it reads a window of the dataset and keys every row by the same id
-    rule the loader uses.
-
-    Measured the hard way: rebuilding HotpotQA context with
-    ``hotpot_tasks(200)`` failed to join **90 of 177** records from a run that
-    had called ``hotpot_tasks(80)``, because a 400-row shuffle and a 160-row
-    shuffle under the same seed are different shuffles. The ids were never the
-    problem; drawing a different sample was.
-    """
-    try:
-        build = _INDEXERS[workload]
-    except KeyError:
-        raise ValueError(f"unknown workload {workload!r}") from None
-    return build(rows)
-
-
-def _index_of(dataset: str, split: str, config: str, to_task) -> Any:
-    """An indexer for a workload that is one dataset and one config."""
-    def build(rows: int) -> Dict[str, Task]:
-        from agentdescent.dataloader import hf_rows
-
-        out: Dict[str, Task] = {}
-        for row in hf_rows(dataset, split, config=config, limit=rows):
-            task = to_task(row)
-            if task is not None:
-                out[task.id] = task
-        return out
-    return build
-
-
-def _index_bbh(rows: int) -> Dict[str, Task]:
-    """BBH is one config per subtask, so it cannot use `_index_of`."""
-    from agentdescent.dataloader import hf_rows
-
-    out: Dict[str, Task] = {}
-    for name in BBH_SUBTASKS:
-        for row in hf_rows("lukaemon/bbh", "test", config=name,
-                           limit=max(40, rows // len(BBH_SUBTASKS))):
-            task = _bbh_task(name, row)
-            if task is not None:
-                out[task.id] = task
-    return out
-
-
-def hotpot_tasks(n: int, *, seed: int = 0) -> List[Task]:
-    """HotpotQA validation questions, answerable without the distractor context.
-
-    The questions are multi-hop and the context is not given to the solver: the
-    point is a workload where a capable model is *often but not always* right and
-    its near-misses are real, not a benchmark score.
-    """
-    from agentdescent.dataloader import hf_rows
-
-    rows = hf_rows("hotpotqa/hotpot_qa", "validation", config="distractor",
-                   limit=max(n * 2, 40))
-    rng = random.Random(seed)
-    rng.shuffle(rows)
-    tasks: List[Task] = []
-    for row in rows:
-        task = _hotpot_task(row)
-        if task is None:
-            continue
-        tasks.append(task)
-        if len(tasks) >= n:
-            break
-    return tasks
-
-
-#: BBH subtasks, chosen for the *shape* of their answers rather than for
-#: difficulty. The phenomenon under study is a judge accepting what exact match
-#: refuses, so a subtask whose only correct string is ``True`` or ``False``
-#: contributes nothing: the two scorers cannot disagree there. These can.
-#:
-#: ``date_understanding`` and ``salient_translation_error_detection`` want a
-#: label -- ``(B)`` -- where a model naturally answers with the content;
-#: ``object_counting`` wants ``8`` where a model may write ``eight``;
-#: ``word_sorting`` wants an exact sequence a model may punctuate. The Yes/No
-#: pair is in for contrast: it is most of BBH, and a workload where the two
-#: scorers *cannot* differ is worth having in the same measurement.
-BBH_SUBTASKS = (
-    "date_understanding",
-    "object_counting",
-    "word_sorting",
-    "salient_translation_error_detection",
-    "causal_judgement",
-    "sports_understanding",
-)
-
-
-def bbh_tasks(n: int, *, seed: int = 0,
-              subtasks: Sequence[str] = BBH_SUBTASKS) -> List[Task]:
-    """BIG-Bench Hard, sampled across subtasks rather than down one of them.
-
-    A single subtask is one answer shape, and the residual this experiment
-    measures is mostly a property of the shape. Spreading the draw is what makes
-    the second workload a second *workload* and not a second sample of the
-    first.
-
-    The subtask goes in ``meta`` so the diagnosis can group by it -- which is
-    also what the coverage sampler's key wants.
-    """
-    from agentdescent.dataloader import hf_rows
-
-    rng = random.Random(seed)
-    per = max(1, n // max(1, len(subtasks)))
-    tasks: List[Task] = []
-    for name in subtasks:
-        rows = hf_rows("lukaemon/bbh", "test", config=name,
-                       limit=max(per * 2, 20))
-        rng.shuffle(rows)
-        taken = 0
-        for row in rows:
-            task = _bbh_task(name, row)
-            if task is None:
-                continue
-            tasks.append(task)
-            taken += 1
-            if taken >= per:
-                break
-    rng.shuffle(tasks)
-    return tasks[:n]
-
-
-def gsm8k_tasks(n: int, *, seed: int = 0) -> List[Task]:
-    """GSM8K grade-school word problems, scored on the final number.
-
-    The third workload, and it is here for the **error modes the first two
-    cannot produce**. HotpotQA's judge is too generous about paraphrase; BBH's
-    stops discriminating on option labels. Neither has a *derivation* in the
-    output, so neither can produce the failure everyone actually fears from an
-    LLM judge: a candidate whose arithmetic reads correctly and whose final
-    number is wrong, marked right because the working looked right.
-
-    Why that matters here rather than as another benchmark row: the improvement
-    pool is allocated by how likely the next label is to show something *new*,
-    and after two workloads that probability had fallen to 0.0169 -- saturated.
-    More labels on the same two shapes cannot move it. A third shape can.
-    """
-    from agentdescent.dataloader import hf_rows
-
-    rows = hf_rows("openai/gsm8k", "test", config="main", limit=max(n * 2, 40))
-    rng = random.Random(seed)
-    rng.shuffle(rows)
-    tasks: List[Task] = []
-    for row in rows:
-        task = _gsm8k_task(row)
-        if task is None:
-            continue
-        tasks.append(task)
-        if len(tasks) >= n:
-            break
-    return tasks
-
-
 def _gsm_hard_task(row: Dict) -> Optional[Task]:
     """One GSM-Hard row as a task. The only place a GSM-Hard task id is constructed."""
     question = str(row.get("input") or "").strip()
@@ -515,46 +358,6 @@ def _gsm_hard_task(row: Dict) -> Optional[Task]:
     digest = hashlib.sha256(question.encode("utf-8")).hexdigest()[:10]
     return Task(id=f"gsm_hard:{digest}", prompt=question,
                 meta={"gold": gold, "expected": gold})
-
-
-def gsm_hard_tasks(n: int, *, seed: int = 0) -> List[Task]:
-    """GSM8K's problems with the numbers replaced by large ones.
-
-    The fourth workload, and the one that finally supplies what the third was
-    chosen for. Phase 0 on plain GSM8K returned `Delta = 0.0000` and
-    **zero** disagreement -- not because the judge is good at arithmetic but
-    because the solver got 98.3% of grade-school word problems right, and a
-    judge cannot be measured on a distribution with no errors in it.
-
-    GSM-Hard keeps the reasoning structure and makes the arithmetic hard, which
-    is the one combination that produces the mode this line of work is about: a
-    derivation that reads correctly around a **wrong final number**. Probed at
-    24 questions, the solver gets 65% and the misses are four distinct shapes --
-    an arithmetic slip (`17414074` answered `17413984`), a repeating decimal
-    rounded (`14053029.666666666` answered `14053029.666`), a unit confusion,
-    and refusing a premise the substitution made absurd.
-
-    Constraining the *solver* was the other candidate and is worse. Capping its
-    tokens at 96 does drop accuracy to 67%, but the errors are **truncations**:
-    the output stops mid-derivation with no answer in it, so `final_number`
-    reads whatever number the sentence was cut after. That is a broken solver,
-    not a hard problem, and the modes it generates are artefacts of the cap.
-    """
-    from agentdescent.dataloader import hf_rows
-
-    rows = hf_rows("reasoning-machines/gsm-hard", "train", config="default",
-                   limit=max(n * 2, 40))
-    rng = random.Random(seed)
-    rng.shuffle(rows)
-    tasks: List[Task] = []
-    for row in rows:
-        task = _gsm_hard_task(row)
-        if task is None:
-            continue
-        tasks.append(task)
-        if len(tasks) >= n:
-            break
-    return tasks
 
 
 def _mbpp_task(row: Dict) -> Optional[Task]:
@@ -582,76 +385,134 @@ def _mbpp_task(row: Dict) -> Optional[Task]:
                 meta={"gold": code, "expected": code, "tests": tests})
 
 
-def mbpp_tasks(n: int, *, seed: int = 0) -> List[Task]:
-    """MBPP: small Python problems, scored by running their own asserts.
+@dataclass(frozen=True)
+class Workload:
+    """Everything that is per-workload, in one place.
 
-    The fifth workload and the first where **grading is the hard part**. Three
-    workloads established that a harder *solving* task does not produce judge
-    errors -- GSM-Hard dropped the solver to 79.6% and the judge still disagreed
-    with the truth on 3.7% of units, both times because the *oracle* could not
-    parse the answer. Judge error comes from the judging task being ambiguous,
-    and "is this number that number" never is.
+    This was **seven** parallel dicts keyed by workload name -- the oracle, its
+    label, the loader, the indexer, the dry-run near-miss, the dry-run wrong
+    answers, and the report label. Seven tables that had to agree, kept in
+    agreement by a test that checked they had the same keys.
 
-    "Does this code do the same thing as that reference code" always is. The
-    judge cannot execute anything, two correct solutions look nothing alike, and
-    a subtly wrong one looks exactly like a right one. Meanwhile the oracle is
-    exact and independent: run the asserts.
+    The test was not enough, and the way it failed is the argument for this
+    class: `gsm_hard` shipped with six entries and no indexer, the test passed
+    because it predated the indexer table, and nothing failed until something
+    asked for that workload's gold answers -- after a paid run had finished.
+    One object per workload cannot be half-registered.
+    """
 
-    That combination is what the audit package is *for*, and it is the one the
-    first four workloads could not supply.
+    #: What the report calls the workload.
+    label: str
+    #: ``(task, output) -> 1.0 | 0.0``. Ground truth.
+    oracle: Callable[[Task, str], float]
+    #: What the report calls the oracle. A report naming the wrong oracle is
+    #: the one error in a measurement nobody can catch later from the file.
+    oracle_label: str
+    #: An answer the judge forgives and this oracle refuses, for `--dry-run`.
+    #: It has to be a near-miss *for this oracle*: `The answer is 18.` is one
+    #: for exact match and simply correct for `number_match`.
+    near_miss: Callable[[str], str]
+    #: Wrong answers for `--dry-run`, several shapes rather than one constant.
+    #: A single `"unknown"` gives the whole dry run one error mode, so
+    #: `P(new error mode)` comes back 0.0 and anything gated on coverage
+    #: refuses to run -- which reads as a finding and is an artefact.
+    wrong: Sequence[Callable[[str, random.Random], str]]
+    #: The dataset a row comes from, and the row -> Task rule.
+    dataset: str = ""
+    split: str = ""
+    config: str = ""
+    to_task: Optional[Callable[[Dict], Optional[Task]]] = None
+    #: BBH alone needs these: it is one dataset config per subtask, so neither
+    #: the sample nor the index is a single `hf_rows` call.
+    sample_with: Optional[Callable[[int, int], List[Task]]] = None
+    index_with: Optional[Callable[[int], Dict[str, Task]]] = None
+
+    def rows(self, limit: int) -> List[Dict]:
+        from agentdescent.dataloader import hf_rows
+
+        return hf_rows(self.dataset, self.split, config=self.config,
+                       limit=limit)
+
+    def sample(self, n: int, *, seed: int = 0) -> List[Task]:
+        """``n`` tasks, shuffled. A *sample*, and that is the point.
+
+        Which tasks come back depends on ``n`` and ``seed``, so this is the
+        wrong thing to rebuild a past run's context with -- see `task_index`.
+        """
+        if self.sample_with is not None:
+            return self.sample_with(n, seed)
+        rows = self.rows(max(n * 2, 40))
+        random.Random(seed).shuffle(rows)
+        out: List[Task] = []
+        for row in rows:
+            task = self.to_task(row)
+            if task is not None:
+                out.append(task)
+                if len(out) >= n:
+                    break
+        return out
+
+    def index(self, rows: int) -> Dict[str, Task]:
+        """``task_id -> Task`` over a *window*, with no sampling."""
+        if self.index_with is not None:
+            return self.index_with(rows)
+        out: Dict[str, Task] = {}
+        for row in self.rows(rows):
+            task = self.to_task(row)
+            if task is not None:
+                out[task.id] = task
+        return out
+
+
+def _bbh_sample(n: int, seed: int) -> List[Task]:
+    """BBH, sampled across subtasks rather than down one of them.
+
+    A single subtask is one answer shape, and the residual this experiment
+    measures is mostly a property of the shape. Spreading the draw is what makes
+    it a second *workload* and not a second sample of the first.
     """
     from agentdescent.dataloader import hf_rows
 
-    rows = hf_rows("google-research-datasets/mbpp", "test", config="full",
-                   limit=max(n * 2, 40))
     rng = random.Random(seed)
-    rng.shuffle(rows)
+    per = max(1, n // len(BBH_SUBTASKS))
     tasks: List[Task] = []
-    for row in rows:
-        task = _mbpp_task(row)
-        if task is None:
-            continue
-        tasks.append(task)
-        if len(tasks) >= n:
-            break
-    return tasks
+    for name in BBH_SUBTASKS:
+        rows = hf_rows("lukaemon/bbh", "test", config=name,
+                       limit=max(per * 2, 20))
+        rng.shuffle(rows)
+        taken = 0
+        for row in rows:
+            task = _bbh_task(name, row)
+            if task is None:
+                continue
+            tasks.append(task)
+            taken += 1
+            if taken >= per:
+                break
+    rng.shuffle(tasks)
+    return tasks[:n]
 
 
-WORKLOADS = {"hotpot": hotpot_tasks, "bbh": bbh_tasks, "gsm8k": gsm8k_tasks,
-             "gsm_hard": gsm_hard_tasks, "mbpp": mbpp_tasks}
+def _bbh_index(rows: int) -> Dict[str, Task]:
+    from agentdescent.dataloader import hf_rows
 
-#: How each workload is indexed. A **table** rather than a chain of ``if``s
-#: because a missing branch is invisible until something asks for that
-#: workload's gold answers, which is after its Phase 0 run has finished and
-#: paid for itself: `gsm_hard` shipped with a loader, four table entries and no
-#: branch here, and would have failed at `context_for` with the records already
-#: written. `test_every_workload_can_be_indexed` covers this table the same way
-#: the other four are covered.
-_INDEXERS = {
-    "hotpot": _index_of("hotpotqa/hotpot_qa", "validation", "distractor",
-                        _hotpot_task),
-    "bbh": _index_bbh,
-    "gsm8k": _index_of("openai/gsm8k", "test", "main", _gsm8k_task),
-    "gsm_hard": _index_of("reasoning-machines/gsm-hard", "train", "default",
-                          _gsm_hard_task),
-    "mbpp": _index_of("google-research-datasets/mbpp", "test", "full",
-                      _mbpp_task),
-}
+    out: Dict[str, Task] = {}
+    for name in BBH_SUBTASKS:
+        for row in hf_rows("lukaemon/bbh", "test", config=name,
+                           limit=max(40, rows // len(BBH_SUBTASKS))):
+            task = _bbh_task(name, row)
+            if task is not None:
+                out[task.id] = task
+    return out
 
 
-#: An answer the judge forgives and the workload's oracle refuses, for
-#: `--dry-run`. Keyed by workload because "the oracle refuses it" is a statement
-#: about the oracle: GSM8K's reads the **last** number, so trailing context is
-#: what moves it, where a restated sentence does not.
-_NEAR_MISS = {
-    "hotpot": lambda gold: f"The answer is {gold}.",
-    "bbh": lambda gold: f"The answer is {gold}.",
-    "gsm8k": lambda gold: f"Working through it, the answer is {gold} (over 7 days).",
-    "gsm_hard": lambda gold: f"Working through it, the answer is {gold} (over 7 days).",
-    # Code that reads like the reference and returns the wrong thing. The judge
-    # sees the same shape; the asserts do not.
-    "mbpp": lambda gold: _plausibly_broken(gold),
-}
+def _restated(gold: str) -> str:
+    return f"The answer is {gold}."
+
+
+def _trailing_context(gold: str) -> str:
+    """A near-miss for an oracle that reads the **last** number."""
+    return f"Working through it, the answer is {gold} (over 7 days)."
 
 
 def _plausibly_broken(gold: str) -> str:
@@ -659,53 +520,79 @@ def _plausibly_broken(gold: str) -> str:
 
     Not `"unknown"` and not a stub: the near-miss has to be something the
     *judge* forgives, and a judge forgives code that looks like the reference.
-    Flipping a comparison keeps the shape and breaks the asserts, which is the
-    whole phenomenon in one string.
+    Flipping a comparison keeps the shape and breaks the asserts.
     """
     for a, b in (("<=", "<"), (">=", ">"), ("==", "!="), ("+", "-")):
         if a in gold:
             return gold.replace(a, b, 1)
     return gold + "\n# (returns the wrong branch)"
 
-#: Wrong answers for `--dry-run`, several shapes rather than one constant.
-#:
-#: A single ``"unknown"`` for every wrong answer gives the whole dry run **one**
-#: error mode, so `P(new error mode)` comes back 0.0 and anything gated on
-#: coverage refuses to run -- which reads as a finding about the workload and is
-#: a property of the stand-in solver. The shapes here are chosen to land in
-#: different buckets of `scripts.audit_modes`, so a rehearsal exercises the
-#: coverage path rather than short-circuiting it.
-_WRONG = {
-    "hotpot": (lambda gold, rng: "unknown",),
-    "bbh": (lambda gold, rng: "unknown",),
-    "gsm8k": (
-        lambda gold, rng: str(rng.randint(1, 400)),
-        lambda gold, rng: (f"{rng.randint(2, 9)} * {rng.randint(2, 9)} = "
-                           f"{rng.randint(1, 400)}, so that is the answer."),
-        lambda gold, rng: "I could not work this out.",
-    ),
-    "gsm_hard": (
-        lambda gold, rng: str(rng.randint(1, 400)),
-        lambda gold, rng: (f"{rng.randint(2, 9)} * {rng.randint(2, 9)} = "
-                           f"{rng.randint(1, 400)}, so that is the answer."),
-        lambda gold, rng: "I could not work this out.",
-    ),
-    "mbpp": (
-        lambda gold, rng: "def solve():\n    pass",
-        lambda gold, rng: "I could not work out an implementation.",
-        lambda gold, rng: "def solve(:\n  return",          # a syntax error
-    ),
+
+_UNKNOWN = (lambda gold, rng: "unknown",)
+_WRONG_NUMBERS = (
+    lambda gold, rng: str(rng.randint(1, 400)),
+    lambda gold, rng: (f"{rng.randint(2, 9)} * {rng.randint(2, 9)} = "
+                       f"{rng.randint(1, 400)}, so that is the answer."),
+    lambda gold, rng: "I could not work this out.",
+)
+_NUMERIC_ORACLE = "the final number in the answer, compared as a quantity"
+_STRING_ORACLE = "normalized exact match against the reference"
+
+#: One entry per workload. `--workload` chooses from these keys.
+WORKLOADS: Dict[str, Workload] = {
+    "hotpot": Workload(
+        label="HotpotQA validation",
+        oracle=exact_match, oracle_label=_STRING_ORACLE,
+        near_miss=_restated, wrong=_UNKNOWN,
+        dataset="hotpotqa/hotpot_qa", split="validation", config="distractor",
+        to_task=_hotpot_task),
+    "bbh": Workload(
+        label=f"BIG-Bench Hard across {len(BBH_SUBTASKS)} subtasks",
+        oracle=exact_match, oracle_label=_STRING_ORACLE,
+        near_miss=_restated, wrong=_UNKNOWN,
+        sample_with=_bbh_sample, index_with=_bbh_index),
+    "gsm8k": Workload(
+        label="GSM8K test, scored on the final number",
+        oracle=number_match, oracle_label=_NUMERIC_ORACLE,
+        near_miss=_trailing_context, wrong=_WRONG_NUMBERS,
+        dataset="openai/gsm8k", split="test", config="main",
+        to_task=_gsm8k_task),
+    "gsm_hard": Workload(
+        label="GSM-Hard (GSM8K with large numbers), scored on the final number",
+        oracle=number_match, oracle_label=_NUMERIC_ORACLE,
+        near_miss=_trailing_context, wrong=_WRONG_NUMBERS,
+        dataset="reasoning-machines/gsm-hard", split="train", config="default",
+        to_task=_gsm_hard_task),
+    "mbpp": Workload(
+        label="MBPP, scored by executing each task's asserts",
+        oracle=tests_pass,
+        oracle_label="the task's own asserts, executed against the candidate",
+        near_miss=_plausibly_broken,
+        wrong=(lambda gold, rng: "def solve():\n    pass",
+               lambda gold, rng: "I could not work out an implementation.",
+               lambda gold, rng: "def solve(:\n  return"),
+        dataset="google-research-datasets/mbpp", split="test", config="full",
+        to_task=_mbpp_task),
 }
 
-#: What the report calls each one. A report that says "HotpotQA validation" over
-#: BBH numbers is worse than one that says nothing.
-_WORKLOAD_LABELS = {
-    "hotpot": "HotpotQA validation",
-    "bbh": "BIG-Bench Hard across " + str(len(BBH_SUBTASKS)) + " subtasks",
-    "gsm8k": "GSM8K test, scored on the final number",
-    "gsm_hard": "GSM-Hard (GSM8K with large numbers), scored on the final number",
-    "mbpp": "MBPP, scored by executing each task's asserts",
-}
+
+def task_index(workload: str, *, rows: int = 400) -> Dict[str, Task]:
+    """``task_id -> Task`` for re-joining records to their gold answers.
+
+    **Not** ``{t.id: t for t in <loader>(n)}``, and the difference is the point.
+    A loader draws a *sample*: it shuffles and truncates, so which tasks come
+    back depends on ``n`` and ``seed``. An index does not sample -- it reads a
+    window of the dataset and keys every row by the same id rule.
+
+    Measured the hard way: rebuilding HotpotQA context with 200 tasks failed to
+    join **90 of 177** records from a run that had drawn 80, because a 400-row
+    shuffle and a 160-row shuffle under the same seed are different shuffles.
+    The ids were never the problem; drawing a different sample was.
+    """
+    try:
+        return WORKLOADS[workload].index(rows)
+    except KeyError:
+        raise ValueError(f"unknown workload {workload!r}") from None
 
 
 _OPTION = re.compile(r"\s*\(([A-Za-z])\)")
@@ -785,8 +672,9 @@ def by_subtask(records, tasks) -> Dict[str, Dict[str, float]]:
 # ---------------------------------------------------------------------------
 
 def run(args) -> Dict:
-    tasks = WORKLOADS[args.workload](args.tasks, seed=args.seed)
-    oracle = ORACLES[args.workload]
+    workload = WORKLOADS[args.workload]
+    tasks = workload.sample(args.tasks, seed=args.seed)
+    oracle = workload.oracle
     usage = Usage()
     notes: Dict[str, int] = {}
 
@@ -843,8 +731,7 @@ def run(args) -> Dict:
         # for `number_match`, so the shared string would have given the GSM8K
         # dry run no disagreements at all -- a harness rehearsal that exercises
         # none of the paths it exists to rehearse.
-        near_miss = _NEAR_MISS[args.workload]
-        wrong = _WRONG[args.workload]
+        near_miss, wrong = workload.near_miss, workload.wrong
 
         def _run(rendered: str, task: Task) -> str:
             rng = random.Random(f"{args.seed}:{task.id}:{len(rendered)}")
@@ -1070,10 +957,11 @@ def report(bundle: Dict, an: Dict, args) -> str:
         "",
         "| | |",
         "|---|---|",
-        f"| workload | {_WORKLOAD_LABELS[args.workload]}, "
+        f"| workload | {WORKLOADS[args.workload].label}, "
         f"{len(bundle['tasks'])} questions |",
         f"| verifier `f` (cheap, biased) | {bundle['judge_label']} |",
-        f"| oracle `Y` (ground truth) | {_ORACLE_LABELS[args.workload]} |",
+        f"| oracle `Y` (ground truth) | "
+        f"{WORKLOADS[args.workload].oracle_label} |",
         f"| `verifier_version` | `{bundle['audited'].verifier_version}` |",
         f"| loop | {args.rounds} rounds x {args.workers} workers, "
         f"held_out_frac={args.held_out_frac}, tournament={args.tournament} |",
