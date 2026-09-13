@@ -1427,6 +1427,7 @@ FixReport(
     false_negative_before: float,
     false_negative_after: float,
     unchanged: int,
+    moved: int = 0,
     noise_floor: int = 0
 ) -> None
 ```
@@ -1688,6 +1689,7 @@ RankReport(
     n_artifacts: int,
     by_artifact: Dict[str, Dict[str, float]] = <factory>,
     n_pairs: int = 0,
+    compared: Tuple[Tuple[str, str], ...] = (),
     agree: int = 0,
     ties: int = 0,
     flips: List[Flip] = <factory>
@@ -2139,6 +2141,7 @@ RectifiedAcceptance(
     enabled: bool = True,
     drift_allowance: Optional[float] = None,
     inflate_when_stale: float = 2.0,
+    explain_refusals: Optional[bool] = None,
     min_kappa: float = 0.001
 ) -> None
 ```
@@ -2152,6 +2155,7 @@ RectifiedAcceptance(
 | `enabled` | `bool` | `True` | `False` delegates to `inner` on the untouched context. This is the constraint that lets the audit be turned on mid-run: off, it is not approximately the old behaviour, it *is* the old call. |
 | `drift_allowance` | `Optional[float]` | `None` | Standard deviation to carry for `Delta` differing between the two sides being compared. `None` uses the rectification's own `se`, which is the right order of magnitude and not an estimate of the thing (see the module docstring). |
 | `inflate_when_stale` | `float` | `2.0` | Variance multiplier while no usable correction exists. `1.0` passes through instead, which is the choice to treat "we have not measured the verifier" and "the verifier is unbiased" as the same claim. |
+| `explain_refusals` | `Optional[bool]` | `None` |  |
 | `min_kappa` | `float` | `0.001` |  |
 
 | method | what it does |
