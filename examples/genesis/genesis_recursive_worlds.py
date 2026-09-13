@@ -120,6 +120,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help=("the control arm: drop the three-way merge, so two "
                               "agents editing one file contradict and one is "
                               "dropped on held-out score (the engine's default)"))
+    parser.add_argument("--no-accountability", action="store_true",
+                        help=("make a manager a pure router: skip upstream's "
+                              "review-and-accountability turn at its own node "
+                              "after its children return"))
     parser.add_argument("--no-parent-tests", action="store_true",
                         help=("stop the parent running the suite on a child's "
                               "work before accepting it; leaves only the scope "
@@ -154,7 +158,10 @@ def main(argv=None) -> None:
                                    "  [git missing: every contested file falls back]"))
     print(f"Gate     : {gate}")
     print("Parent   : scope check"
-          + ("" if args.no_parent_tests else " + integration test on each child's work"))
+          + ("" if args.no_parent_tests else " + integration test on each child's work")
+          + ("" if not args.no_accountability else "")
+          + ("; manager routes only" if args.no_accountability
+             else "; manager reviews and writes its own node last"))
 
     if args.dry_run:
         print("Data     : deferred (dry-run performs no network access)")
@@ -187,7 +194,8 @@ def main(argv=None) -> None:
         log=log, max_depth=args.depth, max_edits=4, contracts=FROZEN,
         # The parent's own test run, inside the episode, on one child's work --
         # the half of the upstream rule the acceptance gate cannot see.
-        review=None if args.no_parent_tests else suite_review(tasks))
+        review=None if args.no_parent_tests else suite_review(tasks),
+        accountability=not args.no_accountability)
     judge = ParentJudge(log=log, enabled=not args.engine_gate)
     octopus = None if args.keyed_union else OctopusConflict()
 
@@ -232,7 +240,9 @@ def main(argv=None) -> None:
           f"sibling_conflicts={delegation.sibling_conflicts}  "
           f"requests raised/handled/unmet={delegation.requests_raised}/"
           f"{delegation.adopted_requests}/{delegation.unmet_requests}  "
-          f"node_relative_paths={delegation.resolved_relative}")
+          f"node_relative_paths={delegation.resolved_relative}  "
+          f"accountability={delegation.accountability_edits}/"
+          f"{delegation.accountability_declined}")
     if octopus is not None:
         print(f"merge           : merged={octopus.merged} conflicted={octopus.conflicted}")
     if not args.engine_gate:

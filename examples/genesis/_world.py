@@ -46,6 +46,7 @@ __all__ = [
     "TRUNCATED",
     "WorldLog",
     "child_paths",
+    "directly_at",
     "normalise",
     "owns",
     "parse_routing",
@@ -145,6 +146,17 @@ def normalise(path: str) -> str:
     while p.startswith("./"):
         p = p[2:]
     return "" if p in ("", ".") else p
+
+
+def directly_at(node: str, path: str) -> bool:
+    """Is ``path`` a file of ``node`` itself, rather than of one of its children?
+
+    The distinction upstream draws between what a manager delegates and what it
+    is directly responsible for writing.
+    """
+    node, path = normalise(node), normalise(path)
+    head = path.rsplit("/", 1)[0] if "/" in path else ""
+    return head == node
 
 
 def owns(owner: str, path: str) -> bool:
@@ -325,9 +337,20 @@ class LocalWorld:
         if skills:
             parts.append("--- skills available here (read one before using it) ---\n"
                          + "\n".join(f"  {k}" for k in skills))
-        mine = sorted(p for p in state if owns(self.path, p))
-        listing = "\n".join(f"  {p} ({len(state[p])} bytes)" for p in mine) or "  (empty)"
-        parts.append(f"--- files under {self.path or './'} ---\n{listing}")
+        # Split "mine" from "my children's". An agent is bad at noticing an
+        # absence inside a long list, and the absence is the actionable part:
+        # a node that owns no file yet says so on its own line.
+        own, below = [], []
+        for key in sorted(state):
+            if not owns(self.path, key):
+                continue
+            (own if directly_at(self.path, key) else below).append(key)
+        parts.append(
+            f"--- files AT {self.path or './'} (yours to write) ---\n"
+            + ("\n".join(f"  {k} ({len(state[k])} bytes)" for k in own)
+               or "  (none yet -- this node owns no file)")
+            + f"\n--- files below {self.path or './'} (each child's own) ---\n"
+            + ("\n".join(f"  {k}" for k in below) or "  (none yet)"))
         text = "\n\n".join(parts)
         return text if len(text) <= max_chars else text[:max_chars] + "\n" + TRUNCATED
 

@@ -623,6 +623,9 @@ Reply with ONE JSON object and nothing else:
 {{"delegations": [{{"path": "<a node inside {path}>", "objective": "<one sentence>"}}]}}
 
 Rules:
+- You are ACCOUNTABLE for all code under `{path}`, and delegating does not \
+discharge that. The files AT `{path}` itself are nobody else's to write: after \
+your children return you get one more turn to write them.
 - A node is a **directory**, never a file. `src/frontend` is a node; \
 `src/frontend/lexer.py` is a file that belongs to the agent situated at \
 `src/frontend`, and delegating to it is refused.

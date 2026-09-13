@@ -194,7 +194,10 @@ as repository-relative, the files fell outside the agent's subtree, became
 upward requests, and the root — which does have authority everywhere — granted
 them at the top level. Every layer behaved exactly as designed.
 
-Two fixes, because one alone is not enough. The protocol now names the agent's own
+Three defects of this port's own stood between a model and a working toolchain,
+and the second and third were only visible once the first was gone.
+
+**"Relative to what?"** Two fixes, because one alone is not enough. The protocol now names the agent's own
 path in every example it shows and is rendered per episode rather than once, so
 "relative" has one meaning. And `resolve_edit_path` resolves a path against the
 node before anything else looks at it, ordered so that a genuine cross-node
@@ -203,7 +206,40 @@ node, or an existing file of the node's, means node-relative; a path whose first
 segment is an existing top-level entry is repository-relative and therefore a
 request about somebody else's node. Resolutions are **counted**
 (`node_relative_paths`), because the alternative to counting is a file appearing
-somewhere nobody asked for it.
+somewhere nobody asked for it. After it, every file landed where it belongs.
+
+**The agents could not see the contract they were judged against.** The language
+specification lives at `spec/CONTEXT.md` — a sibling of `src/`, so on nobody's
+`CONTEXT.md` chain — and `situate()` handed an agent the chain, its own file
+listing, and nothing else. So every agent inferred the whole language from one
+failing input, and built a coherent toolchain with `('NUMBER', '1')` tokens and a
+`parse(tokens)` signature against a specification that says `("num", 1)` and
+`parse(source)`. Five correct files, every one to the wrong contract.
+
+That was a straight misreading of the paper: *"An agent may inspect the complete
+project represented by v, but it begins from p"* (§3.1). The chain is where an
+agent **begins**, not a wall around what it may read — upstream it would open the
+spec with a read tool, and an agent here has no tools, so the human-supplied
+contract travels in the brief or it is invisible. `situate(contracts=)` now shows
+it in full wherever the agent stands. The next run's lexer emitted
+`[('num', 1), ('op', '+'), ('num', 2)]`.
+
+**A manager that delegates was never asked to finish.** With the contract visible
+and every path correct, the run produced five correct modules and **no
+`src/__init__.py`** — the public surface the specification names did not exist, so
+every case still scored zero, and the `src` node's own `CONTEXT.md` had told its
+manager *"Own `src/__init__.py`"*. It delegated every time instead.
+
+Upstream's Architect works in three phases — *architecture & design →
+implementation delegation → **review & accountability*** — and is "ACCOUNTABLE for
+all code in its node path" (`agents/architect.ex:23`). This port stopped after the
+second. A manager now gets one turn at its own node **after** its children return,
+seeing the tree as they left it, restricted to files directly at the node because a
+manager free to rewrite its children's work would make the decomposition
+decorative (`--no-accountability` turns it back into a pure router). `situate()`
+also splits "files AT this node (yours to write)" from "files below it (each
+child's own)", because an agent is bad at noticing an absence inside a long list
+and the absence is the actionable part.
 
 ## Honesty boundary
 

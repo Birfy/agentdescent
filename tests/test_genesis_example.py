@@ -124,7 +124,8 @@ def test_a_routing_note_is_trimmed_before_a_source_file():
                            if b.world.path == "src" else []),
         executor=lambda b: [Edit(b.world.path, f"{b.world.path}/f{i}.py", str(i))
                             for i in range(2)],
-        log=log, max_depth=3, max_edits=4, root_path="src")
+        log=log, max_depth=3, max_edits=4, root_path="src",
+        accountability=False)
     edits = parse_situated_edits(policy.propose(
         _proposal_ctx({"src/CONTEXT.md": _TABLE}, Task(id="t", prompt="x")))[0])
     assert len(edits) == 4 and policy.truncated == 1
@@ -241,7 +242,8 @@ def test_two_children_writing_one_file_are_merged_rather_than_one_rejected():
         manager=lambda b: ([Delegation("src/a", "x"), Delegation("src/a/b", "y")]
                            if b.world.path == "src" else []),
         executor=lambda b: [Edit(b.world.path, "src/a/b/f.py", bodies[b.world.path])],
-        log=log, max_depth=3, root_path="src")
+        log=log, max_depth=3, root_path="src",
+        accountability=False)
     edits = parse_situated_edits(policy.propose(
         _proposal_ctx(state, Task(id="t", prompt="x")))[0])
     merged = next(e["content"] for e in edits if e["path"] == "src/a/b/f.py")
@@ -263,7 +265,8 @@ def test_an_overlapping_sibling_is_sent_back_and_its_other_work_stands():
                            if b.world.path == "src" else []),
         executor=lambda b: [Edit(b.world.path, "src/a/b/f.py", bodies[b.world.path]),
                             Edit(b.world.path, f"{b.world.path}/own.py", "1\n")],
-        log=log, max_depth=3, max_edits=8, root_path="src")
+        log=log, max_depth=3, max_edits=8, root_path="src",
+        accountability=False)
     edits = {e["path"] for e in parse_situated_edits(policy.propose(
         _proposal_ctx(state, Task(id="t", prompt="x")))[0])}
     assert policy.sibling_conflicts == 1
@@ -527,13 +530,58 @@ def test_a_node_relative_filename_lands_in_the_node_not_at_the_repository_root()
         manager=lambda b: ([Delegation("src/frontend", "build the lexer")]
                            if b.world.path == "src" else []),
         executor=lambda b: [Edit(b.world.path, "lexer.py", "lex\n")],
-        log=log, max_depth=3, root_path="src")
+        log=log, max_depth=3, root_path="src",
+        accountability=False)
     routed = {"src/CONTEXT.md": "# src\n\n## Routing Table\n- `./src/frontend/` -> lexer\n"}
     edits = parse_situated_edits(policy.propose(
         _proposal_ctx(routed, Task(id="t", prompt="x")))[0])
     assert [e["path"] for e in edits] == ["src/frontend/lexer.py"]
     assert policy.resolved_relative == 1
     assert policy.requests_raised == 0, "it was never a cross-node request"
+
+
+def test_a_manager_writes_its_own_nodes_file_after_its_children_return():
+    """Upstream's third phase: delegation does not discharge accountability.
+
+    Measured before this existed: a model run produced five correct modules and
+    no `src/__init__.py`, so the public surface the specification names did not
+    exist and every case scored zero. The manager had delegated, every time.
+    """
+    log = WorldLog()
+    seen = []
+
+    def executor(brief):
+        seen.append((brief.world.path, brief.objective.startswith("review")))
+        if brief.world.path == "src/frontend":
+            return [Edit(brief.world.path, "src/frontend/lexer.py", "lex\n")]
+        return [Edit(brief.world.path, "src/__init__.py", "surface\n")]
+
+    policy = RecursiveDelegation(
+        manager=lambda b: ([Delegation("src/frontend", "lexer")]
+                           if b.world.path == "src" else []),
+        executor=executor, log=log, max_depth=3, root_path="src")
+    routed = {"src/CONTEXT.md": "# src\n\n## Routing Table\n- `./src/frontend/` -> lexer\n"}
+    edits = {e["path"] for e in parse_situated_edits(policy.propose(
+        _proposal_ctx(routed, Task(id="t", prompt="x")))[0])}
+    assert edits == {"src/frontend/lexer.py", "src/__init__.py"}
+    assert ("src", True) in seen, "the manager never got its accountability turn"
+    assert policy.accountability_edits == 1
+
+
+def test_the_accountability_turn_will_not_overwrite_a_childs_file():
+    """A manager is accountable for its subtree; a child's files are the child's."""
+    log = WorldLog()
+    policy = RecursiveDelegation(
+        manager=lambda b: ([Delegation("src/frontend", "lexer")]
+                           if b.world.path == "src" else []),
+        executor=lambda b: [Edit(b.world.path, "src/frontend/lexer.py",
+                                 "mine\n" if b.world.path == "src" else "theirs\n")],
+        log=log, max_depth=3, root_path="src")
+    routed = {"src/CONTEXT.md": "# src\n\n## Routing Table\n- `./src/frontend/` -> lexer\n"}
+    edits = {e["path"]: e["content"] for e in parse_situated_edits(policy.propose(
+        _proposal_ctx(routed, Task(id="t", prompt="x")))[0])}
+    assert edits == {"src/frontend/lexer.py": "theirs\n"}
+    assert policy.accountability_declined == 1
 
 
 def test_a_change_outside_a_childs_path_is_reported_up_and_handled_there():

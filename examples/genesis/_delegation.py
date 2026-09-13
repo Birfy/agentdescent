@@ -43,7 +43,8 @@ from agentdescent.filetree import parse_tree
 from ._octopus import three_way
 
 from ._world import (CONTEXT_FILE, EpisodeRecord, LocalWorld, WorldLog,
-                     normalise, owns, resolve_edit_path, routing_entry)
+                     directly_at, normalise, owns, resolve_edit_path,
+                     routing_entry)
 
 __all__ = ["Brief", "Delegation", "Edit", "RecursiveDelegation", "render_edits"]
 
@@ -139,6 +140,10 @@ class RecursiveDelegation:
     #: paper's agent may inspect the whole project; one with no read tool can only
     #: inspect what the brief carries.
     contracts: Sequence[str] = ()
+    #: Upstream's review-and-accountability phase: after its children return, a
+    #: manager gets one turn at its own node. Off makes a manager a pure router,
+    #: which is what this port was and why a node's own file never appeared.
+    accountability: bool = True
     #: The parent's judgement beyond scope. Upstream a parent decides "using the
     #: available tests, constraints and integration evidence" (paper 3.3), which
     #: is a *test* run on the child's work before it is offered to the version
@@ -154,6 +159,10 @@ class RecursiveDelegation:
     #: Sibling edits to one path reconciled by three-way merge, and not.
     sibling_merges: int = 0
     sibling_conflicts: int = 0
+    #: Files a manager wrote at its own node in the accountability phase, and
+    #: edits it offered there that belonged to a child and were declined.
+    accountability_edits: int = 0
+    accountability_declined: int = 0
     #: Edits whose path was written relative to the agent's own node rather than
     #: to the repository. Counted because the alternative to counting is a file
     #: appearing somewhere nobody asked for it.
@@ -296,6 +305,19 @@ class RecursiveDelegation:
             if normalise(delegation.path) not in routed:
                 opened.append(delegation)
 
+        # Upstream's third phase. An Architect works "architecture & design ->
+        # implementation delegation -> **review & accountability**" and is
+        # "ACCOUNTABLE for all code in its node path" (`agents/architect.ex:23`):
+        # delegating does not discharge that, and the files that belong to the
+        # node itself are nobody else's to write. Without this a manager
+        # delegated forever and its own node's file was never written -- measured:
+        # five correct modules and no `src/__init__.py`, so the public surface the
+        # specification names did not exist and every case scored zero.
+        if self.accountability:
+            own = self._accountability_pass(world, objective, state, held, ctx, depth)
+            if own:
+                self._fold(held, owner_of, own, world, state)
+
         merged: List[Edit] = list(held.values()) + notes
 
         # A node whose parent does not route to it is a node later agents cannot
@@ -307,6 +329,39 @@ class RecursiveDelegation:
 
         record.n_edits = len(merged)
         return merged, pending, record
+
+    def _accountability_pass(self, world: LocalWorld, objective: str,
+                             state: Mapping[str, str], held: Mapping[str, Edit],
+                             ctx, depth: int) -> List[Edit]:
+        """One turn for the manager at its own node, after its children return.
+
+        It sees the tree **as its children just left it**, because what the node
+        still needs depends on what came back. Restricted to files directly at the
+        node: a manager is accountable for its whole subtree but a child's files
+        are the child's to write, and a manager free to rewrite them would make
+        the decomposition decorative.
+        """
+        amended = dict(state)
+        for edit in held.values():
+            if edit.content is None:
+                amended.pop(edit.path, None)
+            else:
+                amended[edit.path] = edit.content
+        brief = Brief(world=world, objective=f"review and accountability: {objective}",
+                      context=world.situate(amended, contracts=self.contracts),
+                      state=amended, task=ctx.task, output=ctx.output,
+                      reward=ctx.reward, depth=0)
+        out: List[Edit] = []
+        for raw in self.executor(brief) or ():
+            path, relative = resolve_edit_path(amended, world.path, raw.path)
+            self.resolved_relative += int(relative)
+            if directly_at(world.path, path):
+                out.append(Edit(owner=world.path, path=path, content=raw.content,
+                                kind=raw.kind))
+            else:
+                self.accountability_declined += 1
+        self.accountability_edits += len(out)
+        return out
 
     def _fold(self, held: Dict[str, Edit], owner_of: Dict[str, str],
               returned: Sequence[Edit], child: LocalWorld,
@@ -454,7 +509,9 @@ class RecursiveDelegation:
                 f"sibling_conflicts={self.sibling_conflicts} "
                 f"requests={self.requests_raised}/"
                 f"{self.adopted_requests}/{self.unmet_requests} "
-                f"node_relative_paths={self.resolved_relative}")
+                f"node_relative_paths={self.resolved_relative} "
+                f"accountability={self.accountability_edits}/"
+                f"{self.accountability_declined}")
 
 
 def _state_of(rendered: str) -> Dict[str, str]:
