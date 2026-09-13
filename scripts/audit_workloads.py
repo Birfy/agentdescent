@@ -26,6 +26,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import os
+import pathlib
 import random
 import re
 import string
@@ -39,6 +40,29 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentdescent import Task  # noqa: E402
 from agentdescent.audit import AuditRecord, AuditStore  # noqa: E402
+
+
+def refuse_to_overwrite(path: pathlib.Path, flag: str = "--out") -> pathlib.Path:
+    """Stop before a run, not after it, if its report already exists.
+
+    An experiment writes its report at the end, so a collision discovered there
+    costs the whole run -- here, ten minutes of model calls. Checked up front it
+    costs nothing.
+
+    Refusing rather than auto-suffixing on purpose. A silently-numbered second
+    file is easy not to notice, and the failure that matters is quoting one run
+    while looking at another's numbers. `audit_phase0.py` put the workload in
+    the name for the same reason; it did not stop two runs of the *same*
+    workload on the same day, which is this.
+    """
+    if path.exists():
+        raise SystemExit(
+            f"{path} already exists -- a previous run wrote it.\n"
+            f"Pass {flag} to write somewhere else, or move the old one aside. "
+            f"Refusing rather than overwriting: an experiment result that "
+            f"silently replaces another is the one mistake nobody can catch "
+            f"later from the file.")
+    return path
 
 
 def resolved_records(path: Any) -> List[AuditRecord]:

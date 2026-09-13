@@ -201,3 +201,21 @@ def test_the_judge_is_not_shown_the_tests():
 def test_an_mbpp_row_without_tests_or_a_reference_is_skipped():
     assert P._mbpp_task({"text": "x", "code": "def f(): pass", "test_list": []}) is None
     assert P._mbpp_task({"text": "", "code": "c", "test_list": ["assert 1"]}) is None
+
+
+# -- an experiment must not silently replace another -------------------------
+
+def test_a_report_that_already_exists_stops_the_run(tmp_path):
+    """Checked before the run, not after: a collision found at write time costs
+    the whole run, and the rung-5 loop is ten minutes of model calls. Refusing
+    rather than auto-suffixing, because a silently-numbered second file is easy
+    not to notice and the failure that matters is quoting one run while looking
+    at another's numbers."""
+    path = tmp_path / "report.md"
+    assert P.refuse_to_overwrite(path) == path          # free when it is free
+
+    path.write_text("an earlier run")
+    with pytest.raises(SystemExit) as e:
+        P.refuse_to_overwrite(path)
+    assert "already exists" in str(e.value)
+    assert path.read_text() == "an earlier run"

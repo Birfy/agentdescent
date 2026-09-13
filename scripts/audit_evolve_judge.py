@@ -85,7 +85,8 @@ from agentdescent.audit.diagnose import evaluate_fix, residual_stats  # noqa: E4
 from agentdescent.audit.scorecard import rescan, scorecard  # noqa: E402
 from agentdescent.evolution import LLMAgent  # noqa: E402
 from agentdescent.strategies import AppendRules  # noqa: E402
-from scripts.audit_workloads import (WORKLOADS, resolved_records,  # noqa: E402
+from scripts.audit_workloads import (WORKLOADS,  # noqa: E402
+                                     refuse_to_overwrite, resolved_records,
                                      task_index)
 from scripts.audit_phase0 import _JUDGE_TMPL  # noqa: E402
 
@@ -496,6 +497,12 @@ def main() -> None:
                          "override in the report; it does not remove it")
     args = ap.parse_args()
 
+    out = pathlib.Path(args.out or
+                       f"reports/audit_evolve_judge_{args.workload}_"
+                       f"{date.today().isoformat()}.md")
+    if not args.out:
+        refuse_to_overwrite(out)       # before the loop, not after it
+
     records = resolved_records(args.records)
     if not records:
         raise SystemExit(f"{args.records} holds no resolved pairs")
@@ -580,9 +587,6 @@ def main() -> None:
         "seconds": round(time.time() - t0, 1),
         "calls": usage.calls, "dry_run": bool(args.dry_run),
     }
-    out = pathlib.Path(args.out or
-                       f"reports/audit_evolve_judge_{args.workload}_"
-                       f"{date.today().isoformat()}.md")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(markdown(payload, card), encoding="utf-8")
     out.with_suffix(".json").write_text(json.dumps(payload, indent=2),

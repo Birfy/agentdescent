@@ -54,6 +54,7 @@ import argparse
 import hashlib
 import json
 import os
+import pathlib
 import random
 import re
 import statistics
@@ -74,8 +75,8 @@ from agentdescent import (AppendRules, AuditedReward, AuditStore, GoldAnswer,  #
 from scripts.audit_workloads import (BBH_SUBTASKS, CODE_TIMEOUT,  # noqa: E402,F401
                                      WORKLOADS, Workload, exact_match,
                                      extract_code, final_number, normalize,
-                                     number_match, run_tests, task_index,
-                                     tests_pass)
+                                     number_match, refuse_to_overwrite,
+                                     run_tests, task_index, tests_pass)
 from agentdescent.audit import Purpose, residual_bias  # noqa: E402
 from agentdescent.evolution import LLMAgent  # noqa: E402
 
@@ -712,6 +713,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.store is None:
         args.store = os.path.join(root, "reports", f"audit_phase0_{stamp}{suffix}.jsonl")
     os.makedirs(os.path.dirname(args.store), exist_ok=True)
+
+    if not args.out:
+        refuse_to_overwrite(pathlib.Path(
+            os.path.join(root, "reports", f"audit_phase0_{stamp}{suffix}.md")))
 
     bundle = run(args)
     an = analyse(bundle, args)
