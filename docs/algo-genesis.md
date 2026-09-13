@@ -610,6 +610,23 @@ Genesis diff is never contract-breaking (`SpatialContract` marks nothing so), so
 | `minilang` — accepted / discarded / episodes | 3 / **0** / 87 | 7 / **6** / 202 | 13 / **0** / 154 |
 | held-out / audit | 1.000 | 1.000 | 1.000 |
 
+All four domains, offline, re-measured under both defaults at one budget
+(`--episodes 96 --workers 4`), which is the comparison the flip should be judged on:
+
+| domain | `--sync` accepted | default (barrier-free, nothing discarded) | discarded | reward |
+|---|---|---|---|---|
+| `minilang` | 4 | 12 (+2 refused) | **0** | 1.000 / 1.000 |
+| `stackvm` | 7 | 22 (+2 refused) | **0** | 1.000 / 1.000 |
+| `jqx` | 8 | 14 (+2 refused) | **0** | 1.000 / 1.000 |
+| `md` | 5 | 22 | **0** | 1.000 / 1.000 |
+
+Every domain reaches the same place, nothing is discarded in either arm at this budget,
+and the barrier-free arm commits two to three times as often — each proposal landing as
+its own version instead of waiting for a barrier that would have folded several into
+one. The `below-threshold` refusals that appear in the async column are the parent's
+gate doing its job on proposals that arrive after the version has moved past them: a
+tie or a regression against a head that is no longer what the proposer saw.
+
 Nothing is thrown away and the episode count does not rise to pay for it — the work was
 always being done, the question was only whether a proposal that arrived late was kept.
 What does rise is the number of accepted events, and that is the same fact seen from the
