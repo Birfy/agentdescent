@@ -182,18 +182,28 @@ exercises the mechanism and it cannot exercise the mechanism's *failure* paths,
 because a rule-based actor does not fail that way. Every counter on the world line
 exists because a model does.
 
-**Where the model arm stands, without dressing it up.** Across four runs of
-`deepseek-v4-flash` at 40–60 episodes, held-out reward stayed at **0.000**. The
-mechanism is visibly running — observed depth 3, real refusals, real merges, real
-upward requests — and the toolchain still does not come out working. The current
-failure mode is the actor, not the harness: executors ask for files at paths the
-project does not use (`lexer.py` at the repository root rather than under `src/`),
-and since the root *does* have authority there, the request is granted and the
-tree grows a second, wrong copy. A parent that "handles" a request by applying it
-is the weakest reading of upstream's rule; a parent that re-delegates it to the
-node that owns it is the next thing to try. Reported here rather than tuned away,
-because a port page that showed only the offline 1.000 would be describing a run
-nobody made.
+**"Relative to what?" cost four files and a whole run.** The run above put
+`lexer.py`, `parser.py`, `evaluator.py` and `__init__.py` at the **top of the
+repository** while the suite stayed at 0.000, and the first reading of that was
+"the model asks for paths the project does not use". It was not. The root
+`__init__.py` it wrote says *"Frontend package: tokenizer and parser"* and
+`from . import lexer`: the agent situated at `src/frontend` meant
+`src/frontend/__init__.py` and wrote the path **relative to its own node**. The
+protocol said "relative path" without saying relative to what, this port read it
+as repository-relative, the files fell outside the agent's subtree, became
+upward requests, and the root — which does have authority everywhere — granted
+them at the top level. Every layer behaved exactly as designed.
+
+Two fixes, because one alone is not enough. The protocol now names the agent's own
+path in every example it shows and is rendered per episode rather than once, so
+"relative" has one meaning. And `resolve_edit_path` resolves a path against the
+node before anything else looks at it, ordered so that a genuine cross-node
+request is never mangled into a nested copy of its own path: already inside the
+node, or an existing file of the node's, means node-relative; a path whose first
+segment is an existing top-level entry is repository-relative and therefore a
+request about somebody else's node. Resolutions are **counted**
+(`node_relative_paths`), because the alternative to counting is a file appearing
+somewhere nobody asked for it.
 
 ## Honesty boundary
 

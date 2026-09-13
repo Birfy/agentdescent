@@ -49,6 +49,7 @@ __all__ = [
     "normalise",
     "owns",
     "parse_routing",
+    "resolve_edit_path",
     "routing_entry",
 ]
 
@@ -177,6 +178,48 @@ def child_paths(owner: str, paths: Sequence[str]) -> List[str]:
     return sorted(out)
 
 
+def resolve_edit_path(state: Mapping[str, str], owner: str,
+                      path: str) -> "Tuple[str, bool]":
+    """``(path, was_node_relative)`` -- which path an agent at ``owner`` meant.
+
+    An agent situated at ``src/frontend`` that writes ``lexer.py`` means
+    ``src/frontend/lexer.py``; one that writes ``src/__init__.py`` means exactly
+    that, and is asking for a change outside its own node. Both are ordinary, and
+    telling them apart is the difference between a file landing where it belongs
+    and a second copy of the project appearing at the repository root.
+
+    Measured, before this existed: a `deepseek-v4-flash` run produced
+    ``__init__.py`` and ``lexer.py`` from an agent at ``src/frontend``; read as
+    repository-relative they fell outside its subtree, became requests, and the
+    root -- which has authority everywhere -- wrote them at the top level. Four
+    files of real work landed in the wrong place and the suite stayed at 0.000.
+
+    The rule, in order, so that a genuine cross-node request is never mangled
+    into a nested copy of its own path:
+
+    1. already inside ``owner`` -- take it as written;
+    2. ``owner/path`` exists in the tree -- the agent is editing its own file;
+    3. ``path`` exists, or its first segment is an existing top-level entry --
+       repository-relative, and therefore a request about someone else's node;
+    4. ``owner/path`` is new and ``path``'s first segment is unknown -- a bare
+       filename or a path below this node, so node-relative;
+    5. anything else -- repository-relative.
+    """
+    owner, path = normalise(owner), normalise(path)
+    if not path:
+        return path, False
+    if owns(owner, path) or not owner:
+        return path, False
+    nested = f"{owner}/{path}"
+    if nested in state:
+        return nested, True
+    head = path.split("/", 1)[0]
+    top = {key.split("/", 1)[0] for key in state}
+    if path in state or head in top:
+        return path, False
+    return nested, True
+
+
 @dataclass(frozen=True)
 class LocalWorld:
     """One ``w = (v, p)``.
@@ -239,7 +282,8 @@ class LocalWorld:
         """This node's own ``CONTEXT.md`` path."""
         return f"{self.path}/{CONTEXT_FILE}" if self.path else CONTEXT_FILE
 
-    def situate(self, state: Mapping[str, str], *, max_chars: int = 8_000) -> str:
+    def situate(self, state: Mapping[str, str], *,
+                contracts: Sequence[str] = (), max_chars: int = 8_000) -> str:
         """The context an agent entering this world is given.
 
         Upstream (``EvoGit.Core.ContextNode.build_context/2``) walks root → path
@@ -248,6 +292,21 @@ class LocalWorld:
         files it is responsible for -- an executor cannot edit what it cannot
         see, and handing it the whole tree is what the path coordinate exists to
         avoid.
+
+        ``contracts`` is the part that is *not* optional, and leaving it out was a
+        straight misreading of the paper: "An agent may inspect the complete
+        project represented by v, but it begins from p" (3.1). The chain is where
+        an agent **begins**, not a wall around what it may read. Upstream it would
+        open the specification with a read tool; an agent here has no tools, so
+        the human-supplied contract travels in the brief or it is invisible.
+
+        Measured before this existed: the language specification sat at
+        ``spec/CONTEXT.md`` -- a sibling of ``src/``, so on nobody's chain -- and
+        every agent inferred the whole language from one failing input. They built
+        a coherent toolchain with ``('NUMBER', '1')`` tokens and a ``parse(tokens)``
+        signature, against a specification that says ``("num", 1)`` and
+        ``parse(source)``. Five correct files, every one of them to the wrong
+        contract, and a suite stuck at 0.000.
         """
         parts: List[str] = []
         for node in self._chain():
@@ -255,6 +314,13 @@ class LocalWorld:
             body = state.get(key)
             if body:
                 parts.append(f"--- {key} ---\n{body.strip()}")
+        if contracts:
+            from agentdescent.filetree import match_any
+            given = [k for k in sorted(state) if match_any(k, contracts)]
+            if given:
+                parts.append("--- the contract you are building against "
+                             "(human-supplied, read-only) ---\n"
+                             + "\n\n".join(f"# {k}\n{state[k].strip()}" for k in given))
         skills = self.skills(state)
         if skills:
             parts.append("--- skills available here (read one before using it) ---\n"

@@ -26,7 +26,7 @@ from examples.genesis._octopus import OctopusConflict, git_available, three_way
 from examples.genesis._spatial import SpatialContract, parse_situated_edits
 from examples.genesis._world import (CONTEXT_FILE, SKILLS_DIR, TRUNCATED,
                                      LocalWorld, WorldLog, owns, parse_routing,
-                                     routing_entry)
+                                     resolve_edit_path, routing_entry)
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +147,27 @@ def test_the_offline_manager_takes_its_decomposition_from_context_md():
     assert [d.path for d in domain.offline_manager(brief)] == ["src/frontend"]
 
 
+_TREE = {CONTEXT_FILE: "r", "src/CONTEXT.md": "s", "src/frontend/CONTEXT.md": "f",
+         "src/frontend/lexer.py": "old", "spec/CONTEXT.md": "p"}
+
+
+@pytest.mark.parametrize("owner,written,expected,relative", [
+    # the defect this exists for: a node-relative filename read as
+    # repository-relative sent real work to the top of the repository
+    ("src/frontend", "lexer.py", "src/frontend/lexer.py", True),
+    ("src/frontend", "__init__.py", "src/frontend/__init__.py", True),
+    ("src", "backend/evaluator.py", "src/backend/evaluator.py", True),
+    ("src/frontend", "CONTEXT.md", "src/frontend/CONTEXT.md", True),
+    # ...and the case it must never mangle: a genuine request about another node
+    ("src/frontend", "src/__init__.py", "src/__init__.py", False),
+    ("src/frontend", "src/frontend/parser.py", "src/frontend/parser.py", False),
+    ("", "anything.py", "anything.py", False),
+])
+def test_a_path_is_resolved_against_the_node_the_agent_stands_in(
+        owner, written, expected, relative):
+    assert resolve_edit_path(_TREE, owner, written) == (expected, relative)
+
+
 def test_skills_are_inherited_along_the_chain_like_context():
     """The paper lists reusable skills among what an accepted version carries."""
     state = {f"{SKILLS_DIR}/house.md": "a", f"src/{SKILLS_DIR}/modules.md": "b",
@@ -154,6 +175,22 @@ def test_skills_are_inherited_along_the_chain_like_context():
     world = LocalWorld(version=1, path="src")
     assert world.skills(state) == [f"{SKILLS_DIR}/house.md", f"src/{SKILLS_DIR}/modules.md"]
     assert f"{SKILLS_DIR}/modules.md" in world.situate(state)
+
+
+def test_an_agent_deep_in_the_tree_is_shown_the_contract_it_is_judged_against():
+    """Paper 3.1: an agent may inspect the whole project; it only *begins* at p.
+
+    The specification is a sibling of the implementation, so it is on nobody's
+    CONTEXT.md chain. Before this, every agent inferred the language from one
+    failing input and built a coherent toolchain against the wrong contract.
+    """
+    brief = LocalWorld(version=1, path="src/frontend").situate(
+        domain.initial_files(), contracts=domain.FROZEN)
+    assert "src.parse(source)" in brief
+    assert '("num", <int>)' in brief
+    # ...and without it, invisible -- which is the defect, stated as a test.
+    assert "src.parse(source)" not in LocalWorld(version=1, path="src/frontend").situate(
+        domain.initial_files())
 
 
 def test_an_oversized_brief_carries_upstreams_own_truncation_marker():
@@ -483,6 +520,22 @@ def test_a_refused_child_leaves_its_reason_in_the_nodes_context_md():
     assert [e.verdict for e in log.episodes if e.path == "src"] == ["rejected"]
 
 
+def test_a_node_relative_filename_lands_in_the_node_not_at_the_repository_root():
+    """The whole of a real run's work went to the top of the tree over this."""
+    log = WorldLog()
+    policy = RecursiveDelegation(
+        manager=lambda b: ([Delegation("src/frontend", "build the lexer")]
+                           if b.world.path == "src" else []),
+        executor=lambda b: [Edit(b.world.path, "lexer.py", "lex\n")],
+        log=log, max_depth=3, root_path="src")
+    routed = {"src/CONTEXT.md": "# src\n\n## Routing Table\n- `./src/frontend/` -> lexer\n"}
+    edits = parse_situated_edits(policy.propose(
+        _proposal_ctx(routed, Task(id="t", prompt="x")))[0])
+    assert [e["path"] for e in edits] == ["src/frontend/lexer.py"]
+    assert policy.resolved_relative == 1
+    assert policy.requests_raised == 0, "it was never a cross-node request"
+
+
 def test_a_change_outside_a_childs_path_is_reported_up_and_handled_there():
     """Upstream: "report the need back up to your parent, which will handle it".
 
@@ -510,9 +563,11 @@ def test_a_need_nobody_in_the_chain_can_meet_is_counted_not_dropped():
         manager=lambda b: ([Delegation("src/frontend", "x")]
                            if b.world.path == "src" else []),
         executor=lambda b: [Edit(b.world.path, "src/frontend/a.py", "1\n"),
-                            Edit(b.world.path, "docs/guide.md", "2\n")],
+                            Edit(b.world.path, "spec/extra.md", "2\n")],
         log=log, max_depth=3, root_path="src")
-    policy.propose(_proposal_ctx({"src/CONTEXT.md": "# src\n"},
+    # `spec/` is a real top-level node, so the path is repository-relative and the
+    # request is genuine -- and nobody from `src` down has authority there.
+    policy.propose(_proposal_ctx({"src/CONTEXT.md": "# src\n", "spec/CONTEXT.md": "s"},
                                  Task(id="t", prompt="x")))
     assert (policy.requests_raised, policy.adopted_requests,
             policy.unmet_requests) == (1, 0, 1)

@@ -184,7 +184,7 @@ def main(argv=None) -> None:
         manager=llm_manager(complete) if complete else offline_manager,
         executor=(llm_executor(complete, frozen=FROZEN) if complete
                   else offline_executor),
-        log=log, max_depth=args.depth, max_edits=4,
+        log=log, max_depth=args.depth, max_edits=4, contracts=FROZEN,
         # The parent's own test run, inside the episode, on one child's work --
         # the half of the upstream rule the acceptance gate cannot see.
         review=None if args.no_parent_tests else suite_review(tasks))
@@ -231,7 +231,8 @@ def main(argv=None) -> None:
     print(f"parent          : sibling_merges={delegation.sibling_merges}  "
           f"sibling_conflicts={delegation.sibling_conflicts}  "
           f"requests raised/handled/unmet={delegation.requests_raised}/"
-          f"{delegation.adopted_requests}/{delegation.unmet_requests}")
+          f"{delegation.adopted_requests}/{delegation.unmet_requests}  "
+          f"node_relative_paths={delegation.resolved_relative}")
     if octopus is not None:
         print(f"merge           : merged={octopus.merged} conflicted={octopus.conflicted}")
     if not args.engine_gate:

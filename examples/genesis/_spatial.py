@@ -53,18 +53,22 @@ SITUATED_EDIT_PROTOCOL = """Reply with ONE block in exactly this format and noth
 
 <EDITS>
 {{"rationale": "<one sentence>",
- "edits": [{{"owner": "<the path you were situated at>",
-            "path": "<relative path, inside that subtree>",
+ "edits": [{{"owner": "{owner}",
+            "path": "{owner}/<file>",
             "content": "<the COMPLETE new file>"}}]}}
 </EDITS>
 
 Rules:
 - `content` is the whole file, never a patch or an excerpt.
-- `owner` is your own path. `path` MUST lie inside it -- an edit outside your
-  subtree belongs to the agent responsible for that path, not to you.
+- **`path` is relative to the REPOSITORY ROOT, not to your own directory.** You
+  are situated at `{owner}`, so a file of yours is `{owner}/<name>` -- writing
+  just `<name>` names a file at the top of the repository, which is not yours.
+- `owner` is your own path, `{owner}`, and `path` must lie inside it. A change you
+  need somewhere else is not yours to make: name it anyway and the agent
+  responsible for that path will be asked to handle it.
 - Only these paths are editable: {editable}
 - Never edit: {frozen}
-- To delete a file use {{"owner": "...", "path": "...", "delete": true}}."""
+- To delete a file use {{"owner": "{owner}", "path": "{owner}/<file>", "delete": true}}."""
 
 
 def parse_situated_edits(proposal: str) -> List[Dict[str, Any]]:

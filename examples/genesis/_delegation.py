@@ -43,7 +43,7 @@ from agentdescent.filetree import parse_tree
 from ._octopus import three_way
 
 from ._world import (CONTEXT_FILE, EpisodeRecord, LocalWorld, WorldLog,
-                     normalise, owns, routing_entry)
+                     normalise, owns, resolve_edit_path, routing_entry)
 
 __all__ = ["Brief", "Delegation", "Edit", "RecursiveDelegation", "render_edits"]
 
@@ -134,6 +134,11 @@ class RecursiveDelegation:
     max_depth: int = 2
     max_edits: int = 4
     root_path: str = ""
+    #: Human-supplied, read-only files every agent is shown in full, wherever it
+    #: stands -- the specification, the constraints, the validation contract. The
+    #: paper's agent may inspect the whole project; one with no read tool can only
+    #: inspect what the brief carries.
+    contracts: Sequence[str] = ()
     #: The parent's judgement beyond scope. Upstream a parent decides "using the
     #: available tests, constraints and integration evidence" (paper 3.3), which
     #: is a *test* run on the child's work before it is offered to the version
@@ -149,6 +154,10 @@ class RecursiveDelegation:
     #: Sibling edits to one path reconciled by three-way merge, and not.
     sibling_merges: int = 0
     sibling_conflicts: int = 0
+    #: Edits whose path was written relative to the agent's own node rather than
+    #: to the repository. Counted because the alternative to counting is a file
+    #: appearing somewhere nobody asked for it.
+    resolved_relative: int = 0
     #: Changes an agent needed outside its own path: raised, handled by an
     #: ancestor, and left unmet at the top of the chain.
     requests_raised: int = 0
@@ -194,8 +203,9 @@ class RecursiveDelegation:
         pleased with and a parent that refuses it are one episode, not two.
         """
         brief = Brief(world=world, objective=objective,
-                      context=world.situate(state), state=state, task=ctx.task,
-                      output=ctx.output, reward=ctx.reward, depth=depth)
+                      context=world.situate(state, contracts=self.contracts),
+                      state=state, task=ctx.task, output=ctx.output,
+                      reward=ctx.reward, depth=depth)
 
         delegations: Sequence[Delegation] = ()
         if depth < self.max_depth:
@@ -209,9 +219,16 @@ class RecursiveDelegation:
             # back up to the parent agent, which will handle it"
             # (`agents/executor.ex:64`). So the split here is edits / requests,
             # and the parent decides what to do with the second list.
-            produced = [Edit(owner=world.path, path=e.path, content=e.content,
-                             kind=e.kind)
-                        for e in self.executor(brief) or ()]
+            produced = []
+            for raw in self.executor(brief) or ():
+                # "relative path" means two things to an agent standing in a
+                # subtree, and reading it the wrong way sends real work to the
+                # repository root. Resolve it against the node before anything
+                # else looks at it, and count the ones that needed it.
+                path, relative = resolve_edit_path(state, world.path, raw.path)
+                self.resolved_relative += int(relative)
+                produced.append(Edit(owner=world.path, path=path,
+                                     content=raw.content, kind=raw.kind))
             edits = [e for e in produced if owns(world.path, e.path)]
             requests = [e for e in produced if not owns(world.path, e.path)]
             self.requests_raised += len(requests)
@@ -436,7 +453,8 @@ class RecursiveDelegation:
                 f"sibling_merges={self.sibling_merges} "
                 f"sibling_conflicts={self.sibling_conflicts} "
                 f"requests={self.requests_raised}/"
-                f"{self.adopted_requests}/{self.unmet_requests}")
+                f"{self.adopted_requests}/{self.unmet_requests} "
+                f"node_relative_paths={self.resolved_relative}")
 
 
 def _state_of(rendered: str) -> Dict[str, str]:

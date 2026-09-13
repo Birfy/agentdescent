@@ -675,11 +675,19 @@ def llm_manager(complete) -> Callable[[Brief], Sequence[Delegation]]:
 
 def llm_executor(complete, *, editable: Sequence[str] = ("**",),
                  frozen: Sequence[str] = FROZEN) -> Callable[[Brief], Sequence[Edit]]:
-    """Ask a model for situated edits. Unparseable replies cost their episode."""
-    protocol = SITUATED_EDIT_PROTOCOL.format(
-        editable=", ".join(editable) or "(none)", frozen=", ".join(frozen) or "(none)")
+    """Ask a model for situated edits. Unparseable replies cost their episode.
+
+    The protocol is rendered **per episode** rather than once, because it names
+    the agent's own path in every example it shows. A protocol that says
+    "relative path" without saying relative to what is read both ways, and the
+    wrong reading puts a node's files at the top of the repository.
+    """
 
     def executor(brief: Brief) -> Sequence[Edit]:
+        owner = brief.world.path or "."
+        protocol = SITUATED_EDIT_PROTOCOL.format(
+            owner=owner, editable=", ".join(editable) or "(none)",
+            frozen=", ".join(frozen) or "(none)")
         reply = _ask(complete, _EXECUTOR_PROMPT.format(
             path=brief.world.path or "./", context=brief.context,
             objective=brief.objective,
