@@ -42,6 +42,28 @@ from agentdescent import Task  # noqa: E402
 from agentdescent.audit import AuditRecord, AuditStore  # noqa: E402
 
 
+def read_verdict(reply: str, *, on_unparsed: Optional[Callable[[], None]] = None
+                 ) -> float:
+    """A judge's YES/NO reply as a score.
+
+    One copy. This was three -- `audit_phase0`, `audit_judge_repair` and
+    `audit_evolve_judge` each had the same six lines, and the only thing any of
+    them did differently was count the unparsed replies, which is what
+    ``on_unparsed`` is for.
+
+    **An unparseable reply is not a 0.** Scoring it wrong would blame the
+    artifact for the judge's failure to answer the question it was asked.
+    """
+    head = (reply or "").strip().upper()
+    if head.startswith("YES"):
+        return 1.0
+    if head.startswith("NO"):
+        return 0.0
+    if on_unparsed is not None:
+        on_unparsed()
+    return 1.0 if "YES" in head else 0.0
+
+
 def refuse_to_overwrite(path: pathlib.Path, flag: str = "--out") -> pathlib.Path:
     """Stop before a run, not after it, if its report already exists.
 

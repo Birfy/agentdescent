@@ -13,10 +13,11 @@ import pytest
 
 from agentdescent.audit import AuditRecord, Purpose
 from agentdescent.strategies import AppendRules
+from scripts.audit_workloads import read_verdict
 from scripts.audit_evolve_judge import (_TITLE, MIN_EXAMPLES, _rubric_body,
                                         as_tasks, assess, balanced,
                                         disjoint_heldout, judging_prompt,
-                                        offline_judge, verdict)
+                                        offline_judge)
 from scripts.audit_phase0 import _JUDGE_TMPL, final_number, number_match
 
 
@@ -266,12 +267,12 @@ def test_a_rubric_that_names_the_quantity_makes_the_offline_judge_strict():
 
 # -- odds and ends ------------------------------------------------------------
 
-def test_verdict_reads_the_first_word_and_does_not_score_a_refusal_as_wrong():
-    assert verdict("YES") == 1.0
-    assert verdict(" no, the units differ") == 0.0
-    assert verdict("I think YES") == 1.0
+def test_read_verdict_takes_the_first_word_and_does_not_score_a_refusal_wrong():
+    assert read_verdict("YES") == 1.0
+    assert read_verdict(" no, the units differ") == 0.0
+    assert read_verdict("I think YES") == 1.0
     # An unparseable reply is the judge's failure, not the answer's.
-    assert verdict("") == 0.0
+    assert read_verdict("") == 0.0
 
 
 def test_tasks_carry_the_truth_and_are_keyed_by_record_not_by_task():
@@ -326,7 +327,7 @@ def test_always_no_ties_the_real_judge_on_the_pool_this_rung_trains_on():
     better argument and was not the one being made. A search that ties the
     incumbent while being trivially simpler has gone nowhere and cannot tell.
     """
-    from scripts.audit_workloads import resolved_records
+    from scripts.audit_workloads import read_verdict, resolved_records
 
     records = resolved_records("reports/audit_phase0_2026-09-09.jsonl")
     pool = [r for r in records if r.purpose is Purpose.IMPROVEMENT]
@@ -344,7 +345,7 @@ def test_balancing_removes_the_tie():
     """Whatever the pool's class ratio, the balanced set puts the constant
     rubric at 0.5 -- which is the point of doing it rather than arguing about
     how close the tie was."""
-    from scripts.audit_workloads import resolved_records
+    from scripts.audit_workloads import read_verdict, resolved_records
 
     records = resolved_records("reports/audit_phase0_2026-09-09.jsonl")
     train, _ = balanced([r for r in records

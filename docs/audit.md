@@ -301,6 +301,37 @@ resulting estimate is confidently wrong rather than noisy, and it errs towards
 because a query condition is one careless edit away from being widened and an
 assertion is not.
 
+## One interface, one pipeline
+
+Everything in this half of the package is the same three steps, and the middle
+one is the only thing a caller chooses:
+
+```
+    measure            propose a fix          verify
+    diagnose()   ->    (record, task) -> f -> evaluate_fix() + scorecard() + rescan()
+```
+
+`fix` is one type — `Callable[[AuditRecord, Any], float]`, a new verifier score
+for a stored pair — and everything that looks like a separate mechanism is just
+a different way of producing one:
+
+| how the fix is produced | what it is, concretely |
+|---|---|
+| a hand-written hard rule | a predicate |
+| [`search`](#searching-for-a-fix-instead-of-guessing-one) over rule combinations | the same predicate, enumerated |
+| a judge prompt re-scored (`scripts/audit_judge_repair.py`) | a lookup of the re-scored units |
+| a rubric `evolve()` found (`scripts/audit_evolve_judge.py`) | the same lookup |
+
+All four end at the same `evaluate_fix`, the same noise floor, and the same
+scorecard. There is no ladder to climb and no mode to select. **The one real
+choice is how to express the fix**: a hard rule is cheap, attributable and
+mechanical; prompt text can express a semantic judgement and is a bundle by
+nature, so it can only be changed one clause at a time.
+
+`diagnose()` is not a way to improve the verifier at all — it is the
+measurement that says whether improving is worth it and where the
+[floor](#the-floor) is.
+
 ## Improving the verifier — and the trap in it
 
 Calibration corrects the verifier's mean error. The other question is whether the
@@ -408,9 +439,9 @@ until real data put 7.5% and 22.4% side by side.
 
 Everything above scores **a** proposed fix. Nothing proposes one, which left the
 improvement pool's labels paying for a diagnosis nobody acted on.
-[`search`](api.md#searching-for-a-fix) is the first rung of the ladder,
-automated: enumerate the hard rules a person reaches for, score every
-combination on the whole labelled set, rank by the residual.
+[`search`](api.md#searching-for-a-fix) produces the fix instead of scoring
+one: enumerate the hard rules a person reaches for, score every combination on
+the whole labelled set, rank by the residual.
 
 ```python
 from agentdescent.audit import length_rules, search
@@ -466,11 +497,10 @@ violate it.
 
 ## Evolving the rubric — and what has to be true first
 
-Everything above ends with a person writing a rule and the harness scoring it.
-`scripts/audit_judge_repair.py` is the top of that ladder: **one** clause, hand
-written from a diagnosis, measured against a control. It worked — `sigma`
-0.4738 → 0.4461 on BBH, rubber-stamping 30% → 20% — and it does not scale,
-because the next clause also has to be thought of.
+Every fix above is one a person wrote. `scripts/audit_judge_repair.py` is as far
+as that goes: **one** clause, hand-written from a diagnosis, measured against a
+control. It worked — `sigma` 0.4738 → 0.4461 on BBH, rubber-stamping 30% → 20%
+— and it does not scale, because the next clause also has to be thought of.
 
 `scripts/audit_evolve_judge.py` hands that search to `evolve()`. The artifact is
 the judge's rubric, the reward is agreement with ground truth on one judging
@@ -487,7 +517,7 @@ refusal.
 
 ### It will not run on a saturated pool
 
-This is the gate, and it is the reason the rung sat unbuilt. Across HotpotQA and
+This is the gate, and it is the reason this was unbuilt for so long. Across HotpotQA and
 BBH the improvement pool's [P(new error mode)](#where-the-improvement-labels-go)
 had fallen to **0.0169** — nine and four disagreements, every one a shape
 already understood. Evolving a prompt against thirteen known errors is fitting
@@ -524,8 +554,8 @@ pool the majority is "wrong", so the rubric the loop would converge on is
 | HotpotQA, all labels (n=177) | 0.723 | 0.825 |
 | BBH, improvement (n=13) | 0.385 | 0.692 |
 
-It does not have to *beat* the judge to be found. On the pool this rung trains
-on it ties it exactly, and a search that ties the incumbent while being
+It does not have to *beat* the judge to be found. On the pool this trains on it
+ties it exactly, and a search that ties the incumbent while being
 trivially simpler is a search that has gone nowhere and cannot tell. Two guards,
 because the first is a property of a sample and the second of a decision:
 

@@ -161,6 +161,56 @@ All notable changes to AgentDescent are documented here. The format follows
   buying more in-loop evaluation cannot improve the criterion and the budget
   belongs on oracle labels.
 
+- **The judge evolved against ground truth, live.**
+  `scripts/audit_evolve_judge.py` run on MBPP: `sigma` **0.4747 -> 0.2549**
+  (-46%), disagreement 29.9% -> 6.9%, false negatives 3.2% -> **0.0%**, fixed 21
+  and broke 1 against a noise floor of 10. **Nothing blocks.** Two rules, both
+  naming the dominant failure -- a candidate that is the expected *value* rather
+  than an implementation.
+  [reports/audit_evolve_judge_mbpp_big_2026-09-13.md](reports/audit_evolve_judge_mbpp_big_2026-09-13.md)
+
+  Run twice, and the pair is the result rather than either half:
+
+  | | small pool | larger pool |
+  |---|---|---|
+  | the loop's own gate | 9 units (resolution 1/9) | **30** |
+  | reward over ten rounds | 0.778, never moved | 0.800 -> **0.967** |
+  | rules accepted | 7 | **2** |
+  | scorecard | refused | **nothing blocks** |
+
+  Fewer rules, more improvement. A gate that cannot see below 1/9 was selecting
+  on noise, and the seven rules it took were never shown to be signal.
+
+  The larger pool's `P(new error mode)` is **0.0000** -- no variety left at all
+  -- and it passed on sufficiency alone, 15 examples of one mode. Under the
+  variety-only gate this branch shipped earlier the same morning, the run that
+  produced the cleanest result in the sequence would have been refused.
+
+  Bounds, because the numbers above are narrower than they look: one model; a
+  noise floor of **11.5%** (the judge disagrees with itself on more than a tenth
+  of re-runs); an ordering "pair" between an artifact 70.5% right and one 0.0%
+  right, where the report's own note says Kendall tau is uninformative; and a
+  dominant error mode that is partly a distribution artifact -- see the entry
+  below on the artifact/judge coupling.
+
+- **One interface, one pipeline** -- the docs said ladder, the code never had
+  one. `diagnose()` measures, something produces a
+  `fix(record, task) -> float`, and `evaluate_fix` + `scorecard` + `rescan`
+  verify it. A hand-written predicate, a `search` over combinations, a re-scored
+  prompt and an evolved rubric are all that one type and all end at the same
+  three functions. The only choice a caller makes is how to express the fix: a
+  hard rule is cheap, attributable and mechanical; prompt text can express a
+  semantic judgement and is a bundle by nature, so it changes one clause at a
+  time. `diagnose()` is not a way to improve the verifier at all -- it says
+  whether improving is worth it and where the floor is.
+  [docs/audit.md](docs/audit.md)
+
+  Also: the YES/NO reply parser existed in three scripts, identical in all
+  three, and `verdict` meant two different things in two of them. One
+  `read_verdict`, and the name no longer collides with Phase 0's own verdict.
+  [reports/README.md](reports/README.md) indexes the twelve experiment reports,
+  which nothing linked to.
+
 - **A third workload, and the rung of the ladder it unblocks.**
   `scripts/audit_evolve_judge.py` evolves the judge's *rubric* with `evolve()`:
   the artifact is the rubric, the reward is agreement with ground truth on one

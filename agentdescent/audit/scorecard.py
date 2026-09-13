@@ -480,7 +480,7 @@ def scorecard(current: Rectification, records: Sequence[AuditRecord], *,
         # there. A bare `fn_now > bound` makes a pre-existing violation
         # permanent: while the incumbent is over, no improvement can ever ship,
         # including one that is moving back toward the bound. The first live
-        # rung-5 run was refused for a rate of 5.26% that was 5.26% before it
+        # judge-rubric run was refused for a rate of 5.26% that was 5.26% before it
         # too, with a message reading as though the change had caused it.
         was = fn_metric.previous
         newly = was is None or was != was or was <= max_false_negative
@@ -516,7 +516,7 @@ def scorecard(current: Rectification, records: Sequence[AuditRecord], *,
         # **Which way** the flip went decides whether this is an alarm. A
         # reversal toward ground truth is the thing you were trying to buy; a
         # reversal away from it is the instrument breaking. `ranked` knows, and
-        # this blocked without asking: the first live rung-5 run printed "the
+        # this blocked without asking: the first live judge-rubric run printed "the
         # verifier's favourite is also the truth's" and refused the change in
         # the same card, for correcting an ordering the old verifier had wrong.
         corrects = (ranked.n_pairs > 0 and ranked.agreement >= 1.0)

@@ -4,9 +4,13 @@
 them would cost and scores **a** proposed fix. It does not propose one, so the
 improvement pool's labels were being spent on a diagnosis nobody acted on.
 
-This is the first rung of the plan's ladder, automated: enumerate the hard rules
-a person reaches for, score every combination of them on the whole labelled set,
-and rank by the residual. No model, no training, and no judgement about the
+So this produces the fix rather than scoring one a person wrote: enumerate the
+hard rules a person reaches for, score every combination of them on the whole
+labelled set, and rank by the residual. The output is an ordinary
+``fix(record, task) -> float``, which is the one interface everything in this
+half of the package shares -- a hand-written predicate, a searched combination,
+a re-scored prompt and an evolved rubric are all that type, and all end at
+:func:`~agentdescent.audit.diagnose.evaluate_fix`. No model, no training, and no judgement about the
 domain beyond the reference the caller already has.
 
 Run on the Phase 0 audit, over seven candidate rules taken two at a time:
@@ -248,7 +252,7 @@ def length_rules(normalise: Callable[[str], str],
     Every one of them is a *shape* argument -- the answer is far shorter than
     the reference, far longer, shares no word with it, is empty. None needs a
     model and none is a judgement about the domain, which is what puts them on
-    the first rung of the ladder.
+    a fix rather than a score for one.
 
     ``normalise`` must be the **oracle's own**. A rule that measures length in
     one normalisation while the truth compares in another is answering a

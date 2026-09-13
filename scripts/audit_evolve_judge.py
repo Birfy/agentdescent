@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Rung 5: let the oracle evolve the judge, instead of a person guessing clauses.
+"""Let the oracle evolve the judge, instead of a person guessing clauses.
 
-Rungs 1-4 of the ladder all end with a person writing a rule or a sentence and
-the harness scoring it. `scripts/audit_judge_repair.py` is the top of that:
-**one** clause, hand-written from a diagnosis, measured against a control. It
-worked -- `sigma` 0.4738 -> 0.4461 on BBH, rubber-stamping 30% -> 20% -- and it
-does not scale, because the next clause also has to be thought of.
+Every other way of producing a fix ends with a person writing the rule or the
+sentence and the harness scoring it. `scripts/audit_judge_repair.py` is as far
+as that goes: **one** clause, hand-written from a diagnosis, measured against a
+control. It worked -- `sigma` 0.4738 -> 0.4461 on BBH, rubber-stamping 30% ->
+20% -- and it does not scale, because the next clause also has to be thought of.
 
-This rung hands that search to `evolve()`. The artifact is the judge's rubric,
-the reward is agreement with ground truth, and the labels come out of the
-audit's **improvement** pool, which exists for exactly this.
+This hands that search to `evolve()`. The artifact is the judge's rubric, the
+reward is agreement with ground truth, and the labels come out of the audit's
+**improvement** pool, which exists for exactly this. What comes back is the same
+`fix(record, task) -> float` every other route produces, scored by the same
+`evaluate_fix`, the same noise floor and the same scorecard.
 
 Five things it refuses to do, each of which is a way to get a number that looks
 like progress and is not:
@@ -32,7 +34,7 @@ report says how many that dropped.
 
 **It will not let "always NO" win.** The reward is agreement with the oracle, so
 a rubric that rejects everything scores `P(the answer was wrong)`. On the
-HotpotQA improvement pool -- the 55 labels this rung would actually train on --
+HotpotQA improvement pool -- the 55 labels this would actually train on --
 that is **0.836, exactly the real judge's agreement rate on the same units**. It
 does not have to beat the judge to be found: a search that ties the incumbent
 while being trivially simpler is a search that has gone nowhere and cannot tell.
@@ -86,8 +88,8 @@ from agentdescent.audit.scorecard import rescan, scorecard  # noqa: E402
 from agentdescent.evolution import LLMAgent  # noqa: E402
 from agentdescent.strategies import AppendRules  # noqa: E402
 from scripts.audit_workloads import (WORKLOADS,  # noqa: E402
-                                     refuse_to_overwrite, resolved_records,
-                                     task_index)
+                                     read_verdict, refuse_to_overwrite,
+                                     resolved_records, task_index)
 from scripts.audit_phase0 import _JUDGE_TMPL  # noqa: E402
 
 #: The last line of the shipped judge template, and the seam the rubric is
@@ -97,7 +99,7 @@ from scripts.audit_phase0 import _JUDGE_TMPL  # noqa: E402
 _REPLY_LINE = "Reply with exactly one word: YES or NO."
 
 #: The starting rubric: empty. Not a seeded clause, because a seed is a guess,
-#: and the whole argument for this rung is that the guessing is what does not
+#: and the whole argument for this script is that the guessing is what does not
 #: scale. An empty `AppendRules` renders `# Playbook\n(empty)`, which
 #: `judging_prompt` drops entirely -- see there.
 _TITLE = "# Grading rules"
@@ -291,15 +293,6 @@ def disjoint_heldout(calibration: Sequence[AuditRecord],
 # The judge, live and offline
 # ---------------------------------------------------------------------------
 
-def verdict(reply: str) -> float:
-    head = (reply or "").strip().upper()
-    if head.startswith("YES"):
-        return 1.0
-    if head.startswith("NO"):
-        return 0.0
-    return 1.0 if "YES" in head else 0.0
-
-
 #: ``(rubric, question, gold, candidate, task_id) -> the judge's reply``.
 #:
 #: ``task_id`` is there for the offline stand-in alone -- a live judge has no
@@ -372,7 +365,7 @@ def rescore(records: Sequence[AuditRecord], ask, rubric: str, context
         if ctx is None or not (rec.output or "").strip():
             out[rec.record_id] = rec.verifier_score
             continue
-        out[rec.record_id] = verdict(
+        out[rec.record_id] = read_verdict(
             ask(rubric, ctx.prompt, ctx.meta.get("gold", ""), rec.output,
                 rec.task_id))
     return out
@@ -397,7 +390,7 @@ def evolve_rubric(tasks: Sequence[Task], ask, args, usage: Usage
         often as it over-rejects would score perfectly while being worse. Per
         decision, agreement *is* the residual's magnitude, and it cannot cancel.
         """
-        return 1.0 if verdict(output) == task.meta["oracle"] else 0.0
+        return 1.0 if read_verdict(output) == task.meta["oracle"] else 0.0
 
     if args.dry_run:
         propose = _offline_propose
@@ -410,7 +403,7 @@ def evolve_rubric(tasks: Sequence[Task], ask, args, usage: Usage
                     score: float) -> Optional[str]:
             if score == 1.0:
                 return None           # nothing to learn from a correct call
-            said = "correct" if verdict(output) == 1.0 else "incorrect"
+            said = "correct" if read_verdict(output) == 1.0 else "incorrect"
             truth = "correct" if task.meta["oracle"] == 1.0 else "incorrect"
             return agent.propose(rendered, replace_prompt(task, said, truth),
                                  output, score)
@@ -470,8 +463,8 @@ def main() -> None:
     ap.add_argument("--model", default="deepseek-v4-flash")
     ap.add_argument("--min-unseen", type=float, default=0.25,
                     help="a pool still finding new error modes at this rate is "
-                         "worth training on. The pool that first blocked this "
-                         "rung measured 0.0169")
+                         "worth training on. The pool that first blocked "
+                         "this measured 0.0169")
     ap.add_argument("--min-examples", type=int, default=MIN_EXAMPLES,
                     help="...and so is one holding this many examples of a "
                          "single mode, however little variety is left. A clause "

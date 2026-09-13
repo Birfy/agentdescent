@@ -75,7 +75,8 @@ from agentdescent import (AppendRules, AuditedReward, AuditStore, GoldAnswer,  #
 from scripts.audit_workloads import (BBH_SUBTASKS, CODE_TIMEOUT,  # noqa: E402,F401
                                      WORKLOADS, Workload, exact_match,
                                      extract_code, final_number, normalize,
-                                     number_match, refuse_to_overwrite,
+                                     number_match, read_verdict,
+                                     refuse_to_overwrite,
                                      run_tests, task_index, tests_pass)
 from agentdescent.audit import Purpose, residual_bias  # noqa: E402
 from agentdescent.evolution import LLMAgent  # noqa: E402
@@ -109,15 +110,10 @@ def llm_judge(complete, usage_note: Dict[str, int]):
             return 0.0
         reply = complete(_JUDGE_TMPL.format(
             question=task.prompt, gold=task.meta["gold"], candidate=output[:2000]))
-        head = (reply or "").strip().upper()
-        if head.startswith("YES"):
-            return 1.0
-        if head.startswith("NO"):
-            return 0.0
-        # An unparseable reply is not a 0: scoring it as "wrong" would blame the
-        # artifact for the judge's failure to answer the question it was asked.
-        usage_note["unparsed"] = usage_note.get("unparsed", 0) + 1
-        return 1.0 if "YES" in head else 0.0
+        def _unparsed() -> None:
+            usage_note["unparsed"] = usage_note.get("unparsed", 0) + 1
+
+        return read_verdict(reply, on_unparsed=_unparsed)
 
     return score
 

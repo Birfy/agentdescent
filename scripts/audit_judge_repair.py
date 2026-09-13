@@ -53,7 +53,7 @@ from agentdescent.audit import AuditRecord, Purpose
 from agentdescent.audit.diagnose import evaluate_fix, residual_stats
 from agentdescent.evolution import Task
 
-from scripts.audit_workloads import resolved_records
+from scripts.audit_workloads import read_verdict, resolved_records
 from scripts.audit_phase0 import (_JUDGE_TMPL, label_agreement,
                                   task_index)
 
@@ -93,12 +93,7 @@ def judge_for(template: str, complete) -> Any:
         reply = complete(template.format(
             question=task.prompt, gold=task.meta["gold"],
             candidate=record.output[:2000]))
-        head = (reply or "").strip().upper()
-        if head.startswith("YES"):
-            return 1.0
-        if head.startswith("NO"):
-            return 0.0
-        return 1.0 if "YES" in head else 0.0
+        return read_verdict(reply)
     return score
 
 
