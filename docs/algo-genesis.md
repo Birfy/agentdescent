@@ -566,6 +566,20 @@ The contract does not move. Three fences, none of which replaces the others:
 It signs in with the local `claude` CLI's credentials rather than the `--model`
 endpoint, which is why it is opt-in and why the run header says so.
 
+Exercised once against a real session rather than only the stand-in binary the tests
+drive. One leaf episode at `src/frontend` on `minilang`, twelve turns: it wrote
+`lexer.py` and the package marker, nothing else, and the tokens it emits are
+`("num", 1)` / `("op", "+")` — the shape the specification pins, which is the exact
+detail an early completion-based run got wrong in five files at once (`('NUMBER','1')`,
+inferred from one failing input because the contract was not in the brief). With the
+one line its *parent* owes — `src/__init__.py` re-exporting `tokenize` — the `tok`
+stage goes **10/10**.
+
+It also declined to write that line itself, which is the more interesting half: asked
+for the entry point as well, a session situated at `src/frontend` wrote only its own
+node and said so, so the port's request channel never even had to fire (`requests=0`).
+The contract held inside the session rather than at the boundary.
+
 ## Synchronous or barrier-free, and which one is upstream's
 
 `--async` switches `evolve()` to its barrier-free runtime, and it is a fair question
