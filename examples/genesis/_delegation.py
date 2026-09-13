@@ -65,12 +65,20 @@ class Edit:
     is an obligation upstream puts on every agent, but it must never cost the
     change it is describing: the trust region is small, and an edit set trimmed
     to fit should lose its routing note before it loses a source file.
+
+    With one exception, and ``--cold-start`` is what found it. A note that *creates*
+    a node's record is ``"record"``, and it is trimmed **last** -- because then it is
+    not bookkeeping at all. It is the only place the decomposition the system just
+    invented is written down, and nothing else in the accepted version carries it;
+    the source file it would be dropped for is re-proposable next round, the
+    structure is not. While every domain shipped a ``CONTEXT.md`` per node this
+    could not show: the note only ever added a line to a table that already existed.
     """
 
     owner: str
     path: str
     content: Optional[str]
-    kind: str = "work"          # "work" | "context"
+    kind: str = "work"          # "record" | "work" | "context"
 
 
 @dataclass(frozen=True)
@@ -177,7 +185,8 @@ class RecursiveDelegation:
 
     def propose(self, ctx) -> Sequence[str]:
         state = _state_of(ctx.rendered)
-        root = LocalWorld(version=int(ctx.base_version or 0), path=self.root_path)
+        root = LocalWorld(version=int(ctx.base_version or 0), path=self.root_path,
+                          readonly=tuple(self.contracts))
 
         # A parent that asked for more work gets it before anything else is
         # chosen: this is the third verdict, arriving one round later because
@@ -458,7 +467,9 @@ class RecursiveDelegation:
         if not changed:
             return None
         self.routes_opened += len(opened)
-        return Edit(owner=world.path, path=key, content=body, kind="context")
+        # Creating the record outranks the work; adding a line to one does not.
+        return Edit(owner=world.path, path=key, content=body,
+                    kind="context" if key in state else "record")
 
     def _failure_note(self, child: LocalWorld, state: Mapping[str, str],
                       reason: str) -> Optional[Edit]:
@@ -483,15 +494,17 @@ class RecursiveDelegation:
     def _bound(self, edits: Sequence[Edit]) -> List[Edit]:
         """Last write per path wins, then the trust region, counted.
 
-        Work before bookkeeping, so a trimmed edit set loses a routing note
-        before it loses a source file -- see :class:`Edit`.
+        Work before bookkeeping, so a trimmed edit set loses a routing note before
+        it loses a source file -- and a record that brings a node into existence
+        before either, because nothing else in the accepted version says the node
+        exists. See :class:`Edit`.
         """
         by_path: Dict[str, Edit] = {}
         for edit in edits:
             by_path[edit.path] = edit
-        work = sorted((p for p, e in by_path.items() if e.kind == "work"))
-        context = sorted((p for p, e in by_path.items() if e.kind != "work"))
-        ordered = [by_path[p] for p in work + context]
+        order = {"record": 0, "work": 1}
+        ordered = [by_path[p] for p in
+                   sorted(by_path, key=lambda p: (order.get(by_path[p].kind, 2), p))]
         if len(ordered) > self.max_edits:
             self.truncated += len(ordered) - self.max_edits
             ordered = ordered[:self.max_edits]

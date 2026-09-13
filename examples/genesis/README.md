@@ -20,6 +20,7 @@ python -m examples.genesis.genesis_recursive_worlds                       # offl
 python -m examples.genesis.genesis_recursive_worlds --domain stackvm      # the deeper world
 python -m examples.genesis.genesis_recursive_worlds --domain jqx          # a program, not a package
 python -m examples.genesis.genesis_recursive_worlds --domain md           # scored by tests, no oracle
+python -m examples.genesis.genesis_recursive_worlds --cold-start          # no node records: it writes its own
 python -m examples.genesis.genesis_recursive_worlds --episodes 96 --workers 8
 python -m examples.genesis.genesis_recursive_worlds --keyed-union         # control: no three-way merge
 python -m examples.genesis.genesis_recursive_worlds --engine-gate         # control: the Beta gate

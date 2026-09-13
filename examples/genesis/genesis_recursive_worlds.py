@@ -89,10 +89,10 @@ from . import _jqx as jqx
 from . import _md as md
 from . import _stackvm as stackvm
 from ._judge import ParentJudge
-from ._suite import preflight
+from ._suite import cold_start, preflight
 from ._octopus import OctopusConflict, git_available
 from ._spatial import SpatialContract
-from ._world import WorldLog
+from ._world import CONTEXT_FILE, WorldLog
 
 #: The formation domains. Four, and each answers something the one before could
 #: not: minilang shows the mechanism, stackvm gives the recursion somewhere to go,
@@ -145,6 +145,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--depth", type=int, default=3,
                         help="maximum recursive delegation depth (v,p) -> (v,q)")
+    parser.add_argument("--cold-start", action="store_true",
+                        help="start from the goal, the contract and the suite only: "
+                             "no node CONTEXT.md records, no routing tables, no "
+                             "skills. The run has to write its own decomposition, "
+                             "which is the paper's first phase and the part a "
+                             "pre-seeded tree hands it for free")
     parser.add_argument("--engine-gate", action="store_true",
                         help=("the control arm: accept on the engine's Beta "
                               "posterior instead of the parent's monotone rule. "
@@ -210,10 +216,19 @@ def main(argv=None) -> None:
           f"{', '.join(spec.FROZEN)}")
     audited = [t for t in tasks if t.meta.get("audit")]
     print(f"Scoring  : {spec.SCORING}")
+    initial = cold_start(spec.initial_files()) if args.cold_start else spec.initial_files()
     print(f"Loaded   : {len(tasks)} {spec.CASE_NOUN} over "
           f"{len(set(t.meta['kind'] for t in tasks))} {spec.GROUP_NOUN}; "
-          f"{len(spec.initial_files())} files in the repository, "
+          f"{len(initial)} files in the repository, "
           "none of them implementation")
+    print("Start    : " + ("cold -- the goal, the contract and the suite; no node "
+                           "records, no routing tables, no skills. The run writes "
+                           "its own decomposition."
+                           if args.cold_start else
+                           f"{sum(1 for p in initial if p.endswith(CONTEXT_FILE))} "
+                           "CONTEXT.md records with routing tables, human-written: "
+                           "the decomposition is given, not grown (--cold-start "
+                           "takes it away)"))
     # Two different things live in the held-out tail depending on the domain, and
     # conflating them is how the jqx run stalled: sampled inputs the search has not
     # seen (a generalisation estimate), or requirements the search is not allowed to
@@ -236,7 +251,7 @@ def main(argv=None) -> None:
         preflight(complete)
 
     log = WorldLog()
-    strategy = SpatialContract(initial_files=spec.initial_files(), frozen=spec.FROZEN,
+    strategy = SpatialContract(initial_files=initial, frozen=spec.FROZEN,
                                log=log, max_files_per_diff=6)
     delegation = RecursiveDelegation(
         manager=spec.llm_manager(complete) if complete else spec.offline_manager,

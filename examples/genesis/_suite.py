@@ -38,7 +38,7 @@ from agentdescent.filetree import match_any, materialize, parse_tree
 
 from ._delegation import Brief, Delegation, Edit
 from ._spatial import SITUATED_EDIT_PROTOCOL, parse_situated_edits
-from ._world import normalise
+from ._world import CONTEXT_FILE, ROUTING_HEADING, SKILLS_DIR, normalise
 
 __all__ = ["CRASHED", "PYTHON_MODULE_SKILL", "Suite", "TestSuite", "llm_executor",
            "llm_manager", "reward", "reward_test", "run_cases", "run_test"]
@@ -394,6 +394,93 @@ def llm_executor(complete, *, editable: Sequence[str] = ("**",),
                 for edit in parse_situated_edits(reply)]
 
     return executor
+
+
+def cold_start(files: Mapping[str, str]) -> Dict[str, str]:
+    """The same repository with the **decomposition taken out**.
+
+    A formation domain ships a `CONTEXT.md` per node, each with a routing table, and
+    that is a fair reading of upstream -- the records are part of the accepted
+    version and a human writes the first ones. It is also, for every node below the
+    root, the system's own first job done for it: the paper's phase 1 is
+    *architecture and design*, and a tree that already says `src/potentials/pair/ ->
+    one module per interaction` has had its architecture handed to it.
+
+    So this strips every node record except the root's, and the root's routing table
+    with them, leaving only what a human cannot avoid supplying: the goal, the
+    contract, the suite that scores it, and any frozen entry script. The skills go
+    too -- a hint about how to lay out Python packages is a hint about the shape of
+    the answer.
+
+    Nothing frozen is touched, so scoring is identical; what changes is that the run
+    has to write its own `CONTEXT.md` chain as it goes, which `routing()` and
+    `_routing_note` already support (that is what `routes_opened` counts).
+    """
+    kept: Dict[str, str] = {}
+    for path, body in files.items():
+        if path == CONTEXT_FILE:
+            kept[path] = _without_routing(body)
+        elif path.endswith(CONTEXT_FILE) and not path.startswith("spec/"):
+            continue                                   # a node record: the run's job
+        elif f"/{SKILLS_DIR}/" in f"/{path}" or path.startswith(f"{SKILLS_DIR}/"):
+            continue                                   # a hint about the shape
+        else:
+            kept[path] = body
+    return kept
+
+
+def _without_routing(body: str) -> str:
+    """The root record with its routing table removed, and a note saying why."""
+    lines, out, dropping = body.splitlines(), [], False
+    for line in lines:
+        if line.strip().lower().startswith(ROUTING_HEADING.lower()):
+            dropping = True
+            out.append(ROUTING_HEADING)
+            out.append("- (empty: open the nodes this needs, and record them here)")
+            out.append("")
+            continue
+        if dropping:
+            if line.startswith("## "):
+                dropping = False
+            else:
+                continue
+        out.append(line)
+    return "\n".join(out) + "\n"
+
+
+def plan_delegations(brief: Brief, owes: Callable[[Mapping[str, str], str], bool],
+                     nodes: Sequence[str]) -> List[Delegation]:
+    """Where the rule-based manager sends work, cold start included.
+
+    The routing table first, which is what that table is for upstream: the
+    decomposition is read from `CONTEXT.md` rather than hardcoded, and only the
+    choice of *which* routed child to work on is a surrogate. But a cold-started
+    world has no tables at all, so a manager that can only delegate to what it
+    already routes to would have nothing to do forever. Upstream a manager may name
+    a new node inside its own subtree and the table records it afterwards, so this
+    one does the same: if nothing routed owes work, open the direct children its
+    plan still owes work to.
+
+    That makes the offline cold-start arm a test of the *mechanism* -- tables get
+    written, the recursion reaches depth -- and nothing at all about inventing a
+    decomposition, because the plan is the decomposition. Only a model arm can say
+    anything about that.
+    """
+    here = normalise(brief.world.path)
+    routed = [node for node in brief.world.routing(brief.state)
+              if owes(brief.state, node)]
+    if not routed:
+        prefix = f"{here}/" if here else ""
+        depth = len(prefix.split("/")) if here else 1
+        routed = sorted({node for node in nodes
+                         if node.startswith(prefix) and node != here
+                         and owes(brief.state, node)},
+                        key=len)
+        # direct children only: the recursion is what reaches the rest
+        routed = [node for node in routed
+                  if len(normalise(node).split("/")) == depth]
+    return [Delegation(node, f"clear the outstanding work under {node}/")
+            for node in routed]
 
 
 def preflight(complete) -> None:

@@ -41,7 +41,7 @@ from typing import Dict, List, Mapping, Sequence
 
 from ._delegation import Brief, Delegation, Edit
 from ._suite import (PYTHON_MODULE_SKILL, TEST_FAILURE, TestSuite,
-                     reward_test)
+                     plan_delegations, reward_test)
 from ._suite import llm_executor as _llm_executor
 from ._suite import llm_manager as _llm_manager
 from ._world import SKILLS_DIR, normalise
@@ -1329,10 +1329,12 @@ def _owes(state: Mapping[str, str], node: str) -> bool:
 
 
 def offline_manager(brief: Brief) -> Sequence[Delegation]:
-    """Decompose along the node's routing table; accountability writes its own."""
-    return [Delegation(node, f"clear the outstanding work under {node}/")
-            for node in brief.world.routing(brief.state)
-            if _owes(brief.state, node)]
+    """Decompose along the node's routing table; accountability writes its own.
+
+    Cold-started there is no table, so it opens the nodes its plan needs -- see
+    :func:`plan_delegations`.
+    """
+    return plan_delegations(brief, _owes, list(_PLAN))
 
 
 def offline_executor(brief: Brief) -> Sequence[Edit]:

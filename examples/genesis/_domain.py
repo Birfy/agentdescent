@@ -48,7 +48,7 @@ from __future__ import annotations
 from typing import Dict, List, Mapping, Optional, Sequence
 
 from ._delegation import Brief, Delegation, Edit
-from ._suite import PYTHON_MODULE_SKILL, Suite, reward
+from ._suite import PYTHON_MODULE_SKILL, Suite, plan_delegations, reward
 from ._suite import llm_executor as _llm_executor
 from ._suite import llm_manager as _llm_manager
 from ._world import SKILLS_DIR, normalise
@@ -413,10 +413,11 @@ def offline_manager(brief: Brief) -> Sequence[Delegation]:
     standing on, which is what that table is for upstream. What stays a surrogate
     is only the choice of *which* routed child to work on, and that is decided by
     what the node still owes rather than by a fixed list.
+
+    Cold-started (`--cold-start`) there is no table to read, so it opens the nodes
+    its plan needs and the run records them -- see :func:`plan_delegations`.
     """
-    return [Delegation(node, f"clear the outstanding work under {node}/")
-            for node in brief.world.routing(brief.state)
-            if _owes(brief.state, node)]
+    return plan_delegations(brief, _owes, list(_PLAN))
 
 
 def offline_executor(brief: Brief) -> Sequence[Edit]:

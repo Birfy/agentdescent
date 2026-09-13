@@ -27,7 +27,7 @@ from examples.genesis._delegation import (Brief, Delegation, Edit,
 from examples.genesis._judge import ParentJudge
 from examples.genesis._octopus import OctopusConflict, git_available, three_way
 from examples.genesis._spatial import SpatialContract, parse_situated_edits
-from examples.genesis._suite import preflight
+from examples.genesis._suite import cold_start, preflight
 from examples.genesis._world import (CONTEXT_FILE, SKILLS_DIR, TRUNCATED,
                                      LocalWorld, WorldLog, owns, parse_routing,
                                      resolve_edit_path, routing_entry)
@@ -826,6 +826,81 @@ def test_a_dead_backend_stops_the_run_before_it_starts():
     asked = []
     preflight(lambda prompt: asked.append(prompt) or "OK")       # a live one is quiet
     assert len(asked) == 1
+
+
+# ---------------------------------------------------------------------------
+# Cold start: the decomposition is the run's job, not the human's
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("spec", DOMAINS, ids=DOMAIN_IDS)
+def test_cold_start_keeps_the_goal_the_contract_and_the_suite_and_nothing_else(spec):
+    """Every file a human cannot avoid supplying, and not one more.
+
+    A formation domain ships a `CONTEXT.md` per node, each with a routing table, and
+    for every node below the root that is the system's own first job done for it --
+    the paper's phase 1 is architecture and design. `--cold-start` takes it away:
+    what is left is the goal, the frozen contract, the suite that scores it and any
+    frozen entry script.
+    """
+    cold = cold_start(spec.initial_files())
+    assert set(cold) <= set(spec.initial_files())
+    # the root record survives, with an emptied table
+    assert parse_routing(cold[CONTEXT_FILE]) == []
+    # no other record, and no skill
+    assert [p for p in cold if p.endswith(CONTEXT_FILE)] == [CONTEXT_FILE] + \
+           [p for p in cold if p.endswith(CONTEXT_FILE) and p.startswith("spec/")]
+    assert not [p for p in cold if SKILLS_DIR in p]
+    # and nothing frozen was touched: scoring is identical
+    frozen = [p for p in spec.initial_files() if match_any(p, spec.FROZEN)]
+    assert frozen and all(cold.get(p) == spec.initial_files()[p] for p in frozen)
+
+
+def test_a_cold_started_root_is_not_sent_into_the_read_only_directories():
+    """`routing()` falls back to the sub-directories that exist, which was invisible
+    while every domain shipped a table at the root. Cold-started, the root's only
+    sub-directories are `spec/` and `tests/` -- and a manager was duly told to
+    delegate into the two places it is forbidden to write."""
+    cold = cold_start(md.initial_files())
+    assert LocalWorld(0, "", readonly=md.FROZEN).routing(cold) == []
+    assert LocalWorld(0, "").routing(cold) == ["spec", "tests"]      # the old bug
+    # a directory with anything writable in it is still a route
+    grown = dict(cold, **{"src/__init__.py": "x\n"})
+    assert LocalWorld(0, "", readonly=md.FROZEN).routing(grown) == ["src"]
+
+
+def test_a_cold_started_world_writes_the_decomposition_it_was_not_given():
+    """End to end, offline, from eight files: the run opens its own nodes, records
+    them in its own routing tables, and still reaches a working world."""
+    tasks = domain.build_tasks()
+    log = WorldLog()
+    cold = cold_start(domain.initial_files())
+    assert [p for p in cold if p.endswith(CONTEXT_FILE)] == [CONTEXT_FILE,
+                                                             "spec/" + CONTEXT_FILE]
+    strategy = SpatialContract(initial_files=cold, frozen=domain.FROZEN, log=log,
+                               max_files_per_diff=6)
+    delegation = RecursiveDelegation(manager=domain.offline_manager,
+                                     executor=domain.offline_executor, log=log,
+                                     max_depth=3, contracts=domain.FROZEN)
+    result = evolve(
+        tasks, domain.reward, run=domain.make_runner(),
+        propose=lambda *a: (_ for _ in ()).throw(AssertionError("not installed")),
+        strategy=strategy, artifact_id="world", blast_radius=0.2,
+        rounds=14, n_workers=4, max_concurrency=4, self_verify=False,
+        held_out_frac=0.4, seed=0,
+        policies=Policies(proposal=delegation,
+                          acceptance=ParentJudge(log=log, enabled=True),
+                          conflict=OctopusConflict()))
+
+    assert result.error is None
+    assert result.final_reward > 0.9, result.outcomes()
+    assert delegation.routes_opened > 0, "no node was ever opened"
+    grown = result.state if isinstance(result.state, dict) else dict(result.state)
+    records = {p: grown[p] for p in grown if p.endswith(CONTEXT_FILE)}
+    assert len(records) > 1, sorted(records)
+    written = [p for p in records if p != CONTEXT_FILE and not p.startswith("spec/")]
+    assert written, "the run never recorded a node of its own"
+    assert any(parse_routing(records[p]) for p in records), "no routing table grew"
+    assert log.contract_violations == 0
 
 
 def test_stackvm_is_deeper_than_minilang_which_is_why_it_exists():

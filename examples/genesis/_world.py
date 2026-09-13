@@ -263,6 +263,11 @@ class LocalWorld:
 
     version: int
     path: str = ""
+    #: Globs that are contract rather than work -- the frozen specification, the
+    #: suite, a frozen entry script. Carried on the world because it travels with
+    #: the brief, and :meth:`routing` must not send a manager into a directory
+    #: where nothing is writable.
+    readonly: Sequence[str] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "path", normalise(self.path))
@@ -279,7 +284,7 @@ class LocalWorld:
             raise ValueError(
                 f"delegation must stay inside the parent's subtree: "
                 f"{self.path or './'} cannot situate a child at {q or './'}")
-        return LocalWorld(version=self.version, path=q)
+        return LocalWorld(version=self.version, path=q, readonly=self.readonly)
 
     def routing(self, state: Mapping[str, str]) -> List[str]:
         """Where this node says work may be delegated to.
@@ -293,7 +298,25 @@ class LocalWorld:
         key = f"{self.path}/{CONTEXT_FILE}" if self.path else CONTEXT_FILE
         declared = [p for p in parse_routing(state.get(key, "")) if owns(self.path, p)
                     and normalise(p) != self.path]
-        return declared or child_paths(self.path, list(state))
+        if declared:
+            return declared
+        return [child for child in child_paths(self.path, list(state))
+                if not self._all_readonly(state, child)]
+
+    def _all_readonly(self, state: Mapping[str, str], child: str) -> bool:
+        """Is every file under ``child`` contract rather than work?
+
+        The fallback used to return any sub-directory, which was invisible while
+        every domain shipped a routing table at the root. Cold-started -- no tables
+        at all, which is the point of that mode -- the root's only sub-directories
+        are `spec/` and `tests/`, and a manager was duly sent to delegate into the
+        two directories it is forbidden to write.
+        """
+        if not self.readonly:
+            return False
+        from agentdescent.filetree import match_any
+        under = [key for key in state if owns(child, key)]
+        return bool(under) and all(match_any(key, self.readonly) for key in under)
 
     def skills(self, state: Mapping[str, str]) -> List[str]:
         """Skill files this node inherits, nearest ancestor last.

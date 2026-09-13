@@ -180,6 +180,55 @@ together. So `md` splits the two jobs the single knob was doing:
 `audit reward` in the run header is therefore the honest headline number — the
 score on tests nothing that wrote the code has ever seen.
 
+### What the human supplies, and what the run has to invent
+
+A formation domain starts from fifteen files and not one line of implementation.
+That number deserves a challenge, and it got one. Sorted by who the author should
+be:
+
+| what | why a human writes it |
+|---|---|
+| `spec/CONTEXT.md` | the goal, in prose and formulas. Unavoidable: something has to say what to build. |
+| `tests/**` | the scoring. Upstream's equivalents are c-testsuite, LLVM and Csmith — also human-supplied, also frozen. |
+| `md.py` / `jqx.py` | a frozen entry point, so the result is a program rather than a package nobody can invoke. A choice, and a defensible one. |
+| `CONTEXT.md` **per node, with routing tables** | …this one is not defensible. |
+
+Six of md's fifteen files are `CONTEXT.md` records that name the nodes and what
+each is for: `src/potentials/pair/ -> one module per pair interaction`. That is the
+decomposition, and the paper's first phase is *architecture and design* — so a tree
+that ships with it has had its architecture handed to it. The machinery to grow one
+was always there and always measured (`routes_opened`: a manager may name a node
+its table does not reach, and the table records it afterwards); there was simply
+never a domain that started without one.
+
+`--cold-start` takes it away. What is left is the goal, the contract, the suite and
+the frozen driver — eight files for md — with the root's routing table emptied and
+the skills removed, because a hint about how to lay out Python packages is a hint
+about the shape of the answer. Nothing frozen is touched, so the scoring is
+identical; what changes is that the run has to write its own `CONTEXT.md` chain as
+it goes.
+
+Two defects were hiding behind the scaffolding, both of them invisible while every
+domain shipped a table at the root:
+
+* `routing()` falls back to the sub-directories that exist when a node has no
+  table. Cold-started, the root's only sub-directories are `spec/` and `tests/` —
+  so a manager was cheerfully told to delegate into the two places it is forbidden
+  to write. The world now carries the read-only globs and the fallback skips a
+  directory with nothing writable in it.
+* A routing note was always bookkeeping, trimmed before a source file when an
+  episode's edits exceeded the trust region. That is right for a note that adds a
+  line to an existing table and wrong for one that *creates* a node's record: the
+  source file is re-proposable next round, and the structure the system just
+  invented is written nowhere else. A record that brings a node into existence is
+  now trimmed last.
+
+Offline on md, cold, `--episodes 120`: **audit reward 1.000**, depth 3,
+`routes_opened=30` — the tables the run wrote are in the repository it wrote. That
+says the mechanism works from eight files; it says nothing about *inventing* a good
+decomposition, because the rule-based actor's plan **is** a decomposition. Only a
+model arm can speak to that, and it is measured separately below.
+
 ### What the domains share
 
 Everything that is not the software itself lives in [`_suite.py`](https://github.com/Birfy/agentdescent/blob/main/examples/genesis/_suite.py):
