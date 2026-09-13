@@ -198,13 +198,16 @@ def build_parser() -> argparse.ArgumentParser:
                              "which is what every published number on the page was "
                              "measured under")
     parser.add_argument("--staleness", choices=("guarded", "full", "reflective"),
-                        default="full",
+                        default="reflective",
                         help="what happens to a proposal built on a version that has "
-                             "since moved. The engine's default discards it beyond a "
-                             "lag budget; `full` never discards for lag, which is "
-                             "upstream's behaviour -- a parent merges what its child "
-                             "returns, whatever it branched from, and that is what "
-                             "the octopus merge is for. Only reachable under --async")
+                             "since moved. `reflective` (default) replays it on the "
+                             "current head and keeps it if it still improves -- never "
+                             "discarded for being late, only for no longer helping, "
+                             "which is the parent's own rule applied to a lagging "
+                             "contribution. `guarded` (the engine's default) drops it "
+                             "past a lag budget, which upstream never does; `full` "
+                             "takes it as-is, which is not a merge and can revert "
+                             "newer work. Only reachable under the barrier-free mode")
     parser.add_argument("--executor", choices=("completion", "claude-code"),
                         default="completion",
                         help="what one episode is. `completion` (default): one model "
@@ -293,8 +296,10 @@ def main(argv=None) -> None:
              else ""))
     print(f"Staleness: {args.staleness}"
           + (" (no effect: nothing is stale at a barrier)" if not args.asynchronous else
-             "  -- a lagging proposal is merged, not dropped, which is what a parent "
-             "does upstream" if args.staleness == "full" else
+             "  -- a lagging proposal is replayed on the current head and kept if it "
+             "still improves" if args.staleness == "reflective" else
+             "  -- a lagging proposal is taken as-is, which is not a merge and can "
+             "revert newer work" if args.staleness == "full" else
              "  -- a proposal that lagged past the budget is discarded, which upstream "
              "never does"))
     print(f"Merge    : {merge}" + ("" if git_available() else

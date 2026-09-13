@@ -613,10 +613,30 @@ not have: discard on staleness. Upstream never discards for lag — the parent m
 its child returns, whatever the child branched from, and that is what
 `Git.merge_octopus/2` is for.
 
-Which the engine already has a seam for, and it is the obvious arrangement once it is
-put that way: `Policies(staleness=)`. `FullStaleness` never discards for lag, and a
-Genesis diff is never contract-breaking (`SpatialContract` marks nothing so), so
-`--async --staleness full` is barrier-free *and* discards nothing.
+Which the engine already has a seam for: `Policies(staleness=)`. The first reading of
+that sentence was `FullStaleness` — never discards for lag — and it was wrong, in a way
+that took a model run to show. **The operative word is *merges*.** `Full` does not
+merge: it takes the diff as-is, so a stale whole-file edit replaces the current file and
+silently reverts whatever was done to it in between. Upstream's parent does not do that;
+it merges the child's commit into the tree it now has.
+
+`ReflectiveStaleness` is that: replay the diff on the current head, keep it if it still
+improves, discard **only** if it no longer does — never for being late. Which is the
+parent's own monotone rule (`agents/manager.ex:58`) applied to a lagging contribution,
+and it is the default here.
+
+The evidence is one model run each, so it is a demonstration rather than a comparison:
+
+| model arm | rollouts | result |
+|---|---|---|
+| `--sync` | **244** (ended itself, root agent) | **1.000** |
+| barrier-free, `--staleness full` | 4 003 (budget exhausted) | **0.812**, `open rework: src, src/observe/rdf` |
+
+Sixteen times the rollouts and a worse repository, with the self-clobbering `rdf` back
+in it. The mechanism explains it without needing the sample size: `merged=0
+conflicted=0` in that run, because in barrier-free mode cards arrive one at a time and
+the conflict policy only sees contests *within* a batch — so nothing was three-way
+merged, and every stale whole-file edit simply overwrote.
 
 | | sync | `--async` | `--async --staleness full` |
 |---|---|---|---|
@@ -655,7 +675,12 @@ landed on a file another proposal had touched. The claim measured is narrower an
 the one that matters for fidelity — under `--async --staleness full` nothing is
 discarded for being late, which is upstream's rule.
 
-**That arrangement is the default now.** A run is barrier-free with nothing discarded
+Offline, all four staleness arms reach 1.000 on every domain, which is worth stating
+because it is a limit of the offline arm rather than a result: rule-based actors follow
+one plan and two rollouts never genuinely contest a file, so the failure mode cannot
+appear there at all.
+
+**Barrier-free is the default now, with `reflective`.** A run is barrier-free with nothing discarded
 for lag unless `--sync` (or `--serial`, which is the one-worker arm of the comparison
 above and means the barrier too) puts the barrier back. The header prints which one is
 in force, and every number on this page that predates the change was measured under
