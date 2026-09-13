@@ -301,7 +301,8 @@ comparable across the two.
 
 | domain | seed | held-out | accepted | episodes | depth | calls | wall-clock |
 |---|---|---|---|---|---|---|---|
-| `md` (test-scored, stops itself) | 0 | **1.000** | 48 | 346 | 3 | 2 821 | 48.6 min |
+| `md`, barrier-free + `reflective` (**the default**, stops itself) | 0 | **1.000** | 32 | 111 | 4 | 3 731 | 9.3 min |
+| `md` under `--sync` (test-scored, stops itself) | 0 | **1.000** | 48 | 346 | 3 | 2 821 | 48.6 min |
 | `minilang` | 0 | **1.000** | 5 | 34 | 3 | 284 | 135 s |
 | `minilang` | 1 | **1.000** | 5 | — | 3 | 306 | 173 s |
 | `minilang` | 2 | **1.000** | 5 | — | 2 | 242 | 100 s |
@@ -631,9 +632,12 @@ The evidence is one model run each, so it is a demonstration rather than a compa
 |---|---|---|
 | `--sync` | **244** (ended itself, root agent) | **1.000** |
 | barrier-free, `--staleness full` | 4 003 (budget exhausted) | **0.812**, `open rework: src, src/observe/rdf` |
+| barrier-free, `--staleness reflective` | **2 791** (ended itself, root agent) | **1.000**, 67/67 in one process |
 
 Sixteen times the rollouts and a worse repository, with the self-clobbering `rdf` back
-in it. The mechanism explains it without needing the sample size: `merged=0
+in it — and the same domain, same model, same budget under `reflective` ends itself at
+1.000 with one stale proposal discarded, for no longer improving rather than for being
+late. The mechanism explains it without needing the sample size: `merged=0
 conflicted=0` in that run, because in barrier-free mode cards arrive one at a time and
 the conflict policy only sees contests *within* a batch — so nothing was three-way
 merged, and every stale whole-file edit simply overwrote.
