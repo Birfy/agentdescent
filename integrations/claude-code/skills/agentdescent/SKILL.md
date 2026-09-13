@@ -142,6 +142,45 @@ needing one:
 
 Offer one of these rather than stopping.
 
+## When the reward was an agent
+
+If the run's `score` is a model judging an output rather than a fact about it,
+the loop optimised a **proxy**, and every gate in it read that same proxy — so a
+change that games the judge is indistinguishable from one that improves. Nothing
+in `status` or `show` can tell you which happened.
+
+The `audit_*` tools can. They take the audit JSONL path, not a `run_id` — add an
+`audit` block to the spec and `status` reports `audit_store` once records exist:
+
+```json
+"audit": {"oracle": "mypkg.scorers:exact_match", "sample_rate": 0.1}
+```
+
+`enabled` defaults to false there: the run collects records and the acceptance
+gate is untouched. Show the user what the first run measured before offering to
+turn the correction on.
+
+1. **`audit_status`** — `delta_hat` is how generous the verifier is on average;
+   `resid_sd` is how *scattered* its error is, and that is the bigger number and
+   the one the acceptance gate's uncertainty is built from. Quote both. If
+   `is_stale` is true the correction must not be applied and `stale_reason` says
+   why.
+2. **`audit_pending`** lists units waiting on ground truth; **`audit_resolve`**
+   files one result. It refuses to overwrite an existing result — a second score
+   for the same unit is a duplicate submission or a correction and only the user
+   knows which, so ask rather than retry. **`audit_recompute`** after a batch.
+3. **`audit_scorecard`** grades a verifier change. Read `blockers`; if `ship` is
+   false, relay them. **Never recommend a verifier change because `delta_hat`
+   fell** — a mean error goes to zero when errors cancel, and on real data a
+   correct-looking rule cut it 74% while making the verifier worse.
+4. **`audit_drift`** charts the correction across versions. `signal-lost` means
+   the verifier no longer predicts the truth: the fix is a different verifier,
+   not more labels. If `overlapping` is true, the limits do not apply — say so
+   rather than reporting the alarm.
+5. **`audit_rescan`** re-scores stored outputs with another verifier. Its
+   `verifier` argument is imported and **run**; anything outside the
+   `agentdescent` package needs the user to widen `allow`. Ask them.
+
 ## Guardrails
 
 - Never edit the target directory yourself while a run is in progress.

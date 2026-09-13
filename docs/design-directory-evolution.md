@@ -378,7 +378,7 @@ result.write_to(path, backup=True)   # 装回，先备份
 
 两个反直觉的点，都已对代码核实：
 
-1. **oracle 门是免费的。** `oracle_eval` 和 `eval_counts` 调同一个 `eval_fn`、同一个
+1. **审计门是免费的。** `full_eval`（0.6 前叫 `oracle_eval`）和 `eval_counts` 调同一个 `eval_fn`、同一个
    held-out 集，而 `_EvalCache` 按 `(render(), task.id)` 记忆化
    （[evolution.py:531](https://github.com/Birfy/agentdescent/blob/main/agentdescent/evolution.py#L531)），所以 L1 的强制审计只消耗
    `oracle_budget` 计数器，不产生任何额外 agent 调用。**演化 agent 目录/代码

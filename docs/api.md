@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-235 public names across 36 modules.
+332 public names across 54 modules.
 
 ---
 
@@ -572,6 +572,26 @@ Usage(
 ### `WorkspaceAgent`
 
 A `Completion` that can additionally be bound to a directory.
+
+### `anthropic_compatible(...)`
+
+A completion for any **Anthropic-format** endpoint, with no SDK dependency.
+
+```python
+anthropic_compatible(
+    model: str,
+    *,
+    base_url_env: str = 'ANTHROPIC_BASE_URL',
+    api_key_env: str = 'ANTHROPIC_API_KEY',
+    default_base_url: str = 'https://api.anthropic.com',
+    version: str = '2023-06-01',
+    max_tokens: int = 4096,
+    timeout: float = 120.0,
+    usage: Optional[Usage] = None,
+    retries: int = 3,
+    **create_kwargs
+) -> Completion
+```
 
 ### `claude(...)`
 
@@ -1145,7 +1165,7 @@ Rule / learned / oracle, and the budget that bounds the expensive one. &nbsp;·&
 
 ### `ThreeLayerVerifier(...)`
 
-Rule / learned / oracle backend for the aggregator.
+Rule / learned / full backend for the aggregator.
 
 ```python
 ThreeLayerVerifier(
@@ -1162,13 +1182,1281 @@ ThreeLayerVerifier(
 |---|---|
 | `cheap_eval(artifact: Evolvable) -> float` | The signal used everywhere a budget-free score is needed. |
 | `eval_counts(artifact: Evolvable, floor: Optional[float] = None) -> Tuple[float, float]` | Return (successes, failures) on the full held-out set. |
+| `full_eval(artifact: Evolvable) -> float` | `eval_fn` on the **whole** held-out set. Consumes audit budget. |
 | `learned_eval(artifact: Evolvable) -> Tuple[float, float]` | Noisy proxy that also returns an uncertainty estimate. |
-| `oracle_eval(artifact: Evolvable) -> float` | Ground truth on the full held-out set. Consumes audit budget. |
+| `oracle_eval(artifact: Evolvable) -> float` | Deprecated alias for `full_eval`. Removed in 0.7. |
 | `rule_eval(artifact: Evolvable) -> float` | Cheap, deterministic-ish check on a tiny subset. |
 
 ### `VerifierBudget(oracle_calls_remaining: int = 200, oracle_calls_used: int = 0) -> None`
 
-Oracle call budget, consumed by `oracle_eval`.
+Budget for full-set evaluations, consumed by `full_eval`.
+
+---
+
+## The sparse audit layer
+
+Pair a cheap verifier against ground truth without paying for truth. &nbsp;·&nbsp; `agentdescent.audit.tap` &nbsp;·&nbsp; [guide](audit.md)
+
+### `AuditedReward(...)`
+
+A cheap verifier that hands a sampled minority of its work to the truth.
+
+```python
+AuditedReward(
+    verifier: Callable[[Any, str], float],
+    *,
+    oracle: Optional[Any] = None,
+    store: Optional[AuditStore] = None,
+    draw_by: str = 'task',
+    sample_rate: float = 0.1,
+    stratify: Optional[Callable[[Any, str, float], str]] = None,
+    rates: Optional[Dict[str, float]] = None,
+    calibration_fraction: float = 0.7,
+    seed: int = 0,
+    verifier_version: Optional[str] = None,
+    version_extra: Any = None
+) -> None
+```
+
+| parameter | type | default | what it is |
+|---|---|---|---|
+| `verifier` | `Callable[[Any, str], float]` | *required* | The cheap scorer the loop optimises against -- an agent judging the output, a learned scorer, a heuristic. `(task, output) -> float`. |
+| `oracle` | `Optional[Any]` | `None` | Ground truth. `GoldAnswer` when it returns now, `DeferredOracle` when it arrives later. Defaults to `NullOracle`, which still records the questions -- useful when the answerer has not been asked yet. |
+| `store` | `Optional[AuditStore]` | `None` | Where records go. Defaults to an in-memory store; pass `AuditStore("audit.jsonl")` to keep them. |
+| `draw_by` | `str` | `'task'` | What the inclusion draw is a function of. `"task"` (the default) audits a task **whole or not at all**; `"output"` draws per unit. They are identical when each task is scored once, and differ exactly where the difference matters. A run scores the same task again for every artifact version, and a per-unit draw then puts that task in *both* the labelled and the unlabelled half -- which the estimator assumes cannot happen. Measured at a nominal 0.95, on 200 tasks scored under four versions each: coverage **0.9125** when the halves share tasks and **0.945** when they do not. `"output"` buys more distinct tasks per label and an interval about 15% too narrow. Use it only when a task is scored once, where it is the same thing. |
+| `sample_rate` | `float` | `0.1` | Probability a unit is audited, when no stratum-specific rate applies. |
+| `stratify` | `Optional[Callable[[Any, str, float], str]]` | `None` | Optional `(task, output, verifier_score) -> str`. Names the layer a unit belongs to, so `rates` can spend more of the budget where the residual varies most. The stratum is recorded either way. |
+| `rates` | `Optional[Dict[str, float]]` | `None` | Per-stratum inclusion probabilities, falling back to `sample_rate`. |
+| `calibration_fraction` | `float` | `0.7` | Share of audited units assigned `CALIBRATION`; the rest become `IMPROVEMENT`. The split is drawn at random rather than taken in order, because units arrive grouped by task and by artifact and any ordered split would correlate the two pools with whatever the ordering happens to encode. |
+| `seed` | `int` | `0` | Base seed for the inclusion draw. |
+| `verifier_version` | `Optional[str]` | `None` | Overrides the fingerprint derived from `verifier`. Pass one when the verifier is an agent whose behaviour lives in a prompt or a model id rather than in the source of the function. |
+| `version_extra` | `Any` | `None` | Mixed into the derived fingerprint. The cheaper way to say the same thing: `version_extra={"model": "...", "prompt_sha": "..."}`. |
+
+| method | what it does |
+|---|---|
+| `calibration_set() -> list` | Resolved CALIBRATION records for *this* verifier version. |
+| `pending() -> list` | Audited units still waiting on truth. |
+
+### `RenderTap(run: Callable[[str, Any], str]) -> None`
+
+Optional wrapper for `run` that records *which* artifact produced an output.
+
+---
+
+## Switching the audit on
+
+One call that assembles the six pieces and the four cross-references. &nbsp;·&nbsp; `agentdescent.audit.wiring` &nbsp;·&nbsp; [guide](audit.md)
+
+### `Audit(...)`
+
+The assembled layer. Hand the three fields to `evolve()`.
+
+```python
+Audit(
+    reward: AuditedReward,
+    run: Optional[RenderTap],
+    acceptance: RectifiedAcceptance,
+    store: AuditStore,
+    calibrator: Calibrator,
+    watch: VerifierWatch
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `rebalance(unseen: float, **kw: Any) -> float` | Move the calibration share as the improvement pool stops learning. |
+| `recompute() -> Rectification` | Re-read the store and re-estimate. Call after a batch resolves. |
+| `rectification() -> Rectification` | The correction in force. Never raises; stale is an answer. |
+| `status() -> Dict[str, Any]` | What the audit knows, for a round hook or a log line. |
+
+### `attach(...)`
+
+Assemble the audit around `verifier` and return what `evolve()` needs.
+
+```python
+attach(
+    verifier: Callable[[Any, str], float],
+    *,
+    oracle: Optional[Any] = None,
+    store: Union[AuditStore, str, None] = None,
+    run: Optional[Callable[[str, Any], str]] = None,
+    inner: Any = None,
+    enabled: bool = True,
+    plan: Optional[SamplePlan] = None,
+    policy: Optional[AuditPolicy] = None,
+    sample_rate: float = 0.1,
+    stratify: Optional[Callable[[Any, str, float], str]] = None,
+    calibration_fraction: float = 0.7,
+    draw_by: str = 'task',
+    seed: int = 0,
+    verifier_version: Optional[str] = None,
+    version_extra: Any = None,
+    watch_ids: Iterable[str] = (),
+    watch_globs: Sequence[str] = ()
+) -> Audit
+```
+
+| parameter | type | default | what it is |
+|---|---|---|---|
+| `verifier` | `Callable[[Any, str], float]` | *required* | The cheap scorer the loop optimises against, `(task, output) -> float`. |
+| `oracle` | `Optional[Any]` | `None` | Ground truth. A bare callable `(task, output) -> float` is wrapped in `GoldAnswer`, because that is what every caller with a gold answer already has and asking them to wrap it adds an import and a chance to forget that an oracle must never raise into the rollout. `None` records the questions without answering them. |
+| `store` | `Union[AuditStore, str, None]` | `None` | An `AuditStore`, or a path to open one at. A path is the usual case: the process that resolves a deferred oracle is not this one. |
+| `run` | `Optional[Callable[[str, Any], str]]` | `None` | The loop's `run`. Wrapped in a `RenderTap` so each unit records which artifact produced it. Leave it out and the audit still estimates the bias; it just cannot attribute a unit to an artifact. |
+| `inner` | `Any` | `None` |  |
+| `enabled` | `bool` | `True` | `False` collects records and **does not correct anything** -- the gate delegates to `inner` on the untouched context. The honest way to run a first round: measure before you spend. |
+| `plan` | `Optional[SamplePlan]` | `None` | A `SamplePlan` from a previous round, which carries per-stratum rates and overrides `sample_rate`. |
+| `policy` | `Optional[AuditPolicy]` | `None` |  |
+| `sample_rate` | `float` | `0.1` |  |
+| `stratify` | `Optional[Callable[[Any, str, float], str]]` | `None` |  |
+| `calibration_fraction` | `float` | `0.7` |  |
+| `draw_by` | `str` | `'task'` |  |
+| `seed` | `int` | `0` |  |
+| `verifier_version` | `Optional[str]` | `None` |  |
+| `version_extra` | `Any` | `None` |  |
+| `watch_ids` | `Iterable[str]` | `()` | Artifact ids and diff-key globs that mean the verifier changed. Nothing is watched by default, which is right for a fixed function and exactly wrong for a run that evolves its own judge -- see `VerifierWatch`. |
+| `watch_globs` | `Sequence[str]` | `()` | As `watch_ids`. |
+
+---
+
+## Audit oracle sources
+
+Where ground truth comes from, and how long it takes to arrive. &nbsp;·&nbsp; `agentdescent.audit.sources` &nbsp;·&nbsp; [guide](audit.md)
+
+### `DeferredOracle(*, max_queued: Optional[int] = None) -> None`
+
+Truth that arrives later: an experiment, a human, an overnight job.
+
+| method | what it does |
+|---|---|
+| `forget(record_id: str) -> None` | Drop a resolved id from the queue view. |
+| `queued() -> List[str]` | Record ids awaiting an answer, oldest first. |
+
+### `GoldAnswer(fn: Callable[[object, str], float]) -> None`
+
+Synchronous truth: a gold answer, an exact match, a checker, a simulator.
+
+### `NullOracle()`
+
+An oracle that never answers. The default, and it is not a no-op.
+
+### `OracleSource`
+
+Ground truth for one `(task, output)` pair.
+
+### `resolve_from_mapping(store, answers: Dict[str, float], *, at: Optional[float] = None) -> int`
+
+Fill in truth for many pending records at once. Returns how many landed.
+
+---
+
+## The audit store
+
+Append-only persistence for paired observations, and the two pools. &nbsp;·&nbsp; `agentdescent.audit.store` &nbsp;·&nbsp; [guide](audit.md)
+
+### `AuditStore(path: Optional[str] = None) -> None`
+
+Records on disk, indexed in memory.
+
+| method | what it does |
+|---|---|
+| `all() -> List[AuditRecord]` | Every record, in the order first seen. |
+| `flush() -> None` | Persist the moments now. Call it when a run ends. |
+| `for_calibration(verifier_version: str) -> List[AuditRecord]` | Resolved CALIBRATION records for one verifier version, and nothing else. |
+| `for_improvement(verifier_version: Optional[str] = None) -> List[AuditRecord]` | Resolved IMPROVEMENT records -- the pool you are allowed to look at. |
+| `load() -> None` | Re-read the file, last-occurrence-wins. |
+| `observe_unlabelled(verifier_version: str, stratum: str, score: float) -> None` | Fold one un-audited score into its stratum's running moments. |
+| `pending(...)` | Records still waiting on truth -- the work list for whoever answers. |
+| `remember_fingerprint(fingerprint: str) -> None` | Persist the fingerprint so a restart can be compared against it. |
+| `remember_priorities(priorities: Dict[str, float]) -> None` | Record what the merge path thought was worth auditing. |
+| `reopen(record_id: str) -> bool` | Clear a resolution so it can be replaced. For corrections, not for retries. |
+| `resolve(record_id: str, oracle_score: float, *, at: Optional[float] = None) -> bool` | Attach ground truth to a pending record. `False` if there was none to attach. |
+| `unlabelled_moments(verifier_version: str)` | `stratum -> {n, mean, var}` over the units that were not audited. |
+| `versions() -> List[str]` | Every `verifier_version` seen, in order of first appearance. |
+
+### `summarise(records: Iterable[AuditRecord]) -> Dict[str, float]`
+
+Counts and the raw mean residual. **Not** an estimate of the bias.
+
+---
+
+## Diagnosing the verifier
+
+Sort the residual by what fixing it would cost, and measure a proposed fix. &nbsp;·&nbsp; `agentdescent.audit.diagnose` &nbsp;·&nbsp; [guide](audit.md)
+
+### `Direction`
+
+Which way the verifier was wrong.
+
+| member | value |
+|---|---|
+| `OVER` | `'over'` |
+| `UNDER` | `'under'` |
+
+### `Disagreement(record: AuditRecord, kind: Kind, direction: Direction, note: str = '') -> None`
+
+### `DisagreementReport(...)`
+
+The residual, sorted by what fixing it would cost.
+
+```python
+DisagreementReport(
+    n_pairs: int,
+    n_disagree: int,
+    delta: float,
+    sigma: float,
+    by_kind: Dict[Kind, int],
+    by_direction: Dict[Direction, int],
+    by_kind_direction: Dict[Tuple[Kind, Direction], int],
+    floor_sigma: float,
+    sigma_without: Dict[Kind, float],
+    items: List[Disagreement] = <factory>
+) -> None
+```
+
+### `FixReport(...)`
+
+What a proposed change to the verifier actually costs.
+
+```python
+FixReport(
+    n_pairs: int,
+    delta_before: float,
+    delta_after: float,
+    sigma_before: float,
+    sigma_after: float,
+    disagree_before: float,
+    disagree_after: float,
+    fixed: int,
+    broken: int,
+    breakage_rate: float,
+    false_negative_before: float,
+    false_negative_after: float,
+    unchanged: int,
+    moved: int = 0,
+    noise_floor: int = 0
+) -> None
+```
+
+### `Kind`
+
+What it would take to fix this disagreement. Ordered by increasing cost.
+
+| member | value |
+|---|---|
+| `FORMATTING` | `'formatting'` |
+| `SPEC_GAP` | `'spec_gap'` |
+| `AMBIGUOUS` | `'ambiguous'` |
+| `JUDGMENT` | `'judgment'` |
+| `UNCLASSIFIED` | `'unclassified'` |
+
+### `classify_disagreements(...)`
+
+Sort a store's resolved disagreements by what fixing them would take.
+
+```python
+classify_disagreements(
+    records: Iterable[AuditRecord],
+    classifier: Optional[Classifier] = None,
+    context: Optional[Mapping[str, Any]] = None
+) -> DisagreementReport
+```
+
+### `evaluate_fix(...)`
+
+Score a proposed verifier change against **every** labelled pair.
+
+```python
+evaluate_fix(
+    records: Iterable[AuditRecord],
+    fix: Callable[[AuditRecord, Any], float],
+    context: Optional[Mapping[str, Any]] = None,
+    *,
+    noise_floor: int = 0
+) -> FixReport
+```
+
+### `reference_classifier(...)`
+
+A classifier for the common case: a reference answer and a normaliser.
+
+```python
+reference_classifier(
+    normalise: Callable[[str], str],
+    reference_of: Callable[[Any], str],
+    *,
+    ambiguous_when: Optional[Callable[[str, str, Any], bool]] = None,
+    spec_gap_when: Optional[Callable[[str, str, Any], bool]] = None
+) -> Classifier
+```
+
+### `residual_stats(records: Iterable[AuditRecord]) -> Dict[str, float]`
+
+`n`, `delta`, `sigma`, `disagree` over resolved records.
+
+---
+
+## Searching for a fix
+
+Enumerate the hard rules, score every combination, rank by the residual. &nbsp;·&nbsp; `agentdescent.audit.propose` &nbsp;·&nbsp; [guide](audit.md)
+
+### `Candidate(rules: Tuple[str, ...], report: FixReport, passengers: Tuple[str, ...] = ()) -> None`
+
+One combination of rules and what it does to the whole labelled set.
+
+### `Rule(name: str, predicate: Predicate) -> None`
+
+A named reason to mark an output wrong that the verifier marked right.
+
+### `SearchReport(...)`
+
+Every combination tried, best first, and the two things to distrust.
+
+```python
+SearchReport(
+    sigma_before: float,
+    candidates: List[Candidate] = <factory>,
+    n_rules: int = 0,
+    n_combinations: int = 0,
+    floor: float = nan,
+    warnings: List[str] = <factory>
+) -> None
+```
+
+### `length_rules(...)`
+
+Candidate rules that need only a reference and a normaliser.
+
+```python
+length_rules(
+    normalise: Callable[[str], str],
+    reference_of: Callable[[Any], str],
+    *,
+    question_of: Optional[Callable[[Any], str]] = None,
+    short: Sequence[float] = (0.6, 0.4),
+    long: Sequence[float] = (1.6, 3.0)
+) -> List[Rule]
+```
+
+### `search(...)`
+
+Score every combination of `rules` up to `max_size`, best first.
+
+```python
+search(
+    records: Sequence[AuditRecord],
+    rules: Sequence[Rule],
+    context: Optional[Mapping[str, Any]] = None,
+    *,
+    max_size: int = 2,
+    floor: float = nan,
+    max_combinations: int = 200
+) -> SearchReport
+```
+
+---
+
+## The verifier scorecard
+
+What has to be true before a new verifier replaces the old one. &nbsp;·&nbsp; `agentdescent.audit.scorecard` &nbsp;·&nbsp; [guide](audit.md)
+
+### `Cost(verifier_seconds: float, oracle_seconds: float = nan) -> None`
+
+Seconds per decision, for the verifier and for the thing it stands in for.
+
+### `Goal`
+
+Which way a metric is supposed to move.
+
+| member | value |
+|---|---|
+| `LOWER` | `'lower is better'` |
+| `HIGHER` | `'higher is better'` |
+| `WATCH` | `'no target; read it'` |
+
+### `Metric(...)`
+
+One row. `previous` is `None` when there is nothing to compare to.
+
+```python
+Metric(
+    name: str,
+    value: float,
+    goal: Goal,
+    previous: Optional[float] = None,
+    note: str = '',
+    blocking: bool = False,
+    triggered: bool = False
+) -> None
+```
+
+### `RescanReport(...)`
+
+What a new verifier would have said about outputs the run already scored.
+
+```python
+RescanReport(
+    n: int,
+    n_artifacts: int,
+    agreement: float,
+    mean_shift: float,
+    sigma_shift: float,
+    by_artifact: Dict[str, Dict[str, float]] = <factory>,
+    flipped: List[Tuple[str, str, float, float]] = <factory>,
+    n_pairs: int = 0,
+    sigma_before: float = nan,
+    sigma_after: float = nan
+) -> None
+```
+
+### `Scorecard(...)`
+
+The rows, and whether they add up to a change worth making.
+
+```python
+Scorecard(
+    version: str,
+    previous_version: Optional[str],
+    metrics: List[Metric],
+    blockers: List[str] = <factory>,
+    notes: List[str] = <factory>,
+    rescan: Optional[RescanReport] = None,
+    rank: Optional[RankReport] = None,
+    computed_at: float = 0.0
+) -> None
+```
+
+### `rescan(...)`
+
+Re-score the outputs the audit kept, and see what would have moved.
+
+```python
+rescan(
+    records: Sequence[AuditRecord],
+    new_verifier: Callable[[AuditRecord, Any], float],
+    context: Optional[Mapping[str, Any]] = None,
+    *,
+    pairs: Optional[Sequence[Tuple[str, str]]] = None
+) -> RescanReport
+```
+
+### `verifier_scorecard(...)`
+
+Fill the card for `current`, against `previous` where there is one.
+
+```python
+verifier_scorecard(
+    current: Rectification,
+    records: Sequence[AuditRecord],
+    *,
+    previous: Optional[Rectification] = None,
+    previous_records: Sequence[AuditRecord] = (),
+    rescan_report: Optional[RescanReport] = None,
+    rank: Optional[RankReport] = None,
+    cost: Optional[Cost] = None,
+    previous_cost: Optional[Cost] = None,
+    max_false_negative: float = 0.05,
+    max_cost_ratio: float = 0.25
+) -> Scorecard
+```
+
+---
+
+## Ordering agreement
+
+Can the verifier put candidates in the right order -- the only thing the gate uses. &nbsp;·&nbsp; `agentdescent.audit.ranking` &nbsp;·&nbsp; [guide](audit.md)
+
+### `Flip(...)`
+
+One artifact pair the verifier orders backwards.
+
+```python
+Flip(
+    base: str,
+    candidate: str,
+    verifier_gap: float,
+    oracle_gap: float,
+    n_base: int,
+    n_candidate: int
+) -> None
+```
+
+### `RankReport(...)`
+
+Ordering agreement, at the unit level and at the level the gate acts on.
+
+```python
+RankReport(
+    n_units: int,
+    tau_b: float,
+    concordant: int,
+    discordant: int,
+    one_directional: bool,
+    n_artifacts: int,
+    by_artifact: Dict[str, Dict[str, float]] = <factory>,
+    n_pairs: int = 0,
+    compared: Tuple[Tuple[str, str], ...] = (),
+    agree: int = 0,
+    ties: int = 0,
+    flips: List[Flip] = <factory>
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `above(gap: float) -> Tuple[int, int]` | `(agree, flip)` among pairs whose *verifier* gap is at least `gap`. |
+
+### `kendall_tau_b(x: Sequence[float], y: Sequence[float]) -> Tuple[float, int, int]`
+
+`(tau_b, concordant, discordant)`, tie-corrected.
+
+### `rank_agreement(...)`
+
+Does the verifier order units, and artifacts, the way ground truth does?
+
+```python
+rank_agreement(
+    records: Iterable[AuditRecord],
+    *,
+    pairs: Optional[Sequence[Tuple[str, str]]] = None,
+    min_units: int = 1
+) -> RankReport
+```
+
+---
+
+## Drift monitoring
+
+EWMA control charts on the correction, without an alarm every generation. &nbsp;·&nbsp; `agentdescent.audit.drift` &nbsp;·&nbsp; [guide](audit.md)
+
+### `DriftKind`
+
+What a signal is telling the operator to do.
+
+| member | value |
+|---|---|
+| `BIAS_UP` | `'bias-up'` |
+| `BIAS_DOWN` | `'bias-down'` |
+| `SIGNAL_LOST` | `'signal-lost'` |
+| `NOT_INDEPENDENT` | `'not-independent'` |
+
+### `DriftMonitor(...)`
+
+EWMA charts on `delta_hat` and `gain_factor`, generation by generation.
+
+```python
+DriftMonitor(
+    *,
+    lam: float = 0.2,
+    L: float = 3.0,
+    centre: Optional[float] = None,
+    min_gain: float = 1.05,
+    gain_lam: float = 0.2
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `observe(rect: Rectification, label: str = '') -> List[DriftSignal]` | Chart one generation. Returns only the signals *this* point raised. |
+| `observe_point(point: DriftPoint) -> List[DriftSignal]` | Chart a point assembled by hand. For a caller that is not using `Calibrator`. |
+
+### `DriftPoint(...)`
+
+One generation's rectification, reduced to what a chart needs.
+
+```python
+DriftPoint(
+    label: str,
+    delta_hat: float,
+    se: float,
+    gain_factor: float,
+    n: int,
+    covers: Tuple[float, float] = (0.0, 0.0)
+) -> None
+```
+
+### `DriftReport(...)`
+
+Every point charted, every signal raised, and whether the chart is valid.
+
+```python
+DriftReport(
+    points: List[DriftPoint] = <factory>,
+    z_bias: List[float] = <factory>,
+    band: List[float] = <factory>,
+    z_gain: List[float] = <factory>,
+    signals: List[DriftSignal] = <factory>,
+    centre: float = 0.0,
+    overlapping: bool = False
+) -> None
+```
+
+### `DriftSignal(...)`
+
+One alarm, with the number that raised it and what to do.
+
+```python
+DriftSignal(
+    kind: DriftKind,
+    at: int,
+    label: str,
+    value: float,
+    z: float,
+    limit: float,
+    detail: str
+) -> None
+```
+
+---
+
+## Coverage allocation
+
+Where the improvement labels go: Good-Turing unseen mass, not Neyman. &nbsp;·&nbsp; `agentdescent.audit.coverage` &nbsp;·&nbsp; [guide](audit.md)
+
+### `Coverage(key: str, labels: int, modes: int, singletons: int, unseen: float) -> None`
+
+What one key has taught so far, and how much it still has to teach.
+
+### `CoveragePlan(...)`
+
+Per-key inclusion probabilities for the improvement pool.
+
+```python
+CoveragePlan(
+    rates: Dict[str, float],
+    target_n: Dict[str, int],
+    weights: Dict[str, float],
+    unseen: Dict[str, float],
+    default_rate: float = 0.0,
+    total_n: int = 0,
+    expected_units: int = 0,
+    unseen_overall: float = nan,
+    warnings: List[str] = <factory>
+) -> None
+```
+
+### `coverage_of(...)`
+
+Group resolved records by `key` and measure the variety inside each.
+
+```python
+coverage_of(
+    records: Iterable[Any],
+    key: Callable[[Any], str],
+    mode: Callable[[Any], Optional[str]],
+    *,
+    keys: Sequence[str] = ()
+) -> Dict[str, Coverage]
+```
+
+### `exhausted(coverage: Mapping[str, Coverage], min_unseen: float = 0.05) -> List[str]`
+
+Keys where the next label is unlikely to show anything new.
+
+### `plan_coverage(...)`
+
+Allocate `target_n` improvement labels by how much each key can still teach.
+
+```python
+plan_coverage(
+    *,
+    weights: Mapping[str, float],
+    expected_units: int,
+    coverage: Mapping[str, Coverage],
+    target_n: int = 100,
+    min_per_key: int = 5,
+    max_rate: float = 1.0
+) -> CoveragePlan
+```
+
+### `rarefaction(...)`
+
+`[(m, mean distinct modes in a sample of m)]` -- the diminishing return.
+
+```python
+rarefaction(
+    modes: Sequence[str],
+    sizes: Sequence[int],
+    *,
+    reps: int = 200,
+    seed: int = 0
+) -> List[Tuple[int, float]]
+```
+
+### `rebalance(...)`
+
+How much of the audit budget belongs to calibration, given `unseen`.
+
+```python
+rebalance(
+    unseen: float,
+    *,
+    floor: float = 0.5,
+    ceiling: float = 0.95,
+    learning_at: float = 0.25
+) -> float
+```
+
+### `unseen_mass(modes: Sequence[Optional[str]]) -> float`
+
+Good-Turing: the probability that the next label shows an unseen mode.
+
+### `unseen_mass_overall(coverage: Mapping[str, Coverage]) -> float`
+
+Good-Turing across every key, pooled by label count.
+
+---
+
+## The merge path's ranking
+
+Draining the audit scheduler into the queue a person works from. &nbsp;·&nbsp; `agentdescent.audit.queue` &nbsp;·&nbsp; [guide](audit.md)
+
+### `DrainReport(...)`
+
+What came off the queue, and what could not be placed.
+
+```python
+DrainReport(
+    priorities: Dict[str, float] = <factory>,
+    popped: int = 0,
+    unplaced: int = 0,
+    examples: List[str] = <factory>
+) -> None
+```
+
+### `drain(...)`
+
+Empty the scheduler's queue into `signature -> priority`.
+
+```python
+drain(
+    scheduler: Any,
+    *,
+    signature_of: Optional[Callable[[Any], Optional[str]]] = None,
+    limit: Optional[int] = None
+) -> DrainReport
+```
+
+### `prioritise(...)`
+
+Order pending records by what the merge path thought was risky.
+
+```python
+prioritise(
+    records: Iterable[AuditRecord],
+    priorities: Dict[str, float],
+    *,
+    default: float = 0.0
+) -> List[AuditRecord]
+```
+
+---
+
+## Audit allocation
+
+Neyman allocation, as per-stratum inclusion probabilities. &nbsp;·&nbsp; `agentdescent.audit.sampler` &nbsp;·&nbsp; [guide](audit.md)
+
+### `AuditPolicy(...)`
+
+What the audit is trying to achieve, and what it refuses to do to get there.
+
+```python
+AuditPolicy(
+    enabled: bool = False,
+    target_halfwidth: float = 0.05,
+    boundary_width: float = 0.05,
+    calibration_fraction: float = 0.7,
+    min_per_stratum: int = 20,
+    min_dominant: int = 80,
+    max_labels: int = 400,
+    alpha: float = 0.05
+) -> None
+```
+
+| parameter | type | default | what it is |
+|---|---|---|---|
+| `enabled` | `bool` | `False` | Off by default. The whole layer is opt-in, and a policy that is not enabled plans a rate of zero everywhere rather than a small one -- "we are not auditing" and "we are auditing a little" produce different records and only one of them is honest. |
+| `target_halfwidth` | `float` | `0.05` | How narrow the correction's 95% interval should be. Drives the total label budget through the Neyman-optimal sample size; see `plan`. |
+| `boundary_width` | `float` | `0.05` | Half-width of the band around the acceptance threshold that counts as `boundary`. |
+| `calibration_fraction` | `float` | `0.7` | Share of audited units that go to the calibration pool rather than the improvement pool. Passed through to the tap. |
+| `min_per_stratum` | `int` | `20` | No layer gets fewer than this many labels, whatever Neyman says. A layer allocated two labels contributes a variance estimate from two points, which is worse than not stratifying at all. |
+| `min_dominant` | `int` | `80` | The heaviest layer gets at least this many. Defaults to `MIN_N_DOMINANT`, below which the reported coverage is about 0.92 rather than 0.95 -- so this floor and that warning are the same number for the same reason, and moving one without the other is how a floor stops meaning anything. |
+| `max_labels` | `int` | `400` | A hard cap. Oracle labels cost money or a person's afternoon, and a target half-width small enough to be unreachable should produce a warning and a bounded plan rather than an unbounded bill. |
+| `alpha` | `float` | `0.05` |  |
+
+### `SamplePlan(...)`
+
+Per-stratum inclusion probabilities, and the reasoning that produced them.
+
+```python
+SamplePlan(
+    rates: Dict[str, float],
+    target_n: Dict[str, int],
+    weights: Dict[str, float],
+    resid_sd: Dict[str, float],
+    default_rate: float = 0.0,
+    total_n: int = 0,
+    expected_units: int = 0,
+    warnings: List[str] = <factory>
+) -> None
+```
+
+### `boundary_stratifier(threshold: float, width: float = 0.05) -> Callable[[Any, str, float], str]`
+
+Split units into `accepted` / `boundary` / `rejected` around a threshold.
+
+### `observed_weights(store: Any, verifier_version: str) -> Dict[str, float]`
+
+Population shares from what a previous run actually saw.
+
+### `plan_audit(...)`
+
+Neyman allocation, converted to per-stratum inclusion probabilities.
+
+```python
+plan_audit(
+    policy: AuditPolicy,
+    *,
+    weights: Dict[str, float],
+    expected_units: int,
+    resid_sd: Optional[Dict[str, float]] = None
+) -> SamplePlan
+```
+
+| parameter | type | default | what it is |
+|---|---|---|---|
+| `policy` | `AuditPolicy` | *required* |  |
+| `weights` | `Dict[str, float]` | *required* | Population share per stratum. Need not sum to exactly 1; it is normalised, because these usually come from counting a previous run and arriving at 0.9999 should not be an error. |
+| `expected_units` | `int` | *required* | How many units the next run is expected to score. Rates are `n_h / (W_h * expected_units)`, so an estimate that is too low oversamples and one that is too high undersamples -- both bounded, and the realised inclusion probability is recorded per unit either way, so a wrong guess costs precision and never correctness. |
+| `resid_sd` | `Optional[Dict[str, float]]` | `None` | Per-stratum sd of `f - Y` from the last calibration. Missing entries fall back to an equal-residual assumption, which is what proportional allocation already assumes -- so the first run, with no history, plans proportionally and is right to. |
+
+### `resid_sd_from(previous: Any) -> Dict[str, float]`
+
+`stratum -> resid_sd` out of a `PPIResult`, or `{}`.
+
+---
+
+## The calibrator
+
+Turns a store of audited pairs into a correction the acceptance gate applies. &nbsp;·&nbsp; `agentdescent.audit.calibrator` &nbsp;·&nbsp; [guide](audit.md)
+
+### `Calibrator(...)`
+
+Keeps one rectification per verifier version, and knows when to distrust it.
+
+```python
+Calibrator(
+    store: AuditStore,
+    *,
+    alpha: float = 0.05,
+    seed: int = 0,
+    min_labels: int = 30,
+    min_per_stratum: int = 5,
+    cluster_by: Optional[str] = 'task_id'
+) -> None
+```
+
+| parameter | type | default | what it is |
+|---|---|---|---|
+| `store` | `AuditStore` | *required* | Where the audited pairs and the unlabelled moments live. |
+| `alpha` | `float` | `0.05` |  |
+| `seed` | `int` | `0` |  |
+| `min_labels` | `int` | `30` | Below this many resolved calibration labels the result is stale rather than wide. A very wide interval and "we do not know yet" are different claims, and only the second one stops a caller reading a number off it. |
+| `min_per_stratum` | `int` | `5` | A stratum with fewer than this many labels is **merged into the largest one** rather than dropped. Dropping it would silently change the population the estimate describes; merging keeps every unit represented and costs only resolution. |
+| `cluster_by` | `Optional[str]` | `'task_id'` | Record attribute the audited units are grouped by, `"task_id"` by default. They are **not** independent draws: a run scores the same task again for every artifact version, and a task the verifier is generous about it is generous about every time. Measured on the Phase 0 audit -- 177 units from 49 tasks -- treating them as independent made the interval **32% too narrow**, and the gate spends that interval's width as `drift`. `None` restores the independent estimate, which is right only when each audited unit is a distinct task. |
+
+| method | what it does |
+|---|---|
+| `current(verifier_version: str) -> Rectification` | The rectification to apply now, computing it if it is not cached. |
+| `mark_stale(reason: str) -> None` | Withhold every rectification until the next `recompute`. |
+| `recompute(verifier_version: str) -> Rectification` | Re-read the store and re-estimate. Clears any manual stale mark. |
+
+### `Rectification(...)`
+
+The correction, its uncertainty, and whether it may be used at all.
+
+```python
+Rectification(
+    verifier_version: str,
+    delta_hat: float,
+    delta_se: float,
+    theta: float,
+    theta_ci: Tuple[float, float],
+    se: float,
+    n: int,
+    n_unlab: int,
+    gain_factor: float,
+    is_stale: bool,
+    stale_reason: Optional[str],
+    resid_sd: float = nan,
+    warnings: List[str] = <factory>,
+    computed_at: float = 0.0,
+    covers: Tuple[float, float] = (0.0, 0.0)
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `stale(...)` | A rectification that must not be applied, and says why. |
+
+### `population_resid_sd(strata) -> float`
+
+Sd of `f - Y` over the whole population, from the labelled pairs.
+
+---
+
+## Spending the correction
+
+The only place the audit changes an outcome: evidence discounted by verifier noise. &nbsp;·&nbsp; `agentdescent.audit.gate` &nbsp;·&nbsp; [guide](audit.md)
+
+### `Adjustment(...)`
+
+What the audit did to one merge decision, and why.
+
+```python
+Adjustment(
+    applied: bool,
+    reason: str,
+    delta_hat: float = 0.0,
+    sigma_eps: float = 0.0,
+    drift: float = 0.0,
+    kappa_base: float = 1.0,
+    kappa_cand: float = 1.0,
+    var_before: float = 0.0,
+    var_after: float = 0.0,
+    audit_limited: bool = False,
+    stale: bool = False
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `to_detail() -> str` | One clause, for the tail of a refusal a person will read. |
+
+### `RectifiedAcceptance(...)`
+
+An acceptance gate that knows its measurement came from a proxy.
+
+```python
+RectifiedAcceptance(
+    inner: Any = None,
+    *,
+    calibrator: Optional[Calibrator] = None,
+    verifier_version: Union[str, Callable[[], str]] = '',
+    rectification: Optional[Rectification] = None,
+    enabled: bool = True,
+    drift_allowance: Optional[float] = None,
+    inflate_when_stale: float = 2.0,
+    explain_refusals: Optional[bool] = None,
+    min_kappa: float = 0.001
+) -> None
+```
+
+| parameter | type | default | what it is |
+|---|---|---|---|
+| `inner` | `Any` | `None` | The rule that actually decides. Defaults to the shipped gate, with the run's thresholds filled in by the aggregator at install time. |
+| `calibrator` | `Optional[Calibrator]` | `None` | Where the correction comes from. Re-read on every decision, so a rectification that goes stale mid-run takes effect at the next merge. |
+| `verifier_version` | `Union[str, Callable[[], str]]` | `''` | The version to ask the calibrator about -- a string, or a callable returning one for a verifier that can change under the run. |
+| `rectification` | `Optional[Rectification]` | `None` | A fixed correction instead of a calibrator. For a run that measured its bias once, offline, and does not intend to keep measuring. |
+| `enabled` | `bool` | `True` | `False` delegates to `inner` on the untouched context. This is the constraint that lets the audit be turned on mid-run: off, it is not approximately the old behaviour, it *is* the old call. |
+| `drift_allowance` | `Optional[float]` | `None` | Standard deviation to carry for `Delta` differing between the two sides being compared. `None` uses the rectification's own `se`, which is the right order of magnitude and not an estimate of the thing (see the module docstring). |
+| `inflate_when_stale` | `float` | `2.0` | Variance multiplier while no usable correction exists. `1.0` passes through instead, which is the choice to treat "we have not measured the verifier" and "the verifier is unbiased" as the same claim. |
+| `explain_refusals` | `Optional[bool]` | `None` |  |
+| `min_kappa` | `float` | `0.001` |  |
+
+| method | what it does |
+|---|---|
+| `current() -> Optional[Rectification]` | The rectification in force, or `None` if there is no source. |
+| `explain(ctx) -> Adjustment` | What `accept` would do to `ctx`, without deciding anything. |
+
+### `VerifierWatch(...)`
+
+Marks a calibrator stale when the instrument it calibrated may have moved.
+
+```python
+VerifierWatch(
+    calibrator: Calibrator,
+    *,
+    fingerprint: Optional[Callable[[], str]] = None,
+    artifact_ids: Iterable[str] = (),
+    key_globs: Sequence[str] = (),
+    layers: Iterable[int] = (),
+    store: Any = None
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `check() -> bool` | Re-read the fingerprint; mark stale and return True if it changed. |
+| `on_merge(artifact, diff) -> bool` | Call after a diff commits. True means the calibration was withdrawn. |
+
+### `discount_for(...)`
+
+How many of these observations are worth believing, given `extra_var`.
+
+```python
+discount_for(
+    counts: Tuple[float, float],
+    extra_var: float,
+    *,
+    min_kappa: float = 0.001
+) -> Tuple[float, float, float]
+```
+
+### `rectified_counts(counts: Tuple[float, float], delta: float) -> Tuple[Tuple[float, float], float]`
+
+Shift `(successes, failures)` so the rate reads `p - delta`.
+
+---
+
+## Prediction-powered inference
+
+The calibration estimator: a stratified mean that borrows the unlabelled scores. &nbsp;·&nbsp; `agentdescent.audit.ppi` &nbsp;·&nbsp; [guide](audit.md)
+
+### `PPIError`
+
+The input cannot support an estimate at all.
+
+### `PPIResult(...)`
+
+The estimate, its interval, and everything needed to distrust it.
+
+```python
+PPIResult(
+    theta: float,
+    ci: Tuple[float, float],
+    se: float,
+    df: float,
+    lambda_: float,
+    gain_factor: float,
+    n: int,
+    n_unlab: int,
+    alpha: float,
+    warnings: List[str] = <factory>,
+    clustered: bool = False,
+    per_stratum: Dict[str, Dict[str, float]] = <factory>
+) -> None
+```
+
+### `Stratum(...)`
+
+One layer of the sampling design, with its labelled and unlabelled halves.
+
+```python
+Stratum(
+    name: str,
+    weight: float,
+    f_lab: np.ndarray,
+    y_lab: np.ndarray,
+    f_unlab: Optional[np.ndarray] = None,
+    n_unlab: int = 0,
+    mean_unlab: float = 0.0,
+    var_unlab: float = 0.0,
+    clusters_lab: Optional[Sequence[Any]] = None
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `from_moments(...)` | Build from a running summary of the unlabelled half rather than its scores. |
+
+### `cluster_var_of_mean(values: np.ndarray, clusters: Sequence[Any]) -> Tuple[float, int]`
+
+Variance of `mean(values)` when the units come in correlated groups.
+
+### `ppi_mean_stratified(...)`
+
+Estimate `E[Y]` over a stratified population, using the unlabelled `f`.
+
+```python
+ppi_mean_stratified(
+    strata: Sequence[Stratum],
+    *,
+    alpha: float = 0.05,
+    k_folds: int = 5,
+    seed: int = 0
+) -> PPIResult
+```
+
+| parameter | type | default | what it is |
+|---|---|---|---|
+| `strata` | `Sequence[Stratum]` | *required* | One `Stratum` per layer. `weight` must be the **population** share and the weights must sum to 1. |
+| `alpha` | `float` | `0.05` | `1 - alpha` is the nominal coverage. 0.05 gives a 95% interval. |
+| `k_folds` | `int` | `5` | Folds for cross-fitting `lam`; see `_lambda_crossfit`. |
+| `seed` | `int` | `0` | Fixes the fold split, so the same labels give the same interval twice. |
+
+### `t_ppf(p: float, df: float) -> float`
+
+Quantile of Student's t, via the Cornish-Fisher expansion in `1/df`.
+
+---
+
+## Audit estimation
+
+The design-based baseline: a weighted mean of the residual, with an interval. &nbsp;·&nbsp; `agentdescent.audit.estimate` &nbsp;·&nbsp; [guide](audit.md)
+
+### `bootstrap_ci(...)`
+
+Percentile bootstrap interval for `hajek_mean`.
+
+```python
+bootstrap_ci(
+    values: Sequence[float],
+    probs: Sequence[float],
+    *,
+    draws: int = 5000,
+    alpha: float = 0.05,
+    seed: int = 0,
+    clusters: Optional[Sequence] = None
+) -> Tuple[float, float]
+```
+
+### `hajek_mean(values: Sequence[float], probs: Sequence[float]) -> float`
+
+Inclusion-probability-weighted mean -- the Hajek ratio estimator.
+
+### `residual_bias(...)`
+
+Estimate `Delta = E[f - Y]` from resolved `AuditRecord`s.
+
+```python
+residual_bias(
+    records: Iterable,
+    *,
+    draws: int = 5000,
+    alpha: float = 0.05,
+    seed: int = 0
+) -> Dict[str, object]
+```
+
+### `standard_error(...)`
+
+Bootstrap standard error of `hajek_mean`.
+
+```python
+standard_error(
+    values: Sequence[float],
+    probs: Sequence[float],
+    *,
+    draws: int = 2000,
+    seed: int = 1,
+    clusters: Optional[Sequence] = None
+) -> float
+```
+
+---
+
+## The audit out of process
+
+The audit's verbs as JSON, for the MCP surface and anything resolving truth later. &nbsp;·&nbsp; `agentdescent.audit.service` &nbsp;·&nbsp; [guide](audit.md)
+
+### `audit_drift(path: str, versions: Optional[Sequence[str]] = None) -> Dict[str, Any]`
+
+Chart one rectification per verifier version, oldest first.
+
+### `audit_pending(...)`
+
+The records waiting on an oracle -- for a person or an experiment system.
+
+```python
+audit_pending(
+    path: str,
+    limit: int = 50,
+    older_than: Optional[float] = None,
+    version: Optional[str] = None,
+    order: str = 'dispatched'
+) -> Dict[str, Any]
+```
+
+### `audit_recompute(path: str, version: Optional[str] = None) -> Dict[str, Any]`
+
+Re-read the store and re-estimate. Returns the new rectification.
+
+### `audit_rescan(...)`
+
+Re-score the stored outputs with another verifier and see what moves.
+
+```python
+audit_rescan(
+    path: str,
+    verifier: str,
+    version: Optional[str] = None,
+    allow: Optional[Sequence[str]] = None,
+    pairs: Optional[Sequence[Sequence[str]]] = None
+) -> Dict[str, Any]
+```
+
+### `audit_resolve(path: str, record_id: str, oracle_score: float) -> Dict[str, Any]`
+
+Attach ground truth to one pending record.
+
+### `audit_scorecard(...)`
+
+Fill the card for `version`, against `previous` if one is named.
+
+```python
+audit_scorecard(
+    path: str,
+    version: Optional[str] = None,
+    previous: Optional[str] = None,
+    max_false_negative: float = 0.05,
+    verifier_seconds: Optional[float] = None,
+    oracle_seconds: Optional[float] = None
+) -> Dict[str, Any]
+```
+
+### `audit_status(path: str, version: Optional[str] = None) -> Dict[str, Any]`
+
+The rectifier in force, how much it rests on, and what is outstanding.
+
+---
+
+## Audit records
+
+What one audited measurement is, and how a verifier is versioned. &nbsp;·&nbsp; `agentdescent.audit.records` &nbsp;·&nbsp; [guide](audit.md)
+
+### `AuditRecord(...)`
+
+One `(task, output)` pair scored by the verifier, awaiting or carrying truth.
+
+```python
+AuditRecord(
+    record_id: str,
+    task_id: str,
+    artifact_signature: str,
+    output: str,
+    verifier_version: str,
+    verifier_score: float,
+    inclusion_prob: float,
+    purpose: Purpose,
+    stratum: str = 'all',
+    oracle_score: Optional[float] = None,
+    dispatched_at: float = <factory>,
+    resolved_at: Optional[float] = None,
+    sampler_seed: int = 0,
+    schema_version: int = 1
+) -> None
+```
+
+### `Purpose`
+
+Which of the two disjoint pools a labelled unit belongs to.
+
+| member | value |
+|---|---|
+| `CALIBRATION` | `'calibration'` |
+| `IMPROVEMENT` | `'improvement'` |
+
+### `new_record_id() -> str`
+
+A fresh record id. Also the ticket a deferred oracle resolves against.
+
+### `output_digest(output: str) -> str`
+
+A short stable digest of an output, for logs and for de-duplication.
+
+### `verifier_fingerprint(fn: Callable[..., Any], *, extra: Any = None) -> str`
+
+A stable id for the verifier `fn`, so a correction can be bound to it.
 
 ---
 
@@ -1391,23 +2679,6 @@ Archive(
 ### `Beam(k: int = 1) -> None`
 
 Keep the `k` best-scoring candidates and spread the workers over them.
-
-### `Candidate(...)`
-
-One starting point the next batch could be launched from.
-
-```python
-Candidate(
-    artifact_id: str,
-    version: int,
-    state: Mapping[str, str] = <factory>,
-    score: Optional[float] = None,
-    per_task: Mapping[str, float] = <factory>,
-    selected: int = 0,
-    parent: Optional[int] = None,
-    prior: Optional[float] = None
-) -> None
-```
 
 ### `MCTS(exploration: float = 1.4) -> None`
 
@@ -1733,6 +3004,7 @@ EvolveSpec(
     timeout: float = 120.0,
     host: Optional[str] = None,
     env_passthrough: Sequence[str] = (),
+    audit: Optional[Dict[str, Any]] = None,
     policies: Dict[str, Any] = <factory>,
     agg_config: Dict[str, Any] = <factory>,
     evolve: Dict[str, Any] = <factory>,
@@ -2281,6 +3553,14 @@ Whether a candidate is committed.
 
 Accumulate a deduped list of rules/lessons (append-only, content-addressed).
 
+### `CALIBRATION_CEILING`
+
+Convert a string or number to a floating point number, if possible.
+
+### `CALIBRATION_FLOOR`
+
+Convert a string or number to a floating point number, if possible.
+
 ### `CacheProtocol`
 
 Somewhere to keep evaluations. In one process, across many, or on disk.
@@ -2312,6 +3592,10 @@ Runs rollouts somewhere. Threads here, processes and hosts later.
 ### `FAST_MAX`
 
 The L2/L1 blast-radius boundary (`0.30`).
+
+### `FLIP_ALARM`
+
+Convert a string or number to a floating point number, if possible.
 
 ### `FROZEN_IDS`
 
@@ -2348,6 +3632,18 @@ Seven methods: four the aggregator calls, three more the engine calls.
 ### `LocalWorkspaceSandbox`
 
 A throwaway directory on this machine -- what a rollout has always got.
+
+### `MAX_COMBINATIONS`
+
+int([x]) -> integer int(x, base=10) -> integer
+
+### `MIN_N_DOMINANT`
+
+int([x]) -> integer int(x, base=10) -> integer
+
+### `MIN_UNSEEN`
+
+Convert a string or number to a floating point number, if possible.
 
 ### `MemoryCache`
 
@@ -2409,6 +3705,10 @@ What one rollout produced, or why it did not.
 
 One rollout, described completely enough to run somewhere else.
 
+### `SCHEMA_VERSION`
+
+int([x]) -> integer int(x, base=10) -> integer
+
 ### `SCORERS`
 
 dict() -> new empty dictionary dict(mapping) -> new dictionary initialized from a mapping object's (key, value) pairs dict(iterable) -> new dictionary initialized as if via: d = {} for k, v in iterable: d[k] = v dict(**kwargs) -> new dictionary initialized with the name=value pairs in the keyword argument list. For example: dict(one=1, two=2)
@@ -2424,6 +3724,10 @@ dict() -> new empty dictionary dict(mapping) -> new dictionary initialized from 
 ### `SOLVED`
 
 Reward at or above which a task counts as solved (`0.999`). Lower it for a graded scorer, or every rollout asks the reflector to fix an answer that was already good.
+
+### `STALE_INFLATION`
+
+Convert a string or number to a floating point number, if possible.
 
 ### `Sandbox`
 

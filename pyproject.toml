@@ -16,7 +16,10 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Intended Audience :: Science/Research",
 ]
-dependencies = []
+# `agentdescent.audit.ppi` -- the prediction-powered estimator behind the
+# calibration layer -- is numpy. Everything else in the package still runs on the
+# standard library alone, and the CLI deliberately stays that way.
+dependencies = ["numpy>=1.20"]
 
 [project.optional-dependencies]
 # `pyyaml` is only used by the dsh patch tests, which parse the block we

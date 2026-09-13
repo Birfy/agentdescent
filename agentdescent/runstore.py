@@ -194,6 +194,16 @@ class RunDir:
         return self._file("ledger")
 
     @property
+    def audit_path(self) -> str:
+        """Where a spec's ``audit`` block writes, by default.
+
+        Derived rather than configured, so the ``audit_*`` tools can find a
+        run's audit from its id. A run that writes its audit somewhere only the
+        caller knows is a run whose audit nobody reads.
+        """
+        return self._file("audit.jsonl")
+
+    @property
     def log_path(self) -> str:
         return self._file("log.txt")
 

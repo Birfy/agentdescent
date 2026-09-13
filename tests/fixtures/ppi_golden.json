@@ -1,0 +1,233 @@
+{
+  "no_unlabelled": {
+    "ci": [
+      0.4385896921163552,
+      0.661410307883645
+    ],
+    "df": 79.0,
+    "gain_factor": 1.0,
+    "lambda": 0.0,
+    "n": 80,
+    "n_unlab": 0,
+    "per_stratum": {
+      "s0": {
+        "design_effect": 1.0,
+        "lambda": 0.0,
+        "n": 80,
+        "n_clusters": 80.0,
+        "n_unlab": 0,
+        "resid_sd": 0.3179742048291164,
+        "theta": 0.55,
+        "var": 0.0031329113924050632,
+        "weight": 1.0
+      }
+    },
+    "se": 0.055972416353102565,
+    "theta": 0.55,
+    "truth": 0.6,
+    "warnings": [
+      "gain_factor 1.000: the verifier is buying almost nothing. More oracle labels will help; more in-loop evaluation will not."
+    ]
+  },
+  "perfect_verifier": {
+    "ci": [
+      0.36562095937943756,
+      0.4263790406205626
+    ],
+    "df": 997.9892346184344,
+    "gain_factor": 8.354363782458494,
+    "lambda": 0.8800000000000002,
+    "n": 120,
+    "n_unlab": 880,
+    "per_stratum": {
+      "s0": {
+        "design_effect": 1.0,
+        "lambda": 0.8800000000000002,
+        "n": 120,
+        "n_clusters": 120.0,
+        "n_unlab": 880,
+        "resid_sd": 0.0,
+        "theta": 0.3960000000000001,
+        "var": 0.0002396612843089455,
+        "weight": 1.0
+      }
+    },
+    "se": 0.015480997523058568,
+    "theta": 0.3960000000000001,
+    "truth": 0.4,
+    "warnings": []
+  },
+  "stratified_generous": {
+    "ci": [
+      0.5169997457335179,
+      0.5996984556796282
+    ],
+    "df": 350.90172617062126,
+    "gain_factor": 1.788558762727853,
+    "lambda": 0.5124969878978312,
+    "n": 300,
+    "n_unlab": 900,
+    "per_stratum": {
+      "s0": {
+        "design_effect": 1.0,
+        "lambda": 0.684241811806018,
+        "n": 100,
+        "n_clusters": 100.0,
+        "n_unlab": 300,
+        "resid_sd": 0.2564323999762428,
+        "theta": 0.7577958746929846,
+        "var": 0.0009552455869911321,
+        "weight": 0.5
+      },
+      "s1": {
+        "design_effect": 1.0,
+        "lambda": 0.5313311356931435,
+        "n": 100,
+        "n_clusters": 100.0,
+        "n_unlab": 300,
+        "resid_sd": 0.3942772444036626,
+        "theta": 0.4673945661260456,
+        "var": 0.0016489016768436737,
+        "weight": 0.3
+      },
+      "s2": {
+        "design_effect": 1.0,
+        "lambda": 0.3219180161943319,
+        "n": 100,
+        "n_clusters": 100.0,
+        "n_unlab": 300,
+        "resid_sd": 0.4512608598542129,
+        "theta": 0.19616396761133603,
+        "var": 0.0013701445607543802,
+        "weight": 0.2
+      }
+    },
+    "se": 0.02102423197393638,
+    "theta": 0.5583491007065731,
+    "truth": 0.5900000000000001,
+    "warnings": []
+  },
+  "thin_dominant_stratum": {
+    "ci": [
+      0.41335656397586995,
+      0.6239685203515674
+    ],
+    "df": 54.95564405178094,
+    "gain_factor": 1.5356434971299198,
+    "lambda": 0.6045728781022898,
+    "n": 50,
+    "n_unlab": 500,
+    "per_stratum": {
+      "s0": {
+        "design_effect": 1.0,
+        "lambda": 0.8180035650623886,
+        "n": 25,
+        "n_clusters": 25.0,
+        "n_unlab": 250,
+        "resid_sd": 0.27688746209726917,
+        "theta": 0.7140263814616756,
+        "var": 0.004171194036073693,
+        "weight": 0.6
+      },
+      "s1": {
+        "design_effect": 1.0,
+        "lambda": 0.39114219114219106,
+        "n": 25,
+        "n_clusters": 25.0,
+        "n_unlab": 250,
+        "resid_sd": 0.47609522856952335,
+        "theta": 0.22561678321678325,
+        "var": 0.007871422813871423,
+        "weight": 0.4
+      }
+    },
+    "se": 0.05254576579712163,
+    "theta": 0.5186625421637187,
+    "truth": 0.54,
+    "warnings": [
+      "dominant stratum 's0' has 25 labels (< MIN_N_DOMINANT=80); measured coverage there is about 0.92 against a nominal 0.95, so this interval is optimistic by roughly 3 points"
+    ]
+  },
+  "useless_verifier": {
+    "ci": [
+      0.39912412491852023,
+      0.5608758750814797
+    ],
+    "df": 149.0,
+    "gain_factor": 1.0,
+    "lambda": 0.0,
+    "n": 150,
+    "n_unlab": 450,
+    "per_stratum": {
+      "s0": {
+        "design_effect": 1.0,
+        "lambda": 0.0,
+        "n": 150,
+        "n_clusters": 150.0,
+        "n_unlab": 450,
+        "resid_sd": 0.5937063442305445,
+        "theta": 0.48,
+        "var": 0.0016751677852348994,
+        "weight": 1.0
+      }
+    },
+    "se": 0.04092881363092387,
+    "theta": 0.48,
+    "truth": 0.5,
+    "warnings": [
+      "gain_factor 1.000: the verifier is buying almost nothing. More oracle labels will help; more in-loop evaluation will not."
+    ]
+  },
+  "weights_carry_the_answer": {
+    "ci": [
+      0.6669376368240968,
+      0.7561352308315642
+    ],
+    "df": 130.22756080291455,
+    "gain_factor": 3.1163599988464847,
+    "lambda": 0.49235266283174506,
+    "n": 180,
+    "n_unlab": 600,
+    "per_stratum": {
+      "s0": {
+        "design_effect": 1.0,
+        "lambda": 0.7378646319941866,
+        "n": 60,
+        "n_clusters": 60.0,
+        "n_unlab": 200,
+        "resid_sd": 0.1810203347193925,
+        "theta": 0.8631672808747708,
+        "var": 0.0008701313771730385,
+        "weight": 0.7
+      },
+      "s1": {
+        "design_effect": 1.0,
+        "lambda": 0.6532747878901725,
+        "n": 60,
+        "n_clusters": 60.0,
+        "n_unlab": 200,
+        "resid_sd": 0.27871780678530217,
+        "theta": 0.5176215522369367,
+        "var": 0.0019074376864429382,
+        "weight": 0.2
+      },
+      "s2": {
+        "design_effect": 1.0,
+        "lambda": 0.08591856861087627,
+        "n": 60,
+        "n_clusters": 60.0,
+        "n_unlab": 200,
+        "resid_sd": 0.4459484908564836,
+        "theta": 0.0379502676810369,
+        "var": 0.000554546948823937,
+        "weight": 0.1
+      }
+    },
+    "se": 0.022543454743245227,
+    "theta": 0.7115364338278305,
+    "truth": 0.74,
+    "warnings": [
+      "dominant stratum 's0' has 60 labels (< MIN_N_DOMINANT=80); measured coverage there is about 0.92 against a nominal 0.95, so this interval is optimistic by roughly 3 points"
+    ]
+  }
+}

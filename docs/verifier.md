@@ -97,8 +97,17 @@ protocol and belongs with the cross-machine work that would justify running one.
 ```python
 verifier.cheap_eval(artifact)     # 0.5 * rule + 0.5 * learned -- ranking
 verifier.eval_counts(artifact)    # (successes, failures) on the FULL held-out set
-verifier.oracle_eval(artifact)    # ground truth, spends budget
+verifier.full_eval(artifact)      # the same eval_fn, whole set, spends budget
 ```
+
+!!! warning "`full_eval` was `oracle_eval` until 0.6"
+    The old name promised an independent source of truth. Every layer here calls
+    the one `eval_fn` you supplied and they differ only in **how many tasks** they
+    score — so this layer bounds *sampling error* and cannot detect *bias*. If
+    your `eval_fn` is an agent judging outputs, running it on more tasks makes the
+    same judge more confident, not more right. See [sparse audit](audit.md) for a
+    genuinely second source. The old name still works, with a
+    `DeprecationWarning`, until 0.7.
 
 `eval_counts` is what feeds the Beta-posterior acceptance test, and it never
 sub-samples: the acceptance decision has to rest on an honest sample size, or the
@@ -135,19 +144,19 @@ sub-samples.
 evolve(..., oracle_budget=200)
 ```
 
-Once spent, `oracle_eval` falls back to the cheap layer rather than spending
+Once spent, `full_eval` falls back to the cheap layer rather than spending
 money it was told not to spend. Note that this only saves anything when
 `cheap_eval_tasks` makes the cheap layer genuinely cheaper — the two knobs go
 together, and setting `oracle_budget` alone does nothing.
 
-!!! tip "The oracle gate is free, because it is not a second measurement"
-    For an [L1 artifact](governance.md) every merge is forced through the oracle,
-    and `ThreeLayerVerifier`'s oracle scores **exactly** the set `eval_counts`
+!!! tip "The audit gate is free, because it is not a second measurement"
+    For an [L1 artifact](governance.md) every merge is forced through the gate,
+    and `ThreeLayerVerifier.full_eval` scores **exactly** the set `eval_counts`
     scores — same `eval_fn`, same held-out set. So the aggregator reuses the
     full-set rates it has already measured for the acceptance test instead of
-    asking for them again. `ThreeLayerVerifier.oracle_shares_full_set` is what
-    says so; a substitute whose oracle is a genuinely independent measurement
-    leaves it undefined and keeps being called.
+    asking for them again. `ThreeLayerVerifier.full_eval_matches_counts` is what
+    says so; a substitute whose expensive layer is a genuinely independent
+    measurement leaves it undefined and keeps being called.
 
     The verdict is identical either way. Evolving a harness is not more expensive
     than evolving a skill, and with the shipped verifier an L1 run now reports
@@ -155,7 +164,7 @@ together, and setting `oracle_budget` alone does nothing.
     `AuditScheduler.audits` to ask whether the gate opened.
 
 !!! danger "Why reuse, and not just a saving"
-    `oracle_eval` degrades to `rule_eval` when the budget runs out, and
+    `full_eval` degrades to `rule_eval` when the budget runs out, and
     `rule_eval` is the **sub-sample**. So an exhausted budget silently turned the
     audit gate into a sub-sample veto — measured, a candidate that took the
     full-set rate from 0.5 to 1.0 was reported `oracle-rejected` because a
@@ -164,7 +173,7 @@ together, and setting `oracle_budget` alone does nothing.
     That contradicted the two promises above it on this page: sub-sampling trades
     ranking precision and never decides a commit. The merge path no longer
     reaches the fallback. If you bring your own verifier, either keep
-    `oracle_eval` exact or set `oracle_shares_full_set` — an oracle that quietly
+    `full_eval` exact or set `full_eval_matches_counts` — a scorer that quietly
     gets cheaper must not hold a veto.
 
 ## Trust, and why it has to be measurable for free
@@ -204,20 +213,25 @@ the run has already spent its rollouts:
 cheap_eval(artifact) -> float                 # ranking
 learned_eval(artifact) -> (score, uncertainty) # the audit priority's uncertainty term
 eval_counts(artifact) -> (successes, failures) # the acceptance test, full set
-oracle_eval(artifact) -> float                 # ground truth, spends budget
+full_eval(artifact) -> float                   # the same eval_fn, whole set
 ```
+
+Pre-0.6 code named the last one `oracle_eval`. The engine still reads that name,
+once, with a `DeprecationWarning`, and drops it in 0.7.
 
 There is also one **optional** attribute, read with a default so a substitute
 that omits it is unaffected:
 
 ```python
-oracle_shares_full_set = True    # oracle_eval scores the same set eval_counts does
+full_eval_matches_counts = True   # full_eval scores the same set eval_counts does
 ```
 
 Set it when both are the same measurement, and the aggregator will reuse the
-rates it already has rather than asking twice. Leave it out when your oracle is
-genuinely independent — then it is called, and it must stay exact: an
-`oracle_eval` that gets cheaper under budget pressure holds a veto over commits.
+rates it already has rather than asking twice. Leave it out when your full-set
+scorer is genuinely independent — then it is called, and it must stay exact: a
+`full_eval` that gets cheaper under budget pressure holds a veto over commits.
+The pre-0.6 spelling `oracle_shares_full_set` is still read, and the new name
+wins if a class carries both.
 
 An [`aggregator_factory`](aggregator.md#replacing-aggregator_factory-aggregatorprotocol)
 receives the verifier, so a custom optimizer that does not want an audit gate can
