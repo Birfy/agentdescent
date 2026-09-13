@@ -766,6 +766,46 @@ def test_the_md_suite_catches_an_integrator_that_is_only_stable():
     assert any("conserved" in t for t in failed), failed
 
 
+def test_the_contract_reaches_the_agent_even_when_a_bigger_frozen_file_sorts_first():
+    """Sorted order made *which* contract an agent sees depend on filenames.
+
+    md froze `spec/**`, `tests/**` and `md.py`; `md.py` sorts first, is 6.8 kB of
+    driver, and ate a budget the 4.5 kB specification then never reached. Every
+    agent inferred the public surface from the one failing test it was shown, five
+    of the seven keyword parameters went missing, and the run scored 0.750 against
+    a specification nobody had read. The order is the domain's now.
+    """
+    state = {CONTEXT_FILE: "# root\n", "aaa_driver.py": "# driver\n" + "x" * 9000,
+             "spec/CONTEXT.md": "# the contract\nTHE SIGNATURE IS f(a, b=1)\n"}
+    context = LocalWorld(0, "").situate(state, contracts=("spec/**", "aaa_driver.py"),
+                                        max_chars=4000)
+    assert "THE SIGNATURE IS f(a, b=1)" in context
+    assert len(context) <= 4000
+
+
+def test_the_file_listing_survives_a_contract_too_big_to_fit():
+    """Truncating from the end dropped the listing, which is the actionable part:
+    a node that owns no file yet only learns it from that line."""
+    state = {CONTEXT_FILE: "# root\n", "spec/CONTEXT.md": "# spec\n" + "y" * 9000}
+    context = LocalWorld(0, "src").situate(state, contracts=("spec/**",),
+                                           max_chars=2000)
+    assert TRUNCATED in context                                  # the contract gave
+    assert "(none yet -- this node owns no file)" in context      # the listing stayed
+
+
+@pytest.mark.parametrize("spec", DOMAINS, ids=DOMAIN_IDS)
+def test_every_node_of_every_domain_is_given_the_whole_contract(spec):
+    """At the default budget, from every node, for every domain -- not just the one
+    whose frozen file happens to sort early."""
+    files = spec.initial_files()
+    nodes = sorted(p[:-len(CONTEXT_FILE)].rstrip("/") for p in files
+                   if p.endswith(CONTEXT_FILE) and not p.startswith("spec/"))
+    contract = files["spec/CONTEXT.md"].strip()
+    for node in nodes:
+        context = LocalWorld(0, node).situate(files, contracts=spec.FROZEN)
+        assert contract in context, f"{spec.MD.name if hasattr(spec, 'MD') else node}"
+
+
 def test_a_dead_backend_stops_the_run_before_it_starts():
     """Thirteen minutes of a 404 endpoint reads exactly like a broken mechanism.
 

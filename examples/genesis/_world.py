@@ -232,6 +232,25 @@ def resolve_edit_path(state: Mapping[str, str], owner: str,
     return nested, True
 
 
+def _in_pattern_order(state: Mapping[str, str],
+                      patterns: Sequence[str]) -> List[str]:
+    """The files matching ``patterns``, in the order the patterns are given.
+
+    Sorted by path is the obvious implementation and the wrong one: it makes which
+    contract an agent actually receives depend on filenames, under a budget that
+    cannot hold all of them. A domain lists its contract in order of importance.
+    """
+    from agentdescent.filetree import match_any
+
+    seen, out = set(), []
+    for pattern in patterns:
+        for key in sorted(state):
+            if key not in seen and match_any(key, (pattern,)):
+                seen.add(key)
+                out.append(key)
+    return out
+
+
 @dataclass(frozen=True)
 class LocalWorld:
     """One ``w = (v, p)``.
@@ -319,20 +338,35 @@ class LocalWorld:
         signature, against a specification that says ``("num", 1)`` and
         ``parse(source)``. Five correct files, every one of them to the wrong
         contract, and a suite stuck at 0.000.
+
+        Measured *again*, on md, after two things that each looked harmless: the
+        contract files were emitted in **sorted** order, and the whole context was
+        truncated from the end. md's frozen set is ``spec/**``, ``tests/**``,
+        ``md.py`` -- and ``md.py`` sorts first, is 6.8 kB of driver, and ate a
+        budget the 4.5 kB specification then never reached. The agents inferred the
+        public surface from the one failing test each was shown, dropped five of the
+        seven keyword parameters, and the run scored 0.750. So the order is the
+        **order the domain declares**, the specification first because it is listed
+        first, and what gets trimmed is the contract block rather than whatever
+        happens to be last -- the file listing at the end is the part that says
+        "this node owns no file yet", which is the most actionable line in here.
         """
-        parts: List[str] = []
+        chain: List[str] = []
         for node in self._chain():
             key = f"{node}/{CONTEXT_FILE}" if node else CONTEXT_FILE
             body = state.get(key)
             if body:
-                parts.append(f"--- {key} ---\n{body.strip()}")
+                chain.append(f"--- {key} ---\n{body.strip()}")
+
+        contract = ""
         if contracts:
-            from agentdescent.filetree import match_any
-            given = [k for k in sorted(state) if match_any(k, contracts)]
+            given = _in_pattern_order(state, contracts)
             if given:
-                parts.append("--- the contract you are building against "
-                             "(human-supplied, read-only) ---\n"
-                             + "\n\n".join(f"# {k}\n{state[k].strip()}" for k in given))
+                contract = ("--- the contract you are building against "
+                            "(human-supplied, read-only) ---\n"
+                            + "\n\n".join(f"# {k}\n{state[k].strip()}" for k in given))
+
+        parts: List[str] = []
         skills = self.skills(state)
         if skills:
             parts.append("--- skills available here (read one before using it) ---\n"
@@ -351,7 +385,14 @@ class LocalWorld:
                or "  (none yet -- this node owns no file)")
             + f"\n--- files below {self.path or './'} (each child's own) ---\n"
             + ("\n".join(f"  {k}" for k in below) or "  (none yet)"))
-        text = "\n\n".join(parts)
+
+        fixed = "\n\n".join(chain + parts)
+        if not contract:
+            return fixed if len(fixed) <= max_chars else fixed[:max_chars] + "\n" + TRUNCATED
+        room = max_chars - len(fixed) - 2
+        if len(contract) > room:
+            contract = contract[:max(0, room - len(TRUNCATED) - 1)] + "\n" + TRUNCATED
+        text = "\n\n".join(chain + [contract] + parts)
         return text if len(text) <= max_chars else text[:max_chars] + "\n" + TRUNCATED
 
     def _chain(self) -> List[str]:
