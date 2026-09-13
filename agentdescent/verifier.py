@@ -116,8 +116,11 @@ class ThreeLayerVerifier:
     #:
     #: Not annotated, so it is a plain class attribute rather than a
     #: constructor field: it is a statement about how this class is written, not
-    #: a knob. A custom verifier whose expensive layer really is an independent
-    #: measurement simply does not define it, and keeps being called.
+    #: a knob. A verifier whose expensive layer really is an independent
+    #: measurement sets it to ``False`` -- and a *subclass* must, because it
+    #: inherits this ``True`` and "simply does not define it" is not available
+    #: to one. :func:`shares_eval_counts` prefers whichever name the verifier
+    #: itself declares over the value it inherited from here.
     full_eval_matches_counts = True
 
     #: Pre-0.6 name for :attr:`full_eval_matches_counts`. Read through
@@ -302,7 +305,28 @@ def shares_eval_counts(verifier: Any) -> bool:
     is gone. Reads :attr:`~ThreeLayerVerifier.full_eval_matches_counts`, then the
     pre-0.6 ``oracle_shares_full_set``.
     """
-    value = getattr(verifier, "full_eval_matches_counts", None)
-    if value is not None:
-        return bool(value)
-    return bool(getattr(verifier, "oracle_shares_full_set", False))
+    # A *declaration* beats an inherited default. `ThreeLayerVerifier` sets
+    # `full_eval_matches_counts = True` as a statement about how that class is
+    # written, and a subclass inherits it -- so the escape hatch the attribute's
+    # docstring offers ("simply does not define it") does not exist for a
+    # subclass, and one that set the pre-0.6 `oracle_shares_full_set = False`
+    # was ignored. Its independent expensive layer then went uncalled and the
+    # gate degraded to the cheap measurement it existed to cross-check, with no
+    # warning.
+    if _declares(verifier, "full_eval_matches_counts"):
+        return bool(getattr(verifier, "full_eval_matches_counts"))
+    if _declares(verifier, "oracle_shares_full_set"):
+        return bool(getattr(verifier, "oracle_shares_full_set"))
+    return bool(getattr(verifier, "full_eval_matches_counts", False))
+
+
+def _declares(obj: Any, name: str) -> bool:
+    """Did *this* verifier set ``name``, rather than inherit the base default?"""
+    if name in vars(obj):
+        return True
+    for klass in type(obj).__mro__:
+        if klass is ThreeLayerVerifier or klass is object:
+            continue
+        if name in vars(klass):
+            return True
+    return False

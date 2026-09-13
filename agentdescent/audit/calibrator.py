@@ -343,15 +343,33 @@ class Calibrator:
         substitution this method exists to prevent, reintroduced inside it.
         """
         thin = [k for k, v in grouped.items() if len(v) < self.min_per_stratum]
-        if not thin or len(thin) == len(grouped):
-            return dict(grouped), dict(moments)
-        host = max((k for k in grouped if k not in thin),
-                   key=lambda k: len(grouped[k]))
-        merged = {k: list(v) for k, v in grouped.items() if k not in thin}
-        pooled = {k: dict(v) for k, v in moments.items() if k not in thin}
+        # A stratum with unlabelled moments and **no labels at all** never
+        # reaches `grouped`, so it was not thin, not merged, and not weighted --
+        # its units simply left the population. That is the substitution this
+        # method exists to prevent, committed by the loop that calls it: with
+        # 1000 units observed in `accepted` and labels only in `boundary`, the
+        # weights came out {boundary: 1.0} and the correction described one
+        # layer while the gate applied it to every unit.
+        #
+        # Folded into the host like a thin one, because the alternative readings
+        # are worse: dropping is the bug, and refusing to estimate would make a
+        # sampler that concentrates labels where the residual varies -- which is
+        # what Neyman allocation *is* -- unable to produce an estimate at all.
+        # The assumption it carries, that the host's residual stands in for the
+        # borrower's, is the same one `min_per_stratum` already makes.
+        unlabelled_only = [k for k in moments if k not in grouped]
+        if not (thin or unlabelled_only) or len(thin) == len(grouped):
+            if not unlabelled_only:
+                return dict(grouped), dict(moments)
+        candidates = [k for k in grouped if k not in thin] or list(grouped)
+        host = max(candidates, key=lambda k: len(grouped[k]))
+        folded = [k for k in thin if k != host] + unlabelled_only
+        merged = {k: list(v) for k, v in grouped.items() if k not in folded}
+        pooled = {k: dict(v) for k, v in moments.items() if k not in folded}
         pooled.setdefault(host, {"n": 0, "mean": 0.0, "var": 0.0})
-        for k in thin:
-            merged[host].extend(grouped[k])
+        for k in folded:
+            if k in grouped:
+                merged[host].extend(grouped[k])
             if k in moments:
                 pooled[host] = self._pool(pooled[host], moments[k])
         return merged, pooled

@@ -27,11 +27,11 @@ from agentdescent.audit.diagnose import (Direction, DisagreementReport, Kind,
                                          reference_classifier, residual_stats)
 
 
-def _rec(f, y, *, task=None, output="out"):
+def _rec(f, y, *, task=None, output="out", prob=1.0):
     return AuditRecord(
         record_id=uuid.uuid4().hex, task_id=task or uuid.uuid4().hex,
         artifact_signature="s", output=output, verifier_version="v1",
-        verifier_score=f, inclusion_prob=1.0, purpose=Purpose.CALIBRATION,
+        verifier_score=f, inclusion_prob=prob, purpose=Purpose.CALIBRATION,
         oracle_score=y, resolved_at=1.0)
 
 
@@ -380,3 +380,37 @@ def test_the_markdown_names_the_floor_it_was_read_against():
 def test_an_empty_set_reports_nothing_rather_than_dividing():
     got = evaluate_fix([], lambda record, ctx: 1.0)
     assert got.n_pairs == 0 and got.sigma_after != got.sigma_after
+
+
+# -- the headline statistic describes the population, not the sample ----------
+
+def test_residual_stats_is_bit_identical_at_uniform_inclusion():
+    """Every measurement committed in `reports/` was drawn at p=1.0, so the
+    weighting must not move any of them by a bit."""
+    import random
+    import statistics
+
+    rng = random.Random(7)
+    recs = [_rec(rng.random(), rng.random()) for _ in range(50)]
+    got = residual_stats(recs)
+    resid = [r.residual for r in recs]
+
+    assert got["delta"] == statistics.fmean(resid)
+    assert got["sigma"] == statistics.stdev(resid)
+
+
+def test_an_oversampled_stratum_does_not_inflate_the_headline_sigma():
+    """Neyman allocation oversamples the stratum whose residual varies most,
+    *because* it varies most. Read raw, `sigma` came out far above the
+    population value `Rectification.resid_sd` reports to the gate -- two numbers
+    called sigma in one report, disagreeing, with a rise in this one a hard
+    blocker."""
+    import statistics
+
+    recs = ([_rec(0.9, 0.0, prob=0.1) for _ in range(10)]
+            + [_rec(0.0, 0.0, prob=1.0) for _ in range(10)])
+    weighted = residual_stats(recs)["sigma"]
+    raw = statistics.stdev([r.residual for r in recs])
+
+    assert weighted < raw
+    assert weighted == pytest.approx(0.26, abs=0.01)

@@ -134,20 +134,38 @@ class Disagreement:
 def residual_stats(records: Iterable[AuditRecord]) -> Dict[str, float]:
     """``n``, ``delta``, ``sigma``, ``disagree`` over resolved records.
 
-    ``sigma`` is the sample sd of ``f - Y``, and it is the number to watch: it is
-    what the acceptance gate's missing variance term is built from, and unlike
+    ``sigma`` is the sd of ``f - Y``, and it is the number to watch: it is what
+    the acceptance gate's missing variance term is built from, and unlike
     ``delta`` it cannot be improved by making errors in both directions.
+
+    **Weighted by ``1 / inclusion_prob``.** These were raw sample statistics over
+    records drawn with deliberately unequal probabilities: Neyman allocation
+    oversamples the stratum whose residual varies most, *because* it varies most,
+    so an unweighted sd read far above the population value that
+    ``Rectification.resid_sd`` reports to the gate -- two numbers called
+    ``sigma`` in one report, disagreeing, with a rise in this one a hard blocker.
+
+    At uniform inclusion the weights cancel and every value is bit-identical to
+    the unweighted statistic, which is what every measurement committed here was
+    drawn at.
     """
-    resid = [r.residual for r in records if r.oracle_score is not None]
-    n = len(resid)
+    rows = [(r.residual, 1.0 / max(1e-12, float(getattr(r, "inclusion_prob", 1.0) or 1.0)))
+            for r in records if r.oracle_score is not None]
+    n = len(rows)
     if n == 0:
         nan = float("nan")
         return {"n": 0, "delta": nan, "sigma": nan, "disagree": nan}
+    total = sum(w for _, w in rows)
+    delta = sum(x * w for x, w in rows) / total
+    if n > 1 and total > 1.0:
+        sigma = math.sqrt(sum(w * (x - delta) ** 2 for x, w in rows) / (total - 1.0))
+    else:
+        sigma = 0.0
     return {
         "n": n,
-        "delta": statistics.fmean(resid),
-        "sigma": statistics.stdev(resid) if n > 1 else 0.0,
-        "disagree": sum(1 for x in resid if x != 0.0) / n,
+        "delta": delta,
+        "sigma": sigma,
+        "disagree": sum(w for x, w in rows if x != 0.0) / total,
     }
 
 
@@ -340,6 +358,16 @@ class FixReport:
     false_negative_before: float
     false_negative_after: float
     unchanged: int
+    #: Units whose **score** the fix moved at all, verdict flip or not.
+    #:
+    #: Not the same as ``fixed + broken``, which counts verdict flips, and the
+    #: difference is the whole of `changed`: a fix taking 1.0 to 0.4 against a
+    #: 0.0 reference moved the residual by 0.6 and flipped nothing, so it landed
+    #: in ``unchanged``. The noise floor it is compared against is a raw count of
+    #: score differences, so the two sides of `above_the_noise` were being
+    #: measured differently. Identical to ``fixed + broken`` on binary scores,
+    #: which is every measurement committed here.
+    moved: int = 0
     #: Units the **unchanged** verifier flips when it is simply re-run. Zero for
     #: a deterministic one. A stochastic verifier -- an LLM judge is one -- moves
     #: ``sigma`` on its own, so a fix that moves fewer units than this has not
@@ -348,8 +376,14 @@ class FixReport:
 
     @property
     def changed(self) -> int:
-        """Units this fix scored differently. ``fixed + broken``."""
-        return self.fixed + self.broken
+        """Units this fix scored differently, verdict flip or not.
+
+        Reads ``moved``, which counts score differences -- the same thing the
+        noise floor counts. It was ``fixed + broken``, which counts verdict
+        flips, so a continuous-scored fix could move every unit and be declared
+        "not shown to help" against a floor built on the other definition.
+        """
+        return self.moved
 
     @property
     def above_the_noise(self) -> bool:
@@ -441,6 +475,7 @@ def evaluate_fix(records: Iterable[AuditRecord],
     after: List[float] = []
     fixed = broken = unchanged = 0
     correct_before = 0
+    moved = 0
     right_answers = fn_before = fn_after = 0
     for rec in resolved:
         new_f = float(fix(rec, (context or {}).get(rec.task_id)))
@@ -451,6 +486,8 @@ def evaluate_fix(records: Iterable[AuditRecord],
             right_answers += 1
             fn_before += rec.verifier_score < rec.oracle_score
             fn_after += new_f < rec.oracle_score
+        if new_f != rec.verifier_score:
+            moved += 1
         if was_right and not is_right:
             broken += 1
         elif not was_right and is_right:
@@ -467,7 +504,7 @@ def evaluate_fix(records: Iterable[AuditRecord],
         sigma_after=statistics.stdev(after) if n > 1 else 0.0,
         disagree_before=sum(1 for x in before if x) / n,
         disagree_after=sum(1 for x in after if x) / n,
-        fixed=fixed, broken=broken, unchanged=unchanged,
+        fixed=fixed, broken=broken, unchanged=unchanged, moved=moved,
         breakage_rate=(broken / correct_before) if correct_before else 0.0,
         false_negative_before=(fn_before / right_answers) if right_answers
         else float("nan"),

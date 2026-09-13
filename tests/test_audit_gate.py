@@ -554,3 +554,45 @@ def test_watching_nothing_marks_nothing():
     assert not watch.check()
     assert not watch.on_merge(_Art(blast_radius=0.9), _Diff(ops={"a": 1}))
     assert cal.reasons == []
+
+
+# -- the counterfactual costs a whole second decision -------------------------
+
+class _Counting:
+    """A policy that records how often it was asked -- i.e. a stateful one."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def accept(self, ctx):
+        self.calls += 1
+        return AcceptDecision(False, "no", "")
+
+    def install(self, **kw):
+        pass
+
+
+def test_an_unknown_policy_is_not_re_run_behind_its_owners_back():
+    """Attributing a refusal re-runs the inner gate on the untouched context --
+    the whole decision, not "one extra Monte-Carlo draw" as the comment used to
+    say. A policy that records, decrements a budget or calls a model would do it
+    twice for one merge, and only on refusals: a divergence visible in some runs
+    and not others."""
+    inner = _Counting()
+    RectifiedAcceptance(inner, rectification=_rect()).accept(_ctx())
+    assert inner.calls == 1
+
+
+def test_its_owner_can_ask_for_the_attribution_anyway():
+    inner = _Counting()
+    gate = RectifiedAcceptance(inner, rectification=_rect(), explain_refusals=True)
+    gate.accept(_ctx())
+    assert inner.calls == 2
+
+
+def test_the_shipped_policy_is_re_run_because_it_is_known_to_be_pure():
+    """Keyed on the policy, not on who supplied it: passing a *configured*
+    `DefaultAcceptance` is the ordinary way to use this, and a rule keyed on
+    'did the caller pass something' drops the attribution for it."""
+    assert RectifiedAcceptance(_inner(), rectification=_rect()).explain_refusals
+    assert RectifiedAcceptance(rectification=_rect()).explain_refusals

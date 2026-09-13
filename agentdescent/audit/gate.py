@@ -269,6 +269,7 @@ class RectifiedAcceptance(_ForwardsInstall):
                  enabled: bool = True,
                  drift_allowance: Optional[float] = None,
                  inflate_when_stale: float = STALE_INFLATION,
+                 explain_refusals: Optional[bool] = None,
                  min_kappa: float = MIN_KAPPA) -> None:
         from ..defaults import DefaultAcceptance
 
@@ -279,6 +280,25 @@ class RectifiedAcceptance(_ForwardsInstall):
         if not 0.0 < min_kappa <= 1.0:
             raise ValueError("min_kappa must be in (0, 1]")
         self.inner = inner if inner is not None else DefaultAcceptance()
+        # Saying *which* refusals the audit caused is the number that tells a
+        # reader whether the audit is earning its budget, and it costs a second
+        # `inner.accept` on the untouched context -- the whole inner gate re-run,
+        # not "one extra Monte-Carlo draw" as this used to claim.
+        #
+        # `None` means: only for a policy we know is safe to run twice.
+        # `DefaultAcceptance.accept` computes and returns; it mutates nothing.
+        # An arbitrary policy may record a decision, decrement a budget, call a
+        # model or advance a counter, and would do it twice for one merge and
+        # only on the refusals -- a divergence that shows up in some runs and
+        # not others. Its owner knows whether that is safe; this does not.
+        #
+        # Keyed on the policy rather than on who supplied it: passing a
+        # *configured* `DefaultAcceptance` is the ordinary way to use this, and
+        # a rule keyed on "did the caller pass something" would have silently
+        # dropped the attribution for it.
+        self.explain_refusals = (isinstance(self.inner, DefaultAcceptance)
+                                 if explain_refusals is None
+                                 else explain_refusals)
         self.calibrator = calibrator
         self.verifier_version = verifier_version
         self.rectification = rectification
@@ -350,13 +370,13 @@ class RectifiedAcceptance(_ForwardsInstall):
         decision = self.inner.accept(self._adjusted(ctx, adj))
         if decision.accept:
             return decision
-        # A refusal is the only place the audit can have changed an outcome, and
-        # saying *which* refusals it caused is the number that tells a reader
-        # whether the audit is earning its budget. One extra Monte-Carlo draw.
-        was = self.inner.accept(ctx)
         note = adj.to_detail()
-        if was.accept:
-            note = f"refused by the audit -- {note}"
+        if self.explain_refusals:
+            # A refusal is the only place the audit can have changed an outcome.
+            # See `__init__` for why this is not done on a caller's own policy
+            # unless they ask.
+            if self.inner.accept(ctx).accept:
+                note = f"refused by the audit -- {note}"
         return replace(decision, detail=f"{decision.detail}; {note}"
                        if decision.detail else note)
 

@@ -363,3 +363,62 @@ def test_a_converged_run_is_stale_rather_than_a_fabricated_zero():
     r = Calibrator(store, min_labels=10).current("v1")
     assert r.is_stale and "variance" in r.stale_reason
     assert math.isnan(r.delta_hat)
+
+
+# -- a stratum with no labels is still part of the population -----------------
+
+def _varied_store():
+    """40 labels in `boundary`; unlabelled mass in `boundary` and in `accepted`,
+    which has no labels at all."""
+    import random
+    import uuid
+
+    from agentdescent.audit import AuditRecord, AuditStore, Purpose
+
+    rng = random.Random(0)
+    store = AuditStore()
+    for i in range(40):
+        rec = AuditRecord(
+            record_id=uuid.uuid4().hex, task_id=uuid.uuid4().hex,
+            artifact_signature="a", output="o", verifier_version="v1",
+            verifier_score=float(i % 2), inclusion_prob=1.0,
+            purpose=Purpose.CALIBRATION, stratum="boundary")
+        store.append(rec)
+        store.resolve(rec.record_id, float((i + 1) % 2))
+    for _ in range(50):
+        store.observe_unlabelled("v1", "boundary", rng.random())
+    for _ in range(1000):
+        store.observe_unlabelled("v1", "accepted", rng.random())
+    return store
+
+
+def test_a_stratum_observed_but_never_labelled_stays_in_the_population():
+    """It never reaches `grouped`, so it was not thin, not merged and not
+    weighted -- its units simply left the population. The weights came out
+    {boundary: 1.0} and the correction described one layer while the gate
+    applied it to every unit. That is the substitution `_merge_thin`'s own
+    docstring says it exists to prevent, committed by the loop that calls it.
+
+    Neyman allocation concentrates labels where the residual varies, so a
+    stratum with observations and no labels is the *expected* shape here, not a
+    corner case."""
+    rect = Calibrator(_varied_store()).recompute("v1")
+
+    assert not rect.is_stale, rect.stale_reason
+    assert rect.n_unlab == 1050, (
+        "50 unlabelled in the labelled stratum + 1000 in the one with no "
+        "labels; the 1000 used to vanish")
+
+
+def test_it_is_folded_into_the_host_rather_than_dropped_or_refused():
+    """Dropping is the bug. Refusing would make a sampler that concentrates
+    labels unable to produce an estimate at all. Folding carries the same
+    borrow-the-host's-residual assumption `min_per_stratum` already makes."""
+    store = _varied_store()
+    merged, pooled = Calibrator(store)._merge_thin(
+        {"boundary": store.for_calibration("v1")},
+        store.unlabelled_moments("v1"))
+
+    assert list(merged) == ["boundary"]
+    assert pooled["boundary"]["n"] == 1050
+    assert "accepted" not in pooled, "folded in, not left beside it"

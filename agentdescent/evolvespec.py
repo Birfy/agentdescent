@@ -485,9 +485,18 @@ def build_audit(spec: EvolveSpec, *, reward: Callable, run: Optional[Callable],
     if stratify is not None:
         stratify = _resolve(stratify, spec, where="audit.stratify")
     store = cfg.pop("store", None)
-    if store is None and repo_path:
-        store = os.path.join(os.path.dirname(os.path.abspath(repo_path)),
-                             "audit.jsonl")
+    if store is None:
+        if repo_path:
+            store = os.path.join(os.path.dirname(os.path.abspath(repo_path)),
+                                 "audit.jsonl")
+        else:
+            # No run directory to put it beside -- `compose(spec)` called
+            # directly, `plan_payload`, the demo. An in-memory store here meant
+            # the audit ran, paid for every oracle call and threw the records
+            # away at process exit, with only a line in `notes` to say so. The
+            # records are the deliverable; a relative path beside the caller is
+            # a worse place than a run directory and a far better one than /dev/null.
+            store = "audit.jsonl"
     cfg.setdefault("enabled", False)
     try:
         return attach(reward, oracle=oracle, store=store, run=run,

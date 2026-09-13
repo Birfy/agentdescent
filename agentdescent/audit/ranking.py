@@ -131,6 +131,12 @@ class RankReport:
     #: Signature -> ``{"n", "verifier", "oracle"}``, inclusion-weighted.
     by_artifact: Dict[str, Dict[str, float]] = field(default_factory=dict)
     n_pairs: int = 0
+    #: The ``(base, candidate)`` signatures actually compared. Retained because
+    #: `above` used to re-enumerate every combination of `by_artifact` instead,
+    #: so a caller who passed the run's real merge pairs -- to avoid counting
+    #: comparisons no merge ever made -- got exactly that over-count back in the
+    #: half of the tuple that was not `flips`.
+    compared: Tuple[Tuple[str, str], ...] = ()
     agree: int = 0
     ties: int = 0
     flips: List[Flip] = field(default_factory=list)
@@ -149,12 +155,15 @@ class RankReport:
         than the truth's is deliberate: it is the one the gate can see.
         """
         flips = sum(1 for f in self.flips if abs(f.verifier_gap) >= gap)
-        decided = sum(
-            1 for a, b in itertools.combinations(sorted(self.by_artifact), 2)
-            if abs(self.by_artifact[b]["verifier"]
-                   - self.by_artifact[a]["verifier"]) >= gap
-            and self.by_artifact[b]["oracle"] != self.by_artifact[a]["oracle"]
-            and self.by_artifact[b]["verifier"] != self.by_artifact[a]["verifier"])
+        decided = 0
+        for a, b in self.compared:
+            if a not in self.by_artifact or b not in self.by_artifact:
+                continue
+            x, y = self.by_artifact[a], self.by_artifact[b]
+            if (abs(y["verifier"] - x["verifier"]) >= gap
+                    and y["oracle"] != x["oracle"]
+                    and y["verifier"] != x["verifier"]):
+                decided += 1
         return decided - flips, flips
 
     @property
@@ -274,5 +283,6 @@ def rank_agreement(records: Iterable[AuditRecord], *,
     return RankReport(
         n_units=len(rows), tau_b=tau, concordant=conc, discordant=disc,
         one_directional=one_directional, n_artifacts=len(by_artifact),
-        by_artifact=by_artifact, n_pairs=n_pairs, agree=agree, ties=ties,
+        by_artifact=by_artifact, n_pairs=n_pairs,
+        compared=tuple(pairs), agree=agree, ties=ties,
         flips=flips)
