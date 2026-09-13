@@ -134,25 +134,34 @@ kicks with the same forces, is a different and wrong integrator.
 `src/__init__.py` exposes exactly these seven functions. Nothing outside `src/`
 reaches past them -- not the driver, and not a single test.
 
-| function | returns |
-|---|---|
-| `displacement(a, b, box)` | the nearest-image displacement from `a` to `b` |
-| `wrap(point, box)` | `point` folded into `[0, L)` on every periodic axis |
-| `energy(positions, **params)` | the total potential energy, a float |
-| `forces(positions, **params)` | one force vector per particle |
-| `step(positions, velocities, masses, dt, **params)` | `(positions, velocities)` after one step |
-| `observables(velocities, masses)` | `{"kinetic": f, "temperature": f, "momentum": [f, f, f]}` |
-| `rdf(positions, box, bins, rmax)` | **integer** counts of distinct pairs per bin over `[0, rmax)` |
+These are the signatures, exactly -- every keyword is part of the surface even
+where a caller rarely overrides it, and the tests pass them **by name**:
 
-`**params` is the same keyword set everywhere, with these defaults:
+    def displacement(a, b, box)
+    def wrap(point, box)
 
-    box=(0.0, 0.0, 0.0)   potential="lennard_jones"   cutoff=2.5
-    epsilon=1.0           sigma=1.0                   k=1.0      r0=1.0
+    def energy(positions, box=(0.0, 0.0, 0.0), potential="lennard_jones",
+               epsilon=1.0, sigma=1.0, cutoff=2.5, k=1.0, r0=1.0)
+    def forces(positions, box=(0.0, 0.0, 0.0), potential="lennard_jones",
+               epsilon=1.0, sigma=1.0, cutoff=2.5, k=1.0, r0=1.0)
+    def step(positions, velocities, masses, dt, box=(0.0, 0.0, 0.0),
+             potential="lennard_jones", epsilon=1.0, sigma=1.0, cutoff=2.5,
+             k=1.0, r0=1.0)
 
-`observables` takes no positions and no box: `KE = sum(0.5 * m * v.v)`,
-`T = 2 * KE / (3 * N)` with `k_B = 1` and **no** centre-of-mass correction, and
-`momentum` is the plain mass-weighted sum. A pair at or beyond `rmax` is not
-counted in the histogram.
+    def observables(velocities, masses)
+    def rdf(positions, box, bins, rmax)
+
+`energy` returns a float; `forces` one vector per particle; `step` the pair
+`(positions, velocities)` after one timestep; `rdf` a list of **integer** counts.
+`observables` returns `{"kinetic": f, "temperature": f, "momentum": [f, f, f]}` --
+it takes no positions and no box, with `KE = sum(0.5 * m * v.v)`,
+`T = 2 * KE / (3 * N)` at `k_B = 1` and **no** centre-of-mass correction, and
+`momentum` the plain mass-weighted sum. A pair at or beyond `rmax` is not counted
+in the histogram.
+
+The keyword set reaches all the way down: a layer that accepts `potential` and
+then hard-codes Lennard-Jones fails, and so does one that takes `cutoff` but not
+`epsilon`. Thread the parameters through rather than rediscovering them.
 
 Every entry point MUST import its layer **lazily**, inside the function body.
 The tests for one layer then pass while another layer is still missing, which is
