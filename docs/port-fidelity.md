@@ -442,6 +442,19 @@ passed.
 * **This port follows**: the code, including the acceptance rule — which is the
   *must not change* column above, so the engine's Beta gate is the opt-in control
   arm (`--engine-gate`) rather than the default.
+* **The released code has no objective function.** `grep -rio 'fitness|reward|score'`
+  over `apps/evo_git` returns one hit, `oom_score_adjust`. Nothing computes a number
+  over a validation suite: the executor verifies its own work and writes tests, the
+  parent reviews the result *and* runs the suite *and* rejects code-quality
+  anti-patterns it can see (`agents/manager.ex`), the architect's Phase 3 runs the
+  build and reviews the implementation, given tests are "the **definition of done**"
+  (`runtime/genesis.ex:152`), and termination is an agent calling `complete_task`.
+  `evolve()` is a reward-driven loop by construction, so this port's scalar is the
+  **engine's contract and its own measurement**, while the mechanism it reproduces is
+  the per-node one: the parent's tests (`Suite.review`), the parent reading the diff
+  (`_review.py`), and the root agent's completion judgment (`--complete-task`, through
+  `evolve(stop_when=)`). Reported as `audit reward`, on tests no agent may read, and
+  deliberately never shown to the agent that decides whether the work is done.
 * **Where the paper and the code disagree, and this port follows the code —
   twice.** (1) The paper describes accepted events advancing the version history;
   in the released code `Helpers.merge_and_report/4` **never merges** — it creates
@@ -454,11 +467,25 @@ passed.
 * **Departures**: the benchmark is not reproduced and is not claimed — upstream's
   formation run is 123.4 h, US$44.38 and **one sample**, so the domains are
   compact formation stand-ins and the fidelity class is `mechanism_microport` for
-  that reason alone. There are two of them because the first had nowhere for the
-  recursion to go: `minilang` bottoms out at depth 2, `stackvm` at depth 3 with a
-  node whose parent is itself a child. Multi-repository work, the desktop shell, the dashboard and
-  peak-hour scheduling are out of scope. Observed recursion depth is 2 here and
-  4–8 upstream, because the domain's decomposition is three nodes deep.
+  that reason alone. There are four of them because each answered something the one
+  before could not: `minilang` bottoms out at depth 2, `stackvm` at depth 3 with a
+  node whose parent is itself a child, `jqx` comes out as a program rather than a
+  package, and `md` takes the oracle out of the scoring path altogether. Observed
+  recursion depth is 3–4 here and 4–8 upstream. Multi-repository work, the desktop
+  shell, the dashboard and peak-hour scheduling are out of scope — including the
+  **human merge** at the end of upstream's chain, which means the last gate on an
+  accepted version is missing here rather than automated.
+* **The scheduling model is ported rather than imitated (`--worktrees`).** Upstream
+  "commit your changes, release your worktree, and wait" is how agents are scheduled
+  at all, so each episode takes a git worktree, commits on a branch of its own, and
+  the worktree is removed, with a ledger that balances. The phylogenetic graph is then
+  real git history — a parent that kept three children leaves a four-parent merge
+  commit, which is the shape `Git.merge_octopus/2` leaves — and `EpisodeRecord` carries
+  the third field of upstream's `(node_path, commit_sha, objective)` resurrection
+  tuple. It is not load-bearing for correctness here (the episode tree is a pure
+  function over a state dict, and siblings branch from one base by construction), and
+  acting on it found a real gap anyway: a manager that opens a node now records it
+  *before* briefing the child, as `make_dir` (auto-commits) then spawn requires.
 * **Two engine boundaries it ran into, recorded rather than routed around.**
   Tensor parallelism is the engine's own statement of the spatial contract, and
   it cannot be used: its ownership map is fixed before round 0, so every file the
