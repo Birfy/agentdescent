@@ -8,6 +8,59 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- **`evolve(checkpointing=True)`: the search survives a process restart.**
+  `repo_path` already resumed the *artifact* -- the ledger's whole job -- but
+  the aggregator's search state is only ever in memory, so a resume re-seeded
+  an archive of one from the ledger head and threw away every count the search
+  had accumulated: Beta posteriors, a population archive and its `selected`
+  counts, the early-stop patience counter. An aggregator opts in by
+  implementing `checkpoint()` / `restore()`; both are duck-typed and stay out
+  of `AggregatorProtocol`, so an aggregator without them is untouched. Off by
+  default, because a run on a throwaway repo would pay the write for nothing.
+  The reference `Aggregator` and `PopulationAggregator` implement both, and
+  `agentdescent status <run_id>` says which of the two kinds of resume a run is
+  set up for.
+
+### Fixed
+
+- **Checkpoints are excluded from the ledger's index on every open, not only
+  at genesis.** `Ledger._commit` runs `git add -A`. A committed
+  `checkpoints/latest.json` exists on `dev` and not on `stable`, so the promote
+  switch deletes it -- and once the next round has rewritten the now-tracked
+  file, `git checkout` refuses to clobber it and *every* `snapshot(STABLE)` and
+  `promote_to_stable` after that fails with "local changes would be
+  overwritten". Writing the exclusion only when the repo is created missed
+  precisely the long-lived ledgers a resume exists for, since those already
+  have their `.git/`. It now goes in `.git/info/exclude` -- git's own space,
+  never part of a branch -- rather than a working-tree `.gitignore`, which
+  would be committed to one branch and vanish on the switch to the other.
+- **A checkpoint that cannot be written or read no longer takes the run down.**
+  The lock acquisition raises `TimeoutError`, and it sat outside the guard: the
+  one race the lock exists for -- a resume while the previous process is still
+  alive -- made the new run fail to start *and* killed the old one's next
+  round. Serialisation, locking and IO now all degrade to "there is no
+  checkpoint" on every entry point.
+- **State that does not round-trip through JSON is refused rather than
+  reshaped.** `json.dump(..., default=str)` wrote a `set` as its `repr`,
+  reported success, and handed `restore` a candidate whose state had silently
+  changed shape -- which `PopulationAggregator` then commits to the ledger as
+  the next parent.
+- **Round numbering continues across a resume.** Both drivers count rounds from
+  zero per process, so a resumed run wrote `round_0.json` over the previous
+  run's, reported `round 0` for a search several rounds deep, and gave the
+  pruner a history that no longer sorted.
+- **`PopulationAggregator` no longer files rendered candidates as artifact
+  ids.** Its `_admit` dedup set *was* `Aggregator._seen`, which
+  `_known_artifacts` unions into the promotion table -- so `finalize` called
+  `_promote("# Playbook\n- change-t2\n...")`, a whole rendered artifact passed
+  off as an id, once per distinct candidate. The two sets are now separate
+  (`_keys` and `_seen`), which also stops the checkpoint carrying every
+  candidate's full text twice.
+- **Reads leave nothing behind.** `load_checkpoint` created a `.git/` directory
+  to hold its lock file, so `agentdescent status` fabricated a bogus repository
+  on whatever path it was handed. The lock now lives inside `checkpoints/`,
+  which also means checkpoints work on a plain directory with no git repo.
+
 - **Sparse audit: a cheap verifier paired against ground truth
   (`agentdescent.audit`).** When `reward` is an agent judging an output rather
   than a fact about it, the loop optimises a proxy, and every gate reads the same

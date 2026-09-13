@@ -350,7 +350,19 @@ class LedgerProtocol(Protocol):
     ``commit``, ``promote_to_stable`` -- yields a contract that type-checks and
     then dies in ``_build_engine``, which calls ``register`` before any merge
     happens, in ``_safe_log`` at the end of every run, and in ``_Engine.cleanup``.
+
+    ``repo_path`` is an attribute, not a method: the checkpoint module reads it
+    to know where to write ``checkpoints/``. Every :class:`~agentdescent.ledger.Ledger`
+    has it, and a hand-built ledger that does not support checkpointing can leave
+    it as an empty string -- or omit it entirely, since the engine reaches it
+    through ``getattr`` and skips the checkpoint when it is missing or empty.
+    Note that this is the one non-method member here, which means
+    ``issubclass(X, LedgerProtocol)`` now raises ``TypeError`` (a Protocol with
+    data members supports ``isinstance`` only). Nothing in the engine does that;
+    a downstream caller that did must switch to ``isinstance``.
     """
+
+    repo_path: str
 
     def register(self, artifact: "Evolvable", branch: str = ...) -> None: ...
     def snapshot(self, branch: str = ...) -> Any: ...

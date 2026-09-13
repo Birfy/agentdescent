@@ -67,7 +67,17 @@ class PopulationAggregator(Aggregator):
         self.selection = selection
         self.population_artifact = artifact_id
         self._archive: List[Dict[str, object]] = []
-        self._seen: Set[str] = set()
+        #: Rendered candidates already in the archive, for `_admit`'s dedup.
+        #:
+        #: **Not** `Aggregator._seen`, which this used to shadow. That set is
+        #: the aggregator's record of *artifact ids*: `_known_artifacts` unions
+        #: it into the promotion table and `finalize` promotes every member.
+        #: Feeding it `artifact.render()` meant `finalize` called
+        #: `_promote("# Playbook\n- change-t2\n...")` -- a whole rendered
+        #: artifact passed off as an id -- once per distinct candidate. Two
+        #: different questions ("which artifacts do I own" and "have I archived
+        #: this text") had been sharing one set because both are sets of str.
+        self._keys: Set[str] = set()
         self._archive_lock = threading.Lock()
         #: Selections made, i.e. the ``round`` handed to the policy. Not under
         #: the archive lock: `step()` is the merger's, one thread, while the
@@ -79,9 +89,9 @@ class PopulationAggregator(Aggregator):
     def _admit(self, artifact, version: int) -> None:
         key = artifact.render()
         with self._archive_lock:
-            if key in self._seen:
+            if key in self._keys:
                 return
-            self._seen.add(key)
+            self._keys.add(key)
         # The gate has just evaluated a committed candidate on the full
         # held-out set, so this is a cache hit, not a new evaluation.
         score = self.verifier.eval_fn(artifact, list(self.verifier.held_out))
@@ -227,6 +237,96 @@ class PopulationAggregator(Aggregator):
         if best is not None:
             self._commit_state(best, "population: final best")
         super().finalize()
+
+    # -- checkpointing -------------------------------------------------------
+
+    def checkpoint(self) -> Optional[dict]:
+        """Serialise the archive and the selection counter.
+
+        The archive is the whole point of a population run: it holds every
+        committed candidate with its held-out score and its ``selected``
+        count — the novelty term ``Archive(sampling='novelty')`` reads, the
+        rotation index ``Beam`` needs. Without this, a resumed run starts an
+        archive of one (the head) and every selection policy degenerates:
+        ``Beam(4)`` is ``Beam(1)`` again, ``Archive``'s novelty term is gone,
+        and ``ParetoFrontier`` has a front of one to sit on.
+
+        The parent ``Aggregator`` state (Beta posteriors, promotion counters,
+        the artifact ids in ``_seen``) is merged in via ``super().checkpoint()``.
+        ``keys`` is this layer's own: the rendered form of every archived
+        candidate, which ``_admit`` dedups on. It is kept separate from the
+        parent's ``seen`` because the two answer different questions — see
+        ``_keys`` — and folding them together would restore a run whose
+        ``finalize`` then promotes rendered artifacts as if they were ids.
+        """
+        parent = super().checkpoint()
+        with self._archive_lock:
+            own = {
+                "archive": [dict(entry) for entry in self._archive],
+                "keys": sorted(self._keys),
+                "selections": self._selections,
+            }
+        if parent is not None:
+            own.update(parent)
+        return own
+
+    def restore(self, state: dict) -> None:
+        """Restore the archive written by :meth:`checkpoint`.
+
+        Entries are validated shape-wise; a malformed entry is skipped rather
+        than raised (a partially restored archive still beats an empty one,
+        and one bad row must not cost the whole history). The restored
+        ``state`` dicts are the candidates' *key spaces* — they are only ever
+        compared and committed, never executed, so trusting their shape is
+        enough.
+
+        The parent ``Aggregator`` state (Beta posteriors, promotion counters,
+        seen artifact ids) is restored via ``super().restore()`` first, so the
+        acceptance prior is in place before the population archive is loaded
+        on top of it.
+        """
+        # Restore the parent's state first (posteriors, promoted_at, seen).
+        # The parent's ``restore`` reads ``posteriors`` / ``promoted_at`` /
+        # ``seen`` keys, which ``checkpoint`` merged in from ``super()``.
+        super().restore(state)
+
+        archive = state.get("archive")
+        if not isinstance(archive, list):
+            return
+        restored: List[Dict[str, object]] = []
+        for entry in archive:
+            if not isinstance(entry, dict):
+                continue
+            st = entry.get("state")
+            if not isinstance(st, dict):
+                continue
+            try:
+                restored.append({
+                    "state": dict(st),
+                    "score": float(entry.get("score", 0.0)),
+                    "version": int(entry.get("version", 0)),
+                    "selected": int(entry.get("selected", 0)),
+                })
+            except (TypeError, ValueError):
+                continue
+        with self._archive_lock:
+            self._archive = restored
+            # The dedup keys `_admit` reserves on. `seen_keys` is read as a
+            # fallback for a checkpoint written before this layer had a set of
+            # its own. Absent both, `_keys` stays empty and the archive can
+            # gain a duplicate row for a candidate committed again after the
+            # resume -- the keys are `artifact.render()`, which needs the
+            # strategy, and the aggregator does not hold one, so they cannot be
+            # rebuilt from the archive's states.
+            keys = state.get("keys")
+            if not isinstance(keys, list):
+                keys = state.get("seen_keys")
+            if isinstance(keys, list):
+                self._keys = {str(k) for k in keys}
+            try:
+                self._selections = int(state.get("selections", 0))
+            except (TypeError, ValueError):
+                self._selections = 0
 
 
 def population_factory(selection: SelectionPolicy, artifact_id: str, *,

@@ -1650,6 +1650,21 @@ class _Engine:
     #: ``None`` when the caller passed ``repo_path`` (theirs to keep, and how a run
     #: is resumed).
     scratch_repo: Optional[str] = None
+    #: The checkpoint payload loaded by ``_build_engine`` (or ``None``).
+    #: Threaded to ``restore_early_stop`` to avoid a second file read.
+    checkpoint_payload: Optional[dict] = None
+    #: Whether to write checkpoints after each round. Off by default — a run
+    #: on a throwaway repo (tempdir, never resumed) would pay the write cost
+    #: for nothing. Read by ``record_round``; set by ``_build_engine`` from
+    #: ``evolve(checkpointing=)``.
+    checkpointing: bool = False
+    #: Rounds the search had already run when this process started, from the
+    #: restored checkpoint. Both drivers number rounds from zero per process
+    #: (``index=r`` in one, ``index=len(history)`` in the other), so without
+    #: this offset a resume writes ``round_0.json`` over the previous run's,
+    #: reports ``round 0`` for a search 40 rounds deep, and hands
+    #: ``_prune_round_files`` a history that no longer sorts.
+    checkpoint_round_base: int = 0
 
     def record_round(self, *, index: int, reward: float, n_items: int,
                      reports: Sequence[Any],
@@ -1701,6 +1716,29 @@ class _Engine:
         history.append(info)
         stop_reason = early.observe(info.held_out_reward)
         notify(on_round, info)
+        # Checkpoint the aggregator's in-memory search state after every round,
+        # so a process restart can resume the search rather than starting fresh.
+        # Off by default: a throwaway repo never resumes, and the write (lock +
+        # JSON serialise) is pure cost there. A no-op when the aggregator does
+        # not support checkpointing either.
+        # `getattr`: `LedgerProtocol` only grew `repo_path` with checkpointing,
+        # and a ledger written against the older contract is still a valid one.
+        # It opts out of checkpoints rather than dying on an attribute.
+        repo = getattr(self.ledger, "repo_path", None)
+        if self.checkpointing and repo:
+            from .checkpoint import save_checkpoint
+            save_checkpoint(
+                repo,
+                self.checkpoint_round_base + index,
+                self.aggregator,
+                artifact_id=self.artifact_id,
+                round_info={
+                    "reward": reward,
+                    "committed": info.committed,
+                    "rejected": info.rejected,
+                },
+                early_stop=early,
+            )
         if stop_reason is None and stop_when is not None:
             # The caller's own budget -- dollars, an external deadline, a
             # kill file -- asked at the same point the built-in ones are, so it
@@ -1761,7 +1799,8 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
                   usage: Optional[Usage] = None,
                   verifier: Optional[Any] = None,
                   ledger_impl: Optional[Any] = None,
-                  policies_bundle: Optional[Policies] = None) -> _Engine:
+                  policies_bundle: Optional[Policies] = None,
+                  checkpointing: bool = False) -> _Engine:
     """Wire the ledger, runtime, verifier and aggregator (shared by
     :func:`evolve` and :func:`~agentdescent.async_evolve.async_evolve`)."""
     import tempfile
@@ -2045,6 +2084,31 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
                 f"no callable {method}(). An aggregator needs ingest(card) and "
                 "step() -> list[MergeReport] (see AggregatorProtocol).")
 
+    # Restore the aggregator's in-memory search state if a checkpoint exists
+    # from a previous run on this ledger. Only runs when checkpointing is on —
+    # a run that never wrote checkpoints has nothing to restore, and probing
+    # for them anyway is a wasted lock + file read on every fresh run. The
+    # expected artifact id and aggregator class guard against restoring one
+    # search's state into another's (same repo, different artifact / factory).
+    # The returned payload is threaded to restore_early_stop to avoid a second
+    # file read.
+    _cp_payload = None
+    if repo_path and checkpointing:
+        from .checkpoint import restore_checkpoint
+        _cp_payload = restore_checkpoint(
+            repo_path, aggregator,
+            expected_artifact_id=artifact_id,
+            expected_aggregator_type=type(aggregator).__name__,
+        )
+    # Where this process's round numbering starts. The checkpoint records the
+    # last round the *search* reached, so the next one is that plus one; a run
+    # with no checkpoint starts at zero, as it always did.
+    _cp_round_base = 0
+    if _cp_payload is not None:
+        _last = _cp_payload.get("round")
+        if isinstance(_last, int) and _last >= 0:
+            _cp_round_base = _last + 1
+
     # Imported here rather than at module scope: `executor` reaches `workspec`,
     # which reaches back here for `Task`.
     from .executor import ThreadExecutor
@@ -2081,7 +2145,9 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     return _Engine(ledger, runtime, verifier, aggregator, strategy, run, reward,
                    propose, train, held_out, {t.id: t for t in train},
                    [t.id for t in train], artifact_id, blast_radius,
-                   executor=executor, meter=meter, scratch_repo=scratch)
+                   executor=executor, meter=meter, scratch_repo=scratch,
+                   checkpoint_payload=_cp_payload, checkpointing=checkpointing,
+                   checkpoint_round_base=_cp_round_base)
 
 
 def evolve(
@@ -2117,6 +2183,12 @@ def evolve(
     self_verify: bool = True,
     held_out_frac: float = 0.4,
     repo_path: Optional[str] = None,
+    #: Checkpoint the aggregator's search state every round, so a process
+    #: restart can resume the search rather than just the artifact. Off by
+    #: default: a caller that never resumes (a scratch run, a throwaway
+    #: ``repo_path`` in a tempdir) would pay the write cost for nothing.
+    #: Turn it on when the ledger is durable and you might resume.
+    checkpointing: bool = False,
     agg_config: Optional[AggregatorConfig] = None,
     staleness_policy: Optional[StalenessPolicy] = None,
     aggregator_factory: Optional[AggregatorFactory] = None,
@@ -2326,6 +2398,21 @@ def evolve(
         Git runs with an isolated config, so a personal ``~/.gitconfig``
         (``commit.gpgsign``, ``core.hooksPath``) cannot fail the ledger's own
         bookkeeping commits.
+    checkpointing:
+        Save the aggregator's in-memory **search** state to
+        ``<repo_path>/checkpoints/`` after every round, so a later run on the
+        same ``repo_path`` resumes the search instead of re-deriving it from
+        the ledger head. ``repo_path`` alone already resumes the *artifact*;
+        what it cannot carry is what the search learned on the way there --
+        Beta posteriors, a population archive and its ``selected`` counts, the
+        early-stop patience counter. Off by default, because a run that never
+        resumes (a scratch repo, a tempdir) would pay the serialise-and-write
+        for nothing, and because an aggregator opts in by implementing
+        ``checkpoint()`` / ``restore()`` at all -- one without them is
+        unaffected either way. A checkpoint that cannot be written or read
+        (state that does not serialise, a lock another process holds, a full
+        disk) is skipped, never raised: the cost of a missing checkpoint is a
+        resume that starts the search fresh, which is what ``False`` does.
     agg_config:
         Tuning for the reference aggregator (batching, acceptance risk, trust
         region, staleness tolerance).
@@ -2489,7 +2576,7 @@ def evolve(
             eval_concurrency=eval_concurrency,
             pipelined_gate=pipelined_gate, gate_workers=gate_workers,
             on_round=on_round, stop_when=stop_when, verbose=verbose, usage=usage,
-            policies=policies)
+            policies=policies, checkpointing=checkpointing)
 
     if pipelined_gate:
         # The mirror of the block above, and the same reasoning: a knob accepted
@@ -2548,7 +2635,7 @@ def evolve(
         cheap_eval_tasks=cheap_eval_tasks, fusion_tournament=fusion_tournament,
             shuffle=shuffle, seed=seed,
         usage=usage, verifier=_pol.verifier, ledger_impl=_pol.ledger,
-        policies_bundle=_pol)
+        policies_bundle=_pol, checkpointing=checkpointing)
     # Start the clock after the wiring, before the first unit of work: setup
     # is not what a time-to-quality number is asking about.
     eng.meter.start()
@@ -2565,6 +2652,14 @@ def evolve(
     # Shared with the barrier-free loop: the same two questions, the same
     # tracker, and now the same epsilon (they had two).
     early = EarlyStop(target_reward=target_reward, patience=patience)
+    # Restore the early-stop tracker from the checkpoint the previous process
+    # wrote: without this, a resumed run forgets how long it had already
+    # stalled and re-burns its patience budget re-discovering the stall. Only
+    # when checkpointing is on — otherwise there is no checkpoint to read and
+    # eng.checkpoint_payload is None.
+    if checkpointing and repo_path and eng.checkpoint_payload is not None:
+        from .checkpoint import restore_early_stop
+        restore_early_stop(repo_path, early, payload=eng.checkpoint_payload)
     unit_lock = threading.Lock()
     # Per-worker snapshots, when `refresh_interval > 1`. See `_snapshot_for`.
     worker_snaps: Dict[int, Tuple["EvolvingArtifact", int]] = {}

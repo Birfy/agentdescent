@@ -134,9 +134,9 @@ class PromptBreederPopulation(PopulationAggregator):
         state = dict(getattr(artifact, "state", {}) or {})
         key = artifact.render()
         with self._archive_lock:
-            if key in self._seen:
+            if key in self._keys:
                 return
-            self._seen.add(key)
+            self._keys.add(key)
         score = float(self._fitness(state, self._batch))
         entry = {"state": state, "score": score, "version": int(version),
                  "selected": 0}
@@ -219,9 +219,9 @@ class PromptBreederPopulation(PopulationAggregator):
                     if len(self._archive) >= self._size:
                         break
                     key = "\n\n".join(f"[{k}]\n{v}" for k, v in state.items())
-                    if key in self._seen:
+                    if key in self._keys:
                         continue
-                    self._seen.add(key)
+                    self._keys.add(key)
                 score = float(self._fitness(dict(state), self._batch))
                 with self._archive_lock:
                     self._archive.append({"state": dict(state), "score": score,

@@ -263,6 +263,51 @@ class Ledger:
             # create dev branch off the genesis commit
             _git(self.repo_path, "branch", "-f", self.DEV)
             _git(self.repo_path, "branch", "-m", self.STABLE)
+        self._exclude_non_ledger_files()
+
+    def _exclude_non_ledger_files(self) -> None:
+        """Keep `checkpoints/` out of the index, on every repo we open.
+
+        Checkpoints are per-process diagnostics, not ledger state: they live in
+        the working tree, and `_commit` runs `git add -A`. Committed, they break
+        the ledger in two ways. A branch switch *deletes* them -- a dev-only file
+        does not exist on stable -- so a resume finds nothing. Worse, the next
+        round rewrites the now-tracked file, and `checkout` refuses to clobber a
+        modified tracked file: every `snapshot(STABLE)` and `promote_to_stable`
+        after that dies with "local changes would be overwritten".
+
+        The exclusion goes in `.git/info/exclude`, not a working-tree
+        `.gitignore`, for the reason the repo lock lives in `.git/` too: that
+        directory is git's own space and is never part of a branch. A
+        `.gitignore` would itself be committed, would therefore exist on the
+        branch that committed it and not the other, and would come and go with
+        every checkout -- an ignore rule that disappears exactly when a branch
+        switch is what needs it.
+
+        Written on **every** `__init__`, not just at genesis: a ledger created
+        by an earlier version already has its `.git/`, so an init-only write
+        would skip precisely the long-lived repos a resume exists for.
+        (The name mirrors `checkpoint.CHECKPOINT_DIR`; spelled out here to keep
+        the ledger free of that import.)
+        """
+        rule = "checkpoints/"
+        path = os.path.join(self.repo_path, ".git", "info", "exclude")
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            try:
+                with open(path) as f:
+                    lines = f.read().splitlines()
+            except FileNotFoundError:
+                lines = []
+            if rule in lines:
+                return
+            with open(path, "a") as f:
+                f.write(f"{rule}\n")
+        except OSError:
+            # A read-only or otherwise hostile `.git/` is not a reason to
+            # refuse the ledger: nothing writes checkpoints unless the caller
+            # turned them on, and that path degrades on its own.
+            pass
 
     # -- low-level version bookkeeping ---------------------------------------
 

@@ -488,8 +488,31 @@ def status_payload(run_id: Optional[str], *, store: Optional[str] = None,
             # Only once it exists: a path to a file that was never written
             # invites `audit_status` to report an empty store as an answer.
             st["audit_store"] = rd.audit_path
+        st["checkpoint"] = _checkpoint_summary(rd)
         return st
     return [st.to_dict() for st in runstore.list_runs(store=store)]
+
+
+def _checkpoint_summary(rd: "runstore.RunDir") -> Optional[dict]:
+    """The latest checkpoint of this run's ledger, for the status line.
+
+    ``None`` when the run has none (no checkpointing aggregator, or never
+    got through a round). A present checkpoint is what makes a resume
+    continue the *search* rather than just the artifact — worth showing,
+    because "resumed" has meant two very different things since checkpoints
+    landed and only one of them keeps the archive.
+    """
+    from .checkpoint import load_checkpoint
+    if not os.path.isdir(rd.ledger_path):
+        return None
+    payload = load_checkpoint(rd.ledger_path)
+    if payload is None:
+        return None
+    return {
+        "round": payload.get("round"),
+        "aggregator": payload.get("aggregator_type"),
+        "early_stop": payload.get("early_stop"),
+    }
 
 
 def cmd_status(a: argparse.Namespace) -> int:
@@ -504,6 +527,16 @@ def cmd_status(a: argparse.Namespace) -> int:
                 for r in rd.rounds()[-3:]:
                     print(f"  round {r['round']:>3}  reward={r['held_out_reward']:.3f}  "
                           f"+{r['committed']}/-{r['rejected']}  {r.get('reasons', {})}")
+                cp = _checkpoint_summary(rd)
+                if cp:
+                    es = cp.get("early_stop") or {}
+                    stalled = es.get("stalled", "?")
+                    print(f"  checkpoint: round {cp['round']} "
+                          f"({cp['aggregator']}) — a resume continues the "
+                          f"search, stall counter at {stalled}")
+                else:
+                    print("  checkpoint: none — a resume restarts the search "
+                          "from the ledger head")
         return 0
     runs = runstore.list_runs(store=a.store)
     if a.brief:
