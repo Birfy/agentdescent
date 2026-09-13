@@ -1,13 +1,13 @@
-"""The workload registry in `scripts/audit_phase0.py`, once there were three.
+"""The workload registry: one object per workload, in `scripts/audit_workloads.py`.
 
-Everything here was a single-workload assumption that a second or third
-workload made wrong. The dataset loaders are not tested: they need `hf_rows`,
-and a test that silently skipped on a cold cache would be a test of nothing.
+Everything here was a single-workload assumption that a later workload made
+wrong. The dataset loaders are not tested: they need `hf_rows`, and a test that
+silently skipped on a cold cache would be a test of nothing.
 """
 
 import pytest
 
-from scripts import audit_phase0 as P
+from scripts import audit_workloads as P
 
 
 def _task(gold, *, meta=None):
@@ -26,6 +26,8 @@ def test_a_workload_cannot_be_half_registered():
         assert w.label and w.oracle_label, name
         assert callable(w.oracle) and callable(w.near_miss), name
         assert w.wrong and all(callable(f) for f in w.wrong), name
+        # Either a dataset to read rows from, or its own sampler and indexer.
+        assert callable(w.modes), name
         # Either a dataset to read rows from, or its own sampler and indexer.
         assert (w.dataset and w.to_task) or (w.sample_with and w.index_with), name
 
@@ -73,16 +75,20 @@ def test_the_offline_judge_takes_the_workloads_oracle_not_a_default():
     """With `exact_match` hard-coded the GSM8K dry run's known `Delta` -- the one
     thing the stand-in exists to make known -- would be about the wrong
     oracle."""
-    judge = P.offline_judge(generosity=0.0, seed=0, oracle=P.number_match)
+    from scripts.audit_phase0 import offline_judge
+
+    judge = offline_judge(generosity=0.0, seed=0, oracle=P.number_match)
     assert judge(_task("18"), "18.00") == 1.0      # never marked down
-    lenient = P.offline_judge(generosity=0.0, seed=0, oracle=P.exact_match)
+    lenient = offline_judge(generosity=0.0, seed=0, oracle=P.exact_match)
     assert lenient(_task("18"), "18.00") == 0.0
 
 
 def test_the_offline_judge_only_ever_scores_up():
     """Symmetric noise would make a broken estimator look fine -- it is unbiased
     on balanced binary outcomes."""
-    judge = P.offline_judge(generosity=1.0, seed=0, oracle=P.number_match)
+    from scripts.audit_phase0 import offline_judge
+
+    judge = offline_judge(generosity=1.0, seed=0, oracle=P.number_match)
     assert judge(_task("18"), "18") == 1.0
     assert judge(_task("18"), "17") == 1.0        # forgiven, never marked down
 
@@ -94,7 +100,7 @@ def test_gsm8k_wrong_answers_span_more_than_one_error_mode():
     property of the stand-in solver."""
     import random
 
-    from scripts.audit_modes import gsm8k_error_mode
+    from scripts.audit_workloads import gsm8k_error_mode
 
     class _Rec:
         task_id = "t"
@@ -102,8 +108,9 @@ def test_gsm8k_wrong_answers_span_more_than_one_error_mode():
         def __init__(self, output):
             self.output = output
 
+    ctx = P.Task(id="t", prompt="q", meta={"gold": "18", "expected": "18"})
     rng = random.Random(0)
-    modes = {gsm8k_error_mode(_Rec(shape("18", rng)), ("q", "18", None))
+    modes = {gsm8k_error_mode(_Rec(shape("18", rng)), ctx)
              for shape in P.WORKLOADS["gsm8k"].wrong for _ in range(20)}
     assert len(modes) >= 3
 
@@ -183,7 +190,9 @@ def test_the_judge_is_not_shown_the_tests():
     task = P._mbpp_task({"text": "Add two numbers.",
                          "code": "def add(a, b): return a + b",
                          "test_list": ["assert add(1, 2) == 3"]})
-    shown = P._JUDGE_TMPL.format(question=task.prompt, gold=task.meta["gold"],
+    from scripts.audit_phase0 import _JUDGE_TMPL
+
+    shown = _JUDGE_TMPL.format(question=task.prompt, gold=task.meta["gold"],
                                  candidate="def add(a, b): return a + b")
     assert "assert add(2, 2)" not in shown          # only the signature hint
     assert task.meta["tests"][0] not in shown.split("Reference answer:")[1]

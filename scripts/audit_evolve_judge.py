@@ -85,8 +85,8 @@ from agentdescent.audit.diagnose import evaluate_fix, residual_stats  # noqa: E4
 from agentdescent.audit.scorecard import rescan, scorecard  # noqa: E402
 from agentdescent.evolution import LLMAgent  # noqa: E402
 from agentdescent.strategies import AppendRules  # noqa: E402
-from scripts.audit_modes import (ERROR_MODES, context_for,  # noqa: E402
-                                 resolved_records)
+from scripts.audit_workloads import (WORKLOADS, resolved_records,  # noqa: E402
+                                     task_index)
 from scripts.audit_phase0 import _JUDGE_TMPL  # noqa: E402
 
 #: The last line of the shipped judge template, and the seam the rubric is
@@ -202,7 +202,7 @@ def assess(records: Sequence[AuditRecord], context, workload: str, *,
            min_unseen: float = 0.25,
            min_examples: int = MIN_EXAMPLES) -> Pool:
     """Measure the improvement pool both ways."""
-    mode = ERROR_MODES[workload]
+    mode = WORKLOADS[workload].modes
     coverage = coverage_of(records, score_band,
                            lambda r: mode(r, context.get(r.task_id)))
     counts = Counter(
@@ -263,8 +263,8 @@ def as_tasks(records: Sequence[AuditRecord], context) -> List[Task]:
             continue
         out.append(Task(
             id=rec.record_id,
-            prompt=ctx[0],
-            meta={"gold": ctx[1], "candidate": rec.output,
+            prompt=ctx.prompt,
+            meta={"gold": ctx.meta.get("gold", ""), "candidate": rec.output,
                   "oracle": rec.oracle_score, "task_id": rec.task_id,
                   "stored_verifier": rec.verifier_score}))
     return out
@@ -372,7 +372,8 @@ def rescore(records: Sequence[AuditRecord], ask, rubric: str, context
             out[rec.record_id] = rec.verifier_score
             continue
         out[rec.record_id] = verdict(
-            ask(rubric, ctx[0], ctx[1], rec.output, rec.task_id))
+            ask(rubric, ctx.prompt, ctx.meta.get("gold", ""), rec.output,
+                rec.task_id))
     return out
 
 
@@ -462,7 +463,7 @@ def main() -> None:
     ap.add_argument("--records", required=True,
                     help="the audit JSONL a Phase 0 run wrote")
     ap.add_argument("--workload", default="gsm8k",
-                    choices=sorted(ERROR_MODES),
+                    choices=sorted(WORKLOADS),
                     help="which workload wrote those records; picks the error "
                          "modes and the gold answers")
     ap.add_argument("--model", default="deepseek-v4-flash")
@@ -498,7 +499,7 @@ def main() -> None:
     records = resolved_records(args.records)
     if not records:
         raise SystemExit(f"{args.records} holds no resolved pairs")
-    context = context_for(args.workload, limit=args.limit)
+    context = task_index(args.workload, rows=args.limit)
     improvement = [r for r in records if r.purpose is Purpose.IMPROVEMENT]
     calibration = [r for r in records if r.purpose is Purpose.CALIBRATION]
     if not improvement:

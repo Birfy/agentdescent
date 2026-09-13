@@ -28,10 +28,10 @@ from agentdescent.audit.coverage import (coverage_of, plan_coverage,
                                          rarefaction, unseen_mass_overall)
 from agentdescent.audit.propose import length_rules, search
 from agentdescent.audit.scorecard import rescan, scorecard
-from scripts.audit_modes import (ERROR_MODES, context_for,  # noqa: F401
-                                 echoes_the_question,
-                                 far_shorter_than_reference, normalise,
-                                 resolved_records)
+from scripts.audit_workloads import (WORKLOADS,  # noqa: F401
+                                     echoes_the_question,
+                                     far_shorter_than_reference, normalise,
+                                     resolved_records, task_index)
 
 
 # -- the two rules a person reaches for first --------------------------------
@@ -40,7 +40,7 @@ from scripts.audit_modes import (ERROR_MODES, context_for,  # noqa: F401
 #: `scripts.audit_modes`, because the coverage number decides whether the
 #: improvement pool still gets budget and two copies that drift would answer
 #: that in two files with no way to tell which one ran.
-error_mode = ERROR_MODES["hotpot"]
+error_mode = WORKLOADS["hotpot"].modes
 
 
 def score_band(record: AuditRecord) -> str:
@@ -57,7 +57,7 @@ def make_fix(*, echo: bool = True, shorter: float = 0.6):
     def fix(record: AuditRecord, ctx) -> float:
         if ctx is None or record.verifier_score <= 0.0:
             return record.verifier_score
-        question, gold = ctx[0], ctx[1]
+        question, gold = ctx.prompt, ctx.meta["gold"]
         if echo and echoes_the_question(record.output, question):
             return 0.0
         if shorter and far_shorter_than_reference(record.output, gold, shorter):
@@ -79,23 +79,23 @@ def main() -> None:
     if not records:
         raise SystemExit(f"{args.records} holds no resolved pairs")
     version = records[0].verifier_version
-    context = context_for("hotpot", limit=args.limit)
+    context = task_index("hotpot", rows=args.limit)
     missing = sum(1 for r in records if r.task_id not in context)
 
     # A record whose question could not be joined lands in UNCLASSIFIED rather
     # than being dropped: a diagnosis that quietly narrows its own population is
     # the failure this package spends most of its docstrings on.
     def _spec_gap(out, ref, ctx):
-        return bool(ctx) and echoes_the_question(out, ctx[0])
+        return ctx is not None and echoes_the_question(out, ctx.prompt)
 
     def _ambiguous(out, ref, ctx):
-        if not ctx or not ctx[1]:
+        if ctx is None or not ctx.meta.get("gold"):
             return False
-        o, g = normalise(out), normalise(ctx[1])
+        o, g = normalise(out), normalise(ctx.meta["gold"])
         return bool(o) and bool(g) and (o in g or g in o)
 
     classify = reference_classifier(
-        normalise, lambda ctx: ctx[1] if ctx else "",
+        normalise, lambda ctx: ctx.meta["gold"] if ctx else "",
         spec_gap_when=_spec_gap, ambiguous_when=_ambiguous)
     report = classify_disagreements(records, classify, context)
 
@@ -125,8 +125,8 @@ def main() -> None:
     curve = rarefaction(modes, [5, 10, 15, 20, 25, 30], reps=400)
 
     found = search(records,
-                   length_rules(normalise, lambda c: c[1],
-                                question_of=lambda c: c[0]),
+                   length_rules(normalise, lambda c: c.meta["gold"],
+                                question_of=lambda c: c.prompt),
                    context, max_size=2, floor=report.floor_sigma)
 
     stats = residual_stats(records)

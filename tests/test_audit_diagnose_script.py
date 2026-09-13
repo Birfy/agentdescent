@@ -11,9 +11,10 @@ import uuid
 
 import pytest
 
+from agentdescent import Task
 from agentdescent.audit import AuditRecord, Purpose
 from agentdescent.audit.diagnose import evaluate_fix
-from scripts.audit_modes import resolved_records
+from scripts.audit_workloads import resolved_records
 from scripts.audit_diagnose import (echoes_the_question,
                                     far_shorter_than_reference,
                                     make_fix, normalise)
@@ -70,9 +71,17 @@ def test_the_length_rules_threshold_is_a_dial_not_a_constant():
 
 # -- composition -------------------------------------------------------------
 
-_CONTEXT = {"echo": ("where is Fairfax City", "Fairfax County"),
-            "short": ("who was he", "Robert Erskine Childers DSC"),
-            "fine": ("who was he", "Robert Erskine Childers DSC")}
+def _ctx(task_id, question, gold):
+    """A context is the `Task` the index already built, not a tuple made from
+    one -- the positional form dropped `meta["tests"]` and gave slot `[2]` a
+    different meaning per workload."""
+    return Task(id=task_id, prompt=question,
+                meta={"gold": gold, "expected": gold})
+
+
+_CONTEXT = {"echo": _ctx("echo", "where is Fairfax City", "Fairfax County"),
+            "short": _ctx("short", "who was he", "Robert Erskine Childers DSC"),
+            "fine": _ctx("fine", "who was he", "Robert Erskine Childers DSC")}
 
 
 def _sample():

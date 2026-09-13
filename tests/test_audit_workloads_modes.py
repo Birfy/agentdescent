@@ -1,17 +1,32 @@
-"""One error-mode definition per workload, in `scripts/audit_modes.py`.
+"""Error modes, now a field on the `Workload` object rather than a table beside it.
 
 The coverage number decides whether the improvement pool still gets budget, so
 two definitions that drift would answer that question differently in two files
-with no way to tell which one ran. These tests are mostly about that: the
-identity of the shared functions, and the boundaries between GSM8K's modes.
+with no way to tell which one ran. `ERROR_MODES` was that second table -- an
+eighth dict keyed by workload name, which could go missing on a new workload
+without anything failing until `assess()`, after a paid run. These tests are
+about the boundaries between the modes; the registry is covered by
+`test_audit_phase0_workloads.py`, which now only has to confirm one object is
+whole.
 """
 
 import uuid
 
 import pytest
 
+from agentdescent import Task
 from agentdescent.audit import AuditRecord, Purpose
-from scripts import audit_diagnose, audit_modes, audit_phase0
+from scripts import audit_diagnose, audit_phase0, audit_workloads as audit_modes
+
+
+def _task(gold, *, worked=None, prompt="q"):
+    """A context. It **is** a `Task` -- the positional `(question, reference,
+    extra)` tuple this replaces dropped `meta["tests"]` and gave slot `[2]` a
+    different meaning per workload."""
+    meta = {"gold": gold, "expected": gold}
+    if worked is not None:
+        meta["worked"] = worked
+    return Task(id="t", prompt=prompt, meta=meta)
 
 
 def _rec(out, *, task="t", f=1.0, y=0.0):
@@ -23,8 +38,8 @@ def _rec(out, *, task="t", f=1.0, y=0.0):
 
 # -- one definition, not two --------------------------------------------------
 
-def test_the_diagnosis_uses_the_shared_mode_function_rather_than_its_own():
-    assert audit_diagnose.error_mode is audit_modes.ERROR_MODES["hotpot"]
+def test_the_diagnosis_uses_the_workloads_own_mode_function():
+    assert audit_diagnose.error_mode is audit_modes.WORKLOADS["hotpot"].modes
 
 
 def test_the_normaliser_is_still_the_oracles_own_object():
@@ -35,12 +50,15 @@ def test_the_normaliser_is_still_the_oracles_own_object():
 
 
 def test_every_workload_has_a_mode_function():
-    assert set(audit_modes.ERROR_MODES) == set(audit_phase0.WORKLOADS)
+    for name, w in audit_modes.WORKLOADS.items():
+        assert callable(w.modes), name
+    assert set(audit_modes.WORKLOADS) == set(audit_phase0.WORKLOADS)
 
 
 # -- the GSM8K modes ----------------------------------------------------------
 
-CTX = ("Janet sells eggs. How much?", "18", "16 - 3 - 4 = 9\n9 * 2 = 18")
+CTX = _task("18", worked="16 - 3 - 4 = 9\n9 * 2 = 18",
+            prompt="Janet sells eggs. How much?")
 
 
 @pytest.mark.parametrize("out,want", [
@@ -77,7 +95,8 @@ def test_an_unjoined_record_has_no_mode_rather_than_a_wrong_one():
 # -- the text modes are unchanged --------------------------------------------
 
 def test_text_modes_still_classify_what_they_did_before_the_move():
-    ctx = ("Who wrote the book about the sea?", "Robert Erskine Childers", None)
+    ctx = _task("Robert Erskine Childers",
+                prompt="Who wrote the book about the sea?")
     mode = audit_modes.text_error_mode
     assert mode(_rec("Who wrote the book about the sea"), ctx) == "echoes-question"
     assert mode(_rec("Robert Erskine"), ctx) == "substring-of-reference"
@@ -107,7 +126,7 @@ def test_predicates_kept_their_meaning_through_the_move():
     (r"\boxed{5489}", "5489.5466666667"),
 ])
 def test_a_rounded_repeating_decimal_is_not_filed_as_a_wrong_answer(out, gold):
-    assert audit_modes.gsm8k_error_mode(_rec(out), ("q", gold, None)) == "rounded"
+    assert audit_modes.gsm8k_error_mode(_rec(out), _task(gold)) == "rounded"
 
 
 @pytest.mark.parametrize("out,gold", [
@@ -115,7 +134,7 @@ def test_a_rounded_repeating_decimal_is_not_filed_as_a_wrong_answer(out, gold):
     ("6", "8.0"),                                        # plainly wrong
 ])
 def test_a_genuine_slip_is_not_excused_as_rounding(out, gold):
-    assert audit_modes.gsm8k_error_mode(_rec(out), ("q", gold, None)) != "rounded"
+    assert audit_modes.gsm8k_error_mode(_rec(out), _task(gold)) != "rounded"
 
 
 def test_rounding_needs_a_non_integral_reference():
@@ -141,7 +160,7 @@ def test_a_fraction_the_oracle_cannot_read_is_not_filed_as_a_judge_slip(out, gol
     `wrong-number-with-working` -- counting an oracle bug as a judge slip and
     sending the improvement pool's budget after it."""
     assert audit_modes.gsm8k_error_mode(
-        _rec(out), ("q", gold, None)) == "equivalent-fraction"
+        _rec(out), _task(gold)) == "equivalent-fraction"
 
 
 def test_a_division_shown_as_working_is_still_a_slip():
@@ -150,7 +169,7 @@ def test_a_division_shown_as_working_is_still_a_slip():
     a working-out that happens to contain a slash is untouched."""
     assert audit_modes.gsm8k_error_mode(
         _rec("168636356 / 12 = 17413984"),
-        ("q", "17414074.0", None)) == "wrong-number-with-working"
+        _task("17414074.0")) == "wrong-number-with-working"
 
 
 def test_a_unit_conversion_is_left_unclassified_rather_than_guessed_at():
@@ -160,13 +179,14 @@ def test_a_unit_conversion_is_left_unclassified_rather_than_guessed_at():
     claimed as one."""
     got = audit_modes.gsm8k_error_mode(
         _rec("98,826 hours, 37 minutes, and 35 seconds"),
-        ("q", "5929597.583333333", None))
+        _task("5929597.583333333"))
     assert got != "equivalent-fraction"
 
 
 # -- MBPP: modes are about what the judge was reading -------------------------
 
 REF = "def remove_Occ(s, ch):\n    return s"
+_CODE_CTX = _task(REF)
 
 
 @pytest.mark.parametrize("out,want", [
@@ -180,7 +200,7 @@ REF = "def remove_Occ(s, ch):\n    return s"
     ("", "no-code"),
 ])
 def test_code_modes_group_by_what_the_judge_was_reading(out, want):
-    assert audit_modes.code_error_mode(_rec(out), ("q", REF, None)) == want
+    assert audit_modes.code_error_mode(_rec(out), _CODE_CTX) == want
 
 
 def test_a_docstring_only_body_is_a_stub():
@@ -188,4 +208,4 @@ def test_a_docstring_only_body_is_a_stub():
     different failure from one saying yes to a wrong implementation, and only
     the second is about reading code."""
     body = 'def remove_Occ(s, ch):\n    """Remove the first and last."""'
-    assert audit_modes.code_error_mode(_rec(body), ("q", REF, None)) == "stub"
+    assert audit_modes.code_error_mode(_rec(body), _CODE_CTX) == "stub"

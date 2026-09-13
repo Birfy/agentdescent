@@ -14,7 +14,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scripts.audit_modes import resolved_records  # noqa: E402
+from scripts.audit_workloads import resolved_records  # noqa: E402
 
 STORES = [
     ("HotpotQA", "reports/audit_phase0_2026-09-09.jsonl"),

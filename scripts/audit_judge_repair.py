@@ -53,7 +53,7 @@ from agentdescent.audit import AuditRecord, Purpose
 from agentdescent.audit.diagnose import evaluate_fix, residual_stats
 from agentdescent.evolution import Task
 
-from scripts.audit_modes import resolved_records
+from scripts.audit_workloads import resolved_records
 from scripts.audit_phase0 import (_JUDGE_TMPL, label_agreement,
                                   task_index)
 
@@ -79,7 +79,7 @@ ARMS: Dict[str, str] = {
 #: dataset rather than drawing a sample -- rebuilding the context with a loader
 #: means guessing the ``n`` and ``seed`` of a past run, and guessing wrong loses
 #: half the records silently.
-WORKLOADS = {
+RECORDS = {
     "hotpot": "reports/audit_phase0_2026-09-09.jsonl",
     "bbh": "reports/audit_phase0_bbh_2026-09-10.jsonl",
 }
@@ -309,7 +309,7 @@ def main() -> None:
 
     data: Dict[str, Tuple[List[AuditRecord], Dict[str, Task]]] = {}
     for name in args.workloads.split(","):
-        records = resolved_records(WORKLOADS[name])
+        records = resolved_records(RECORDS[name])
         if args.limit:
             records = records[:args.limit]
         context = task_index(name, rows=args.index_rows)

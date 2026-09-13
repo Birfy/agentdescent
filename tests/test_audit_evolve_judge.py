@@ -134,7 +134,12 @@ def test_nothing_is_dropped_when_the_pools_are_already_disjoint():
 # -- the saturation gate ------------------------------------------------------
 
 def _context(n):
-    return {f"t{i}": (f"question {i}", "18", None) for i in range(n)}
+    """`task_index` returns real `Task` objects, so a context is one."""
+    from agentdescent import Task
+
+    return {f"t{i}": Task(id=f"t{i}", prompt=f"question {i}",
+                          meta={"gold": "18", "expected": "18"})
+            for i in range(n)}
 
 
 def test_a_pool_whose_errors_are_all_one_mode_reports_no_unseen_mass():
@@ -274,7 +279,11 @@ def test_tasks_carry_the_truth_and_are_keyed_by_record_not_by_task():
     same question, and `evolve()` dedupes its held-out split by task id."""
     a = _rec(1.0, 0.0, out="17", task="shared")
     b = _rec(0.0, 1.0, out="18", task="shared")
-    tasks = as_tasks([a, b], {"shared": ("the question", "18", None)})
+    from agentdescent import Task
+
+    ctx = {"shared": Task(id="shared", prompt="the question",
+                          meta={"gold": "18", "expected": "18"})}
+    tasks = as_tasks([a, b], ctx)
     assert {t.id for t in tasks} == {a.record_id, b.record_id}
     assert [t.meta["oracle"] for t in tasks] == [0.0, 1.0]
     assert all(t.meta["task_id"] == "shared" for t in tasks)
@@ -317,7 +326,7 @@ def test_always_no_ties_the_real_judge_on_the_pool_this_rung_trains_on():
     better argument and was not the one being made. A search that ties the
     incumbent while being trivially simpler has gone nowhere and cannot tell.
     """
-    from scripts.audit_modes import resolved_records
+    from scripts.audit_workloads import resolved_records
 
     records = resolved_records("reports/audit_phase0_2026-09-09.jsonl")
     pool = [r for r in records if r.purpose is Purpose.IMPROVEMENT]
@@ -335,7 +344,7 @@ def test_balancing_removes_the_tie():
     """Whatever the pool's class ratio, the balanced set puts the constant
     rubric at 0.5 -- which is the point of doing it rather than arguing about
     how close the tie was."""
-    from scripts.audit_modes import resolved_records
+    from scripts.audit_workloads import resolved_records
 
     records = resolved_records("reports/audit_phase0_2026-09-09.jsonl")
     train, _ = balanced([r for r in records
