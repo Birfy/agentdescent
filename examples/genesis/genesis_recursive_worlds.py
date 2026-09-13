@@ -137,7 +137,12 @@ UPSTREAM_RELEASED_CODE = "https://github.com/EMI-Group/genesis @ v0.12.6"
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     add_standard_args(
-        parser, model_default=None, max_seconds_default=120.0,
+        # No wall-clock budget unless one is asked for. It was 120 s back when
+        # `--async` was an opt-in experiment and `max_seconds` was passed only in
+        # that arm; barrier-free by default, that dormant number became the thing
+        # that ended every run -- a 4 000-episode budget stopping after 12 rollouts.
+        # `--episodes` is the budget; this is a stopwatch for when you want one.
+        parser, model_default=None, max_seconds_default=0.0,
         model_help=("optional: let a model be the manager and executor agents "
                     "(else rule-based offline actors -- see the selected "
                     "--domain module)"))
@@ -275,6 +280,11 @@ def main(argv=None) -> None:
     print(f"Plan     : model={args.model or 'offline rule-based actors'}, "
           f"episodes={args.episodes} root ({rounds} rounds x {args.workers} workers), "
           f"max depth={args.depth}")
+    print("Budget   : " + f"{args.episodes} root episodes"
+          + (f", or {args.max_seconds:.0f}s, whichever comes first"
+             if args.max_seconds and args.asynchronous else "")
+          + ("; the root agent may end it sooner" if args.complete_task and args.model
+             else ""))
     print(f"Staleness: {args.staleness}"
           + (" (no effect: nothing is stale at a barrier)" if not args.asynchronous else
              "  -- a lagging proposal is merged, not dropped, which is what a parent "
@@ -485,7 +495,7 @@ def main(argv=None) -> None:
         n_workers=args.workers,
         max_concurrency=1 if args.asynchronous else args.workers,
         asynchronous=args.asynchronous, async_ratio=args.async_ratio,
-        max_seconds=args.max_seconds if args.asynchronous else None,
+        max_seconds=(args.max_seconds or None) if args.asynchronous else None,
         # Upstream runs no local before/after re-check: a child returns its work
         # and the parent judges it. Re-running every proposal here would also
         # double the number of child processes the domain spawns.

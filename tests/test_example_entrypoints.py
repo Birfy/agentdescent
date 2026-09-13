@@ -132,7 +132,10 @@ PORTS = (
     # reference tree, so `build_tasks` is the boundary a dry-run must not cross,
     # and the async budget is wall-clock for child processes rather than API
     # calls.
-    Port(genesis, "episodes", None, 120.0, "build_tasks",
+    # 0.0 = no wall-clock budget: `--episodes` is the budget, and this port runs
+    # barrier-free by default, where a dormant `max_seconds` would otherwise become
+    # the thing that ends every run.
+    Port(genesis, "episodes", None, 0.0, "build_tasks",
          async_ratio=3, budget_is_iterations=True),
 )
 
