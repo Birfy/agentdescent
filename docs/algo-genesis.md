@@ -87,6 +87,30 @@ engine's own defaults, which is how the rows below were measured.
 
 ## Measured results — compact formation domain
 
+### With a real model
+
+`deepseek-v4-flash` through an Anthropic-shaped endpoint, `--episodes 60
+--workers 4 --no-thinking`, three seeds. The repository starts implementation-empty
+and the model writes every line of what comes out.
+
+| seed | held-out | accepted events | agent episodes | observed depth | model calls | wall-clock |
+|---|---|---|---|---|---|---|
+| 0 | **1.000** | 5 | 34 | 3 | 284 | 135 s |
+| 1 | **1.000** | 5 | — | 3 | 306 | 173 s |
+| 2 | **1.000** | 5 | — | 2 | 242 | 100 s |
+
+Seed 0's repository was re-scored independently from what `--write-repo` wrote:
+**30/30 cases**. What it grew is `src/__init__.py` plus
+`frontend/{lexer,parser}.py` and `backend/evaluator.py`, and the `__init__.py`
+imports each stage lazily because the specification says to — so the agents read
+the contract rather than guessing it.
+
+Three defects of this port stood between a model and that result, each invisible
+until the one before it was gone; they are the section below, and none of them was
+the model.
+
+### With the offline actors
+
 Offline rule-based actors, `--episodes 96`, three seeds, one machine. The
 repository starts at **0.000** with five `CONTEXT.md` files and no implementation;
 held-out reward is the frozen staged suite (12 of 30 cases held out).
@@ -130,12 +154,18 @@ one from being built at all.
 !!! warning "What these numbers are not"
     Upstream's formation run is **123.4 hours, US$44.38, 248,989 lines and one
     sample**; its continuation and MESA-redevelopment runs are one sample each.
-    None of that is reproduced here and none of it is claimed. The domain is a
-    stand-in sized to finish offline, the actors are rule-based, and the
-    wall-clock column is dominated by child processes rather than model calls —
-    so the speedup is a property of this domain, not a result about Genesis.
-    What the rows support is that the **mechanism** runs, and how it differs from
-    the engine's defaults when it does.
+    None of that is reproduced here and none of it is claimed.
+
+    The **model** rows are three seeds, one model, one endpoint, one small domain.
+    They support "this organization can take an implementation-empty repository to
+    a working, spec-conformant one, and here is what it cost" — not any comparison
+    with upstream's scale, and not a claim about models in general.
+
+    The **offline** rows run rule-based actors, and their wall-clock is dominated
+    by child processes rather than model calls, so the speedup column is a property
+    of this domain. What they support is that the mechanism runs and how it differs
+    from the engine's defaults when it does — including the failure paths a
+    rule-based actor can never reach, which is why the section below exists.
 
 ## What a real-model run found that the offline arm could not
 
