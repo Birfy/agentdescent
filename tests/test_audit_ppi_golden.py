@@ -3,7 +3,7 @@
 Coverage tests answer "is it right"; these answer "did it change". Both are
 needed and neither substitutes for the other -- coverage moves a point or two
 under any small change, so it cannot separate a refactor from a regression,
-while these are exact to 1e-12 and cannot tell you whether the behaviour they
+while these are pinned to 1e-9 and cannot tell you whether the behaviour they
 pin is *correct*. The coverage suite makes that claim; this one freezes it.
 
     python -m tools.gen_audit_ppi_golden        # regenerate, deliberately
@@ -85,3 +85,38 @@ def test_the_generator_check_mode_agrees_with_the_fixture():
     proc = subprocess.run([sys.executable, "-m", "tools.gen_audit_ppi_golden",
                            "--check"], cwd=ROOT, capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
+
+
+def test_a_last_bit_difference_is_not_drift_but_a_real_change_is():
+    """The tolerance has to separate a numpy build from a regression.
+
+    `--check` compared serialised JSON, so it demanded bit-equality. `df` is a
+    ratio of sums of squares over numpy reductions, and numpy is free to sum
+    them in a different order on a different build: CI went green on 3.11 and
+    red on 3.12 for one unchanged tree, on 7e-15 of `df`. Bit-equality cannot
+    be the rule. Neither can a loose one -- a changed `lam` must still fail.
+    """
+    from tools.gen_audit_ppi_golden import differences
+
+    stored = {"c": {"theta": 0.5, "df": 54.95564405178094, "warnings": []}}
+    ulp = {"c": {"theta": 0.5, "df": 54.955644051780936, "warnings": []}}
+    assert differences(ulp, stored) == []
+
+    real = {"c": {"theta": 0.5, "df": 54.95564405178094, "warnings": ["MIN_N"]}}
+    assert differences(real, stored), "a new warning is a change in the record"
+
+    lam = {"c": {"theta": 0.5009, "df": 54.95564405178094, "warnings": []}}
+    moved = differences(lam, stored)
+    assert moved and "theta" in moved[0], moved
+
+
+def test_the_drift_report_names_the_field_that_moved():
+    """A golden file whose failure says only "it moved" is a golden file you
+    cannot act on -- which is how a 7e-15 difference cost a round trip."""
+    from tools.gen_audit_ppi_golden import differences
+
+    stored = {"case": {"ci": [0.1, 0.9], "n": 40}}
+    fresh = {"case": {"ci": [0.1, 0.8], "n": 41}}
+    moved = differences(fresh, stored)
+    assert any("/case/ci[1]" in line and "0.9" in line for line in moved), moved
+    assert any("/case/n" in line and "41" in line for line in moved), moved
