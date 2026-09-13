@@ -115,6 +115,10 @@ class Audit:
             "verifier_version": self.verifier_version,
             "seen": self.reward.seen,
             "audited": len(self.store),
+            # Without this, `seen` stops equalling audited + unlabelled the
+            # moment two strata have different rates, and a reader has no way
+            # to tell a dropped unit from one that was never scored.
+            "skipped": self.reward.skipped,
             "pending": len(self.store.pending()),
             "delta_hat": rect.delta_hat,
             "resid_sd": rect.resid_sd,

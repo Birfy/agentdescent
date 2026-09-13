@@ -31,13 +31,35 @@ from __future__ import annotations
 import inspect
 import json
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 from . import __version__, runstore
 from .cli import NESTED_ENV, apply_payload, doctor_report, plan_payload, show_payload, status_payload
 from .evolvespec import EvolveSpec, SpecError, compose
 
-__all__ = ["Tools", "TOOL_DESCRIPTIONS", "build_server", "serve"]
+__all__ = ["RESCAN_ALLOW_ENV", "Tools", "TOOL_DESCRIPTIONS", "build_server",
+           "rescan_allow_from_env", "serve"]
+
+#: Comma-separated import prefixes `audit_rescan` may resolve beyond this
+#: package, read from the operator's environment.
+RESCAN_ALLOW_ENV = "AGENTDESCENT_RESCAN_ALLOW"
+
+
+def rescan_allow_from_env(environ: Optional[Dict[str, str]] = None
+                          ) -> Tuple[str, ...]:
+    """The operator's rescan allowlist, or an empty one.
+
+    An environment variable rather than a tool parameter, and the difference is
+    the entire control. `audit_rescan` resolves a "module:attribute" reference
+    by **importing** the module, which runs its top level; the allowlist is what
+    stands between that and any importable module on the box. A tool parameter
+    is filled in by the model calling the tool, so an allowlist passed that way
+    is one the caller can widen for itself -- the boundary would come down to
+    the tool description asking it not to. The environment is set by the person
+    running the server, before any model is in the room.
+    """
+    raw = (environ if environ is not None else os.environ).get(RESCAN_ALLOW_ENV, "")
+    return tuple(part.strip() for part in raw.split(",") if part.strip())
 
 #: Written for the calling model: what the tool is for and what to do around it.
 TOOL_DESCRIPTIONS: Dict[str, str] = {
@@ -119,9 +141,10 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
         "Re-score the outputs the audit kept with a different verifier, and report how "
         "much of the run's recorded history it would have scored differently -- including "
         "how many artifact pairs reverse order. `verifier` is a 'module:attribute' "
-        "reference; resolving it RUNS the module, so anything outside the agentdescent "
-        "package needs the user to widen `allow` explicitly. Ask them; do not widen it "
-        "on their behalf."),
+        "reference; resolving it RUNS the module, so only the agentdescent package and "
+        "whatever prefixes the operator set in AGENTDESCENT_RESCAN_ALLOW can be named. "
+        "That list is not something this tool can widen: if the reference you need is "
+        "refused, tell the user which prefix to add and why."),
     "audit_drift": (
         "Chart the correction across verifier versions with an EWMA control chart. A "
         "`bias-up` signal means the loop is finding answers the verifier likes and the "
@@ -134,8 +157,15 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
 class Tools:
     """The tool bodies, SDK-free. One instance per server, bound to a run store."""
 
-    def __init__(self, store: Optional[str] = None) -> None:
+    def __init__(self, store: Optional[str] = None, *,
+                 rescan_allow: Optional[Sequence[str]] = None) -> None:
         self.store = store
+        #: Import prefixes `audit_rescan` may resolve beyond this package. It is
+        #: read from the operator's environment and never from a tool call: see
+        #: `audit_rescan` for why that distinction is the whole control.
+        self.rescan_allow: Tuple[str, ...] = (
+            tuple(rescan_allow) if rescan_allow is not None
+            else rescan_allow_from_env())
         #: Set by :func:`build_server` on the first tool call, once there is a
         #: live session to borrow. Stays None on a host without sampling, and
         #: `host_model` then fails with a message that says which case it is.
@@ -316,12 +346,24 @@ class Tools:
                                        max_false_negative, verifier_seconds,
                                        oracle_seconds)
 
-    def audit_rescan(self, path: str, verifier: str, version: Optional[str] = None,
-                     allow: Optional[list] = None,
+    def audit_rescan(self, path: str, verifier: str,
+                     version: Optional[str] = None,
                      pairs: Optional[list] = None) -> Dict[str, Any]:
+        """Re-score with another verifier, within the operator's allowlist.
+
+        There is deliberately no ``allow`` parameter. Resolving a reference
+        **imports** the module, which runs whatever is at its top level, so the
+        allowlist is the boundary between "this server can run the agentdescent
+        package" and "this server can run anything importable". A parameter is
+        the wrong shape for that: the tool is called by a model, so a widening
+        parameter is one the model fills in, and the boundary would be enforced
+        by asking it nicely not to. `service.audit_rescan` still takes `allow`
+        -- there the caller is the operator, writing a script.
+        """
         from .audit import service
 
-        return service.audit_rescan(path, verifier, version, allow, pairs)
+        return service.audit_rescan(path, verifier, version,
+                                    self.rescan_allow, pairs)
 
     def audit_drift(self, path: str,
                     versions: Optional[list] = None) -> Dict[str, Any]:
@@ -363,7 +405,8 @@ def _server_class():
             "The CLI (agentdescent plan / evolve / status ...) works without it.") from None
 
 
-def build_server(store: Optional[str] = None, *, name: str = "agentdescent"):
+def build_server(store: Optional[str] = None, *, name: str = "agentdescent",
+                 rescan_allow: Optional[Sequence[str]] = None):
     """An MCP server with every tool in :data:`TOOL_DESCRIPTIONS` and two resources."""
     server_cls = _server_class()
     # `version` only where the constructor takes it: mcp 2.x does, and without it
@@ -381,7 +424,7 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent"):
         "path, not a run_id: when a run's reward was an agent judging an output rather "
         "than a fact about it, the loop was optimising a proxy, and audit_status is the "
         "only thing that can tell the user how far that proxy is from the truth."))
-    t = Tools(store)
+    t = Tools(store, rescan_allow=rescan_allow)
 
     def attach_bridge(ctx: Any, loop: Any) -> None:
         """Stand up the sampling bridge the first time a launching tool runs.
@@ -516,9 +559,8 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent"):
 
     @server.tool(description=TOOL_DESCRIPTIONS["audit_rescan"])
     def audit_rescan(path: str, verifier: str, version: Optional[str] = None,
-                     allow: Optional[list] = None,
                      pairs: Optional[list] = None) -> Dict[str, Any]:
-        return t.audit_rescan(path, verifier, version, allow, pairs)
+        return t.audit_rescan(path, verifier, version, pairs)
 
     @server.tool(description=TOOL_DESCRIPTIONS["audit_drift"])
     def audit_drift(path: str, versions: Optional[list] = None) -> Dict[str, Any]:

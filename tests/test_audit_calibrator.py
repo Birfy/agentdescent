@@ -422,3 +422,48 @@ def test_it_is_folded_into_the_host_rather_than_dropped_or_refused():
     assert list(merged) == ["boundary"]
     assert pooled["boundary"]["n"] == 1050
     assert "accepted" not in pooled, "folded in, not left beside it"
+
+
+def test_strata_merge_even_when_every_one_of_them_is_thin():
+    """The safeguard skipped the case it exists for.
+
+    `len(thin) == len(grouped)` returned the strata untouched, so five strata of
+    three labels stayed five strata of three labels -- fifteen labels, plenty in
+    aggregate, and not one stratum with an estimable variance. PPI then ran on
+    per-stratum variances built from three points each. It also made the
+    `or list(grouped)` host fallback directly below unreachable, which is the
+    only case that fallback was written for.
+
+    Merging leaves one pooled stratum: an unstratified estimate, which is what
+    fifteen labels support and what the method's own argument -- merge rather
+    than drop, so no unit leaves the population -- asks for.
+    """
+    from agentdescent.audit import AuditStore
+    from agentdescent.audit.calibrator import Calibrator
+
+    calibrator = Calibrator(AuditStore())
+    thin = calibrator.min_per_stratum - 1
+    grouped = {f"s{i}": [object()] * thin for i in range(5)}
+    moments = {f"s{i}": {"n": 100, "mean": 0.5, "var": 0.1} for i in range(5)}
+
+    merged, pooled = calibrator._merge_thin(grouped, moments)
+
+    assert len(merged) == 1, merged
+    host, records = next(iter(merged.items()))
+    assert len(records) == 5 * thin, "no label may leave the population"
+    assert pooled[host]["n"] == 500, "nor any unlabelled unit"
+
+
+def test_a_lone_thin_stratum_has_nowhere_to_go_and_is_left_alone():
+    """There is no host but itself, so merging is a no-op rather than a loss."""
+    from agentdescent.audit import AuditStore
+    from agentdescent.audit.calibrator import Calibrator
+
+    calibrator = Calibrator(AuditStore())
+    grouped = {"only": [object()] * 2}
+    moments = {"only": {"n": 10, "mean": 0.5, "var": 0.1}}
+
+    merged, pooled = calibrator._merge_thin(grouped, moments)
+
+    assert list(merged) == ["only"] and len(merged["only"]) == 2
+    assert pooled["only"]["n"] == 10

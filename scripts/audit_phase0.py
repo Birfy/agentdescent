@@ -398,6 +398,7 @@ def analyse(bundle: Dict, args) -> Dict:
         "subset_gaps": gaps,
         "subset_gap_mean": statistics.fmean(gaps) if gaps else None,
         "seen": audited.seen, "audited_n": audited.audited,
+        "skipped": audited.skipped,
         "carried": len(prior),
     }
 

@@ -358,9 +358,16 @@ class Calibrator:
         # The assumption it carries, that the host's residual stands in for the
         # borrower's, is the same one `min_per_stratum` already makes.
         unlabelled_only = [k for k in moments if k not in grouped]
-        if not (thin or unlabelled_only) or len(thin) == len(grouped):
-            if not unlabelled_only:
-                return dict(grouped), dict(moments)
+        # Only when there is nothing to do. `len(thin) == len(grouped)` -- every
+        # stratum below the floor -- used to return here too, which skipped the
+        # safeguard in the one case that needs it most: five strata of three
+        # labels is fifteen labels, plenty in aggregate and not one stratum with
+        # an estimable variance. It also made the `or list(grouped)` fallback
+        # just below unreachable, which is what that fallback is for. Merging
+        # them leaves a single pooled stratum -- an unstratified estimate, which
+        # is what fifteen labels support.
+        if not (thin or unlabelled_only):
+            return dict(grouped), dict(moments)
         candidates = [k for k in grouped if k not in thin] or list(grouped)
         host = max(candidates, key=lambda k: len(grouped[k]))
         folded = [k for k in thin if k != host] + unlabelled_only

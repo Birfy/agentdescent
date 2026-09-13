@@ -255,3 +255,106 @@ def test_an_unknown_draw_by_is_refused():
 
     with pytest.raises(ValueError, match="draw_by"):
         AuditedReward(lambda task, out: 1.0, draw_by="unit")
+
+
+def _split_tap(rates, *, draw_by="task", seed=0):
+    """A tap whose stratum depends on the score, as the shipped one does."""
+    from agentdescent.audit import AuditedReward
+
+    scores = {"hi": 1.0, "lo": 0.0}
+    tap = AuditedReward(lambda task, out: scores[out], draw_by=draw_by,
+                        sample_rate=min(rates.values()), rates=rates, seed=seed,
+                        stratify=lambda t, o, s: "hi" if s >= 0.5 else "lo")
+    seen = []
+    inner = tap.store.observe_unlabelled
+    tap.store.observe_unlabelled = (
+        lambda v, s, sc: (seen.append(s), inner(v, s, sc))[1])
+    return tap, seen
+
+
+def test_a_task_is_never_in_both_halves_when_the_strata_differ_in_rate():
+    """The draw is task-level; the threshold it meets was not.
+
+    `_key` guarantees every unit of a task draws the same number, and the test
+    above pins it. But the number is compared against `rate_for(stratum)`, and
+    the shipped `boundary_stratifier` bands by *score* -- so one task scored
+    under several artifact versions meets a different threshold each time. A
+    task could be labelled in the high-rate band and unlabelled in the low-rate
+    one: both halves at once, which is what `draw_by="task"` exists to prevent
+    and what costs the interval its coverage. Measured before the fix: 33 of the
+    35 eligible tasks out of 40.
+    """
+    from agentdescent.evolution import Task
+
+    tap, seen = _split_tap({"lo": 0.05, "hi": 0.90})
+    both = 0
+    for i in range(40):
+        task = Task(f"t{i}", "q")
+        if not 0.05 <= tap._draw(task, "") < 0.90:
+            continue                       # outside the band, never ambiguous
+        audited, unlabelled = tap.audited, len(seen)
+        tap(task, "hi")
+        tap(task, "lo")
+        if tap.audited > audited and len(seen) > unlabelled:
+            both += 1
+    assert both == 0, f"{both} tasks landed in both halves"
+
+
+def test_the_partition_costs_neither_the_allocation_nor_the_weights():
+    """Dropping a unit is only safe if it drops them evenly.
+
+    Two properties carry the fix. A unit is labelled exactly when
+    `draw < rate[stratum]`, so Neyman allocation still spends labels where it
+    planned to; and it is recorded unlabelled exactly when `draw >= max_rate`,
+    which does not mention the stratum -- so the relative weights the estimator
+    reads off those counts stay unbiased. Lose either and the fix trades a
+    coverage bug for a weighting one.
+    """
+    from collections import Counter
+
+    from agentdescent.evolution import Task
+
+    rates = {"lo": 0.05, "hi": 0.90}
+    tap, seen = _split_tap(rates)
+    labelled = Counter()
+    n = 4000
+    for i in range(n):
+        task = Task(f"t{i}", "q")
+        for out in ("hi", "lo"):
+            before = tap.audited
+            tap(task, out)
+            if tap.audited > before:
+                labelled[out] += 1
+    unlabelled = Counter(seen)
+
+    for stratum, rate in rates.items():
+        assert abs(labelled[stratum] / n - rate) < 0.02, stratum
+    # `1 - max_rate`, the same for both, which is what makes the weights safe.
+    for stratum in rates:
+        assert abs(unlabelled[stratum] / n - 0.10) < 0.02, stratum
+
+
+def test_one_rate_everywhere_changes_nothing():
+    """The drop is a fix for unequal rates and must be inert without them."""
+    from agentdescent.evolution import Task
+
+    tap, seen = _split_tap({"lo": 0.5, "hi": 0.5})
+    for i in range(200):
+        task = Task(f"t{i}", "q")
+        tap(task, "hi")
+        tap(task, "lo")
+    assert tap.skipped == 0
+    assert tap.audited + len(seen) == tap.seen, "every unit was accounted for"
+
+
+def test_drawing_per_output_is_left_alone():
+    """`draw_by="output"` never promised whole-task inclusion, and a per-unit
+    draw against a per-unit threshold is already internally consistent."""
+    from agentdescent.evolution import Task
+
+    tap, _ = _split_tap({"lo": 0.05, "hi": 0.90}, draw_by="output")
+    for i in range(200):
+        task = Task(f"t{i}", "q")
+        tap(task, "hi")
+        tap(task, "lo")
+    assert tap.skipped == 0

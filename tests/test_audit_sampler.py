@@ -202,10 +202,18 @@ def test_floors_that_exceed_the_cap_win_and_say_why():
 # -- rates -------------------------------------------------------------------
 
 def test_rates_are_the_allocation_divided_by_the_expected_population():
+    """...and then by the calibration split, which is the part that was missing.
+
+    `target_n` is calibration labels; the rate buys *audited* units, of which
+    only `calibration_fraction` become calibration records. This used to assert
+    the unscaled ratio, which is why the shortfall it caused went unnoticed --
+    see `test_the_plan_delivers_the_labels_it_planned_for`.
+    """
     p = plan(ON, weights={"a": 0.5, "b": 0.5}, expected_units=1000,
              resid_sd={"a": 0.3, "b": 0.1})
+    split = ON.calibration_fraction
     for k in ("a", "b"):
-        assert p.rates[k] == pytest.approx(p.target_n[k] / (0.5 * 1000))
+        assert p.rates[k] == pytest.approx(p.target_n[k] / split / (0.5 * 1000))
 
 
 def test_a_rate_is_capped_at_one_and_the_shortfall_is_reported():
@@ -311,3 +319,56 @@ def test_the_whole_loop_closes_from_one_run_to_the_next_plan():
         "sampled at a higher rate")
     assert all(0.0 <= r <= 1.0 for r in p.rates.values())
     assert p.expected_units == 4000
+
+
+def test_the_plan_delivers_the_labels_it_planned_for():
+    """`target_n` counts calibration labels; `rates` govern audited units.
+
+    Only `calibration_fraction` of audited units become calibration records, and
+    the calibrator reads nothing else -- so a rate planned straight off
+    `target_n` delivered the default 0.7 of every stratum. Measured before the
+    fix: 85 labels against a planned 123, an interval 1/sqrt(0.7) = 1.2x wider
+    than the one requested, and every per-stratum floor missed by the same
+    factor. The floor matters more than the width: it is what makes a stratum's
+    variance estimable at all.
+
+    End to end rather than on the arithmetic, because the arithmetic was not
+    wrong -- it was answering a different question than the one the rate needed.
+    """
+    from agentdescent.audit import AuditedReward
+    from agentdescent.evolution import Task
+
+    policy = AuditPolicy(enabled=True, target_halfwidth=0.05,
+                         calibration_fraction=0.7)
+    units = 20_000
+    p = plan(policy, weights={"a": 0.5, "b": 0.5}, expected_units=units,
+             resid_sd={"a": 0.4, "b": 0.4})
+
+    tap = AuditedReward(lambda task, out: 1.0 if out == "a" else 0.0,
+                        sample_rate=p.default_rate, rates=p.rates,
+                        stratify=lambda t, o, s: o,
+                        calibration_fraction=policy.calibration_fraction, seed=0)
+    for i in range(units // 2):
+        for out in ("a", "b"):
+            tap(Task(f"t{i}", "q"), out)
+
+    got = {}
+    for record in tap.store:
+        if record.purpose is Purpose.CALIBRATION:
+            got[record.stratum] = got.get(record.stratum, 0) + 1
+
+    for stratum, planned in p.target_n.items():
+        ratio = got.get(stratum, 0) / planned
+        assert 0.9 <= ratio <= 1.1, f"{stratum}: {got.get(stratum, 0)}/{planned}"
+
+
+def test_an_all_improvement_policy_says_it_cannot_hit_a_half_width():
+    """`calibration_fraction=0` means no label ever reaches the calibrator, so
+    no rate achieves any half-width. Scaling by it would divide by zero; saying
+    nothing would hand back a plan that quietly cannot work."""
+    policy = AuditPolicy(enabled=True, target_halfwidth=0.05,
+                         calibration_fraction=0.0)
+    p = plan(policy, weights={"a": 1.0}, expected_units=10_000,
+             resid_sd={"a": 0.4})
+    assert any("calibration_fraction is 0" in warning for warning in p.warnings)
+    assert all(0.0 <= r <= 1.0 for r in p.rates.values())
