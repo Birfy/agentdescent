@@ -60,12 +60,28 @@ so add one layer of specificity and do not repeat the parent. The routing table 
 documentation: it is the map a manager delegates by, so every entry has to be specific \
 enough to route work without investigating the subtree.
 
+The read-only paths in the contract above are **not** yours to design inside. They are \
+the contract, not work: no agent may write there, so a node under them is a node with \
+nothing to do.
+
 **A node is a directory, never a file.** `src/frontend` is a node; \
 `src/frontend/lexer.py` is a file belonging to the agent situated at `src/frontend`. \
 Name directories in the routing table and files in the API Surface.
 
-Decompose only where the work genuinely separates. A node with one child is a node that \
-should not exist; a leaf is a node whose files one agent can write.
+**If the objective feels too large, that is exactly the signal to decompose MORE \
+aggressively.** A large objective does not mean more work for you -- it means more \
+delegation, and the recursive chain handles it. Never answer that a task is too big; \
+decompose it further. Every directory you name is a place a later agent can be sent to \
+work in parallel with its siblings, and every one you do not name is work that has to \
+be done by one agent in one sitting.
+
+That pressure has a counterweight and upstream states both: single responsibility, low \
+coupling, high cohesion, and **shared capability belongs at the lowest common \
+ancestor** so two children never write it twice. A node is a *module or a group of \
+modules* -- a file approaching ~1000 lines is the signal that its directory wanted \
+splitting, and a directory holding one short function is a signal it did not. A leaf is \
+a node whose files one agent can write in one turn; anything larger has children, and \
+anything smaller belongs in its parent's API Surface as a file.
 
 Reply with ONE JSON object and nothing else:
 {{"record": "<the whole CONTEXT.md, markdown>",
@@ -95,6 +111,8 @@ class ArchitectPhase:
         self.refused = 0
         self.mistaken_nodes = 0
         self.unparsed = 0
+        #: Nodes still queued when the budget ran out.
+        self.truncated = 0
 
     def design(self, given: Mapping[str, str], objective: str) -> Dict[str, str]:
         """``given`` plus one ``CONTEXT.md`` per node the architect decided on."""
@@ -112,6 +130,7 @@ class ArchitectPhase:
             if depth + 1 > self._max_depth:
                 continue
             world = LocalWorld(version=0, path=path)
+            accepted: List[Dict[str, str]] = []
             for child in children:
                 if looks_like_file(child["path"]):
                     # One architect designed `observables/observables.py` as a node and
@@ -120,12 +139,32 @@ class ArchitectPhase:
                     # exists yet, so the shape is all there is to go on.
                     self.mistaken_nodes += 1
                     continue
+                if world._all_readonly(state, normalise(child["path"])):
+                    # `tests/` and `spec/` are the contract. An architect that designs
+                    # a subtree inside them has designed work nobody may do: every
+                    # file there is refused to every proposal.
+                    self.refused += 1
+                    continue
+                if normalise(child["path"]) == path:
+                    # A node routes to its *children*. One architect wrote
+                    # `potentials -> potentials`, which is a manager delegating to
+                    # itself for as long as the depth bound allows.
+                    self.refused += 1
+                    continue
                 try:
                     world.delegate(child["path"])       # the spatial contract, early
                 except ValueError:
                     self.refused += 1                   # named outside its own subtree
                     continue
+                accepted.append(child)
                 queue.append((normalise(child["path"]), child["objective"], depth + 1))
+            if len(accepted) != len(children):
+                # A table that advertises a node the contract refuses is a trap for the
+                # next manager to read it: it would delegate there and be refused in
+                # turn. The record keeps only what was accepted.
+                state[key] = _only_routing(record, [c["path"] for c in accepted])
+        if queue:
+            self.truncated = len(queue)
         return state
 
     def summary(self) -> str:
@@ -133,6 +172,8 @@ class ArchitectPhase:
                 + (f", {self.refused} outside their subtree" if self.refused else "")
                 + (f", {self.mistaken_nodes} file paths refused as nodes"
                    if self.mistaken_nodes else "")
+                + (f", {self.truncated} left undesigned at the node budget"
+                   if self.truncated else "")
                 + (f", {self.unparsed} replies unusable" if self.unparsed else ""))
 
     # -- internals ---------------------------------------------------------
@@ -195,6 +236,26 @@ def _parse(reply: str, prefix: str) -> Tuple[Optional[str], List[Dict[str, str]]
                    + "\n".join(f"- `./{c['path']}/` -> {c['objective']}"
                                for c in children) + "\n")
     return record, children
+
+
+def _only_routing(record: str, keep: Sequence[str]) -> str:
+    """``record`` with every routing-table line that names a path outside ``keep`` gone."""
+    kept = {normalise(p) for p in keep}
+    out, in_table = [], False
+    for line in record.splitlines():
+        if line.strip().lower().startswith(ROUTING_HEADING.lower()):
+            in_table = True
+            out.append(line)
+            continue
+        if in_table:
+            if line.startswith("## "):
+                in_table = False
+            elif line.strip().startswith("-"):
+                named = parse_routing(ROUTING_HEADING + "\n" + line)
+                if named and normalise(named[0]) not in kept:
+                    continue
+        out.append(line)
+    return "\n".join(out).rstrip("\n") + "\n"
 
 
 def missing_sections(record: str) -> List[str]:
