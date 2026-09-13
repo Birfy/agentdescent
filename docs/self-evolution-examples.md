@@ -296,6 +296,7 @@ construction rather than by a weak baseline. Model rows are three seeds at
 |---|---|---:|---:|---|
 | [Genesis](algo-genesis.md#with-a-real-model) · `minilang`, deepseek-v4-flash | compact formation run, 2 nodes deep | 0.000 → **1.000** ×3 | 5 | the model writes every line; seed 0 re-scored independently at 30/30, observed depth 3, 284 calls in 135 s |
 | [Genesis](algo-genesis.md#with-the-offline-actors) · `minilang`, offline actors | the same | 0.000 → **1.000** ×3 | 5 serial / **4** at N=4 / **3** at N=8 | deterministic on every seed; `--keyed-union` takes 5 at *every* width, so the three-way merge is what parallelism buys here |
+| [Genesis](algo-genesis.md#with-a-real-model) · `md`, deepseek-v4-flash | compact formation run, scored by a frozen test suite with no oracle | 0.000 → **1.000** | 48 | ended itself at 244 of 4 000 episodes when the root agent called it done; 65/65 re-scored with pytest, 67/67 in one interpreter, and a 108-particle run agrees with an independent reference line for line |
 | [Genesis](algo-genesis.md#with-a-real-model) · `stackvm`, deepseek-v4-flash | compact formation run, 4 nodes deep | 0.000 → **1.000** | 12 | re-scored independently at 30/30; it invented its own decomposition and left two pieces of dead code the suite cannot see — see the page |
 | [Genesis](algo-genesis.md#with-the-offline-actors) · `stackvm`, offline actors | the same | 0.000 → **1.000** ×3 | **6** at N=8 | ten files the agents write, observed depth 3; `--keyed-union` takes 8 |
 

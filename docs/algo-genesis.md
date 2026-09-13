@@ -297,6 +297,7 @@ and the model writes every line of what comes out.
 
 | domain | seed | held-out | accepted | episodes | depth | calls | wall-clock |
 |---|---|---|---|---|---|---|---|
+| `md` (test-scored, stops itself) | 0 | **1.000** | 48 | 346 | 3 | 2 821 | 48.6 min |
 | `minilang` | 0 | **1.000** | 5 | 34 | 3 | 284 | 135 s |
 | `minilang` | 1 | **1.000** | 5 | — | 3 | 306 | 173 s |
 | `minilang` | 2 | **1.000** | 5 | — | 2 | 242 | 100 s |
@@ -307,6 +308,32 @@ wrote: **30/30** each. On `minilang` it grew `src/__init__.py` plus
 `frontend/{lexer,parser}.py` and `backend/evaluator.py`, with each stage imported
 lazily because the specification says to — so the agents read the contract rather
 than guessing it.
+
+!!! success "`md`: the run ended itself, and the result agrees with an independent implementation"
+    The only run here that was not stopped by its round budget. Given a ceiling of
+    4 000 episodes it used **244**, and ended on `stop_when` because the root agent
+    said so:
+
+    > All 51 tests pass, every required function in `src/` is implemented with real
+    > physics (Lennard-Jones with cutoff shift, harmonic, Velocity Verlet,
+    > observables, RDF, geometry), no stubs or dead modules remain, and the codebase
+    > is ready to hand.
+
+    Checked afterwards, three ways. `pytest` on what `--write-repo` wrote: **65/65**,
+    matching the harness. The suite in one interpreter: **67/67**, which is the check
+    that caught the previous run's self-destroying `rdf`. And a 108-particle,
+    600-step thermostatted run against the reference implementation: **identical line
+    for line**, every temperature, kinetic energy and momentum to six decimal places,
+    over 600 steps of chaotic dynamics.
+
+    The layout is the agents' own, not the one the `CONTEXT.md` records proposed:
+    `core/geometry.py` instead of the two modules suggested, no separate registry,
+    `rdf` inside `observe/__init__.py`. Eleven files under `src/`, none written by a
+    person.
+
+    The parent's reading gate did real work on the way: **188 diffs read, 28 sent
+    back**. The workspace ledger balanced — 437 worktrees created, 437 removed, 437
+    commits, 116 of them merges, five parents at the widest.
 
 !!! note "The suite constrains the surface, not the structure — and `stackvm` shows it"
     The `stackvm` run passes every case and the repository it wrote is **not** the
