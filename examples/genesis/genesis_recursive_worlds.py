@@ -89,6 +89,7 @@ from . import _jqx as jqx
 from . import _md as md
 from . import _stackvm as stackvm
 from ._judge import ParentJudge
+from ._suite import preflight
 from ._octopus import OctopusConflict, git_available
 from ._spatial import SpatialContract
 from ._world import WorldLog
@@ -230,6 +231,9 @@ def main(argv=None) -> None:
         if not confirm(args):
             return
         complete = completion_for(args, usage=usage)
+        # One call before the run: a wrong endpoint is otherwise 400 episodes of
+        # silent nothing, which reads exactly like a broken mechanism.
+        preflight(complete)
 
     log = WorldLog()
     strategy = SpatialContract(initial_files=spec.initial_files(), frozen=spec.FROZEN,

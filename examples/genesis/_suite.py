@@ -396,10 +396,33 @@ def llm_executor(complete, *, editable: Sequence[str] = ("**",),
     return executor
 
 
+def preflight(complete) -> None:
+    """One call before the run, so a dead backend costs a second instead of an hour.
+
+    ``evolve()`` swallows an exception raised inside a proposal policy, and it is
+    right to: one model call that times out should cost its episode and nothing
+    more. But the same tolerance turns a *wrong endpoint* into a run that looks like
+    a failure of the mechanism. A base URL with ``/v1/messages`` already on it -- the
+    SDK appends its own -- 404s every call, the actors return no edits, every
+    proposal is an empty accepted step, and thirteen minutes later the run reports
+    ``reward 0.000  depth=0  accepted=400``. The only evidence was ``2400 failed``
+    in the usage line, and nothing in the header said the model had never answered.
+
+    So ask it one question first, and let that failure be loud.
+    """
+    try:
+        complete("Reply with the single word OK.")
+    except Exception as exc:  # noqa: BLE001 - anything at all means do not start
+        raise SystemExit(
+            f"model backend unreachable: {type(exc).__name__}: {exc}\n"
+            "check --provider/--model and the endpoint -- ANTHROPIC_BASE_URL is the "
+            "BASE url, and the SDK appends /v1/messages to it") from exc
+
+
 def _ask(complete, prompt: str) -> str:
     try:
         return complete(prompt) or ""
-    except Exception:  # noqa: BLE001 - a dead backend costs this episode, not the run
+    except Exception:  # noqa: BLE001 - a dead call costs this episode, not the run
         return ""
 
 

@@ -27,6 +27,7 @@ from examples.genesis._delegation import (Brief, Delegation, Edit,
 from examples.genesis._judge import ParentJudge
 from examples.genesis._octopus import OctopusConflict, git_available, three_way
 from examples.genesis._spatial import SpatialContract, parse_situated_edits
+from examples.genesis._suite import preflight
 from examples.genesis._world import (CONTEXT_FILE, SKILLS_DIR, TRUNCATED,
                                      LocalWorld, WorldLog, owns, parse_routing,
                                      resolve_edit_path, routing_entry)
@@ -763,6 +764,28 @@ def test_the_md_suite_catches_an_integrator_that_is_only_stable():
               if md.reward(t, run(rendered, t)) == 0.0]
     assert any("reversing" in t for t in failed), failed
     assert any("conserved" in t for t in failed), failed
+
+
+def test_a_dead_backend_stops_the_run_before_it_starts():
+    """Thirteen minutes of a 404 endpoint reads exactly like a broken mechanism.
+
+    `evolve()` swallows an exception from a proposal policy, correctly -- one timed
+    out call should cost its episode and no more. But then every call failing is not
+    an error, it is an empty run: `reward 0.000  depth=0  accepted=400`, with the
+    only evidence `2400 failed` in the usage line. So the endpoint is asked one
+    question first, and that failure is loud.
+    """
+    def dead(prompt):
+        raise RuntimeError("Error code: 404 - the API does not exist")
+
+    with pytest.raises(SystemExit) as caught:
+        preflight(dead)
+    assert "ANTHROPIC_BASE_URL" in str(caught.value)
+    assert "404" in str(caught.value)
+
+    asked = []
+    preflight(lambda prompt: asked.append(prompt) or "OK")       # a live one is quiet
+    assert len(asked) == 1
 
 
 def test_stackvm_is_deeper_than_minilang_which_is_why_it_exists():
