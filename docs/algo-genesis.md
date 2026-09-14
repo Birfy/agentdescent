@@ -539,11 +539,41 @@ describing a repository that does not exist. Extraction is the easier job and it
 `--mode a` over the md reference produced a tree whose routing tables name the real
 directories at every level, with the classes, the signatures and even the
 `floor(x + 0.5)`-not-`round` constraint read off the code. `--mode b` on the same model
-took three attempts to stop producing degenerate trees, and the reason is the row below
+took five attempts to stop producing degenerate trees, and the reason is the row below
 about what an episode is: architecture is exactly the task that wants iteration and
 review, and upstream's architect has both — 2 048 turns, file and shell tools, and a
 Phase 1 (cont.) that reviews its sub-architects and re-spawns refinement architects
 where a node misaligns. One completion per node has none of that.
+
+Two of those five attempts were the port's mistake rather than the model's, and both
+are worth stating because they are the mistakes a port of this makes.
+
+**An objective is not a catalogue line.** Phase 1 was handed `DOMAIN_BLURB` — "Lennard-
+Jones molecular dynamics with a frozen driver (6 nodes, 14 files), test suite" — which
+is the string the header prints, and an architect given twelve words invents the rest.
+It read `spec/CONTEXT.md` correctly; the API Surface in the root record it wrote names
+`src/geometry.py`. Then its routing table said `./geometry/`, dropping the package root,
+so `src/` was never delegated to and the seven names the suite imports were never
+written where it imports them. Every child that read the same specification then tried
+to build its own `src/` inside its own node, and 900 episodes later the world was
+`integrate/step/src/geometry/displacement/src/`, held out at 0.562. Each domain now
+carries an `OBJECTIVE`: what a person would brief an architect with, and the header
+keeps its catalogue line.
+
+**The architect designs the codebase, not the repository around it.** Fixing the brief
+did not fix the tree: situated at the repository root and told the library lives at
+`src/`, the architect resolved the contradiction by deciding it *was* `src` — record
+titled `# src`, API Surface naming `__init__.py`, children `geometry/`, `potentials/`,
+`integrator/` hung at the repository root where nothing imports them. Three samples out
+of three, and saying "you are situated at `./` and that is the directory your record
+describes" in the prompt did not move it. Upstream's architect is started on the
+codebase it creates; the specification, the suite and the entry point a person already
+wrote are the harness *around* that codebase and exist before any agent does. So the
+repository root is not a design problem and is no longer designed: `--mode b` generates
+it from what the domain already declares — the frozen paths, and the package root
+implied by its entry point — and phase 1 starts at the package root. That is one record
+a person did not have to write for each domain and every node below it invented, against
+eight hand-written records in `given`.
 
 ## The episode, and `--executor claude-code`
 

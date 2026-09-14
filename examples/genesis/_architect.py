@@ -34,7 +34,7 @@ from ._world import (CONTEXT_FILE, LocalWorld, ROUTING_HEADING,
                      STANDARD_SECTIONS, looks_like_file, normalise,
                      parse_routing)
 
-__all__ = ["ARCHITECT_PROMPT", "ArchitectPhase"]
+__all__ = ["ARCHITECT_PROMPT", "ArchitectPhase", "harness_record"]
 
 ARCHITECT_PROMPT = """You are an architect agent in a recursive software world, \
 situated at the repository path `{path}`. You design; you do not implement.
@@ -46,6 +46,11 @@ THE OBJECTIVE
 
 Write the `CONTEXT.md` for **your own node** and name the child directories it should \
 route to. Nothing else: no code, no stubs, no files other than this record.
+
+You are situated at `{path}` and that is the directory your record describes. If the \
+objective names a directory below you, that directory is a **child**: route to it and \
+let the agent situated there describe it. Do not write its record here, and do not \
+describe your own node as though you were already inside it.
 
 The four sections are required, in this order:
 
@@ -68,6 +73,13 @@ nothing to do.
 `src/frontend/lexer.py` is a file belonging to the agent situated at `src/frontend`. \
 Name directories in the routing table and files in the API Surface.
 
+**Your API Surface may only name files inside your own directory**, written \
+`{path_prefix}<file>`. Anything deeper belongs to a child, so route to it: name that \
+directory in the routing table and let the agent situated there own those files. A \
+record whose API Surface describes files its routing table never reaches is a design \
+nobody is accountable for -- and every agent that reads the same contract will build \
+its own copy of it inside its own node.
+
 **If the objective feels too large, that is exactly the signal to decompose MORE \
 aggressively.** A large objective does not mean more work for you -- it means more \
 delegation, and the recursive chain handles it. Never answer that a task is too big; \
@@ -88,6 +100,49 @@ Reply with ONE JSON object and nothing else:
   "children": [{{"path": "{path_prefix}<name>", "objective": "<one sentence>"}}]}}
 
 An empty `children` list means this node is a leaf and its files are written here."""
+
+
+#: The repository root in a formation run, and the one record phase 1 does not write.
+#:
+#: Upstream's architect is started on the codebase it is creating; the repository
+#: *around* that codebase -- the specification, the suite, the entry point a person
+#: already wrote -- is the harness, and it exists before any agent does. This port
+#: collapsed the two: it situated the architect at the repository root and briefed it on
+#: a library that lives at `src/`. Three samples out of three, the architect resolved
+#: that by deciding it *was* `src`: a record titled `# src`, an API Surface naming
+#: `__init__.py`, and children `geometry/`, `potentials/`, `integrator/` hung at the
+#: repository root where nothing imports them. Telling it in the prompt that its own
+#: path is its own directory did not move it -- the objective names a directory below
+#: you is a contradiction a weak model resolves by ignoring one half.
+#:
+#: So the root is not a design problem and is not designed. It is generated from what
+#: the domain already declares -- the frozen paths and the package root implied by its
+#: entry point -- and it says the one thing the architect kept getting wrong: the
+#: library is *down there*. Everything below it, phase 1 invents.
+HARNESS_RECORD = """# The repository root
+
+## Intent
+{objective}
+
+## API Surface
+Nothing here is implementation. The repository root holds the human's harness and the \
+library that harness is for; the library is the only thing grown in this run.
+
+## Constraints
+- Read-only to every agent and restored pristine before scoring: {frozen}. They are \
+the contract, not work items.
+- Every agent edits only files under its own path.
+
+## Routing Table
+- `./{package}/` -> the library, and every public entry point the contract names
+"""
+
+
+def harness_record(package: str, frozen: Sequence[str], objective: str) -> str:
+    """The repository-root record a formation run starts from -- see `HARNESS_RECORD`."""
+    return HARNESS_RECORD.format(
+        package=package, objective=objective.strip(),
+        frozen=", ".join(f"`{p}`" for p in frozen) or "nothing")
 
 
 class ArchitectPhase:

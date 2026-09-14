@@ -75,6 +75,7 @@ Intentional differences
 from __future__ import annotations
 
 import argparse
+import posixpath
 
 from agentdescent import Policies, evolve
 from agentdescent.evolution import EvolvingArtifact
@@ -91,7 +92,7 @@ from . import _domain as minilang
 from . import _jqx as jqx
 from . import _md as md
 from . import _stackvm as stackvm
-from ._architect import ArchitectPhase, missing_sections
+from ._architect import ArchitectPhase, harness_record, missing_sections
 from ._claude_code import ClaudeCodeExecutor, claude_code_available
 from ._extract import ExtractPhase
 from ._judge import ParentJudge
@@ -119,6 +120,9 @@ DOMAINS = {"minilang": minilang, "stackvm": stackvm, "jqx": jqx, "md": md}
 #: A day is past any run this port has taken and is still a timestamp.
 UNBOUNDED_SECONDS = 86_400.0
 
+#: One catalogue line per domain, for the header. What the *agents* are briefed with
+#: is `spec.OBJECTIVE` -- `objective_for` below -- and the two are deliberately not the
+#: same string: see `_md.OBJECTIVE` for the run that proves why.
 DOMAIN_BLURB = {
     "minilang": ("an integer expression language (2 nodes deep, 4 files), "
                  "staged suite"),
@@ -129,6 +133,25 @@ DOMAIN_BLURB = {
     "md": ("Lennard-Jones molecular dynamics with a frozen driver (6 nodes, "
            "14 files), test suite -- invariants, not values"),
 }
+
+
+def objective_for(domain: str) -> str:
+    """The brief handed to phase 1, the Context Extractor and the completion judge.
+
+    A domain that has not written one falls back to its catalogue line, which is what
+    every domain used to get and is enough to run -- just not enough to design against.
+    """
+    return getattr(DOMAINS[domain], "OBJECTIVE", DOMAIN_BLURB[domain])
+
+
+def package_root(domain: str) -> str:
+    """The directory the library itself lives in -- `src`, in every domain here.
+
+    Read off the domain's own entry point rather than declared twice: `ENTRY` is
+    `src/__init__.py`, and what the suite imports is the package around it.
+    """
+    entry = getattr(DOMAINS[domain], "ENTRY", "src/__init__.py")
+    return posixpath.dirname(entry)
 
 
 def build_tasks(domain: str = "minilang"):
@@ -374,8 +397,9 @@ def main(argv=None) -> None:
                            if args.mode == "a" else
                            f"{len(initial)} files from {args.continue_from}, contract "
                            "restored" if args.continue_from else "")
-          + ("designed in phase 1 by an architect agent, from the goal, "
-                           "the contract and the suite" if args.mode == "b" else
+          + ("one generated record mapping the repository root to the package it "
+             "holds; everything below it designed in phase 1 by an architect agent, "
+             "from the goal, the contract and the suite" if args.mode == "b" else
                            "cold -- the goal, the contract and the suite; no node "
                            "records, no routing tables, no skills. The run writes "
                            "its own decomposition."
@@ -418,7 +442,7 @@ def main(argv=None) -> None:
                                  max_depth=args.depth + 1,
                                  skip=tuple(p.split("/")[0] for p in spec.FROZEN
                                             if "/" in p))
-        initial = extractor.extract(initial, DOMAIN_BLURB[args.domain])
+        initial = extractor.extract(initial, objective_for(args.domain))
         print(f"\nPhase A  : context extractor {extractor.summary()}")
         for path in extractor.nodes:
             record = initial[f"{path}/{CONTEXT_FILE}" if path else CONTEXT_FILE]
@@ -430,9 +454,15 @@ def main(argv=None) -> None:
             print("--mode b needs --model: there is no offline architect, and a "
                   "rule-based one would be the decomposition it is meant to invent")
             return
+        # Phase 1 designs the *codebase*, and the repository around it is the
+        # harness: see `_architect.HARNESS_RECORD` for the three-out-of-three run
+        # that established the difference is not cosmetic.
+        root = package_root(args.domain)
+        initial[CONTEXT_FILE] = harness_record(root, spec.FROZEN,
+                                               objective_for(args.domain))
         architect = ArchitectPhase(complete, contracts=spec.CONTRACTS,
-                                   max_depth=args.depth)
-        initial = architect.design(initial, DOMAIN_BLURB[args.domain])
+                                   max_depth=args.depth, root_path=root)
+        initial = architect.design(initial, objective_for(args.domain))
         print(f"\nPhase 1  : architect {architect.summary()}")
         for path in architect.nodes:
             record = initial[f"{path}/{CONTEXT_FILE}" if path else CONTEXT_FILE]
@@ -495,7 +525,7 @@ def main(argv=None) -> None:
                               is not None else delegation.last_state),
             contracts=spec.CONTRACTS,
             suite_failures=getattr(spec, "suite_failures", None),
-            objective=DOMAIN_BLURB[args.domain])
+            objective=objective_for(args.domain))
 
     def _superseded(rendered, task, output, reward_):
         # `evolve()` requires a `propose` before it installs the bundle's

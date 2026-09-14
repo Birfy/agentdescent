@@ -54,7 +54,7 @@ from ._suite import llm_manager as _llm_manager
 from ._world import SKILLS_DIR, normalise
 
 __all__ = ["CASE_NOUN", "CONTRACTS", "FROZEN", "GROUP_NOUN", "HELD_OUT_FRAC",
-           "SCORING", "MINILANG", "build_tasks", "initial_files", "llm_executor",
+           "SCORING", "MINILANG", "OBJECTIVE", "build_tasks", "initial_files", "llm_executor",
            "llm_manager", "make_runner", "offline_executor", "offline_manager",
            "reference_tree", "reward", "suite_review"]
 
@@ -73,6 +73,15 @@ GROUP_NOUN = "stages"
 #: held-out tail is a genuine generalisation estimate -- unlike md, where every task
 #: is a requirement and the tail is an audit set instead.
 HELD_OUT_FRAC = 0.4
+
+#: The brief, not the header line -- see `_md.OBJECTIVE` for what a catalogue entry
+#: costs an architect that is handed one instead.
+OBJECTIVE = (
+    "Build the integer expression language `spec/CONTEXT.md` specifies: a Python "
+    "package rooted at `src/`, whose `src/__init__.py` exposes `tokenize`, `parse` "
+    "and `evaluate`. Everything below `src/` is yours to decide. Pure Python, no "
+    "third-party packages."
+)
 
 ENTRY = "src/__init__.py"
 LEXER = "src/frontend/lexer.py"

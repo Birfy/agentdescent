@@ -62,7 +62,7 @@ from ._world import SKILLS_DIR, normalise
 
 __all__ = ["BASELINES", "CASE_NOUN", "CONTRACTS", "FROZEN",
            "SUITE_ONLY_BASELINES", "GROUP_NOUN", "HELD_OUT_FRAC",
-           "MD",
+           "MD", "OBJECTIVE",
            "SCORING", "build_tasks", "initial_files", "suite_failures",
            "llm_executor", "llm_manager", "make_runner", "offline_executor",
            "offline_manager", "reference_tree", "reward", "suite_review"]
@@ -82,6 +82,26 @@ CONTRACTS = ("spec/**", "md.py")
 SCORING = "frozen test suite, no reference implementation in the scoring path"
 CASE_NOUN = "test functions"
 GROUP_NOUN = "test files"
+
+#: What a person would brief an architect with, and what phase 1, the Context
+#: Extractor and the completion judge are each handed. Not `DOMAIN_BLURB`, which is a
+#: catalogue line for the header: an architect given twelve words invents the rest,
+#: and the first `--mode b` run proves how. Its root record read the specification
+#: correctly -- the API Surface it wrote says `src/geometry.py` -- and then its
+#: routing table said `./geometry/`, dropping the package root. `src/` was never
+#: delegated to, so the seven names never appeared where the suite imports them, and
+#: every child that read the same specification tried to build its own `src/` inside
+#: its own node: `integrate/step/src/geometry/displacement/src/`. The layout below
+#: `src/` is the architect's to invent; where the package root is, is the contract.
+OBJECTIVE = (
+    "Build the molecular-dynamics library the frozen driver `md.py` and the frozen "
+    "test suite both import: a Python package rooted at `src/`, whose "
+    "`src/__init__.py` exposes exactly `displacement`, `wrap`, `energy`, `forces`, "
+    "`step`, `observables` and `rdf`. `spec/CONTEXT.md` pins those signatures and "
+    "the physics behind them; everything below `src/` -- how many modules, what they "
+    "are called, who owns what -- is yours to decide. Pure Python, no third-party "
+    "packages."
+)
 
 ENTRY = "src/__init__.py"
 CORE_INIT = "src/core/__init__.py"

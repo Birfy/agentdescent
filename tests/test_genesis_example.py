@@ -10,6 +10,7 @@ verdict is the parent's, and two agents editing one file both survive.
 from __future__ import annotations
 
 import json
+import posixpath
 
 import pytest
 
@@ -28,7 +29,8 @@ from examples.genesis._delegation import (Brief, Delegation, Edit,
                                           RecursiveDelegation, render_edits)
 from examples.genesis._claude_code import (CLAUDE_CODE_BRIEF,
                                            ClaudeCodeExecutor)
-from examples.genesis._architect import (ArchitectPhase, missing_sections,
+from examples.genesis._architect import (ARCHITECT_PROMPT, ArchitectPhase,
+                                         missing_sections,
                                          _parse as parse_architect_reply)
 from examples.genesis._judge import ParentJudge
 from examples.genesis._review import (CompletionJudge, ParentCodeReview,
@@ -1400,6 +1402,77 @@ def test_a_file_shaped_path_is_not_a_node_even_before_it_exists():
     assert phase.mistaken_nodes == 1
     assert "observe/" + CONTEXT_FILE in tree
     assert "observables.py/" + CONTEXT_FILE not in tree
+
+
+def test_every_domain_briefs_its_agents_with_an_objective_not_a_catalogue_line():
+    """The architect is told what to build, not what the header calls it.
+
+    `--mode b` was first run with `DOMAIN_BLURB` as the objective -- "Lennard-Jones
+    molecular dynamics with a frozen driver (6 nodes, 14 files), test suite" -- and the
+    architect filled in the rest. Its root record read the specification correctly, the
+    API Surface it wrote names `src/geometry.py`, and then its routing table said
+    `./geometry/`: the package root the suite imports from was never delegated to. So
+    every child that read the same specification built its own `src/` inside its own
+    node, and the world came out `integrate/step/src/geometry/displacement/src/`, held
+    out at 0.562. The layout below `src/` is the architect's to invent; where the
+    package root *is* is the contract, and a brief is where a contract goes.
+    """
+    from examples.genesis.genesis_recursive_worlds import (DOMAIN_BLURB, DOMAINS,
+                                                           objective_for)
+    for domain in DOMAINS:
+        objective = objective_for(domain)
+        assert objective is not DOMAIN_BLURB[domain]
+        assert objective != DOMAIN_BLURB[domain]
+        # Where the deliverable goes, and what has to be reachable from there.
+        assert "`src/`" in objective and "`src/__init__.py`" in objective
+        assert len(objective) > len(DOMAIN_BLURB[domain])
+
+    # ... and the one thing it does not say is how to decompose below that root.
+    for word in ("geometry", "potentials", "forces", "integrate", "observe"):
+        assert f"src/{word}" not in md.OBJECTIVE
+
+
+def test_phase_one_designs_the_codebase_and_not_the_repository_around_it():
+    """The root record is generated, and phase 1 starts at the package root.
+
+    Situated at the repository root and briefed on a library at `src/`, the architect
+    resolved the contradiction by deciding it *was* `src`: a record titled `# src`, an
+    API Surface naming `__init__.py`, and children hung at the repository root where
+    nothing imports them -- three samples out of three, and a prompt line saying its own
+    path was its own directory did not move it. Upstream starts its architect on the
+    codebase it creates; the specification, the suite and the entry point are the
+    harness around that codebase and predate every agent. So the root is generated from
+    what the domain already declares, and every node below it is still invented.
+    """
+    from examples.genesis._architect import harness_record
+    from examples.genesis.genesis_recursive_worlds import DOMAINS, objective_for
+    from examples.genesis.genesis_recursive_worlds import package_root
+
+    for domain, spec in DOMAINS.items():
+        root = package_root(domain)
+        assert root == posixpath.dirname(spec.ENTRY) and "/" not in root
+        record = harness_record(root, spec.FROZEN, objective_for(domain))
+        # It is a record like any other: the four standard sections, and one route.
+        assert missing_sections(record) == []
+        assert parse_routing(record) == [root]
+        # And it says what the architect kept getting wrong, in the section that binds.
+        for frozen in spec.FROZEN:
+            assert f"`{frozen}`" in record
+        assert "Nothing here is implementation" in record
+
+
+def test_the_architect_is_told_its_api_surface_stops_at_its_own_directory():
+    """The record-level half of the same lesson, stated in the prompt.
+
+    A node's API Surface names its own files; anything deeper is a child's, and the way
+    to reach a child is the routing table. An architect that describes files it never
+    routes to has designed something nobody is accountable for.
+    """
+    prompt = ARCHITECT_PROMPT.format(path="src", path_prefix="src/",
+                                     objective="o", context="c")
+    assert "API Surface may only name files inside your own directory" in prompt
+    assert "src/<file>" in prompt
+    assert "never reaches" in prompt
 
 
 # ---------------------------------------------------------------------------

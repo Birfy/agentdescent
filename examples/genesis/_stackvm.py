@@ -27,7 +27,7 @@ from ._suite import llm_manager as _llm_manager
 from ._world import SKILLS_DIR, normalise
 
 __all__ = ["CASE_NOUN", "CONTRACTS", "FROZEN", "GROUP_NOUN", "HELD_OUT_FRAC",
-           "SCORING", "STACKVM", "build_tasks", "initial_files", "llm_executor",
+           "SCORING", "STACKVM", "OBJECTIVE", "build_tasks", "initial_files", "llm_executor",
            "llm_manager", "make_runner", "offline_executor", "offline_manager",
            "reference_tree", "reward", "suite_review"]
 
@@ -38,6 +38,14 @@ SCORING = "reference oracle, exact match"
 CASE_NOUN = "validation cases"
 GROUP_NOUN = "stages"
 HELD_OUT_FRAC = 0.4
+
+#: The brief, not the header line -- see `_md.OBJECTIVE`.
+OBJECTIVE = (
+    "Build the stack machine and assembler `spec/CONTEXT.md` specifies: a Python "
+    "package rooted at `src/`, whose `src/__init__.py` exposes `tokenize`, "
+    "`assemble` and `run`. Everything below `src/` is yours to decide. Pure Python, "
+    "no third-party packages."
+)
 
 ENTRY = "src/__init__.py"
 ASM_INIT = "src/asm/__init__.py"
