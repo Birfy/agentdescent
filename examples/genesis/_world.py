@@ -132,6 +132,26 @@ def shadowed_by_module(state, path: str) -> bool:
     return any(f"{node}{suffix}" in state for suffix in (".py", ".pyi"))
 
 
+def shadows_package(state, path: str) -> bool:
+    """Would writing ``path`` shadow an existing node directory of the same name?
+
+    The other half of :func:`shadowed_by_module`, and the half that actually bit. The
+    guard in `RecursiveDelegation._is_node` stops a child being opened beside an
+    existing `rdf.py`; it cannot stop the reverse, which is what a `--mode b` run did:
+    the manager at `src/potentials/kernels` delegated `lennard_jones/` to a child and
+    then, on its own accountability turn, wrote `lennard_jones.py` beside it. One name,
+    and the module wins, so the child's whole node became unreachable -- 41 bytes of
+    `from .lennard_jones import lennard_jones` that nothing can import. The run's own
+    root agent called it dead scaffolding and refused to sign the objective off.
+    """
+    node = normalise(path)
+    for suffix in (".py", ".pyi"):
+        if node.endswith(suffix):
+            stem = node[:-len(suffix)]
+            return any(key == stem or key.startswith(stem + "/") for key in state)
+    return False
+
+
 def looks_like_file(path: str) -> bool:
     """Does this path name a file rather than a directory?
 

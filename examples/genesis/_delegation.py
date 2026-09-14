@@ -45,7 +45,7 @@ from ._octopus import three_way
 from ._world import (CONTEXT_FILE, KNOWN_ISSUES, EpisodeRecord, LocalWorld,
                      WorldLog, directly_at, looks_like_file, normalise, owns,
                      resolve_edit_path, routing_entry, shadowed_by_module,
-                     under_heading)
+                     shadows_package, under_heading)
 
 __all__ = ["Brief", "Delegation", "Edit", "RecursiveDelegation", "render_edits"]
 
@@ -195,6 +195,9 @@ class RecursiveDelegation:
     #: Delegations refused because the directory would shadow a sibling module of
     #: the same name -- see `_is_node`.
     shadowed_nodes: int = 0
+    #: Edits dropped because the file would shadow a node directory of the same name,
+    #: which is the same collision arriving from the other side.
+    shadowing_edits: int = 0
     #: Sibling edits to one path reconciled by three-way merge, and not.
     sibling_merges: int = 0
     sibling_conflicts: int = 0
@@ -296,6 +299,11 @@ class RecursiveDelegation:
                 # else looks at it, and count the ones that needed it.
                 path, relative = resolve_edit_path(state, world.path, raw.path)
                 self.resolved_relative += int(relative)
+                if raw.content is not None and shadows_package(state, path):
+                    # A file written beside a node directory of the same name makes
+                    # that node unreachable from every import -- see `shadows_package`.
+                    self.shadowing_edits += 1
+                    continue
                 produced.append(Edit(owner=world.path, path=path,
                                      content=raw.content, kind=raw.kind))
             for edit in produced:
@@ -471,7 +479,12 @@ class RecursiveDelegation:
         for raw in self.executor(brief) or ():
             path, relative = resolve_edit_path(amended, world.path, raw.path)
             self.resolved_relative += int(relative)
-            if directly_at(world.path, path):
+            if raw.content is not None and shadows_package(amended, path):
+                # The accountability turn is where this actually happened: the manager
+                # at `src/potentials/kernels` delegated `lennard_jones/` to a child and
+                # then wrote `lennard_jones.py` beside it.
+                self.shadowing_edits += 1
+            elif directly_at(world.path, path):
                 out.append(Edit(owner=world.path, path=path, content=raw.content,
                                 kind=raw.kind))
             else:
@@ -672,6 +685,7 @@ class RecursiveDelegation:
                 f"routes_opened={self.routes_opened} "
                 f"mistaken_nodes={self.mistaken_nodes} "
                 f"shadowed_nodes={self.shadowed_nodes} "
+                f"shadowing_edits={self.shadowing_edits} "
                 f"sibling_merges={self.sibling_merges} "
                 f"sibling_conflicts={self.sibling_conflicts} "
                 f"requests={self.requests_raised}/"

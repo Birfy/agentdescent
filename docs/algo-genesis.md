@@ -612,6 +612,17 @@ A *inherits* one, the extractor writes it into the node's `## Known Issues` nami
 consequence and the fact that one of the two has to go. The guard cannot undo history;
 the record can tell the next agent what it is looking at.
 
+It arrives from the other side too, and that is the side that cost `--mode b` its
+completion. That run reached 1.000 and its root agent still refused to sign the
+objective off — "the tree contains several empty `__init__.py` files and stub modules
+(e.g. `src/potentials/kernels/lennard_jones/__init__.py`) that are dead scaffolding".
+It was right that the node was dead and wrong about why: the manager at
+`src/potentials/kernels` had delegated `lennard_jones/` to a child and then, on its own
+accountability turn, written `lennard_jones.py` beside it. `_is_node` cannot catch that
+one, because at delegation time the file did not exist yet. So an edit that would
+shadow an existing node directory is dropped and counted as `shadowing_edits`, on both
+the leaf path and the accountability turn.
+
 ## The episode, and `--executor claude-code`
 
 The gap that produced that result is the one the table below calls the largest, so the

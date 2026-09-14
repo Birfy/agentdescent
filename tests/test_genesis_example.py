@@ -45,7 +45,8 @@ from examples.genesis._world import (CONTEXT_FILE, KNOWN_ISSUES, ROUTING_HEADING
                                      SKILLS_DIR, TRUNCATED,
                                      LocalWorld, WorldLog, owns, parse_routing,
                                      looks_like_file, resolve_edit_path,
-                                     routing_entry, shadowed_by_module, under_heading)
+                                     routing_entry, shadowed_by_module, shadows_package,
+                                     under_heading)
 
 
 # ---------------------------------------------------------------------------
@@ -1477,6 +1478,53 @@ def test_a_node_may_not_shadow_a_sibling_module():
     note = described["src/observe/" + CONTEXT_FILE]
     assert KNOWN_ISSUES in note and "One of the two has to go." in note
     assert "the name resolves back to the forwarding file" in note
+
+
+def test_a_file_may_not_shadow_a_node_directory_of_the_same_name():
+    """The same collision from the other side, and the side that actually bit.
+
+    `--mode b` reached 1.000 and its root agent still refused to sign the objective
+    off: "the tree contains several empty `__init__.py` files and stub modules (e.g.
+    `src/potentials/kernels/lennard_jones/__init__.py`) that are dead scaffolding".
+    It was right that the node was dead and wrong about why. The manager at
+    `src/potentials/kernels` had delegated `lennard_jones/` to a child and then, on
+    its own accountability turn, written `lennard_jones.py` beside it. One name, and
+    the module wins: the child's whole node -- 41 bytes of
+    `from .lennard_jones import lennard_jones` -- became unreachable from every import
+    in the repository.
+
+    `_is_node` cannot catch this one: at delegation time the file did not exist yet.
+    """
+    assert shadows_package({"k/lj/__init__.py": "x"}, "k/lj.py")
+    assert shadows_package({"k/lj/deep/x.py": "x"}, "k/lj.pyi")
+    assert not shadows_package({"k/lj/__init__.py": "x"}, "k/harmonic.py")
+    assert not shadows_package({"k/lj/__init__.py": "x"}, "k/CONTEXT.md")
+    # A prefix that is not a path segment is a different directory, not a collision.
+    assert not shadows_package({"k/ljx/__init__.py": "x"}, "k/lj.py")
+
+    # The leaf path drops it...
+    policy = RecursiveDelegation(
+        manager=lambda b: [], log=WorldLog(),
+        executor=lambda b: [Edit("k", "k/lj.py", "shadowing\n"),
+                            Edit("k", "k/harmonic.py", "fine\n")])
+    state = {CONTEXT_FILE: "# root\n", "k/" + CONTEXT_FILE: "# k\n",
+             "k/lj/__init__.py": "from .lj import lj\n"}
+    policy.propose(_proposal_ctx(state, Task(id="t", prompt="x")))
+    assert policy.shadowing_edits == 1
+
+    # ...and so does the accountability turn, which is where it actually happened.
+    own = RecursiveDelegation(
+        manager=lambda b: ([Delegation("k/lj", "the kernel")] if b.world.path == "k"
+                           else []),
+        executor=lambda b: ([Edit(b.world.path, "k/lj/__init__.py", "x = 1\n")]
+                            if b.world.path == "k/lj"
+                            else [Edit(b.world.path, "k/lj.py", "shadowing\n")]),
+        log=WorldLog(), max_depth=3)
+    own._episode(LocalWorld(version=0, path="k"), "build it",
+                 {CONTEXT_FILE: "# root\n", "k/" + CONTEXT_FILE: "# k\n"},
+                 _proposal_ctx({CONTEXT_FILE: "# root\n"}, Task(id="t", prompt="x")),
+                 depth=0, rollout=None, base=None)
+    assert own.shadowing_edits == 1
 
 
 def test_a_review_finding_reaches_the_manager_that_can_act_on_it():
