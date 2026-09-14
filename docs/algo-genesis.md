@@ -690,6 +690,25 @@ above and means the barrier too) puts the barrier back. The header prints which 
 in force, and every number on this page that predates the change was measured under
 `--sync` and is labelled so.
 
+### An open question the runs raised and could not settle
+
+`--episodes` is a budget of root episodes, and late in a run most of it buys nothing.
+Measured on two model runs: 2 791 rollouts produced **111** agent episodes, and 2 003
+produced **28**. The rest were no-ops — a worker samples a task, the artifact already
+passes it, and there is nothing to propose against.
+
+`RoundRobin` is the engine's default sampler and says so itself: it "spends rollouts
+uniformly, including on tasks the agent already solves". `DifficultyWeighted` exists
+beside it and down-weights a task whose pass rate has gone to 1, which is also the more
+faithful of the two — upstream's manager runs all the tests, identifies the failures,
+and spawns one agent per *failure*, never one per passing test.
+
+It is nonetheless **off by default**, because nothing here has shown it to help. The
+offline arm cannot: it reaches 1.000 long before most tasks pass, so the waste has no
+time to appear, and round-robin and weighted come out at 218 and 208 episodes from the
+same 403-rollout budget. Settling it needs a model run per arm, which is the one
+measurement this page does not have. `--signal-weighted` turns it on.
+
 ## The paper's numbers, and this port's
 
 The mechanism is the thing being ported; the numbers are not, and putting them side by

@@ -81,6 +81,7 @@ from agentdescent.evolution import EvolvingArtifact
 from agentdescent.agents import Usage
 from agentdescent.filetree import load_tree, match_any
 from agentdescent.governance import SKILL_BLAST_RADIUS, classify
+from agentdescent.sampling import DifficultyWeighted
 from agentdescent.staleness import get_policy
 from examples._common import (add_standard_args, budget_kwargs, completion_for,
                               confirm, report_engine, worker_count)
@@ -197,6 +198,14 @@ def build_parser() -> argparse.ArgumentParser:
                              "arrangement; this restores the engine's synchronous DP, "
                              "which is what every published number on the page was "
                              "measured under")
+    parser.add_argument("--signal-weighted", action="store_true",
+                        help="sample tasks by how much signal each carries instead of "
+                             "in order, down-weighting a test that always passes. "
+                             "Off by default because it is UNMEASURED here: the "
+                             "observation it answers is real (one run spent 2 003 "
+                             "rollouts to buy 28 episodes) but the offline arm reaches "
+                             "1.000 too fast to show the waste, so nothing has been "
+                             "shown to improve")
     parser.add_argument("--staleness", choices=("guarded", "full", "reflective"),
                         default="reflective",
                         help="what happens to a proposal built on a version that has "
@@ -525,6 +534,16 @@ def main(argv=None) -> None:
         seed=args.seed, usage=usage,
         policies=Policies(proposal=delegation, acceptance=judge,
                           staleness=get_policy(args.staleness),
+                          # Round-robin "spends rollouts uniformly, including on tasks
+                          # the agent already solves" -- its own words -- and that is
+                          # where a late run's budget goes: one model run spent 2 003
+                          # rollouts to buy 28 episodes. Upstream's manager works on
+                          # failures and never on a test that passes, so the weighted
+                          # sampler is the more faithful one -- and it is off by
+                          # default because no measurement here shows it helping. The
+                          # offline arm reaches 1.000 before the waste can appear.
+                          **({"task_sampler": DifficultyWeighted()}
+                             if args.signal_weighted else {}),
                           **({} if octopus is None else {"conflict": octopus})),
         **budget_kwargs(args),
     )
