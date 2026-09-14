@@ -89,6 +89,7 @@ from examples._common import (add_standard_args, budget_kwargs, completion_for,
 
 from ._delegation import RecursiveDelegation
 from . import _domain as minilang
+from . import _fly as fly
 from . import _jqx as jqx
 from . import _md as md
 from . import _stackvm as stackvm
@@ -111,8 +112,12 @@ from ._world import CONTEXT_FILE, WorldLog, parse_routing
 #: package nobody can invoke -- and md takes the oracle out of the scoring path
 #: altogether, because a frozen test suite is what a human actually writes and
 #: what upstream validates against. All four are stand-ins for upstream's
-#: 123.4-hour compiler run and say so.
-DOMAINS = {"minilang": minilang, "stackvm": stackvm, "jqx": jqx, "md": md}
+#: 123.4-hour compiler run and say so. `fly` is the fifth and the first that grows a
+#: *product* rather than a library -- a simulated animal, an HTTP backend and the page a
+#: person watches it learn on -- and the first shipped with no reference implementation
+#: at all, which is a cost `_fly` states rather than hides.
+DOMAINS = {"minilang": minilang, "stackvm": stackvm, "jqx": jqx, "md": md,
+           "fly": fly}
 
 #: "No wall-clock budget", spelled as a number the runtime can add to `time.time()`.
 #: `float("inf")` cannot be: the shutdown deadline is `t0 + max_seconds` and joining a
@@ -132,6 +137,8 @@ DOMAIN_BLURB = {
             "staged suite"),
     "md": ("Lennard-Jones molecular dynamics with a frozen driver (6 nodes, "
            "14 files), test suite -- invariants, not values"),
+    "fly": ("a Drosophila brain, three assays and a web page to watch it learn on, "
+            "test suite -- a product, not a library"),
 }
 
 
@@ -433,6 +440,13 @@ def main(argv=None) -> None:
     # is designed before anything is written against it, and Phase 2 is handed
     # "the architecture, directory structure, CONTEXT.md routing tables ... already in
     # place (created by an Architect agent)".
+    if getattr(spec, "REQUIRES_MODEL", False) and complete is None:
+        print(f"--domain {args.domain} needs --model: it ships no reference "
+              "implementation, so there is no offline rule-based actor to fall back "
+              "on -- and one written for it would be the design the run is meant to "
+              "invent")
+        return
+
     if args.mode == "a":
         if complete is None:
             print("--mode a needs --model: extracting a Context Tree is reading code, "
