@@ -44,8 +44,8 @@ from ._octopus import three_way
 
 from ._world import (CONTEXT_FILE, KNOWN_ISSUES, EpisodeRecord, LocalWorld,
                      WorldLog, directly_at, looks_like_file, normalise, owns,
-                     resolve_edit_path,
-                     routing_entry, under_heading)
+                     resolve_edit_path, routing_entry, shadowed_by_module,
+                     under_heading)
 
 __all__ = ["Brief", "Delegation", "Edit", "RecursiveDelegation", "render_edits"]
 
@@ -192,6 +192,9 @@ class RecursiveDelegation:
     routes_opened: int = 0
     #: Delegations refused because the target was a file, not a node.
     mistaken_nodes: int = 0
+    #: Delegations refused because the directory would shadow a sibling module of
+    #: the same name -- see `_is_node`.
+    shadowed_nodes: int = 0
     #: Sibling edits to one path reconciled by three-way merge, and not.
     sibling_merges: int = 0
     sibling_conflicts: int = 0
@@ -518,6 +521,16 @@ class RecursiveDelegation:
         file**. A node is a directory: upstream a path is a node when it holds at
         least one tracked file, and delegating to `lexer.py` as though it were one
         makes every write land *inside* a file. A real run did exactly that.
+
+        Nor may it **shadow a sibling module**. Opening `rdf/` next to an existing
+        `rdf.py` creates two importable things with one name, and the module wins:
+        the directory the child then fills is unreachable from every import in the
+        repository. One run did exactly this and could not undo it. The parent
+        review found the mismatch and said so precisely; the accountable manager
+        rewrote its own `rdf.py` to forward to `src.observe.rdf.rdf` -- and that
+        raises `'src.observe.rdf' is not a package`, because the name resolves back
+        to the very file doing the forwarding. Every repair is self-referential
+        while both exist, so the collision has to be refused where it is created.
         """
         path = normalise(delegation.path)
         if not owns(world.path, path) or path == world.path:
@@ -526,6 +539,9 @@ class RecursiveDelegation:
             # `in state` catches a file that exists; the shape catches one that does
             # not yet, which is every file in a formation run until someone writes it.
             self.mistaken_nodes += 1
+            return False
+        if shadowed_by_module(state, path):
+            self.shadowed_nodes += 1
             return False
         return True
 
@@ -655,6 +671,7 @@ class RecursiveDelegation:
         return (f"delegation: {self.log.summary()} truncated_edits={self.truncated} "
                 f"routes_opened={self.routes_opened} "
                 f"mistaken_nodes={self.mistaken_nodes} "
+                f"shadowed_nodes={self.shadowed_nodes} "
                 f"sibling_merges={self.sibling_merges} "
                 f"sibling_conflicts={self.sibling_conflicts} "
                 f"requests={self.requests_raised}/"

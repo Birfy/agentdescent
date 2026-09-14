@@ -119,6 +119,19 @@ def parse_routing(body: str) -> List[str]:
     return out
 
 
+def shadowed_by_module(state, path: str) -> bool:
+    """Would a node at ``path`` be shadowed by a sibling module of the same name?
+
+    `src/observe/rdf/` next to `src/observe/rdf.py` are two importable things called
+    `src.observe.rdf`, and the module wins: a regular module beats the namespace
+    package a directory without `__init__.py` makes, so everything written inside the
+    directory is unreachable. Checked by name rather than by import machinery, because
+    the tree being judged is a dict of paths that has never been on a disk.
+    """
+    node = normalise(path)
+    return any(f"{node}{suffix}" in state for suffix in (".py", ".pyi"))
+
+
 def looks_like_file(path: str) -> bool:
     """Does this path name a file rather than a directory?
 

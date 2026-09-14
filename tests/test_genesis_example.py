@@ -32,6 +32,7 @@ from examples.genesis._claude_code import (CLAUDE_CODE_BRIEF,
 from examples.genesis._architect import (ARCHITECT_PROMPT, ArchitectPhase,
                                          missing_sections,
                                          _parse as parse_architect_reply)
+from examples.genesis._extract import ExtractPhase
 from examples.genesis._judge import ParentJudge
 from examples.genesis._review import (CompletionJudge, ParentCodeReview,
                                       chain_reviews)
@@ -44,7 +45,7 @@ from examples.genesis._world import (CONTEXT_FILE, KNOWN_ISSUES, ROUTING_HEADING
                                      SKILLS_DIR, TRUNCATED,
                                      LocalWorld, WorldLog, owns, parse_routing,
                                      looks_like_file, resolve_edit_path,
-                                     routing_entry, under_heading)
+                                     routing_entry, shadowed_by_module, under_heading)
 
 
 # ---------------------------------------------------------------------------
@@ -1430,6 +1431,52 @@ def test_every_domain_briefs_its_agents_with_an_objective_not_a_catalogue_line()
     # ... and the one thing it does not say is how to decompose below that root.
     for word in ("geometry", "potentials", "forces", "integrate", "observe"):
         assert f"src/{word}" not in md.OBJECTIVE
+
+
+def test_a_node_may_not_shadow_a_sibling_module():
+    """`rdf/` next to `rdf.py` are one name to Python, and the module wins.
+
+    Everything the child then writes in that directory is unreachable from every
+    import in the repository, and it cannot be repaired from either side: the parent
+    that forwards `rdf.py` into `src.observe.rdf.rdf` gets `'src.observe.rdf' is not a
+    package`, because the name resolves back to the file doing the forwarding. Three
+    runs and 30 000 rollouts never got that repository off 0.812. So the collision is
+    refused where it is created -- and where it was inherited instead, mode A says so
+    in the record, because the guard cannot undo history.
+    """
+    assert shadowed_by_module({"src/observe/rdf.py": "x"}, "src/observe/rdf")
+    assert shadowed_by_module({"a/b.pyi": "x"}, "a/b")
+    assert not shadowed_by_module({"src/observe/rdf.py": "x"}, "src/observe/thermo")
+    assert not shadowed_by_module({"src/observe/rdf/rdf.py": "x"}, "src/observe/rdf")
+
+    log = WorldLog()
+    policy = RecursiveDelegation(
+        manager=lambda b: ([Delegation("src/observe/rdf", "the histogram")]
+                           if not b.world.path else []),
+        executor=lambda b: [Edit(b.world.path, f"{b.world.path or '.'}/x.py", "x = 1\n")],
+        log=log, max_depth=3)
+    policy.propose(_proposal_ctx({CONTEXT_FILE: "# root\n", "src/observe/rdf.py": "x"},
+                                 Task(id="t", prompt="x")))
+    assert policy.shadowed_nodes == 1 and policy.mistaken_nodes == 0
+
+    # The architect refuses a designed one the same way.
+    phase = ArchitectPhase(_scripted_architect({
+        "": {"record": "# root\n", "children": [{"path": "rdf", "objective": "no"},
+                                                {"path": "thermo", "objective": "yes"}]}}),
+        max_depth=2)
+    tree = phase.design({CONTEXT_FILE: "# root\n", "rdf.py": "x"}, "o")
+    assert phase.mistaken_nodes == 1
+    assert "thermo/" + CONTEXT_FILE in tree and "rdf/" + CONTEXT_FILE not in tree
+
+    # And the extractor, handed one that already exists, writes it down.
+    reply = json.dumps({"record": "## Intent\nObserve.\n"})
+    extract = ExtractPhase(lambda prompt: reply, max_depth=2)
+    described = extract.extract({CONTEXT_FILE: "# root\n", "src/observe/rdf.py": "x",
+                                 "src/observe/rdf/rdf.py": "y"}, "o")
+    assert extract.shadowed == 1
+    note = described["src/observe/" + CONTEXT_FILE]
+    assert KNOWN_ISSUES in note and "One of the two has to go." in note
+    assert "the name resolves back to the forwarding file" in note
 
 
 def test_a_review_finding_reaches_the_manager_that_can_act_on_it():

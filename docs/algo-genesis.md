@@ -599,6 +599,19 @@ writing `src/__init__.py` — but ran it *blind*: the manager took its own turn 
 being told what its own review had just returned work over. It now carries them, and
 the counters report `findings_carried`.
 
+That moved the work to the right agent and the right file — the rerun's manager did
+rewrite its own `rdf.py`, which neither earlier arm ever did — and the repository still
+did not move, because the repair it wrote was `from src.observe.rdf.rdf import rdf`,
+which raises `'src.observe.rdf' is not a package`. The name resolves back to the file
+doing the forwarding. **`rdf/` and `rdf.py` are one name to Python and the module
+wins**: everything the child wrote in that directory was unreachable from every import
+in the repository, and no edit from either side can fix it while both exist. So the
+collision is refused where it is created — `_is_node` and the architect both reject a
+child that would shadow a sibling module, counted as `shadowed_nodes` — and where mode
+A *inherits* one, the extractor writes it into the node's `## Known Issues` naming the
+consequence and the fact that one of the two has to go. The guard cannot undo history;
+the record can tell the next agent what it is looking at.
+
 ## The episode, and `--executor claude-code`
 
 The gap that produced that result is the one the table below calls the largest, so the

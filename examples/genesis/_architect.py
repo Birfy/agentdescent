@@ -32,7 +32,7 @@ from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 from ._world import (CONTEXT_FILE, LocalWorld, ROUTING_HEADING,
                      STANDARD_SECTIONS, looks_like_file, normalise,
-                     parse_routing)
+                     parse_routing, shadowed_by_module)
 
 __all__ = ["ARCHITECT_PROMPT", "ArchitectPhase", "harness_record"]
 
@@ -192,6 +192,12 @@ class ArchitectPhase:
                     # hung two children under it. The delegation policy refuses a path
                     # that is an existing file; a designed tree contains nothing that
                     # exists yet, so the shape is all there is to go on.
+                    self.mistaken_nodes += 1
+                    continue
+                if shadowed_by_module(state, child["path"]):
+                    # `rdf/` next to an existing `rdf.py` are two importable things
+                    # with one name and the module wins, so the node is unreachable
+                    # from every import in the repository -- see `_is_node`.
                     self.mistaken_nodes += 1
                     continue
                 if world._all_readonly(state, normalise(child["path"])):

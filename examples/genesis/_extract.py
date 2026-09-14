@@ -32,8 +32,8 @@ from __future__ import annotations
 import json
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
-from ._world import (CONTEXT_FILE, LocalWorld, ROUTING_HEADING, normalise,
-                     child_paths, owns)
+from ._world import (CONTEXT_FILE, KNOWN_ISSUES, LocalWorld, ROUTING_HEADING,
+                     child_paths, normalise, owns, shadowed_by_module)
 
 __all__ = ["EXTRACTOR_PROMPT", "ExtractPhase"]
 
@@ -91,6 +91,8 @@ class ExtractPhase:
         self.depth = 0
         self.skipped: List[str] = []
         self.unparsed = 0
+        #: Directories described that an existing sibling module makes unimportable.
+        self.shadowed = 0
 
     def extract(self, state: Mapping[str, str], objective: str) -> Dict[str, str]:
         """``state`` plus a record per node, parents before children as upstream reads."""
@@ -115,6 +117,8 @@ class ExtractPhase:
     def summary(self) -> str:
         return (f"described {len(self.nodes)} nodes, deepest {self.depth}"
                 + (f", {len(self.skipped)} skipped" if self.skipped else "")
+                + (f", {self.shadowed} shadowed by a sibling module"
+                   if self.shadowed else "")
                 + (f", {self.unparsed} replies unusable" if self.unparsed else ""))
 
     # -- internals ---------------------------------------------------------
@@ -153,6 +157,21 @@ class ExtractPhase:
         if record is None:
             self.unparsed += 1
             return None
+        shadowed = [c for c in children if shadowed_by_module(state, c)]
+        if record and shadowed:
+            # The guard in `_is_node` stops this being *created*; a repository handed
+            # to mode A may already contain one, and then describing the directory
+            # without saying so sends every later agent to write code no import can
+            # reach. Measured: `src/observe/rdf/` beside `src/observe/rdf.py`, three
+            # runs and 30 000 rollouts that never got the repository off 0.812.
+            record = record.rstrip("\n") + "\n\n" + KNOWN_ISSUES + "\n" + "\n".join(
+                f"- `{c}/` is shadowed by the module `{c}.py` beside it: both are "
+                f"`{c.replace('/', '.')}` to Python and the module wins, so nothing "
+                f"written in that directory can be imported. Forwarding from "
+                f"`{c}.py` into it cannot work either -- the name resolves back to "
+                f"the forwarding file. One of the two has to go."
+                for c in shadowed) + "\n"
+            self.shadowed += len(shadowed)
         if record and children and ROUTING_HEADING.lower() not in record.lower():
             # A directory missing from its parent's table is a directory nobody can be
             # sent to, and the extractor is the only agent that knows it is there.
