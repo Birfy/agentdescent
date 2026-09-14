@@ -32,7 +32,7 @@ from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 from ._world import (CONTEXT_FILE, LocalWorld, ROUTING_HEADING,
                      STANDARD_SECTIONS, looks_like_file, normalise,
-                     parse_routing, shadowed_by_module)
+                     parse_routes, parse_routing, shadowed_by_module)
 
 __all__ = ["ARCHITECT_PROMPT", "REFINE_PROMPT", "ArchitectPhase",
            "harness_record", "misaligned"]
@@ -254,8 +254,15 @@ class ArchitectPhase:
                 self.nodes.append(path)
                 self.depth = max(self.depth, depth)
                 if depth + 1 <= self._max_depth:
-                    queue += [(normalise(child), node_objective, depth + 1)
-                              for child in parse_routing(state[key])]
+                    # The routing line's right-hand side is the objective this node's
+                    # architect handed that child. Passing `node_objective` down
+                    # instead sends a leaf the whole project: measured, an architect
+                    # asked to design `.../cell_types/mushroom_body` while carrying the
+                    # root objective came back with `brain, learning, environment,
+                    # simulation`, having redesigned the library from the top at depth
+                    # five.
+                    queue += [(normalise(child), handles or node_objective, depth + 1)
+                              for child, handles in parse_routes(state[key])]
                 continue
             record, children = self._ask(state, path, node_objective, depth)
             if record is None:

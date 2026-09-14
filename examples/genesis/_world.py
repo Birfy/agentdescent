@@ -119,6 +119,41 @@ def parse_routing(body: str) -> List[str]:
     return out
 
 
+def parse_routes(body: str) -> List[Tuple[str, str]]:
+    """``(path, what it handles)`` for every routing-table entry, in order.
+
+    The right-hand side of a routing line is not decoration: it is the objective the
+    parent is handing that child, written by the architect that opened it. A phase 1
+    resuming from records rather than from replies has nothing else to give a child,
+    and giving it the *parent's* objective instead sends a leaf the whole project --
+    measured: an architect asked to design `.../cell_types/mushroom_body` while
+    carrying the root objective came back with `brain, learning, environment,
+    simulation`, having redesigned the library from the top at depth five.
+    """
+    if not body:
+        return []
+    out: List[Tuple[str, str]] = []
+    seen = set()
+    inside = False
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("##"):
+            inside = stripped.lower().startswith(ROUTING_HEADING.lower())
+            continue
+        if not inside:
+            continue
+        match = _ROUTE_LINE.match(line)
+        if match:
+            path = normalise(match.group("path"))
+            if path and path not in seen:
+                seen.add(path)
+                # The regex captures only the path; what the entry *handles* is
+                # whatever follows it on the line.
+                handles = line[match.end():].strip().lstrip("-—>").strip()
+                out.append((path, handles))
+    return out
+
+
 def shadowed_by_module(state, path: str) -> bool:
     """Would a node at ``path`` be shadowed by a sibling module of the same name?
 

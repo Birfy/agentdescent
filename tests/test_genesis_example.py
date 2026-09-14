@@ -1624,6 +1624,42 @@ def test_a_record_is_maintained_rather_than_written_once():
                for payload in proposals)
 
 
+def test_a_resumed_phase_one_hands_each_child_its_own_objective():
+    """The routing line's right-hand side is the objective, not decoration.
+
+    A phase 1 continuing from records rather than from replies has nothing else to
+    give a child. Handing down the *parent's* objective instead sends a leaf the whole
+    project: an architect asked to design `.../cell_types/mushroom_body` while carrying
+    the root objective came back with `brain, learning, environment, simulation`,
+    having redesigned the library from the top at depth five.
+    """
+    from examples.genesis._world import parse_routes
+
+    record = ("## Routing Table\n"
+              "- `./src/brain/` -> the connectome-grounded neural model\n"
+              "- `./src/arena/` -> arena physics and odour fields\n")
+    assert parse_routes(record) == [("src/brain", "the connectome-grounded neural model"),
+                                    ("src/arena", "arena physics and odour fields")]
+    # And the paths still come back exactly as `parse_routing` reports them.
+    assert [p for p, _ in parse_routes(record)] == parse_routing(record)
+
+    asked = []
+
+    def complete(prompt):
+        asked.append(prompt.split("THE OBJECTIVE\n", 1)[1].splitlines()[0])
+        return json.dumps({"record": "# leaf\n", "children": []})
+
+    given = {CONTEXT_FILE: "# root\n",
+             "src/" + CONTEXT_FILE: "# src\n" + record}
+    phase = ArchitectPhase(complete, max_depth=3, max_nodes=10, root_path="src",
+                           resume=True)
+    phase.design(given, "build the whole product")
+    assert phase.reused == 1                       # `src` kept, no call spent
+    assert asked == ["the connectome-grounded neural model",
+                     "arena physics and odour fields"]
+    assert "build the whole product" not in asked
+
+
 def test_a_node_may_not_shadow_a_sibling_module():
     """`rdf/` next to `rdf.py` are one name to Python, and the module wins.
 
