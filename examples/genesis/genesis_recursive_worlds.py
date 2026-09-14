@@ -196,9 +196,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--depth", type=int, default=3,
                         help="maximum recursive delegation depth (v,p) -> (v,q)")
-    parser.add_argument("--max-turns", type=int, default=24,
-                        help="turns inside one --executor claude-code episode. "
-                             "Upstream's runs allow 128 for a non-root episode")
+    parser.add_argument("--max-turns", type=int, default=0,
+                        help="turns inside one --executor claude-code episode. The "
+                             "default is upstream's own split -- 2048 at the root, 128 "
+                             "below it -- and a number here pins both to it, which is "
+                             "what a cheap run wants")
     parser.add_argument("--cold-start", action="store_true",
                         help="start from the goal, the contract and the suite only: "
                              "no node CONTEXT.md records, no routing tables, no "
@@ -353,7 +355,10 @@ def main(argv=None) -> None:
                                    "  [git missing: every contested file falls back]"))
     print(f"Gate     : {gate}")
     print("Episode  : " + ("one headless Claude Code session in a throwaway worktree, "
-                           f"up to {args.max_turns} turns, frozen paths denied, network "
+                           f"up to {args.max_turns or ClaudeCodeExecutor.ROOT_TURNS} "
+                           f"turns at the root and "
+                           f"{args.max_turns or ClaudeCodeExecutor.CHILD_TURNS} below, "
+                           f"frozen paths denied, network "
                            "tools off -- billed to the local CLI's credentials"
                            if args.executor == "claude-code" else
                            "one model call returning whole files"))
