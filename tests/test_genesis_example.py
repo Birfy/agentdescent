@@ -1338,7 +1338,8 @@ def test_a_child_the_architect_named_is_always_routed_to():
     record, children = parse_architect_reply(
         json.dumps({"record": "# src\n\n## Intent\nthings\n",
                     "children": [{"path": "core", "objective": "geometry"}]}), "src/")
-    assert children == [{"path": "src/core", "objective": "geometry"}]
+    # `files` rides along undeclared, which the size guard reads as "no claim made".
+    assert children == [{"path": "src/core", "objective": "geometry", "files": 0}]
     assert parse_routing(record) == ["src/core"]
 
 
