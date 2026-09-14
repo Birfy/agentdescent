@@ -281,6 +281,8 @@ def build_parser() -> argparse.ArgumentParser:
                              "sessions go through the local CLI whatever --provider "
                              "says, so with an API provider the architect and every "
                              "episode are otherwise on different models by default")
+    parser.add_argument("--quiet-phase1", action="store_true",
+                        help="do not print each node as phase 1 designs it")
     parser.add_argument("--no-refine", action="store_true",
                         help="do not re-spawn an architect on a node whose record has "
                              "drifted from its files (upstream's architect Phase 3)")
@@ -508,7 +510,12 @@ def main(argv=None) -> None:
                                    # upstream *spawns* sub-architects rather than
                                    # running them one after another. Serial cost the
                                    # fly domain 32 minutes for 71 nodes.
-                                   workers=args.workers)
+                                   workers=args.workers,
+                                   on_node=(None if args.quiet_phase1 else
+                                            lambda path, routes, n: print(
+                                                f"  phase 1 [{n:>3}/{args.nodes}] "
+                                                f"{path or './':<58} {routes} routes",
+                                                flush=True)))
         initial = architect.design(initial, objective_for(args.domain))
         print(f"\nPhase 1  : architect {architect.summary()}")
         for path in architect.nodes:

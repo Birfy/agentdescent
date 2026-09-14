@@ -211,7 +211,7 @@ class ArchitectPhase:
 
     def __init__(self, complete, *, contracts: Sequence[str] = (),
                  max_depth: int = 3, max_nodes: int = 12, root_path: str = "",
-                 resume: bool = False, workers: int = 1):
+                 resume: bool = False, workers: int = 1, on_node=None):
         self._complete = complete
         self._contracts = tuple(contracts)
         self._max_depth = max_depth
@@ -227,6 +227,12 @@ class ArchitectPhase:
         #: How many siblings to design at once. Serial by default so a
         #: run that did not ask for concurrency does not get it.
         self._workers = max(1, int(workers))
+        #: Called with `(path, routes, designed_so_far)` as each node lands. Phase 1
+        #: printed nothing until the whole phase finished, which on the fly domain was
+        #: 82 minutes of silence -- and once the architect went through the SDK rather
+        #: than the CLI there was no session log to read either, so "how far in is it"
+        #: had no answer at all.
+        self._on_node = on_node
         #: Nodes it designed, and the deepest it went.
         self.nodes: List[str] = []
         self.depth = 0
@@ -364,6 +370,8 @@ class ArchitectPhase:
             # the children in both directions. See `_fix_routing` for the subtree that
             # went missing because it only ever agreed in one.
             state[key] = _fix_routing(record, accepted)
+            if self._on_node is not None:
+                self._on_node(path, len(accepted), len(self.nodes))
         return queue
 
     def refine(self, state: Mapping[str, str], path: str, objective: str,
