@@ -276,6 +276,11 @@ def build_parser() -> argparse.ArgumentParser:
                              "domain's empty one. With --mode a this is the Context "
                              "Tree extraction upstream runs on an existing codebase; "
                              "the frozen contract is always the domain's own")
+    parser.add_argument("--executor-model", default="",
+                        help="the model an --executor claude-code session runs. The "
+                             "sessions go through the local CLI whatever --provider "
+                             "says, so with an API provider the architect and every "
+                             "episode are otherwise on different models by default")
     parser.add_argument("--no-refine", action="store_true",
                         help="do not re-spawn an architect on a node whose record has "
                              "drifted from its files (upstream's architect Phase 3)")
@@ -535,13 +540,16 @@ def main(argv=None) -> None:
         # The failure template is the domain's, not a constant: a blind domain must
         # not hand the session the assertion's source, which is the whole point of it.
         # And the session runs the model the run asked for -- left unset it takes the
-        # CLI's default, which on a `--provider claude-cli` run means the architect is
-        # on one model and every executor episode on another.
+        # CLI's default -- a different model from the one the run asked for, silently.
+        # The CLI reads ANTHROPIC_BASE_URL and ANTHROPIC_API_KEY from the environment,
+        # so pointing both the SDK and the CLI at one endpoint is all it takes to put
+        # the architect and every executor session on the same model; the flag is there
+        # for the case where they should deliberately differ.
         sessions = ClaudeCodeExecutor(frozen=spec.FROZEN,
                                       failure=getattr(spec, "FAILURE", TEST_FAILURE),
-                                      model=(args.model if args.provider == "claude-cli"
-                                             else None),
+                                      model=args.executor_model or args.model,
                                       max_turns=args.max_turns)
+
     def _refine(path, state):
         """Upstream's architect Phase 3, as a hook on the accountability pass.
 
