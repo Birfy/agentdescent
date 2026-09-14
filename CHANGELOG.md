@@ -8,6 +8,29 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- **`evolve(max_tokens=...)`: a budget in the unit that maps to the bill.**
+  `max_calls` and `max_rollouts` count invocations, and a reasoning model can
+  spend 40k tokens on hidden thinking in a single one -- so a 20-round run with
+  4 workers is 80 rollouts and ~160 calls but, at 40k tokens each, 6.4M tokens.
+  The cap is checked at the round barrier on the sync path (alongside the other
+  budgets) and per-rollout on the async path, stops with
+  `stop_reason="max_tokens"`, and reports the spend it actually incurred.
+
+  Tokens only reach the meter when the model adapter reports them, and the
+  adapters that do (`claude`, `openai_compatible`) take a `Usage` in their
+  constructor. The caller who built `LLMAgent(claude(usage=u))` had to pass
+  `usage=u` **again** to `evolve()` for the meter — and with it `max_tokens`,
+  the `tokens=` column on every round, and `status` — to see the same numbers.
+  Forgetting the second thread made the run report `tokens=0` while the bill
+  went to `u`, an object only the caller held, and a token budget silently
+  never fired. `evolve()` now adopts the agent's own `usage` when the caller
+  did not pass one; an explicit `usage=` still wins, and a bare
+  `run`/`propose` pair still reports zero (the honest reading, not an error).
+
+  `RoundInfo.tokens` carries the cumulative spend to `on_round` (and so to
+  `rounds.jsonl`), `RunStatus.tokens` lands it in `status.json`, and the CLI
+  status line shows `tok=N` when the run has any.
+
 - **`evolve(checkpointing=True)`: the search survives a process restart.**
   `repo_path` already resumed the *artifact* -- the ledger's whole job -- but
   the aggregator's search state is only ever in memory, so a resume re-seeded

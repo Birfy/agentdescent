@@ -98,6 +98,11 @@ class RunStatus:
     committed: int = 0
     calls: int = 0
     rollouts: int = 0
+    #: Total tokens consumed (prompt + completion), when the agent reports
+    #: them. 0 for an opaque `run`/`propose` with no `usage=` shared — which is
+    # why it is an int and not Optional: "not reported" and "reported zero"
+    # read the same here, and neither is a state a person acts on.
+    tokens: int = 0
     usd: Optional[float] = None
     pid: Optional[int] = None
     started: Optional[float] = None
@@ -460,6 +465,9 @@ def execute(rd: RunDir, *, budget_usd: Optional[float] = None,
         # A number in `status` is read by a person deciding whether to cancel.
         changes["committed"] = st.committed + info.committed
         changes["rollouts"] = info.rollouts
+        # RoundInfo.tokens is the same running-total shape as rollouts; the
+        # meter sums prompt + completion, so this is the spend so far.
+        changes["tokens"] = info.tokens
         if usd_per_call is not None:
             changes["usd"] = round(usage.calls * usd_per_call, 4)
         rd.update_status(**changes)

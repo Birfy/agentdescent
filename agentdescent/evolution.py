@@ -1000,6 +1000,11 @@ class RoundInfo:
     #: comparison has to be able to ask "where was each configuration after N
     #: calls", which needs the number at every round rather than only at the end.
     calls: int = 0
+    #: Tokens consumed by the end of this round, cumulative
+    #: (``prompt_tokens + completion_tokens``). A reasoning model can spend 40k
+    #: tokens on a single hidden-thinking call, so the total is the only budget
+    #: that maps to cost on a real deployment.
+    tokens: int = 0
 
     # -- what the merge did, this round --------------------------------------
     #
@@ -1203,6 +1208,7 @@ class EvolutionResult:
     error: Optional[str] = None
     #: Why the run ended -- ``"target_reward"`` / ``"patience"`` / ``"rounds"`` /
     #: ``"max_seconds"`` / ``"max_iters"`` / ``"max_rollouts"`` / ``"max_calls"`` /
+    #: ``"max_tokens"`` /
     #: ``"stop_when"`` (the caller's own budget, see ``evolve(stop_when=)``)
     #: / ``"error"``. Without it a budget
     #: expiry is indistinguishable from convergence: ``error`` is ``None`` for
@@ -1448,7 +1454,8 @@ class EvolutionResult:
                  "n_items": h.n_items, "committed": h.committed,
                  "rejected": h.rejected, "reasons": h.reasons,
                  "elapsed_s": h.elapsed_s, "rollouts": h.rollouts,
-                 "calls": h.calls, "considered": h.considered,
+                 "calls": h.calls, "tokens": h.tokens,
+                 "considered": h.considered,
                  "discarded_stale": h.discarded_stale,
                  "conflicts_dropped": h.conflicts_dropped, "fused": h.fused}
                 for h in self.history
@@ -1704,6 +1711,7 @@ class _Engine:
         info = RoundInfo(
             index, reward, n_items, committed, len(reports) - committed, reasons,
             elapsed_s=m.elapsed_s, rollouts=m.rollouts, calls=m.calls,
+            tokens=m.prompt_tokens + m.completion_tokens,
             considered=sum(x.considered for x in reports),
             discarded_stale=sum(x.discarded_stale for x in reports),
             conflicts_dropped=sum(x.conflicts_dropped for x in reports),
@@ -1889,6 +1897,18 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     # Wrap the actors before anything else can capture them: `run` is closed over
     # by the runtime, by every worker and by the verifier's `eval_fn`, so a later
     # wrap would miss whichever reference was taken first.
+    #
+    # The `usage` the meter reads defaults to the agent's own, when the agent
+    # has one and the caller did not pass `usage=`: the adapters that report
+    # tokens (`claude`, `openai_compatible`) take a `Usage` in their constructor,
+    # and the caller who built `LLMAgent(claude(usage=u))` has already told the
+    # model where to report. Forcing them to pass `u` again here — the only way
+    # the meter (and with it `max_tokens`, and the `tokens=` column on every
+    # round) would see the same numbers — was a foot-gun the whole token budget
+    # silently missed: the run reported `tokens=0` while the bill went to
+    # `u`, an object only the caller held.
+    if usage is None:
+        usage = getattr(agent, "usage", None)
     meter = Meter(usage=usage) if usage is not None else Meter()
     run, propose = measured(run, meter), measured(propose, meter)
 
@@ -2180,6 +2200,14 @@ def evolve(
     max_seconds: Optional[float] = None,
     max_rollouts: Optional[int] = None,
     max_calls: Optional[int] = None,
+    #: Hard cap on total tokens consumed (``prompt + completion``). A reasoning
+    #: model can spend 40k tokens on hidden thinking in one call, so ``max_calls``
+    #: and ``max_rollouts`` do not bound cost: a 20-round run with 4 workers is
+    #: 80 rollouts and ~160 model calls, but at 40k tokens each that is 6.4M
+    #: tokens -- the bill, not the count, is what a deployment needs to control.
+    #: Checked at the round barrier alongside the other budgets; the run stops
+    #: with ``stop_reason="max_tokens"`` and reports the spend it incurred.
+    max_tokens: Optional[int] = None,
     self_verify: bool = True,
     held_out_frac: float = 0.4,
     repo_path: Optional[str] = None,
@@ -2384,6 +2412,16 @@ def evolve(
 
         The async path has no barrier and enforces both per rollout, so it
         overshoots by at most the rollouts already in flight.
+    max_tokens:
+        Hard cap on total tokens consumed (``prompt_tokens + completion_tokens``).
+        A reasoning model can spend 40k tokens on hidden thinking in one call,
+        so ``max_calls`` and ``max_rollouts`` do not bound cost: a 20-round run
+        with 4 workers is 80 rollouts and ~160 model calls, but at 40k tokens
+        each that is 6.4M tokens -- the bill, not the count, is what a
+        deployment needs to control. Checked at the round barrier alongside the
+        other budgets; the async path checks per-rollout for tighter control.
+        Stops with ``stop_reason="max_tokens"``. ``None`` (default) means
+        unbounded.
     self_verify:
         Re-run the trajectory with the diff applied to record a local
         before/after delta. Doubles the rollouts spent per proposal; ports that
@@ -2564,7 +2602,7 @@ def evolve(
             max_seconds=20.0 if max_seconds is None else max_seconds,
             max_iters=(max_rollouts if max_rollouts is not None
                        else rounds * max(1, n_workers)),
-            max_calls=max_calls, held_out_frac=held_out_frac,
+            max_calls=max_calls, max_tokens=max_tokens, held_out_frac=held_out_frac,
             repo_path=repo_path, agg_config=agg_config, staleness_policy=staleness_policy,
             aggregator_factory=aggregator_factory, oracle_budget=oracle_budget,
             cheap_eval_tasks=cheap_eval_tasks, fusion_tournament=fusion_tournament,
@@ -2686,15 +2724,19 @@ def evolve(
         # produced -- so the run overshoots by up to a round and reports the
         # spend it actually incurred instead of the one it was asked for.
         spent = eng.meter.snapshot()
+        tokens_spent = spent.prompt_tokens + spent.completion_tokens
         over = ((max_rollouts is not None and spent.rollouts >= max_rollouts
                  and "max_rollouts") or
                 (max_calls is not None and spent.calls >= max_calls
-                 and "max_calls"))
+                 and "max_calls") or
+                (max_tokens is not None and tokens_spent >= max_tokens
+                 and "max_tokens"))
         if over:
             stop_reason = over
             if verbose:
                 print(f"round {r:>3}  stopping: {over} reached "
-                      f"({spent.rollouts} rollouts / {spent.calls} calls)")
+                      f"({spent.rollouts} rollouts / {spent.calls} calls "
+                      f"/ {tokens_spent} tokens)")
             break
         try:
             snap = ledger.snapshot(Ledger.DEV)
@@ -3002,7 +3044,8 @@ def evolve(
         if verbose:
             print(f"round {r:>3}  reward={info.held_out_reward:.3f} on "
                   f"{len(held_out)}  size={info.n_items}  "
-                  f"+{info.committed}/-{info.rejected}")
+                  f"+{info.committed}/-{info.rejected}"
+                  + (f"  tokens={info.tokens:,}" if info.tokens else ""))
         if early_stop is not None:
             stop_reason = early_stop
             if verbose:

@@ -73,6 +73,7 @@ def async_evolve(
     max_seconds: float = 20.0,
     max_iters: Optional[int] = None,
     max_calls: Optional[int] = None,
+    max_tokens: Optional[int] = None,
     target_reward: Optional[float] = None,
     patience: Optional[int] = None,
     max_worker_errors: int = 3,
@@ -723,6 +724,16 @@ def async_evolve(
                     # ratio and the second budget cannot be derived from the first.
                     stop_reason[0] = "max_calls"
                     stop.set()
+                elif max_tokens is not None and eng.meter.usage.total_tokens >= max_tokens:
+                    # Same reasoning as max_calls: read from the meter, because
+                    # a reasoning model can spend 40k tokens on one hidden-thinking
+                    # call and `calls` says nothing about the bill. The async
+                    # path checks per-rollout rather than per-round-barrier, so a
+                    # token budget fires sooner here than on the sync path — which
+                    # is correct: the barrier-free loop is the one that can run
+                    # away with spend if the gate keeps accepting.
+                    stop_reason[0] = "max_tokens"
+                    stop.set()
 
     def _drain_and_merge() -> None:
         with intake_lock:
@@ -859,8 +870,10 @@ def async_evolve(
             epoch[0] += 1                      # every worker resyncs on its next loop
             stall.force()
         if verbose:
+            u = eng.meter.usage
             print(f"sweep {len(history):>3}  reward={r:.3f}  merged={len(batch)}  "
-                  f"+{committed}  pending={len(intake)}")
+                  f"+{committed}  pending={len(intake)}"
+                  + (f"  tokens={u.total_tokens:,}" if u.total_tokens else ""))
         if early_stop is not None:
             stop_reason[0] = early_stop
             stop.set()
