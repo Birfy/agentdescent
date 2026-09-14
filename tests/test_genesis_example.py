@@ -1624,6 +1624,74 @@ def test_a_record_is_maintained_rather_than_written_once():
                for payload in proposals)
 
 
+def test_the_routing_table_is_made_to_agree_with_the_children_it_opened():
+    """Upstream: the routing table "is your primary delegation tool ... the map that
+    makes recursive delegation work". A record whose table disagrees with the children
+    the architect just opened is a broken map, and it has to be repaired in *both*
+    directions.
+
+    Dropping a refused entry was always necessary -- a table advertising a node nobody
+    may write is a trap for the next manager. Adding a forgotten one turned out to
+    matter more. An architect answered with five children and a `## Routing Table`
+    holding its API Surface instead: `` `__init__.py` — Exports get_regions(...) ``,
+    then two sentences about FlyWire. Nothing looked wrong that run, because the
+    children were queued from the *reply*. Then the budget ran out, a later phase 1
+    resumed from records, rebuilt its queue from the **table**, found no routes, and
+    dropped five brain regions in silence.
+    """
+    from examples.genesis._architect import _fix_routing
+
+    api_surface_in_the_wrong_section = (
+        "## Intent\nx\n\n## Routing Table\n"
+        "- `__init__.py` — Exports `get_regions(...)`\n"
+        "- All regional organization grounded in FlyWire\n")
+    fixed = _fix_routing(api_surface_in_the_wrong_section,
+                         [{"path": "src/r/antennal_lobe", "objective": "the AL"},
+                          {"path": "src/r/mushroom_body", "objective": "the MB"}])
+    assert parse_routing(fixed) == ["src/r/antennal_lobe", "src/r/mushroom_body"]
+    assert "get_regions" not in fixed
+
+    # A refused child still goes, and one the table already lists is not duplicated.
+    listed = ("## Routing Table\n- `./src/r/keep/` -> stays\n"
+              "- `./src/r/gone/` -> refused\n")
+    fixed = _fix_routing(listed, [{"path": "src/r/keep", "objective": "stays"}])
+    assert parse_routing(fixed) == ["src/r/keep"]
+    assert fixed.count("src/r/keep") == 1
+
+    # And a record with no routing section at all gets one.
+    fixed = _fix_routing("## Intent\nx\n", [{"path": "a/b", "objective": "o"}])
+    assert parse_routing(fixed) == ["a/b"]
+
+
+def test_a_node_may_not_be_named_after_one_of_its_own_ancestors():
+    """"Decompose MORE aggressively" has a counterweight and upstream states both.
+
+    Single responsibility, and **shared capability belongs at the lowest common
+    ancestor**. A directory named after something already above it is that rule broken
+    in the one way a tree can show: whatever is really in there belongs to the ancestor,
+    or the ancestor's name was wrong, and either way two places claim it. Measured: an
+    architect produced `.../receptor/types/catalog/types` and `.../catalog/demographics`
+    beside an existing `.../receptor/population/demographics`.
+    """
+    from examples.genesis._architect import repeats_an_ancestor
+
+    assert repeats_an_ancestor("a/types/catalog/types") == "types"
+    assert repeats_an_ancestor("src/brain/mushroom_body/x/mushroom_body") == "mushroom_body"
+    assert repeats_an_ancestor("src/brain/circuits/cell_types") == ""
+    assert repeats_an_ancestor("src") == ""
+
+    phase = ArchitectPhase(_scripted_architect({
+        "src/a": {"record": "# a\n", "children": [{"path": "src/a/a", "objective": "no"},
+                                                  {"path": "src/a/b", "objective": "yes"}]}}),
+        max_depth=2, root_path="src/a")
+    tree = phase.design({CONTEXT_FILE: "# root\n"}, "o")
+    assert phase.repeated == 1
+    assert "src/a/b/" + CONTEXT_FILE in tree
+    assert "src/a/a/" + CONTEXT_FILE not in tree
+    # and the refused one is not left advertised in the table either
+    assert parse_routing(tree["src/a/" + CONTEXT_FILE]) == ["src/a/b"]
+
+
 def test_a_resumed_phase_one_hands_each_child_its_own_objective():
     """The routing line's right-hand side is the objective, not decoration.
 

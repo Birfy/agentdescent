@@ -236,6 +236,8 @@ class ArchitectPhase:
         self.revised = 0
         #: Nodes an earlier phase 1 already designed and this one kept.
         self.reused = 0
+        #: Children refused for being named after one of their ancestors.
+        self.repeated = 0
 
     def design(self, given: Mapping[str, str], objective: str) -> Dict[str, str]:
         """``given`` plus one ``CONTEXT.md`` per node the architect decided on."""
@@ -295,6 +297,13 @@ class ArchitectPhase:
                     # file there is refused to every proposal.
                     self.refused += 1
                     continue
+                if repeats_an_ancestor(child["path"]):
+                    # "decompose MORE aggressively" has a counterweight and upstream
+                    # states both: shared capability belongs at the lowest common
+                    # ancestor, so a node named after one of its own ancestors is that
+                    # rule broken in the one way a tree can show.
+                    self.repeated += 1
+                    continue
                 if normalise(child["path"]) == path:
                     # A node routes to its *children*. One architect wrote
                     # `potentials -> potentials`, which is a manager delegating to
@@ -308,11 +317,10 @@ class ArchitectPhase:
                     continue
                 accepted.append(child)
                 queue.append((normalise(child["path"]), child["objective"], depth + 1))
-            if len(accepted) != len(children):
-                # A table that advertises a node the contract refuses is a trap for the
-                # next manager to read it: it would delegate there and be refused in
-                # turn. The record keeps only what was accepted.
-                state[key] = _only_routing(record, [c["path"] for c in accepted])
+            # Always, not only when something was refused: the table has to agree with
+            # the children in both directions. See `_fix_routing` for the subtree that
+            # went missing because it only ever agreed in one.
+            state[key] = _fix_routing(record, accepted)
         if queue:
             self.truncated = len(queue)
         return state
@@ -349,6 +357,8 @@ class ArchitectPhase:
                 + (f", {self.refused} outside their subtree" if self.refused else "")
                 + (f", {self.mistaken_nodes} file paths refused as nodes"
                    if self.mistaken_nodes else "")
+                + (f", {self.repeated} repeated an ancestor's name"
+                   if self.repeated else "")
                 + (f", {self.truncated} left undesigned at the node budget"
                    if self.truncated else "")
                 + (f", {self.unparsed} replies unusable" if self.unparsed else ""))
@@ -415,24 +425,71 @@ def _parse(reply: str, prefix: str) -> Tuple[Optional[str], List[Dict[str, str]]
     return record, children
 
 
-def _only_routing(record: str, keep: Sequence[str]) -> str:
-    """``record`` with every routing-table line that names a path outside ``keep`` gone."""
-    kept = {normalise(p) for p in keep}
-    out, in_table = [], False
+def _fix_routing(record: str, keep: Sequence[Mapping[str, str]]) -> str:
+    """Make the routing table say exactly which children this node opened.
+
+    Upstream: "the Routing Table is your primary delegation tool ... they are the map
+    that makes recursive delegation work". A record whose table disagrees with the
+    children the architect just opened is a broken map, and the phase repairs it rather
+    than passing it on -- in both directions.
+
+    **Dropping** an entry the contract refused was always necessary: a table that
+    advertises a node nobody may write is a trap for the next manager, which would
+    delegate there and be refused in turn.
+
+    **Adding** a child the table forgot turned out to matter more. One architect
+    answered with five children and a `## Routing Table` section holding its API
+    Surface instead -- `` `__init__.py` — Exports get_regions(...) ``, then two
+    sentences about FlyWire. The children were queued and designed that run, so nothing
+    looked wrong. Then the budget ran out, and a later phase 1 resuming from records
+    rebuilt its queue from the **table**, found no routes in it, and dropped an entire
+    subtree of the brain -- five regions, silently, because the record and the reply had
+    disagreed and only the reply was ever right.
+    """
+    kept = [(normalise(c["path"]), (c.get("objective") or "").strip()) for c in keep]
+    names = {path for path, _ in kept}
+    out, in_table, seen, done = [], False, set(), False
+
+    def table_lines():
+        return [f"- `./{path}/` -> {objective or 'this subtree'}"
+                for path, objective in kept if path not in seen]
+
     for line in record.splitlines():
         if line.strip().lower().startswith(ROUTING_HEADING.lower()):
-            in_table = True
+            in_table, done = True, True
             out.append(line)
             continue
         if in_table:
             if line.startswith("## "):
+                out.extend(table_lines())
                 in_table = False
             elif line.strip().startswith("-"):
                 named = parse_routing(ROUTING_HEADING + "\n" + line)
-                if named and normalise(named[0]) not in kept:
+                if not named or normalise(named[0]) not in names:
                     continue
+                seen.add(normalise(named[0]))
         out.append(line)
+    if in_table:
+        out.extend(table_lines())
+    elif not done and kept:
+        # No routing section at all, and children to route to.
+        out += ["", ROUTING_HEADING] + table_lines()
     return "\n".join(out).rstrip("\n") + "\n"
+
+
+def repeats_an_ancestor(path: str) -> str:
+    """The ancestor a node's own name repeats, or `""`.
+
+    `.../receptor/types/catalog/types` is a node named after its own great-grandparent,
+    and so is `.../mushroom_body/.../mushroom_body`. Upstream states the counterweight
+    to "decompose MORE aggressively" in the same breath -- single responsibility, and
+    **shared capability belongs at the lowest common ancestor** -- and a directory named
+    after something already above it is that rule broken in the one way a tree can show:
+    whatever is really in there belongs to the ancestor, or the ancestor's name was
+    wrong. Either way two places now claim it and no later agent can tell which.
+    """
+    parts = [p for p in normalise(path).split("/") if p]
+    return parts[-1] if len(parts) > 1 and parts[-1] in parts[:-1] else ""
 
 
 def missing_sections(record: str) -> List[str]:
