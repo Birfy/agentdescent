@@ -623,6 +623,13 @@ one, because at delegation time the file did not exist yet. So an edit that woul
 shadow an existing node directory is dropped and counted as `shadowing_edits`, on both
 the leaf path and the accountability turn.
 
+With both halves in, `--mode b` stops asking to be let off. The rerun ends on
+`stop_when` — the root agent asked twice and the second time said *complete*: "All 51
+tests pass, every required entry point is implemented with real physics … using lazy
+imports". No collision survives in the result, and it got there in **243 rollouts**
+rather than 2 003, because none of the work landed in a directory no import could
+reach.
+
 ## The episode, and `--executor claude-code`
 
 The gap that produced that result is the one the table below calls the largest, so the
