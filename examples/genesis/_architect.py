@@ -210,12 +210,20 @@ class ArchitectPhase:
     """
 
     def __init__(self, complete, *, contracts: Sequence[str] = (),
-                 max_depth: int = 3, max_nodes: int = 12, root_path: str = ""):
+                 max_depth: int = 3, max_nodes: int = 12, root_path: str = "",
+                 resume: bool = False):
         self._complete = complete
         self._contracts = tuple(contracts)
         self._max_depth = max_depth
         self._max_nodes = max_nodes
         self._root = normalise(root_path)
+        #: Keep a record an earlier phase 1 already wrote instead of re-asking.
+        #: Off by default and deliberately: at `root_path=""` the record already in
+        #: `given` is the *harness* record, which is generated rather than designed,
+        #: and skipping the root because of it would leave the tree with no design at
+        #: all. The runner turns it on only for `--continue-from`, where a record that
+        #: is there really is an earlier phase 1's work.
+        self._resume = resume
         #: Nodes it designed, and the deepest it went.
         self.nodes: List[str] = []
         self.depth = 0
@@ -226,6 +234,8 @@ class ArchitectPhase:
         self.truncated = 0
         #: Records rewritten after the code moved on -- upstream's 62 updates.
         self.revised = 0
+        #: Nodes an earlier phase 1 already designed and this one kept.
+        self.reused = 0
 
     def design(self, given: Mapping[str, str], objective: str) -> Dict[str, str]:
         """``given`` plus one ``CONTEXT.md`` per node the architect decided on."""
@@ -233,6 +243,20 @@ class ArchitectPhase:
         queue: List[Tuple[str, str, int]] = [(self._root, objective, 0)]
         while queue and len(self.nodes) < self._max_nodes:
             path, node_objective, depth = queue.pop(0)
+            key = f"{path}/{CONTEXT_FILE}" if path else CONTEXT_FILE
+            if self._resume and state.get(key):
+                # Already designed, by an earlier phase 1 that ran out of budget.
+                # Re-asking would spend a call to get the same answer and would throw
+                # away a record the run may already have grown code against; the thing
+                # that revises a record once code exists is the refinement architect,
+                # not this. So take the routing table as the design and walk on.
+                self.reused += 1
+                self.nodes.append(path)
+                self.depth = max(self.depth, depth)
+                if depth + 1 <= self._max_depth:
+                    queue += [(normalise(child), node_objective, depth + 1)
+                              for child in parse_routing(state[key])]
+                continue
             record, children = self._ask(state, path, node_objective, depth)
             if record is None:
                 continue
@@ -313,6 +337,8 @@ class ArchitectPhase:
 
     def summary(self) -> str:
         return (f"designed {len(self.nodes)} nodes, deepest {self.depth}"
+                + (f" ({self.reused} kept from an earlier phase 1)"
+                   if self.reused else "")
                 + (f", {self.refused} outside their subtree" if self.refused else "")
                 + (f", {self.mistaken_nodes} file paths refused as nodes"
                    if self.mistaken_nodes else "")

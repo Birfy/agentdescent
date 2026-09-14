@@ -495,7 +495,10 @@ def main(argv=None) -> None:
                                                objective_for(args.domain))
         architect = ArchitectPhase(complete, contracts=spec.CONTRACTS,
                                    max_depth=args.depth, max_nodes=args.nodes,
-                                   root_path=root)
+                                   root_path=root,
+                                   # A phase 1 that ran out of budget is worth
+                                   # continuing rather than paying for twice.
+                                   resume=bool(args.continue_from))
         initial = architect.design(initial, objective_for(args.domain))
         print(f"\nPhase 1  : architect {architect.summary()}")
         for path in architect.nodes:
