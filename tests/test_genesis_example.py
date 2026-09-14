@@ -40,6 +40,7 @@ from examples.genesis._octopus import OctopusConflict, git_available, three_way
 from examples.genesis._spatial import SpatialContract, parse_situated_edits
 from examples.genesis._worktree import (Rollout, WorktreeLedger,
                                         git_worktrees_available)
+from examples.genesis._suite import TestSuite as SuiteOfTests
 from examples.genesis._suite import cold_start, preflight
 from examples.genesis._world import (CONTEXT_FILE, KNOWN_ISSUES, ROUTING_HEADING,
                                      SKILLS_DIR, TRUNCATED,
@@ -1432,6 +1433,129 @@ def test_every_domain_briefs_its_agents_with_an_objective_not_a_catalogue_line()
     # ... and the one thing it does not say is how to decompose below that root.
     for word in ("geometry", "potentials", "forces", "integrate", "observe"):
         assert f"src/{word}" not in md.OBJECTIVE
+
+
+# ---------------------------------------------------------------------------
+# Blind mode: the agents write the tests, and cannot read the acceptance suite
+# ---------------------------------------------------------------------------
+
+_ACCEPTANCE = {"acceptance/test_sparse.py": (
+    "TOLERANCE = 0.15\n\n\n"
+    "def test_the_code_is_sparse_at_every_concentration():\n"
+    "    assert 0.04 < 0.05 < TOLERANCE\n")}
+
+
+def _blind_suite(**kw):
+    return SuiteOfTests(name="blind", given={"spec/CONTEXT.md": "# spec\n"},
+                     frozen=("spec/**",), hidden=_ACCEPTANCE,
+                     requirements={"sparse": "SPEC 1.3 -- the mushroom body code."},
+                     **kw)
+
+
+def test_a_blind_suite_never_puts_its_tests_in_the_repository():
+    """Upstream the agents write the tests; the external suite is the experimenter's.
+
+    This port had it backwards -- a human wrote every assertion and then pasted its
+    **source** into the prompt, which is the strongest hint there is. An agent handed
+    the assertion is not implementing a specification, it is writing to an assertion.
+    """
+    suite = _blind_suite()
+    assert suite.blind
+    assert not any(path.startswith("acceptance/") for path in suite.initial_files())
+    assert not any("test_" in path for path in suite.initial_files())
+
+
+def test_a_blind_prompt_carries_the_requirement_and_not_the_assertion():
+    suite = _blind_suite()
+    task = [t for t in suite.build_tasks() if not t.meta.get("suite")][0]
+    assert "SPEC 1.3" in task.prompt
+    # The name is a requirement written as a sentence, and that much is deliberate.
+    assert "the code is sparse at every concentration" in task.prompt
+    # The threshold, the tolerance and the inputs are not.
+    assert "TOLERANCE" not in task.prompt and "0.15" not in task.prompt
+    assert "assert" not in task.prompt
+
+
+def test_a_sighted_suite_still_shows_its_source():
+    """The default is unchanged: `md` and the others still hand over the test."""
+    task = [t for t in md.build_tasks() if not t.meta.get("suite")][0]
+    assert "def test_" in task.prompt and "assert" in task.prompt
+
+
+def test_the_parent_runs_the_tests_the_child_wrote():
+    """`mix test`, theirs. A child whose own tests fail has not finished.
+
+    Everything in the artifact is the agents' own work by construction -- the
+    acceptance suite is merged into a scratch copy only while one evaluation runs --
+    so every `test_*` found here was written by an agent.
+    """
+    suite = _blind_suite()
+    good = {"src/a/kc.py": "X = 1\n", "src/a/test_kc.py": "def test_x():\n    assert 1\n"}
+    bad = {"src/a/kc.py": "X = 1\n",
+           "src/a/test_kc.py": "def test_x():\n    assert 0, 'nope'\n"}
+    assert suite.own_test_failures(good) == []
+    assert "nope" in suite.own_test_failures(bad)[0]
+    # Scoped to one node's subtree, which is what a parent reviewing one child wants.
+    assert suite.own_test_failures(bad, "src/b") == []
+    assert suite.own_test_failures(bad, "src/a") != []
+
+
+def test_a_node_that_wrote_code_and_no_test_is_sent_back():
+    """Upstream every node is accountable for its own subtree, and tests are done.
+
+    A node with untested code is a node whose parent has nothing to run.
+    """
+    suite = _blind_suite()
+    review = suite.own_review()
+
+    class _Parent:
+        def __init__(self, state, path):
+            self.state, self.world = state, LocalWorld(version=0, path=path)
+
+    untested = [Edit("src/a", "src/a/kc.py", "X = 1\n")]
+    verdict = review(_Parent({CONTEXT_FILE: "# root\n"}, "src/a"), untested)
+    assert verdict is not None and verdict[0] == "rework"
+    assert "no test" in verdict[1]
+
+    tested = untested + [Edit("src/a", "src/a/test_kc.py", "def test_x():\n    assert 1\n")]
+    assert review(_Parent({CONTEXT_FILE: "# root\n"}, "src/a"), tested) is None
+
+    failing = [Edit("src/a", "src/a/test_kc.py", "def test_x():\n    assert 0\n")]
+    verdict = review(_Parent({CONTEXT_FILE: "# root\n"}, "src/a"), failing)
+    assert verdict is not None and verdict[0] == "rework"
+    assert "your own tests fail" in verdict[1]
+
+
+def test_the_run_reports_how_many_model_calls_were_in_flight_at_once():
+    """`usage.seconds / wallclock` looks like it answers this and does not.
+
+    `seconds` spans the whole process, including the phases that run before
+    `evolve()` does; the `wallclock` a stage profile reports covers only the stage. The
+    md run's ratio came out at 8.2 with four workers, which is not a measurement of
+    anything. This counts the thing directly.
+    """
+    import threading
+
+    from examples._common import ConcurrencyGauge
+
+    gauge = ConcurrencyGauge()
+    assert gauge.peak == 0
+    inside = threading.Barrier(3, timeout=10)
+
+    def slow(prompt):
+        inside.wait()
+        return prompt
+
+    wrapped = gauge.wrap(slow)
+    threads = [threading.Thread(target=wrapped, args=("x",)) for _ in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert gauge.peak == 3
+    # And it comes back down, so a later quiet phase does not inflate the peak.
+    gauge.wrap(lambda p: p)("x")
+    assert gauge.peak == 3
 
 
 def test_a_node_may_not_shadow_a_sibling_module():

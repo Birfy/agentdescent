@@ -84,8 +84,8 @@ from agentdescent.filetree import load_tree, match_any
 from agentdescent.governance import SKILL_BLAST_RADIUS, classify
 from agentdescent.sampling import DifficultyWeighted
 from agentdescent.staleness import get_policy
-from examples._common import (add_standard_args, budget_kwargs, completion_for,
-                              confirm, report_engine, worker_count)
+from examples._common import (ConcurrencyGauge, add_standard_args, budget_kwargs,
+                              completion_for, confirm, report_engine, worker_count)
 
 from ._delegation import RecursiveDelegation
 from . import _domain as minilang
@@ -427,6 +427,12 @@ def main(argv=None) -> None:
              " -- the tail of the case list"))
 
     usage = Usage()
+    #: How many model calls were in flight at once. The engine's barrier-free
+    #: concurrency *is* `n_workers` and its merge side runs at `max_concurrency=1`,
+    #: so this should come back equal to `--workers`; it is reported because
+    #: `usage.seconds / wallclock` looks like it answers the same question and does
+    #: not -- `seconds` spans phases that run before `evolve()` does.
+    args._concurrency = ConcurrencyGauge()
     complete = None
     if args.model:
         if not confirm(args):
@@ -640,7 +646,9 @@ def main(argv=None) -> None:
               f"partial={judge.partial}")
     if log.pending_rework:
         print(f"open rework     : {sorted(log.pending_rework)}")
-    print(f"model usage     : {usage.summary()}")
+    print(f"model usage     : {usage.summary()}"
+          + (f", peak {args._concurrency.peak} concurrent"
+             if args._concurrency.peak else ""))
     report_engine(result)
 
     if args.write_repo:

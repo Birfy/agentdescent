@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import Optional
+import threading
+from typing import Callable, Optional
 
 from agentdescent.agents import Usage, claude, openai_compatible
 
@@ -395,6 +396,42 @@ def worker_count(args: argparse.Namespace, requested: int) -> int:
     return 1
 
 
+class ConcurrencyGauge:
+    """How many model calls were actually in flight at once, and at most.
+
+    `Usage` records calls, tokens and seconds, and none of those answer "how hard did
+    this run lean on the endpoint". The arithmetic that looks like it should --
+    `usage.seconds / wallclock` -- does not: `seconds` covers the whole process
+    including phases that run before `evolve()` does, while the `wallclock` a stage
+    profile reports covers only the stage, so the ratio comes out above the worker
+    count and means nothing. This counts the thing directly.
+
+    `agentdescent/` is not the place for it: the engine's concurrency is its own
+    business and an example asking what it *observed* is the example's business.
+    """
+
+    __slots__ = ("peak", "_live", "_lock")
+
+    def __init__(self) -> None:
+        self.peak = 0
+        self._live = 0
+        self._lock = threading.Lock()
+
+    def wrap(self, complete: Callable[[str], str]) -> Callable[[str], str]:
+        def gauged(prompt: str) -> str:
+            with self._lock:
+                self._live += 1
+                if self._live > self.peak:
+                    self.peak = self._live
+            try:
+                return complete(prompt)
+            finally:
+                with self._lock:
+                    self._live -= 1
+
+        return gauged
+
+
 def completion_for(args: argparse.Namespace, *, usage: Optional[Usage] = None,
                    **kwargs):
     """Build the ``Completion`` that ``--provider`` and ``--model`` select.
@@ -418,8 +455,10 @@ def completion_for(args: argparse.Namespace, *, usage: Optional[Usage] = None,
     leave reasoning *on* while the run reports it off -- which is the failure
     that matters, since the wall-clock would then be attributed to the scheduler.
     """
+    gauge = getattr(args, "_concurrency", None)
     if is_openai_compatible(args):
-        return openai_compatible(model=args.model, usage=usage, **kwargs)
+        built = openai_compatible(model=args.model, usage=usage, **kwargs)
+        return gauge.wrap(built) if gauge is not None else built
     if getattr(args, "no_thinking", False):
         kwargs.setdefault("thinking", {"type": "disabled"})
     # --timeout reaches this path too: claude()'s 120s default assumes Claude
@@ -428,4 +467,5 @@ def completion_for(args: argparse.Namespace, *, usage: Optional[Usage] = None,
     # 120s x 3 retries before any evolution happened.
     if getattr(args, "timeout", None):
         kwargs.setdefault("timeout", float(args.timeout))
-    return claude(model=args.model, usage=usage, **kwargs)
+    built = claude(model=args.model, usage=usage, **kwargs)
+    return gauge.wrap(built) if gauge is not None else built
