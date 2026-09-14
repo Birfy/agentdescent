@@ -1564,6 +1564,66 @@ def test_the_run_reports_how_many_model_calls_were_in_flight_at_once():
     assert gauge.peak == 3
 
 
+def test_a_root_session_gets_a_bigger_turn_budget_than_a_child():
+    """Upstream's own two numbers: up to 2,048 model-tool turns at the root, 128 below.
+
+    A root agent is running the whole objective and a child one node of it, so a single
+    ceiling for both either starves the root or hands every leaf a session it has no
+    use for. The port had one number, 24, for both.
+    """
+    from examples.genesis._claude_code import ClaudeCodeExecutor
+
+    executor = ClaudeCodeExecutor()
+    assert executor.ROOT_TURNS == 2048 and executor.CHILD_TURNS == 128
+    assert executor._root_turns == 2048 and executor._max_turns == 128
+    root = executor._command("x", executor._root_turns)
+    child = executor._command("x", executor._max_turns)
+    assert root[root.index("--max-turns") + 1] == "2048"
+    assert child[child.index("--max-turns") + 1] == "128"
+    # One number given explicitly still means one number, for a cheap run.
+    pinned = ClaudeCodeExecutor(max_turns=12)
+    assert pinned._root_turns == 12 and pinned._max_turns == 12
+
+
+def test_a_record_is_maintained_rather_than_written_once():
+    """Upstream: 26 `CONTEXT.md` creations and **62 later accepted updates**.
+
+    This port wrote them on exactly two occasions, and a `--mode a` run sat at 0.938
+    reading a map of a layout the work had already left behind -- nothing in the
+    mechanism could say the record was stale. Upstream's architect does not stop at
+    design: it reviews the implementation and re-spawns refinement architects where a
+    node misaligns (`agents/architect.ex`).
+    """
+    from examples.genesis._architect import misaligned
+
+    record = ("## Intent\nx\n\n## API Surface\n`kc.py` does things.\n\n"
+              "## Routing Table\n- `./src/a/gone/` -> nothing is here\n")
+    drift = misaligned(record, {"src/a/kc.py": "x", "src/a/extra.py": "y"}, "src/a")
+    assert "does not exist" in drift            # a route to a directory nobody made
+    assert "extra.py" in drift                  # a file the record never mentions
+    assert misaligned(record, {"src/a/kc.py": "x", "src/a/gone/y.py": "z"},
+                      "src/a") == ""
+
+    # And the hook produces a record edit rather than a verdict, because a verdict
+    # cannot fix a map.
+    revisions = []
+
+    def refine(path, state):
+        revisions.append(path)
+        return "## Intent\nrewritten\n"
+
+    policy = RecursiveDelegation(manager=lambda b: [], executor=lambda b: [],
+                                 log=WorldLog(), refine=refine)
+    state = {CONTEXT_FILE: "# root\n"}
+    proposals = policy.propose(_proposal_ctx(state, Task(id="t", prompt="x")))
+    assert revisions == [""]
+    assert policy.records_revised == 1
+    # A leaf that delegated nothing still gets its record refreshed -- a leaf is where
+    # the code lands, so its API Surface is the one that goes stale first.
+    assert any(CONTEXT_FILE in payload and "rewritten" in payload
+               for payload in proposals)
+
+
 def test_a_node_may_not_shadow_a_sibling_module():
     """`rdf/` next to `rdf.py` are one name to Python, and the module wins.
 
@@ -1808,7 +1868,7 @@ def test_the_session_is_fenced_before_the_contract_ever_sees_it(tmp_path):
     """Three fences, and this is the first two: the frozen globs are denied by name in
     the session's own settings, and the network tools are off."""
     executor = ClaudeCodeExecutor(frozen=md.FROZEN, binary="claude")
-    command = executor._command("do the thing")
+    command = executor._command("do the thing", executor.CHILD_TURNS)
     assert "--disallowedTools" in command
     assert "WebFetch,WebSearch,Task" in command
     assert "--permission-mode" in command and "acceptEdits" in command

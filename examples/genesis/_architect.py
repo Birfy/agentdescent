@@ -34,7 +34,8 @@ from ._world import (CONTEXT_FILE, LocalWorld, ROUTING_HEADING,
                      STANDARD_SECTIONS, looks_like_file, normalise,
                      parse_routing, shadowed_by_module)
 
-__all__ = ["ARCHITECT_PROMPT", "ArchitectPhase", "harness_record"]
+__all__ = ["ARCHITECT_PROMPT", "REFINE_PROMPT", "ArchitectPhase",
+           "harness_record", "misaligned"]
 
 ARCHITECT_PROMPT = """You are an architect agent in a recursive software world, \
 situated at the repository path `{path}`. You design; you do not implement.
@@ -100,6 +101,61 @@ Reply with ONE JSON object and nothing else:
   "children": [{{"path": "{path_prefix}<name>", "objective": "<one sentence>"}}]}}
 
 An empty `children` list means this node is a leaf and its files are written here."""
+
+
+REFINE_PROMPT = """You are an architect agent, returning to a node you designed. \
+It has code in it now, and the record no longer describes what is there.
+
+{context}
+
+THE OBJECTIVE
+{objective}
+
+WHAT DRIFTED
+{reason}
+
+Rewrite this node's `CONTEXT.md` so it describes the directory **as it actually is**. \
+Keep the four sections and their order -- `## Intent`, `## API Surface`, \
+`## Constraints`, `## Routing Table`. Name the files that are here and what each one \
+really exposes; route only to child directories that exist. Carry over anything under \
+`## Known Issues` that is still true.
+
+You are revising a record, not redesigning the node: do not invent children, do not \
+rename files, and do not describe work you would rather someone had done. If the code \
+went somewhere the old record did not anticipate, the record is what is wrong.
+
+Reply with ONE JSON object and nothing else:
+{{"record": "<the whole CONTEXT.md, markdown>"}}"""
+
+
+def misaligned(record: str, state: Mapping[str, str], path: str) -> str:
+    """Why this node's record no longer describes its directory, or `""`.
+
+    Upstream's archive shows 26 `CONTEXT.md` creations and **62 later accepted
+    updates affecting 19 files**: a record is maintained, not written once. This port
+    wrote them on exactly two occasions, and the cost showed -- a `--mode a` run sat at
+    0.938 because the tree it inherited described a layout the work had already left
+    behind, and nothing in the mechanism could say so.
+
+    Two drifts, both cheap to see and both actionable: a routing table that promises a
+    child directory nobody ever created, and a file sitting at the node that the record
+    never mentions. Either one sends the next agent to read a map of somewhere else.
+    """
+    prefix = f"{path}/" if path else ""
+    here = sorted(key for key in state
+                  if key.startswith(prefix) and "/" not in key[len(prefix):]
+                  and key.endswith(".py") and not key.endswith("__init__.py"))
+    reasons = []
+    for child in parse_routing(record):
+        child = normalise(child)
+        if not any(key == child or key.startswith(child + "/") for key in state):
+            reasons.append(f"the routing table sends work to `{child}/`, "
+                           f"which does not exist")
+    undocumented = [key for key in here if key.rsplit("/", 1)[-1] not in record]
+    if undocumented:
+        reasons.append("the API Surface does not mention "
+                       + ", ".join(f"`{k}`" for k in undocumented[:4]))
+    return "; ".join(reasons[:3])
 
 
 #: The repository root in a formation run, and the one record phase 1 does not write.
@@ -168,6 +224,8 @@ class ArchitectPhase:
         self.unparsed = 0
         #: Nodes still queued when the budget ran out.
         self.truncated = 0
+        #: Records rewritten after the code moved on -- upstream's 62 updates.
+        self.revised = 0
 
     def design(self, given: Mapping[str, str], objective: str) -> Dict[str, str]:
         """``given`` plus one ``CONTEXT.md`` per node the architect decided on."""
@@ -227,6 +285,31 @@ class ArchitectPhase:
         if queue:
             self.truncated = len(queue)
         return state
+
+    def refine(self, state: Mapping[str, str], path: str, objective: str,
+               reason: str) -> Optional[str]:
+        """Re-spawn an architect on one node that has drifted, and return its record.
+
+        Upstream's architect does not stop at design. It works "architecture & design ->
+        implementation delegation -> **review & accountability**", runs the build,
+        reviews the implementation, and re-spawns refinement architects where a node
+        misaligns (`agents/architect.ex`). This port stopped after the design, so a
+        record written before any code existed stayed the map for ever.
+        """
+        world = LocalWorld(version=0, path=path, readonly=self._contracts)
+        try:
+            reply = self._complete(REFINE_PROMPT.format(
+                objective=objective, reason=reason,
+                context=world.situate(state, contracts=self._contracts))) or ""
+        except Exception:  # noqa: BLE001 - one dead call costs one revision
+            self.unparsed += 1
+            return None
+        record, _ = _parse(reply, f"{path}/" if path else "")
+        if record is None:
+            self.unparsed += 1
+            return None
+        self.revised += 1
+        return record
 
     def summary(self) -> str:
         return (f"designed {len(self.nodes)} nodes, deepest {self.depth}"

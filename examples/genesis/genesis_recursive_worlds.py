@@ -93,7 +93,8 @@ from . import _fly as fly
 from . import _jqx as jqx
 from . import _md as md
 from . import _stackvm as stackvm
-from ._architect import ArchitectPhase, harness_record, missing_sections
+from ._architect import (ArchitectPhase, harness_record, misaligned,
+                         missing_sections)
 from ._claude_code import ClaudeCodeExecutor, claude_code_available
 from ._extract import ExtractPhase
 from ._judge import ParentJudge
@@ -273,6 +274,13 @@ def build_parser() -> argparse.ArgumentParser:
                              "domain's empty one. With --mode a this is the Context "
                              "Tree extraction upstream runs on an existing codebase; "
                              "the frozen contract is always the domain's own")
+    parser.add_argument("--no-refine", action="store_true",
+                        help="do not re-spawn an architect on a node whose record has "
+                             "drifted from its files (upstream's architect Phase 3)")
+    parser.add_argument("--nodes", type=int, default=12,
+                        help="how many CONTEXT.md records phase 1 may write. The fly "
+                             "domain's architect named 17 children it never reached at "
+                             "the default, so the tree came out two deep and truncated")
     parser.add_argument("--architect", action="store_true",
                         help="upstream's Phase 1: an agent designs the CONTEXT.md tree "
                              "-- intent, API surface, constraints, routing tables -- "
@@ -481,7 +489,8 @@ def main(argv=None) -> None:
         initial[CONTEXT_FILE] = harness_record(root, spec.FROZEN,
                                                objective_for(args.domain))
         architect = ArchitectPhase(complete, contracts=spec.CONTRACTS,
-                                   max_depth=args.depth, root_path=root)
+                                   max_depth=args.depth, max_nodes=args.nodes,
+                                   root_path=root)
         initial = architect.design(initial, objective_for(args.domain))
         print(f"\nPhase 1  : architect {architect.summary()}")
         for path in architect.nodes:
@@ -520,7 +529,28 @@ def main(argv=None) -> None:
                                       model=(args.model if args.provider == "claude-cli"
                                              else None),
                                       max_turns=args.max_turns)
+    def _refine(path, state):
+        """Upstream's architect Phase 3, as a hook on the accountability pass.
+
+        It does not stop at design: it reviews the implementation and re-spawns
+        refinement architects where a node misaligns (`agents/architect.ex`). This port
+        stopped after the design, so a record written before any code existed stayed the
+        map for ever -- and a `--mode a` run sat at 0.938 reading a map of a layout the
+        work had already left behind. Upstream's archive shows 26 record creations and
+        **62 later accepted updates**; this is where the updates come from.
+        """
+        if architect is None:
+            return None
+        key = f"{path}/{CONTEXT_FILE}" if path else CONTEXT_FILE
+        record = state.get(key)
+        if not record:
+            return None
+        reason = misaligned(record, state, path)
+        return architect.refine(state, path, objective_for(args.domain),
+                                reason) if reason else None
+
     delegation = RecursiveDelegation(
+        refine=None if (architect is None or args.no_refine) else _refine,
         rollout_factory=(None if ledger is None else lambda: Rollout(ledger)),
         manager=spec.llm_manager(complete) if complete else spec.offline_manager,
         executor=(sessions if sessions is not None else

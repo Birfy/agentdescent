@@ -97,14 +97,23 @@ class ClaudeCodeExecutor:
     return type, and the edits it produces go through the same spatial contract.
     """
 
+    #: Upstream's own budget, and the two numbers are not the same: a root agent gets
+    #: up to **2,048** model-tool turns and a child **128**. A root is running the whole
+    #: objective and a child one node of it, so one ceiling for both either starves the
+    #: root or hands every leaf a session it has no use for.
+    ROOT_TURNS = 2048
+    CHILD_TURNS = 128
+
     def __init__(self, *, frozen: Sequence[str] = (), binary: str = "claude",
-                 model: str = "", max_turns: int = 24, timeout: float = 900.0,
+                 model: str = "", max_turns: int = 0, root_turns: int = 0,
+                 timeout: float = 900.0,
                  allow_bash: bool = True, failure: str = "",
                  root: Optional[str] = None):
         self._frozen = tuple(frozen)
         self._binary = binary
         self._model = model
-        self._max_turns = max_turns
+        self._max_turns = max_turns or self.CHILD_TURNS
+        self._root_turns = root_turns or max_turns or self.ROOT_TURNS
         self._timeout = timeout
         self._allow_bash = allow_bash
         self._failure = failure
@@ -151,7 +160,7 @@ class ClaudeCodeExecutor:
                   encoding="utf-8") as handle:
             json.dump(settings, handle)
 
-    def _command(self, prompt: str) -> List[str]:
+    def _command(self, prompt: str, turns: int) -> List[str]:
         tools = ["Read", "Write", "Edit", "Glob", "Grep", "TodoWrite"]
         if self._allow_bash:
             # The point of a session rather than a completion is that it can run the
@@ -160,7 +169,7 @@ class ClaudeCodeExecutor:
         command = [self._binary, "-p", prompt,
                    "--output-format", "json",
                    "--permission-mode", "acceptEdits",
-                   "--max-turns", str(self._max_turns),
+                   "--max-turns", str(turns),
                    "--allowedTools", ",".join(tools),
                    "--disallowedTools", "WebFetch,WebSearch,Task"]
         if self._model:
@@ -175,7 +184,8 @@ class ClaudeCodeExecutor:
                                          output=(brief.output or "")[:400],
                                          reward=brief.reward) if self._failure else "")
         try:
-            out = subprocess.run(self._command(prompt), cwd=workspace,
+            turns = self._root_turns if brief.depth == 0 else self._max_turns
+            out = subprocess.run(self._command(prompt, turns), cwd=workspace,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                  timeout=self._timeout)
         except Exception:  # noqa: BLE001 - a dead session costs its episode

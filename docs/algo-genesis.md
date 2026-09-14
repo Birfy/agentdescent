@@ -501,7 +501,20 @@ manager *"Own `src/__init__.py`"*. It delegated every time instead.
 Upstream's Architect works in three phases — *architecture & design →
 implementation delegation → **review & accountability*** — and is "ACCOUNTABLE for
 all code in its node path" (`agents/architect.ex:23`). This port stopped after the
-second. A manager now gets one turn at its own node **after** its children return,
+second, twice over: a manager never wrote its own node, and an architect never came
+back to a node it had designed.
+
+The second of those is now `--refine` (on by default, `--no-refine` turns it off).
+After a node's episode, its record is checked against what is actually in the
+directory — a routing table promising a child nobody created, an `## API Surface`
+that never mentions a file sitting right there — and where it has drifted, an
+architect is re-spawned **on that one node** to rewrite the record against the code
+as it is. It fires on leaves too, and leaves need it most: a leaf is where the code
+lands, so its API Surface is the first thing to go stale. This is where upstream's
+**62 later accepted `CONTEXT.md` updates** come from, against this port's previous
+two occasions — and a `--mode a` run sat at 0.938 for 30 003 rollouts reading a map
+of a layout the work had already left behind, with nothing in the mechanism able to
+say so. A manager now gets one turn at its own node **after** its children return,
 seeing the tree as they left it, restricted to files directly at the node because a
 manager free to rewrite its children's work would make the decomposition
 decorative (`--no-accountability` turns it back into a pure router). `situate()`
@@ -805,7 +818,7 @@ run — the one `md` stands in for — from §4.1 and the appendix tables.
 | wall clock | **123.402 h** (666.385 h of agent time) | 0.6 h | no — the domain is a stand-in, by design |
 | archived agent episodes | **1,019** | 237 (from ~42 proposals over 4 000 rollouts) | in kind only |
 | observed delegation depth | **5** (configured max 8, retries 15) | 3 (configured max 4) | in kind — both bottom out below their ceiling |
-| what one episode *is* | a supervised session of **up to 2 048 root turns / 128 child turns**, with file, shell and test tools | **one model call** (plus one for a manager's accountability turn, one for the parent's review) | **no**, and this is the largest single gap |
+| what one episode *is* | a supervised session of **up to 2 048 root turns / 128 child turns**, with file, shell and test tools | **one model call** by default; `--executor claude-code` makes it a Claude Code session at upstream's own two budgets — 2 048 at the root, 128 below | **with `--executor claude-code`**, and a plain completion otherwise |
 | result size | 750 tracked files, **248 989** physical lines | 25 files, ~700 lines | no |
 | model-token cost | **US$44.3760** | not billed by this endpoint; 2.9 M prompt + 0.15 M completion tokens | no |
 | concurrency | max **22** overlapping episodes | 4 workers | in kind |
