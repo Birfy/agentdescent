@@ -38,7 +38,8 @@ from ._world import SKILLS_DIR
 
 __all__ = ["CASE_NOUN", "CONTRACTS", "FLY", "FROZEN", "GROUP_NOUN", "HELD_OUT_FRAC",
            "OBJECTIVE", "REQUIRES_MODEL", "SCORING", "build_tasks", "initial_files",
-           "llm_executor", "llm_manager", "make_runner", "own_review", "reward",
+           "FAILURE", "llm_executor", "llm_manager", "make_runner", "own_review",
+           "reward",
            "suite_failures", "suite_review"]
 
 #: 需求和驱动。人写的全部，拒绝给任何提案，评分前恢复原样。
@@ -591,6 +592,10 @@ HELD_OUT_FRAC = FLY.held_out_frac()
 
 def llm_manager(complete):
     return _llm_manager(complete)
+
+
+#: 失败时给执行者看什么。blind 域必须用这一套：需求、断言名、它报了什么，没有源码。
+FAILURE = BLIND_FAILURE
 
 
 def llm_executor(complete, *, editable=("**",), frozen=FROZEN):

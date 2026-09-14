@@ -25,7 +25,7 @@ from typing import Callable, Optional
 from agentdescent.agents import Usage, claude, openai_compatible
 
 
-PROVIDER_CHOICES = ("claude", "openai", "glm")
+PROVIDER_CHOICES = ("claude", "claude-cli", "openai", "glm")
 # Providers served by the OpenAI-compatible adapter; 'glm' is a legacy alias.
 OPENAI_COMPATIBLE = ("openai", "glm")
 DEFAULT_MODEL = "claude-haiku-4-5"
@@ -69,9 +69,10 @@ def add_standard_args(
         "--provider",
         default="claude",
         choices=PROVIDER_CHOICES,
-        help=("claude, or any OpenAI-compatible endpoint (DeepSeek, GLM, "
-              "vLLM, ...) via OPENAI_BASE_URL + OPENAI_API_KEY; 'glm' is a "
-              "legacy alias"),
+        help=("claude via the API, `claude-cli` via the locally "
+              "authenticated Claude Code binary, or any OpenAI-compatible "
+              "endpoint (DeepSeek, GLM, vLLM, ...) via OPENAI_BASE_URL + "
+              "OPENAI_API_KEY; 'glm' is a legacy alias"),
     )
     parser.add_argument("--model", default=model_default, help=model_help)
     parser.add_argument("--seed", type=int, default=0)
@@ -396,6 +397,72 @@ def worker_count(args: argparse.Namespace, requested: int) -> int:
     return 1
 
 
+def claude_cli(model: str = "haiku", *, usage: Optional[Usage] = None,
+               timeout: float = 300.0, binary: str = "claude"):
+    """A ``Completion`` that shells out to the locally authenticated Claude Code CLI.
+
+    The SDK path needs an ``ANTHROPIC_API_KEY``. The CLI is authenticated another way
+    entirely -- an OAuth session, a subscription, a corporate login -- and on a machine
+    where that is the credential that exists, there was no way to run a port at all.
+    A one-shot `claude -p` with every tool denied is a plain prompt-to-text function,
+    which is exactly what a ``Completion`` is.
+
+    Two honest caveats, because they change the output and not only the plumbing. The
+    CLI wraps the prompt in **its own** system prompt, its tool definitions and any
+    `CLAUDE.md` it finds, so a call carries tens of thousands of cached input tokens
+    that the API path would not, and the reply is coloured by an agent harness rather
+    than being a bare completion. And the cost lands on the CLI's credentials, not on
+    an API key any budget flag here can see.
+    """
+    import json as _json
+    import subprocess
+    import time
+
+    def complete(prompt: str) -> str:
+        argv = [binary, "-p", "--output-format", "json", "--model", model,
+                "--max-turns", "1", "--allowedTools", ""]
+        started = time.time()
+        try:
+            done = subprocess.run(argv, input=prompt, capture_output=True, text=True,
+                                  timeout=timeout)
+        except subprocess.TimeoutExpired:
+            if usage is not None:
+                usage.record(failed=True, seconds=time.time() - started)
+            raise RuntimeError(f"{binary} timed out after {timeout:.0f}s")
+        elapsed = time.time() - started
+        if done.returncode != 0:
+            if usage is not None:
+                usage.record(failed=True, seconds=elapsed)
+            raise RuntimeError(f"{binary} exited {done.returncode}: "
+                               f"{(done.stderr or '').strip()[:300]}")
+        try:
+            envelope = _json.loads(done.stdout)
+        except ValueError:
+            if usage is not None:
+                usage.record(failed=True, seconds=elapsed)
+            raise RuntimeError(f"{binary} did not return JSON: "
+                               f"{done.stdout.strip()[:300]}")
+        if envelope.get("is_error"):
+            if usage is not None:
+                usage.record(failed=True, seconds=elapsed)
+            raise RuntimeError(f"{binary} reported an error: "
+                               f"{str(envelope.get('result'))[:300]}")
+        if usage is not None:
+            counts = envelope.get("usage") or {}
+            # Cache reads and cache writes are prompt tokens that were really sent;
+            # `input_tokens` alone counts only the uncached remainder and would report
+            # 10 for a call that carried 28,000.
+            usage.record(prompt_tokens=sum(int(counts.get(k) or 0) for k in
+                                           ("input_tokens",
+                                            "cache_creation_input_tokens",
+                                            "cache_read_input_tokens")),
+                         completion_tokens=int(counts.get("output_tokens") or 0),
+                         seconds=elapsed)
+        return envelope.get("result") or ""
+
+    return complete
+
+
 class ConcurrencyGauge:
     """How many model calls were actually in flight at once, and at most.
 
@@ -456,6 +523,15 @@ def completion_for(args: argparse.Namespace, *, usage: Optional[Usage] = None,
     that matters, since the wall-clock would then be attributed to the scheduler.
     """
     gauge = getattr(args, "_concurrency", None)
+    if args.provider == "claude-cli":
+        if getattr(args, "no_thinking", False):
+            # Silently dropping it is the failure this module exists to prevent: the
+            # run would report thinking off while the CLI kept it on.
+            print("note: --no-thinking has no effect with --provider claude-cli; the "
+                  "CLI decides its own reasoning budget", file=sys.stderr)
+        built = claude_cli(model=args.model, usage=usage,
+                           timeout=float(getattr(args, "timeout", None) or 300.0))
+        return gauge.wrap(built) if gauge is not None else built
     if is_openai_compatible(args):
         built = openai_compatible(model=args.model, usage=usage, **kwargs)
         return gauge.wrap(built) if gauge is not None else built

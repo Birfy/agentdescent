@@ -510,7 +510,15 @@ def main(argv=None) -> None:
             return
         # The frozen globs are denied inside the session as well as enforced outside
         # it, and the failure block is the domain's own wording.
-        sessions = ClaudeCodeExecutor(frozen=spec.FROZEN, failure=TEST_FAILURE,
+        # The failure template is the domain's, not a constant: a blind domain must
+        # not hand the session the assertion's source, which is the whole point of it.
+        # And the session runs the model the run asked for -- left unset it takes the
+        # CLI's default, which on a `--provider claude-cli` run means the architect is
+        # on one model and every executor episode on another.
+        sessions = ClaudeCodeExecutor(frozen=spec.FROZEN,
+                                      failure=getattr(spec, "FAILURE", TEST_FAILURE),
+                                      model=(args.model if args.provider == "claude-cli"
+                                             else None),
                                       max_turns=args.max_turns)
     delegation = RecursiveDelegation(
         rollout_factory=(None if ledger is None else lambda: Rollout(ledger)),
