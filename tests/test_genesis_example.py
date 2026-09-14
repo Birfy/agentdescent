@@ -1426,9 +1426,15 @@ def test_every_domain_briefs_its_agents_with_an_objective_not_a_catalogue_line()
         objective = objective_for(domain)
         assert objective is not DOMAIN_BLURB[domain]
         assert objective != DOMAIN_BLURB[domain]
-        # Where the deliverable goes, and what has to be reachable from there.
-        assert "`src/`" in objective and "`src/__init__.py`" in objective
+        # Where the deliverable goes. That much is the contract in every domain --
+        # the run that this test exists for lost `src/` out of a routing table.
+        assert "`src/`" in objective
         assert len(objective) > len(DOMAIN_BLURB[domain])
+        # And what has to be reachable from there, stated however that domain states
+        # it: four domains name `src/__init__.py` and its entry points, and `fly`
+        # names the four functions its frozen driver imports, because there the
+        # public surface is whatever the driver reaches and nothing else.
+        assert "`src/__init__.py`" in objective or "`fly.py`" in objective
 
     # ... and the one thing it does not say is how to decompose below that root.
     for word in ("geometry", "potentials", "forces", "integrate", "observe"):

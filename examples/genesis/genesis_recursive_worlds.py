@@ -519,7 +519,11 @@ def main(argv=None) -> None:
                   spec.llm_executor(complete) if complete else spec.offline_executor),
         log=log, max_depth=args.depth, max_edits=4, contracts=spec.CONTRACTS,
         readonly=spec.FROZEN,
+        # Three links, and the middle one is the only one that can ask "did you test
+        # what you just wrote". A domain whose tests are the agents' own supplies it.
         review=chain_reviews(None if args.no_parent_tests else spec.suite_review(tasks),
+                             (getattr(spec, "own_review", lambda: None)()
+                              if not args.no_parent_tests else None),
                              code_review),
         accountability=not args.no_accountability)
     judge = ParentJudge(log=log, enabled=not args.engine_gate)
@@ -604,12 +608,22 @@ def main(argv=None) -> None:
     # rebound its own name on first call.
     whole = getattr(spec, "suite_failures", None)
     if whole is not None and delegation.last_state is not None:
-        failures = whole(result.state if isinstance(result.state, dict)
-                         else dict(result.state), audit=True)
-        print(f"suite, 1 process: {len(tasks) - len(failures)}/{len(tasks)}"
-              + ("" if not failures else
-                 "   <- these pass one-per-process and fail together:\n    "
-                 + "\n    ".join(failures[:6])))
+        state = result.state if isinstance(result.state, dict) else dict(result.state)
+        failures = whole(state, audit=True)
+        if getattr(getattr(spec, "FLY", None), "blind", False) or getattr(
+                spec, "REQUIRES_MODEL", False) and not hasattr(spec, "reference_tree"):
+            # A blind domain's repository suite is the agents' own, so there is no
+            # denominator from `tasks` to report it against -- count what is there.
+            written = sum(1 for p in state if p.endswith(".py")
+                          and p.rsplit("/", 1)[-1].startswith("test_"))
+            print(f"their own suite : {written} test file(s), "
+                  + ("all passing" if not failures else f"{len(failures)} failing:\n    "
+                     + "\n    ".join(failures[:6])))
+        else:
+            print(f"suite, 1 process: {len(tasks) - len(failures)}/{len(tasks)}"
+                  + ("" if not failures else
+                     "   <- these pass one-per-process and fail together:\n    "
+                     + "\n    ".join(failures[:6])))
     label = "audit reward" if audited else "held-out reward"
     print(f"{label:<16}: {result.final_reward:.3f}"
           + ("   (tests no agent ever saw)" if audited else ""))
