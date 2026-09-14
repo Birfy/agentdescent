@@ -1432,6 +1432,59 @@ def test_every_domain_briefs_its_agents_with_an_objective_not_a_catalogue_line()
         assert f"src/{word}" not in md.OBJECTIVE
 
 
+def test_a_review_finding_reaches_the_manager_that_can_act_on_it():
+    """A parent that returns work keeps the finding for its own turn.
+
+    `--mode a` over a repository whose `src/observe/rdf.py` was a zero stub shadowing
+    the real implementation at `src/observe/rdf/rdf.py`. The parent review diagnosed it
+    exactly -- "the actual file src/observe/rdf/rdf.py defines a function named rdf,
+    not histogram, so this import will fail at runtime" -- and rejected the child over
+    it. But `rdf.py` belongs to the *parent*; no child may write it. The finding went
+    into the child's `## Known Issues`, the node sat in `open rework` for 10 003
+    rollouts across two samplers, and the repository never moved off 0.812 -- while
+    rewriting that one parent-owned file takes it to 65/65.
+
+    Upstream review and accountability are one phase, run by the agent "ACCOUNTABLE for
+    all code in its node path". So the finding travels to the turn that can act on it.
+    """
+    seen = []
+
+    def manager(brief):
+        return [Delegation("src/observe/rdf", "implement the histogram")] \
+            if brief.world.path == "src/observe" else []
+
+    def executor(brief):
+        seen.append((brief.world.path, brief.objective))
+        if brief.world.path == "src/observe/rdf":
+            return [Edit("src/observe/rdf", "src/observe/rdf/rdf.py", "def rdf(): ...\n")]
+        return []
+
+    policy = RecursiveDelegation(
+        manager=manager, executor=executor, log=WorldLog(), max_depth=3,
+        review=lambda brief, edits: ("rejected", "defines rdf, not histogram"))
+    state = {CONTEXT_FILE: "# root\n", "src/observe/" + CONTEXT_FILE: "# observe\n"}
+    policy._episode(LocalWorld(version=0, path="src/observe"), "build it", state,
+                    _proposal_ctx(state, Task(id="t", prompt="x")), depth=0,
+                    rollout=None, base=None)
+
+    own = [objective for path, objective in seen if path == "src/observe"]
+    assert own, "the manager never took its own accountability turn"
+    # The finding, the node it came from, and whose job it now is.
+    assert "defines rdf, not histogram" in own[-1]
+    assert "`src/observe/rdf`" in own[-1]
+    assert "accountable for every file at `src/observe`" in own[-1]
+    assert policy.accountability_findings == 1
+
+    # No finding, no noise: an episode whose review returned nothing reads as before.
+    quiet = RecursiveDelegation(manager=lambda b: [], executor=executor, log=WorldLog())
+    seen.clear()
+    quiet._episode(LocalWorld(version=0, path="src/observe"), "build it", state,
+                   _proposal_ctx(state, Task(id="t", prompt="x")), depth=0,
+                   rollout=None, base=None)
+    assert "Your review returned work" not in seen[-1][1]
+    assert quiet.accountability_findings == 0
+
+
 def test_phase_one_designs_the_codebase_and_not_the_repository_around_it():
     """The root record is generated, and phase 1 starts at the package root.
 

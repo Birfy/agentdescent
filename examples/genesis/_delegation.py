@@ -203,6 +203,9 @@ class RecursiveDelegation:
     #: edits it offered there that belonged to a child and were declined.
     accountability_edits: int = 0
     accountability_declined: int = 0
+    #: Review findings carried into a manager's own turn rather than left with the
+    #: child that could not act on them -- see `_accountability_pass`.
+    accountability_findings: int = 0
     #: Edits whose path was written relative to the agent's own node rather than
     #: to the repository. Counted because the alternative to counting is a file
     #: appearing somewhere nobody asked for it.
@@ -334,6 +337,9 @@ class RecursiveDelegation:
             child_base = self._commit(rollout, record, state, (), base) or base
 
         children: List[EpisodeRecord] = []
+        #: What this episode's review returned work over, carried into the manager's
+        #: own turn below -- see `_accountability_pass`.
+        findings: List[Tuple[str, str, str]] = []
         for delegation in delegations:
             child = world.delegate(delegation.path)
             returned, asked, child_record = self._episode(
@@ -361,6 +367,7 @@ class RecursiveDelegation:
                 note = self._failure_note(child, state, child_record.reason)
                 if note is not None:
                     notes.append(note)
+                findings.append((child.path, "refused", child_record.reason))
                 continue
             if child_record.verdict == "rework":
                 # Not a refusal: the parent wants another attempt, so the node is
@@ -368,6 +375,7 @@ class RecursiveDelegation:
                 # again" would turn CONTEXT.md into a transcript, which is the
                 # one thing upstream says it must not become.
                 self.log.request_rework(child.path, child_record.reason)
+                findings.append((child.path, "sent back", child_record.reason))
                 continue
             conflicts = self._fold(held, owner_of, returned, child, state)
             if conflicts:
@@ -381,6 +389,7 @@ class RecursiveDelegation:
                     f"{conflicts[0]} was also written by a sibling at "
                     f"{owner_of.get(conflicts[0], '?')}, and the two edits overlap")
                 self.log.request_rework(child.path, child_record.reason)
+                findings.append((child.path, "sent back", child_record.reason))
         # Upstream's third phase. An Architect works "architecture & design ->
         # implementation delegation -> **review & accountability**" and is
         # "ACCOUNTABLE for all code in its node path" (`agents/architect.ex:23`):
@@ -390,7 +399,8 @@ class RecursiveDelegation:
         # five correct modules and no `src/__init__.py`, so the public surface the
         # specification names did not exist and every case scored zero.
         if self.accountability:
-            own = self._accountability_pass(world, objective, state, held, ctx, depth)
+            own = self._accountability_pass(world, objective, state, held, ctx, depth,
+                                            findings)
             if own:
                 self._fold(held, owner_of, own, world, state)
 
@@ -413,7 +423,8 @@ class RecursiveDelegation:
 
     def _accountability_pass(self, world: LocalWorld, objective: str,
                              state: Mapping[str, str], held: Mapping[str, Edit],
-                             ctx, depth: int) -> List[Edit]:
+                             ctx, depth: int,
+                             findings: Sequence[Tuple[str, str, str]] = ()) -> List[Edit]:
         """One turn for the manager at its own node, after its children return.
 
         It sees the tree **as its children just left it**, because what the node
@@ -421,6 +432,23 @@ class RecursiveDelegation:
         node: a manager is accountable for its whole subtree but a child's files
         are the child's to write, and a manager free to rewrite them would make
         the decomposition decorative.
+
+        And it is told **what its own review just returned work over**, which it was
+        not, and that omission cost a whole run. `--mode a` over a repository whose
+        `src/observe/rdf.py` was a zero stub shadowing the real implementation at
+        `src/observe/rdf/rdf.py`: the parent review diagnosed it exactly -- "the
+        actual file src/observe/rdf/rdf.py defines a function named rdf, not
+        histogram, so this import will fail at runtime" -- and rejected the child
+        over it. But `rdf.py` and `__init__.py` belong to the *parent*; no child may
+        write them. So the finding went into the child's `## Known Issues`, the node
+        sat in `open rework` for 10 003 rollouts across two samplers, and the
+        repository never moved off 0.812 -- while rewriting that one parent-owned
+        file takes it to 65/65.
+
+        Upstream this cannot happen, because review and accountability are one phase
+        and the agent running it is "ACCOUNTABLE for all code in its node path"
+        (`agents/architect.ex:23`). A finding it cannot delegate is its own to act
+        on, and now it is holding the finding when its turn comes.
         """
         amended = dict(state)
         for edit in held.values():
@@ -428,7 +456,11 @@ class RecursiveDelegation:
                 amended.pop(edit.path, None)
             else:
                 amended[edit.path] = edit.content
-        brief = Brief(world=world, objective=f"review and accountability: {objective}",
+        if findings:
+            self.accountability_findings += len(findings)
+        brief = Brief(world=world,
+                      objective=_with_findings(f"review and accountability: {objective}",
+                                               world.path, findings),
                       context=world.situate(amended, contracts=self.contracts),
                       state=amended, task=ctx.task, output=ctx.output,
                       reward=ctx.reward, depth=depth)
@@ -629,7 +661,28 @@ class RecursiveDelegation:
                 f"{self.adopted_requests}/{self.unmet_requests} "
                 f"node_relative_paths={self.resolved_relative} "
                 f"accountability={self.accountability_edits}/"
-                f"{self.accountability_declined}")
+                f"{self.accountability_declined} "
+                f"findings_carried={self.accountability_findings}")
+
+
+def _with_findings(objective: str, path: str,
+                   findings: Sequence[Tuple[str, str, str]]) -> str:
+    """Append this episode's review findings to the manager's own objective.
+
+    Short, and phrased as what it *is*: the node's own accountability, not a list of
+    complaints about the children. A finding whose fix lies in a file at this node is
+    the only kind the children cannot act on, and it is exactly the kind that
+    otherwise disappears into a `## Known Issues` line nobody is accountable for.
+    """
+    if not findings:
+        return objective
+    lines = "\n".join(f"- `{child or './'}` ({verdict}): {reason}"
+                       for child, verdict, reason in findings)
+    return (f"{objective}\n\nYour review returned work to "
+            f"{len(findings)} child node(s) this episode:\n{lines}\n"
+            f"You are accountable for every file at `{path or './'}` and a child may "
+            f"not write them. If a finding above is really about a file here, fix it "
+            f"here, now -- sending it down again cannot work.")
 
 
 def _state_of(rendered: str) -> Dict[str, str]:

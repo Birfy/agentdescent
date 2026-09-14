@@ -575,6 +575,30 @@ implied by its entry point — and phase 1 starts at the package root. That is o
 a person did not have to write for each domain and every node below it invented, against
 eight hand-written records in `given`.
 
+### A finding the parent cannot delegate
+
+`--mode a` over a repository whose `src/observe/rdf.py` was a zero stub, shadowing the
+real implementation the child had written at `src/observe/rdf/rdf.py`. The parent review
+diagnosed it exactly, in the run's own words:
+
+> the actual file `src/observe/rdf/rdf.py` defines a function named `rdf`, not
+> `histogram`, so this import will fail at runtime
+
+and **rejected the child over it**. But `rdf.py` and `__init__.py` belong to the
+*parent*; no child may write them. So the finding went into the child's
+`## Known Issues`, the node sat in `open rework` for **10 003 rollouts across two
+samplers**, and the repository never moved off 0.812 — while rewriting that one
+parent-owned file takes it to 65/65. The fix was one edit at one node, and the system
+had already written down what the edit was.
+
+Upstream this cannot happen, because review and accountability are one phase and the
+agent running it is "ACCOUNTABLE for all code in its node path"
+(`agents/architect.ex:23`). A finding it cannot delegate is its own to act on. The port
+had the accountability turn — it is what stops a manager delegating forever and never
+writing `src/__init__.py` — but ran it *blind*: the manager took its own turn without
+being told what its own review had just returned work over. It now carries them, and
+the counters report `findings_carried`.
+
 ## The episode, and `--executor claude-code`
 
 The gap that produced that result is the one the table below calls the largest, so the
