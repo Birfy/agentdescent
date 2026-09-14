@@ -211,7 +211,7 @@ class ArchitectPhase:
 
     def __init__(self, complete, *, contracts: Sequence[str] = (),
                  max_depth: int = 3, max_nodes: int = 12, root_path: str = "",
-                 resume: bool = False):
+                 resume: bool = False, workers: int = 1):
         self._complete = complete
         self._contracts = tuple(contracts)
         self._max_depth = max_depth
@@ -224,6 +224,9 @@ class ArchitectPhase:
         #: all. The runner turns it on only for `--continue-from`, where a record that
         #: is there really is an earlier phase 1's work.
         self._resume = resume
+        #: How many siblings to design at once. Serial by default so a
+        #: run that did not ask for concurrency does not get it.
+        self._workers = max(1, int(workers))
         #: Nodes it designed, and the deepest it went.
         self.nodes: List[str] = []
         self.depth = 0
@@ -240,33 +243,73 @@ class ArchitectPhase:
         self.repeated = 0
 
     def design(self, given: Mapping[str, str], objective: str) -> Dict[str, str]:
-        """``given`` plus one ``CONTEXT.md`` per node the architect decided on."""
+        """``given`` plus one ``CONTEXT.md`` per node the architect decided on.
+
+        Breadth first, and **one level at a time**: every node at a depth is asked
+        concurrently, then the answers are applied in order. Siblings are independent
+        by construction -- each inherits the chain down to its own parent, which was
+        designed a level ago -- so nothing in a level can depend on anything else in
+        it. Upstream an Architect *spawns* sub-architects, which is the same statement
+        about independence; running them one after another was this port's choice and
+        it cost the fly domain 32 minutes for 71 nodes.
+
+        The asks read a **snapshot** rather than the live state, so a sibling can never
+        see another sibling's record even if it finishes first, and the tree does not
+        depend on which call returns when.
+        """
         state = dict(given)
-        queue: List[Tuple[str, str, int]] = [(self._root, objective, 0)]
-        while queue and len(self.nodes) < self._max_nodes:
-            path, node_objective, depth = queue.pop(0)
-            key = f"{path}/{CONTEXT_FILE}" if path else CONTEXT_FILE
-            if self._resume and state.get(key):
-                # Already designed, by an earlier phase 1 that ran out of budget.
-                # Re-asking would spend a call to get the same answer and would throw
-                # away a record the run may already have grown code against; the thing
-                # that revises a record once code exists is the refinement architect,
-                # not this. So take the routing table as the design and walk on.
-                self.reused += 1
-                self.nodes.append(path)
-                self.depth = max(self.depth, depth)
-                if depth + 1 <= self._max_depth:
-                    # The routing line's right-hand side is the objective this node's
-                    # architect handed that child. Passing `node_objective` down
-                    # instead sends a leaf the whole project: measured, an architect
-                    # asked to design `.../cell_types/mushroom_body` while carrying the
-                    # root objective came back with `brain, learning, environment,
-                    # simulation`, having redesigned the library from the top at depth
-                    # five.
-                    queue += [(normalise(child), handles or node_objective, depth + 1)
-                              for child, handles in parse_routes(state[key])]
-                continue
-            record, children = self._ask(state, path, node_objective, depth)
+        level: List[Tuple[str, str, int]] = [(self._root, objective, 0)]
+        while level and len(self.nodes) < self._max_nodes:
+            room = self._max_nodes - len(self.nodes)
+            batch, level = level[:room], level[room:]
+
+            # Resume is settled before anything is dispatched: a node an earlier phase 1
+            # already designed must not cost a call, and deciding that after the ask
+            # spends exactly the call it exists to save.
+            kept: List[Tuple[str, str, int]] = []
+            todo: List[Tuple[str, str, int]] = []
+            for path, node_objective, depth in batch:
+                key = f"{path}/{CONTEXT_FILE}" if path else CONTEXT_FILE
+                if self._resume and state.get(key):
+                    self.reused += 1
+                    self.nodes.append(path)
+                    self.depth = max(self.depth, depth)
+                    if depth + 1 <= self._max_depth:
+                        # The routing line's right-hand side is the objective this
+                        # node's architect handed that child. Passing `node_objective`
+                        # down instead sends a leaf the whole project: measured, an
+                        # architect asked to design `.../cell_types/mushroom_body` while
+                        # carrying the root objective came back with `brain, learning,
+                        # environment, simulation`, having redesigned the library from
+                        # the top at depth five.
+                        kept += [(normalise(child), handles or node_objective, depth + 1)
+                                 for child, handles in parse_routes(state[key])]
+                else:
+                    todo.append((path, node_objective, depth))
+            batch = todo
+            snapshot = dict(state)
+            if not batch:
+                replies = []
+            elif self._workers > 1 and len(batch) > 1:
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(max_workers=self._workers) as pool:
+                    replies = list(pool.map(
+                        lambda item: self._ask(snapshot, item[0], item[1], item[2]),
+                        batch))
+            else:
+                replies = [self._ask(snapshot, path, node_objective, depth)
+                           for path, node_objective, depth in batch]
+            level = kept + self._apply(state, batch, replies) + level
+        if level:
+            self.truncated = len(level)
+        return state
+
+    def _apply(self, state: Dict[str, str], batch: Sequence[Tuple[str, str, int]],
+               replies: Sequence[Tuple[Optional[str], List[Dict[str, str]]]],
+               ) -> List[Tuple[str, str, int]]:
+        """Fold one level's answers into the tree, in order, and return the next level."""
+        queue: List[Tuple[str, str, int]] = []
+        for (path, node_objective, depth), (record, children) in zip(batch, replies):
             if record is None:
                 continue
             key = f"{path}/{CONTEXT_FILE}" if path else CONTEXT_FILE
@@ -321,9 +364,7 @@ class ArchitectPhase:
             # the children in both directions. See `_fix_routing` for the subtree that
             # went missing because it only ever agreed in one.
             state[key] = _fix_routing(record, accepted)
-        if queue:
-            self.truncated = len(queue)
-        return state
+        return queue
 
     def refine(self, state: Mapping[str, str], path: str, objective: str,
                reason: str) -> Optional[str]:

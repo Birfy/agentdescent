@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import posixpath
+import time
 
 import pytest
 
@@ -1690,6 +1691,50 @@ def test_a_node_may_not_be_named_after_one_of_its_own_ancestors():
     assert "src/a/a/" + CONTEXT_FILE not in tree
     # and the refused one is not left advertised in the table either
     assert parse_routing(tree["src/a/" + CONTEXT_FILE]) == ["src/a/b"]
+
+
+def test_phase_one_designs_a_level_at_a_time_and_siblings_cannot_see_each_other():
+    """Upstream an Architect *spawns* sub-architects, which is a statement about
+    independence: every node at a depth inherits the chain down to its own parent,
+    designed a level ago, so nothing in a level can depend on anything else in it.
+    Running them one after another was this port's choice, and it cost the fly domain
+    32 minutes for 71 nodes.
+
+    The asks read a snapshot rather than the live tree, so a sibling can never see
+    another sibling's record even if it finishes first and the result does not depend
+    on which call returns when.
+    """
+    import threading
+
+    seen, together, lock = [], [], threading.Lock()
+    live = [0]
+    plan = {"": {"record": "# root\n", "children": [{"path": "a", "objective": "A"},
+                                                    {"path": "b", "objective": "B"},
+                                                    {"path": "c", "objective": "C"}]}}
+
+    def complete(prompt):
+        with lock:
+            live[0] += 1
+            together.append(live[0])
+            seen.append(prompt)
+        time.sleep(0.05)
+        with lock:
+            live[0] -= 1
+        for path, reply in plan.items():
+            if f"repository path `{path or './'}`" in prompt:
+                return json.dumps(reply)
+        return json.dumps({"record": "# leaf\n", "children": []})
+
+    phase = ArchitectPhase(complete, max_depth=2, max_nodes=10, workers=3)
+    phase.design({}, "o")
+    assert len(phase.nodes) == 4                       # root and three children
+    assert max(together) >= 2, "the three siblings were designed one after another"
+    # No sibling saw another's record: each child's prompt carries the root's chain
+    # and nothing from `a`, `b` or `c`.
+    children = [p for p in seen if "repository path `./`" not in p]
+    assert len(children) == 3
+    for prompt in children:
+        assert sum(prompt.count(f"`{n}/") for n in "abc") <= 1
 
 
 def test_a_resumed_phase_one_hands_each_child_its_own_objective():

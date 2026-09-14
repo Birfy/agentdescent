@@ -498,7 +498,12 @@ def main(argv=None) -> None:
                                    root_path=root,
                                    # A phase 1 that ran out of budget is worth
                                    # continuing rather than paying for twice.
-                                   resume=bool(args.continue_from))
+                                   resume=bool(args.continue_from),
+                                   # Siblings are independent by construction, and
+                                   # upstream *spawns* sub-architects rather than
+                                   # running them one after another. Serial cost the
+                                   # fly domain 32 minutes for 71 nodes.
+                                   workers=args.workers)
         initial = architect.design(initial, objective_for(args.domain))
         print(f"\nPhase 1  : architect {architect.summary()}")
         for path in architect.nodes:
