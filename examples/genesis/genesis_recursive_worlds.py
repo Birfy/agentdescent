@@ -371,11 +371,11 @@ def main(argv=None) -> None:
           "none of them implementation")
     print("Start    : " + (f"{len(initial)} files from {args.continue_from}, its own "
                            "records stripped -- phase A writes the tree over it"
-                           if args.continue_from and args.mode == "a" else
+                           if args.mode == "a" else
                            f"{len(initial)} files from {args.continue_from}, contract "
                            "restored" if args.continue_from else "")
           + ("designed in phase 1 by an architect agent, from the goal, "
-                           "the contract and the suite" if args.architect else
+                           "the contract and the suite" if args.mode == "b" else
                            "cold -- the goal, the contract and the suite; no node "
                            "records, no routing tables, no skills. The run writes "
                            "its own decomposition."
