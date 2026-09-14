@@ -1664,6 +1664,44 @@ def test_the_routing_table_is_made_to_agree_with_the_children_it_opened():
     assert parse_routing(fixed) == ["a/b"]
 
 
+def test_a_child_the_architect_calls_two_files_is_not_a_directory():
+    """The counterweight to "decompose MORE aggressively", enforced rather than stated.
+
+    Upstream says both in the same breath -- decompose harder when the objective feels
+    large, *and* single responsibility, shared capability at the lowest common ancestor,
+    a directory holding one short function is a directory that did not want splitting.
+    The first is a command; the second needs judgement, and a model given both executes
+    the first. Measured on the fly domain: 600 nodes for one simulator, three quarters
+    of them pure routing, at depth 8. Upstream's 123-hour C compiler run -- 750 files,
+    249 000 lines -- has **26** nodes and bottomed out at depth 5.
+
+    So a child now declares how many files it expects to hold, and one that says two or
+    fewer is refused: it is two files in this node's API Surface.
+    """
+    reply = {"record": "# node\n",
+             "children": [{"path": "big", "objective": "a lot", "files": 9},
+                          {"path": "tiny", "objective": "a function", "files": 1},
+                          {"path": "pair", "objective": "two things", "files": 2},
+                          {"path": "silent", "objective": "undeclared"}]}
+    phase = ArchitectPhase(lambda prompt: json.dumps(reply)
+                           if "`./`" in prompt or "path `./`" in prompt
+                           else json.dumps({"record": "# leaf\n", "children": []}),
+                           max_depth=2, max_nodes=10)
+    tree = phase.design({CONTEXT_FILE: "# root\n"}, "o")
+    assert phase.too_small == 2
+    assert "big/" + CONTEXT_FILE in tree
+    assert "tiny/" + CONTEXT_FILE not in tree and "pair/" + CONTEXT_FILE not in tree
+    # An undeclared count is not a refusal -- the guard reads what is there and does
+    # not invent a number the architect never gave.
+    assert "silent/" + CONTEXT_FILE in tree
+    # And the refused ones are not left advertised in the routing table either.
+    assert parse_routing(tree[CONTEXT_FILE]) == ["big", "silent"]
+
+    prompt = ARCHITECT_PROMPT.format(path="", path_prefix="", objective="o", context="c")
+    assert '"files"' in prompt
+    assert "three files or fewer, return no children" in prompt
+
+
 def test_a_node_may_not_be_named_after_one_of_its_own_ancestors():
     """"Decompose MORE aggressively" has a counterweight and upstream states both.
 

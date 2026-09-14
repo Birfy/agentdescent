@@ -96,9 +96,24 @@ splitting, and a directory holding one short function is a signal it did not. A 
 a node whose files one agent can write in one turn; anything larger has children, and \
 anything smaller belongs in its parent's API Surface as a file.
 
+**Before you open a child, say how big it is.** Each entry carries `files`: how many \
+source files you expect that directory to hold, counting everything below it. Then:
+
+- **A child of two files or fewer is not a directory.** It is two files in *this* \
+node's API Surface. Do not open it; list the files here instead.
+- **If this whole node is three files or fewer, return no children at all.** Write \
+them here and be a leaf.
+
+Count honestly. The counterweight above is not advice -- a tree whose nodes are mostly \
+routers is a tree where almost nothing is built: measured on this port, an architect \
+that ignored it produced 600 nodes for one simulator, three quarters of them pure \
+routing, at depth 8. Upstream's 123-hour C compiler run -- 750 files and 249 000 lines \
+-- has **26** nodes and bottomed out at depth 5.
+
 Reply with ONE JSON object and nothing else:
 {{"record": "<the whole CONTEXT.md, markdown>",
-  "children": [{{"path": "{path_prefix}<name>", "objective": "<one sentence>"}}]}}
+  "children": [{{"path": "{path_prefix}<name>", "objective": "<one sentence>",
+                "files": <how many source files, counting everything below>}}]}}
 
 An empty `children` list means this node is a leaf and its files are written here."""
 
@@ -247,6 +262,9 @@ class ArchitectPhase:
         self.reused = 0
         #: Children refused for being named after one of their ancestors.
         self.repeated = 0
+        #: Children refused because the architect itself expected them to
+        #: hold two files or fewer.
+        self.too_small = 0
 
     def design(self, given: Mapping[str, str], objective: str) -> Dict[str, str]:
         """``given`` plus one ``CONTEXT.md`` per node the architect decided on.
@@ -346,6 +364,13 @@ class ArchitectPhase:
                     # file there is refused to every proposal.
                     self.refused += 1
                     continue
+                if 0 < int(child.get("files") or 0) <= 2:
+                    # A directory the architect itself expects to hold one or two files
+                    # is two files in this node's API Surface. Refusing it here is the
+                    # only place the counterweight to "decompose MORE aggressively" can
+                    # be enforced rather than merely stated.
+                    self.too_small += 1
+                    continue
                 if repeats_an_ancestor(child["path"]):
                     # "decompose MORE aggressively" has a counterweight and upstream
                     # states both: shared capability belongs at the lowest common
@@ -408,6 +433,8 @@ class ArchitectPhase:
                    if self.mistaken_nodes else "")
                 + (f", {self.repeated} repeated an ancestor's name"
                    if self.repeated else "")
+                + (f", {self.too_small} too small to be a directory"
+                   if self.too_small else "")
                 + (f", {self.truncated} left undesigned at the node budget"
                    if self.truncated else "")
                 + (f", {self.unparsed} replies unusable" if self.unparsed else ""))
@@ -462,9 +489,14 @@ def _parse(reply: str, prefix: str) -> Tuple[Optional[str], List[Dict[str, str]]
             # counts it instead.
             if prefix and "/" not in child:
                 child = prefix + child
+            try:
+                files = int(item.get("files"))
+            except (TypeError, ValueError):
+                files = 0                      # not declared; the guard lets it pass
             children.append({"path": child,
                              "objective": str(item.get("objective", "")).strip()
-                             or f"implement {child}"})
+                             or f"implement {child}",
+                             "files": files})
     # The record is the map the run delegates by, so a child the architect named and
     # did not route to would be unreachable. Add the entry it forgot.
     if children and ROUTING_HEADING.lower() not in record.lower():
