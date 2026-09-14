@@ -7,7 +7,7 @@ Each port owns a directory. Create ``examples/<algorithm>/`` with an
 -- a sandbox runner, an evaluator, fixtures -- belongs in that directory too.
 
 Keep the upstream algorithm's vocabulary for its iteration flag: ``--rounds``,
-``--generations``, ``--iterations``, or ``--steps``. Record every deviation from
+``--generations``, ``--iterations``, ``--steps``, or ``--episodes``. Record every deviation from
 released code in ``docs/algo-<algorithm>.md``, and add the port to ``PORTS`` in
 ``tests/test_example_entrypoints.py`` -- a port outside that table is outside
 the whole command-line contract.

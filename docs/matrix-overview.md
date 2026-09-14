@@ -33,7 +33,7 @@ generated, so edit the generator rather than the page.
     columns do not**: they were measured on the fixture whose baseline was 0.000
     by construction, which is why every cell reads `0.000 -> …`. Current quality
     numbers are the three-seed async rows on each port's own page, summarised in
-    [measured results — all nineteen](self-evolution-examples.md#measured-results-all-nineteen).
+    [measured results — all twenty](self-evolution-examples.md#measured-results-all-twenty).
 
 ## What the rerun has to report
 
