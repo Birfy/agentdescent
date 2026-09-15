@@ -75,6 +75,7 @@ Intentional differences
 from __future__ import annotations
 
 import argparse
+import sys
 import posixpath
 
 from agentdescent import Policies, evolve
@@ -84,19 +85,26 @@ from agentdescent.filetree import load_tree, match_any
 from agentdescent.governance import SKILL_BLAST_RADIUS, classify
 from agentdescent.sampling import DifficultyWeighted
 from agentdescent.staleness import get_policy
-from examples._common import (add_standard_args, budget_kwargs, completion_for,
-                              confirm, report_engine, worker_count)
+from examples._common import (ConcurrencyGauge, add_standard_args, budget_kwargs,
+                              completion_for, confirm, report_engine, worker_count)
 
-from ._delegation import RecursiveDelegation
+from ._delegation import Delegation, RecursiveDelegation
 from . import _domain as minilang
+from . import _fly as fly
 from . import _jqx as jqx
 from . import _md as md
 from . import _stackvm as stackvm
-from ._architect import ArchitectPhase, harness_record, missing_sections
+from ._architect import (ArchitectPhase, harness_record, misaligned,
+                         missing_sections)
+from ._architect_session import ArchitectSession
+from ._roles import ExtractSession, ManagerSession, ReviewSession
 from ._claude_code import ClaudeCodeExecutor, claude_code_available
 from ._extract import ExtractPhase
 from ._judge import ParentJudge
 from ._review import CompletionJudge, ParentCodeReview, chain_reviews
+from ._sandbox import DEFAULT_IMAGE as SANDBOX_IMAGE
+from ._sandbox import LocalSandbox, SessionSandbox
+from ._session import session_home
 from ._suite import TEST_FAILURE
 from ._suite import cold_start, preflight
 from ._octopus import OctopusConflict, git_available
@@ -111,8 +119,12 @@ from ._world import CONTEXT_FILE, WorldLog, parse_routing
 #: package nobody can invoke -- and md takes the oracle out of the scoring path
 #: altogether, because a frozen test suite is what a human actually writes and
 #: what upstream validates against. All four are stand-ins for upstream's
-#: 123.4-hour compiler run and say so.
-DOMAINS = {"minilang": minilang, "stackvm": stackvm, "jqx": jqx, "md": md}
+#: 123.4-hour compiler run and say so. `fly` is the fifth and the first that grows a
+#: *product* rather than a library -- a simulated animal, an HTTP backend and the page a
+#: person watches it learn on -- and the first shipped with no reference implementation
+#: at all, which is a cost `_fly` states rather than hides.
+DOMAINS = {"minilang": minilang, "stackvm": stackvm, "jqx": jqx, "md": md,
+           "fly": fly}
 
 #: "No wall-clock budget", spelled as a number the runtime can add to `time.time()`.
 #: `float("inf")` cannot be: the shutdown deadline is `t0 + max_seconds` and joining a
@@ -132,6 +144,8 @@ DOMAIN_BLURB = {
             "staged suite"),
     "md": ("Lennard-Jones molecular dynamics with a frozen driver (6 nodes, "
            "14 files), test suite -- invariants, not values"),
+    "fly": ("a Drosophila brain, three assays and a web page to watch it learn on, "
+            "test suite -- a product, not a library"),
 }
 
 
@@ -172,7 +186,11 @@ def build_parser() -> argparse.ArgumentParser:
         # that arm; barrier-free by default, that dormant number became the thing
         # that ended every run -- a 4 000-episode budget stopping after 12 rollouts.
         # `--episodes` is the budget; this is a stopwatch for when you want one.
+        # The backend factories' own defaults, made reachable from a command
+        # line: a reasoning model spends `max_tokens` on thinking before it
+        # emits anything, and 4096 was not enough for one architect reply.
         parser, model_default=None, max_seconds_default=0.0,
+        max_tokens_default=4096, timeout_default=120.0,
         model_help=("optional: let a model be the manager and executor agents "
                     "(else rule-based offline actors -- see the selected "
                     "--domain module)"))
@@ -188,9 +206,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--depth", type=int, default=3,
                         help="maximum recursive delegation depth (v,p) -> (v,q)")
-    parser.add_argument("--max-turns", type=int, default=24,
-                        help="turns inside one --executor claude-code episode. "
-                             "Upstream's runs allow 128 for a non-root episode")
+    parser.add_argument("--max-turns", type=int, default=0,
+                        help="turns inside one --executor claude-code episode. The "
+                             "default is upstream's own split -- 2048 at the root, 128 "
+                             "below it -- and a number here pins both to it, which is "
+                             "what a cheap run wants")
     parser.add_argument("--cold-start", action="store_true",
                         help="start from the goal, the contract and the suite only: "
                              "no node CONTEXT.md records, no routing tables, no "
@@ -266,6 +286,71 @@ def build_parser() -> argparse.ArgumentParser:
                              "domain's empty one. With --mode a this is the Context "
                              "Tree extraction upstream runs on an existing codebase; "
                              "the frozen contract is always the domain's own")
+    parser.add_argument("--executor-model", default="",
+                        help="the model an --executor claude-code session runs. The "
+                             "sessions go through the local CLI whatever --provider "
+                             "says, so with an API provider the architect and every "
+                             "episode are otherwise on different models by default")
+    parser.add_argument("--quiet-phase1", action="store_true",
+                        help="do not print each node as phase 1 designs it")
+    parser.add_argument("--no-refine", action="store_true",
+                        help="do not re-spawn an architect on a node whose record has "
+                             "drifted from its files (upstream's architect Phase 3)")
+    parser.add_argument("--nodes", type=int, default=12,
+                        help="how many CONTEXT.md records phase 1 may write. The fly "
+                             "domain's architect named 17 children it never reached at "
+                             "the default, so the tree came out two deep and truncated")
+    parser.add_argument("--thinking-tokens", type=int, default=0,
+                        help="per-turn reasoning cap for every session role, executor "
+                             "included (MAX_THINKING_TOKENS); 0 leaves the CLI's own. "
+                             "Upstream carries reasoning strength per model profile "
+                             "(`reasoning_effort`) rather than as a constant. "
+                             "Measured on one fly node against a coding-plan endpoint: "
+                             "uncapped 497s, capped at 2048 203-242s, same record")
+    parser.add_argument("--sandbox", default="auto",
+                        choices=("auto", "container", "off"),
+                        help=("run every agent session inside a container, using the "
+                              "engine's own boundary (`agentdescent.sandbox_container`): "
+                              "only the workspace visible, read-only root, no "
+                              "capabilities, resource ceilings -- with the network "
+                              "inherited, because a session has to reach its model. "
+                              "`auto` uses one when an engine answers and says so when "
+                              "none does; `container` refuses to run without one. "
+                              "Without it the blind property is a line in the brief: "
+                              "4 of 12 episodes in one run read a previous run's output "
+                              "off /tmp, one of them the answer to its own failure"))
+    parser.add_argument("--sandbox-image", default="", metavar="IMAGE",
+                        help=("the image a sandboxed session runs in (default "
+                              f"{SANDBOX_IMAGE}). The default is a name rather than a "
+                              "build, so a run never fails at its first episode for "
+                              "want of a build context -- but it carries no test "
+                              "runner, and an episode is told to run the suite it is "
+                              "judged by, so every one of them pays for installing it"))
+    parser.add_argument("--session-timeout", type=float,
+                        default=ClaudeCodeExecutor.TIMEOUT, metavar="SECONDS",
+                        help=(f"the wall on one agent session, in seconds (default "
+                              f"{ClaudeCodeExecutor.TIMEOUT:g}). NOT --timeout, which "
+                              "is one model call: a session is a loop of many. This is "
+                              "what actually ends an episode -- of 52 executor sessions "
+                              "in one fly run, 27 ran into this wall and none reached "
+                              "the 128-turn budget"))
+    parser.add_argument("--agent-sessions", action="store_true",
+                        help="run the MANAGER and (with --mode a) the CONTEXT "
+                             "EXTRACTOR as Claude Code sessions with tools, the way "
+                             "upstream runs every agent. The manager may read its "
+                             "subtree before delegating, and reviews the child's real "
+                             "files rather than a diff truncated at 12k characters; "
+                             "the extractor reads the code instead of being shown "
+                             "eight files in its prompt. Needs the claude CLI")
+    parser.add_argument("--architect-session", action="store_true",
+                        help="run phase 1's architect as a Claude Code session that "
+                             "WRITES each CONTEXT.md with a file tool, rather than as "
+                             "one completion returning JSON. This is upstream's shape "
+                             "-- `agents/architect.ex` is `use EvoGit.Agent` with "
+                             "`agent_type :read_write`, and the record is written with "
+                             "`context_write` -- and it removes the whole class of "
+                             "failure where a truncated reply leaves phase 1 with no "
+                             "tree. Needs --architect and the claude CLI")
     parser.add_argument("--architect", action="store_true",
                         help="upstream's Phase 1: an agent designs the CONTEXT.md tree "
                              "-- intent, API surface, constraints, routing tables -- "
@@ -338,8 +423,14 @@ def main(argv=None) -> None:
                                    "  [git missing: every contested file falls back]"))
     print(f"Gate     : {gate}")
     print("Episode  : " + ("one headless Claude Code session in a throwaway worktree, "
-                           f"up to {args.max_turns} turns, frozen paths denied, network "
-                           "tools off -- billed to the local CLI's credentials"
+                           f"up to {args.max_turns or ClaudeCodeExecutor.ROOT_TURNS} "
+                           f"turns at the root and "
+                           f"{args.max_turns or ClaudeCodeExecutor.CHILD_TURNS} below, "
+                           # The wall belongs beside the turn budget because it is the
+                           # one of the two that ends episodes. Printed, a run that
+                           # timed out 27 of 52 sessions says so at the top.
+                           f"{args.session_timeout:g}s each, frozen paths denied, "
+                           "network tools off -- billed to the local CLI's credentials"
                            if args.executor == "claude-code" else
                            "one model call returning whole files"))
     print("Workspace: " + ("a git worktree per episode, a commit per episode, and "
@@ -420,6 +511,12 @@ def main(argv=None) -> None:
              " -- the tail of the case list"))
 
     usage = Usage()
+    #: How many model calls were in flight at once. The engine's barrier-free
+    #: concurrency *is* `n_workers` and its merge side runs at `max_concurrency=1`,
+    #: so this should come back equal to `--workers`; it is reported because
+    #: `usage.seconds / wallclock` looks like it answers the same question and does
+    #: not -- `seconds` spans phases that run before `evolve()` does.
+    args._concurrency = ConcurrencyGauge()
     complete = None
     if args.model:
         if not confirm(args):
@@ -433,12 +530,56 @@ def main(argv=None) -> None:
     # is designed before anything is written against it, and Phase 2 is handed
     # "the architecture, directory structure, CONTEXT.md routing tables ... already in
     # place (created by an Architect agent)".
+    if getattr(spec, "REQUIRES_MODEL", False) and complete is None:
+        print(f"--domain {args.domain} needs --model: it ships no reference "
+              "implementation, so there is no offline rule-based actor to fall back "
+              "on -- and one written for it would be the design the run is meant to "
+              "invent")
+        return
+
+    #: One boundary for the whole run, decided once: what a session can see is part of
+    #: what the run *is*, and a run that isolated some episodes and not others would be
+    #: two experiments with one set of numbers.
+    if args.sandbox == "off":
+        sandbox = LocalSandbox()
+    else:
+        sandbox = SessionSandbox(home=session_home(), image=args.sandbox_image)
+        if not sandbox.available:
+            if args.sandbox == "container":
+                print(f"--sandbox container: {sandbox.reason}", file=sys.stderr)
+                return
+            print(f"--sandbox auto: {sandbox.reason}", file=sys.stderr)
+            sandbox = LocalSandbox()
+
+    def _session_kwargs():
+        # `--timeout` is the timeout on one *model call* -- `_common` says so in its
+        # own help -- and a session is a loop of many calls, so its wall is its own
+        # flag. Sharing one number put the roles on whatever `--timeout` said while
+        # the executor, handed neither, sat on a default nobody in the run had chosen.
+        return dict(model=(args.executor_model or args.model or ""),
+                    timeout=float(args.session_timeout or ClaudeCodeExecutor.TIMEOUT),
+                    thinking_tokens=args.thinking_tokens, sandbox=sandbox)
+
+    #: Whether the manager, the reviewer and the extractor run as sessions. Decided
+    #: once: a run that asked for them and has no CLI should say so once, not once per
+    #: node. Decided *here*, above every role that reads it -- the extractor is built
+    #: inside the `--mode a` branch below, and a name defined after its only use is a
+    #: NameError rather than the fallback it looks like.
+    use_sessions = bool(args.agent_sessions) and complete is not None
+    if use_sessions and not claude_code_available():
+        print("--agent-sessions needs the `claude` CLI on PATH; the manager and the "
+              "extractor fall back to one completion each", file=sys.stderr)
+        use_sessions = False
+
     if args.mode == "a":
         if complete is None:
             print("--mode a needs --model: extracting a Context Tree is reading code, "
                   "and a rule-based reader would be describing what it was told")
             return
         extractor = ExtractPhase(complete, contracts=spec.CONTRACTS,
+                                 session=(ExtractSession(frozen=spec.FROZEN,
+                                                         **_session_kwargs())
+                                          if use_sessions else None),
                                  max_depth=args.depth + 1,
                                  skip=tuple(p.split("/")[0] for p in spec.FROZEN
                                             if "/" in p))
@@ -449,6 +590,7 @@ def main(argv=None) -> None:
             print(f"           {path or './':<24} {len(parse_routing(record))} routes")
 
     architect = None
+    designer = None
     if args.mode == "b":
         if complete is None:
             print("--mode b needs --model: there is no offline architect, and a "
@@ -460,8 +602,30 @@ def main(argv=None) -> None:
         root = package_root(args.domain)
         initial[CONTEXT_FILE] = harness_record(root, spec.FROZEN,
                                                objective_for(args.domain))
+        if args.architect_session:
+            if not claude_code_available():
+                print("--architect-session needs the `claude` CLI on PATH; phase 1 "
+                      "falls back to one completion per node", file=sys.stderr)
+            else:
+                designer = ArchitectSession(frozen=spec.FROZEN,
+                                            **_session_kwargs())
         architect = ArchitectPhase(complete, contracts=spec.CONTRACTS,
-                                   max_depth=args.depth, root_path=root)
+                                   session=designer,
+                                   max_depth=args.depth, max_nodes=args.nodes,
+                                   root_path=root,
+                                   # A phase 1 that ran out of budget is worth
+                                   # continuing rather than paying for twice.
+                                   resume=bool(args.continue_from),
+                                   # Siblings are independent by construction, and
+                                   # upstream *spawns* sub-architects rather than
+                                   # running them one after another. Serial cost the
+                                   # fly domain 32 minutes for 71 nodes.
+                                   workers=args.workers,
+                                   on_node=(None if args.quiet_phase1 else
+                                            lambda path, routes, n: print(
+                                                f"  phase 1 [{n:>3}/{args.nodes}] "
+                                                f"{path or './':<58} {routes} routes",
+                                                flush=True)))
         initial = architect.design(initial, objective_for(args.domain))
         print(f"\nPhase 1  : architect {architect.summary()}")
         for path in architect.nodes:
@@ -477,8 +641,16 @@ def main(argv=None) -> None:
     # results, run the tests, and reject anti-patterns it can see in the code. The
     # middle one is a number and was all this port had; the zero-field run is what
     # that cost. Both now, tests first because they are free.
-    code_review = (None if args.no_parent_review or complete is None else
-                   ParentCodeReview(complete, contracts=spec.CONTRACTS))
+    if args.no_parent_review or complete is None:
+        code_review = None
+    elif use_sessions:
+        # `manager.ex` lists "validate results" among the Manager's five jobs, and a
+        # reviewer handed a rendering of the work truncated at 12 000 characters is
+        # not validating the work. This one reads the files on disk.
+        code_review = ReviewSession(contracts=spec.CONTRACTS, frozen=spec.FROZEN,
+                                    **_session_kwargs())
+    else:
+        code_review = ParentCodeReview(complete, contracts=spec.CONTRACTS)
     ledger = WorktreeLedger() if args.worktrees else None
     if ledger is not None and not git_worktrees_available():
         print("Worktrees: git worktree is unavailable here -- running without it")
@@ -490,16 +662,58 @@ def main(argv=None) -> None:
             return
         # The frozen globs are denied inside the session as well as enforced outside
         # it, and the failure block is the domain's own wording.
-        sessions = ClaudeCodeExecutor(frozen=spec.FROZEN, failure=TEST_FAILURE,
-                                      max_turns=args.max_turns)
+        # The failure template is the domain's, not a constant: a blind domain must
+        # not hand the session the assertion's source, which is the whole point of it.
+        # And the session runs the model the run asked for -- left unset it takes the
+        # CLI's default -- a different model from the one the run asked for, silently.
+        # The CLI reads ANTHROPIC_BASE_URL and ANTHROPIC_API_KEY from the environment,
+        # so pointing both the SDK and the CLI at one endpoint is all it takes to put
+        # the architect and every executor session on the same model; the flag is there
+        # for the case where they should deliberately differ.
+        # The same session settings every other role gets. Without this the one role
+        # that does the work was the one role running on defaults: a wall it was never
+        # told about and no reasoning cap, while the architect, the manager, the
+        # reviewer and the extractor all carried the run's own numbers.
+        sessions = ClaudeCodeExecutor(frozen=spec.FROZEN,
+                                      failure=getattr(spec, "FAILURE", TEST_FAILURE),
+                                      max_turns=args.max_turns, **_session_kwargs())
+
+    def _refine(path, state):
+        """Upstream's architect Phase 3, as a hook on the accountability pass.
+
+        It does not stop at design: it reviews the implementation and re-spawns
+        refinement architects where a node misaligns (`agents/architect.ex`). This port
+        stopped after the design, so a record written before any code existed stayed the
+        map for ever -- and a `--mode a` run sat at 0.938 reading a map of a layout the
+        work had already left behind. Upstream's archive shows 26 record creations and
+        **62 later accepted updates**; this is where the updates come from.
+        """
+        if architect is None:
+            return None
+        key = f"{path}/{CONTEXT_FILE}" if path else CONTEXT_FILE
+        record = state.get(key)
+        if not record:
+            return None
+        reason = misaligned(record, state, path)
+        return architect.refine(state, path, objective_for(args.domain),
+                                reason) if reason else None
+
     delegation = RecursiveDelegation(
+        refine=None if (architect is None or args.no_refine) else _refine,
         rollout_factory=(None if ledger is None else lambda: Rollout(ledger)),
-        manager=spec.llm_manager(complete) if complete else spec.offline_manager,
+        manager=(ManagerSession(Delegation, frozen=spec.FROZEN,
+                                **_session_kwargs()) if use_sessions else
+                 spec.llm_manager(complete) if complete
+                 else spec.offline_manager),
         executor=(sessions if sessions is not None else
                   spec.llm_executor(complete) if complete else spec.offline_executor),
         log=log, max_depth=args.depth, max_edits=4, contracts=spec.CONTRACTS,
         readonly=spec.FROZEN,
+        # Three links, and the middle one is the only one that can ask "did you test
+        # what you just wrote". A domain whose tests are the agents' own supplies it.
         review=chain_reviews(None if args.no_parent_tests else spec.suite_review(tasks),
+                             (getattr(spec, "own_review", lambda: None)()
+                              if not args.no_parent_tests else None),
                              code_review),
         accountability=not args.no_accountability)
     judge = ParentJudge(log=log, enabled=not args.engine_gate)
@@ -584,12 +798,22 @@ def main(argv=None) -> None:
     # rebound its own name on first call.
     whole = getattr(spec, "suite_failures", None)
     if whole is not None and delegation.last_state is not None:
-        failures = whole(result.state if isinstance(result.state, dict)
-                         else dict(result.state), audit=True)
-        print(f"suite, 1 process: {len(tasks) - len(failures)}/{len(tasks)}"
-              + ("" if not failures else
-                 "   <- these pass one-per-process and fail together:\n    "
-                 + "\n    ".join(failures[:6])))
+        state = result.state if isinstance(result.state, dict) else dict(result.state)
+        failures = whole(state, audit=True)
+        if getattr(getattr(spec, "FLY", None), "blind", False) or getattr(
+                spec, "REQUIRES_MODEL", False) and not hasattr(spec, "reference_tree"):
+            # A blind domain's repository suite is the agents' own, so there is no
+            # denominator from `tasks` to report it against -- count what is there.
+            written = sum(1 for p in state if p.endswith(".py")
+                          and p.rsplit("/", 1)[-1].startswith("test_"))
+            print(f"their own suite : {written} test file(s), "
+                  + ("all passing" if not failures else f"{len(failures)} failing:\n    "
+                     + "\n    ".join(failures[:6])))
+        else:
+            print(f"suite, 1 process: {len(tasks) - len(failures)}/{len(tasks)}"
+                  + ("" if not failures else
+                     "   <- these pass one-per-process and fail together:\n    "
+                     + "\n    ".join(failures[:6])))
     label = "audit reward" if audited else "held-out reward"
     print(f"{label:<16}: {result.final_reward:.3f}"
           + ("   (tests no agent ever saw)" if audited else ""))
@@ -616,6 +840,8 @@ def main(argv=None) -> None:
         print(f"workspace       : {ledger.summary()}")
     if sessions is not None:
         print(f"claude code     : {sessions.summary()}")
+    if designer is not None and designer.sessions:
+        print(f"architect       : {designer.summary()}")
     if code_review is not None:
         print(f"parent review   : read={code_review.reviewed} "
               f"rejected={code_review.rejected} unparsed={code_review.unparsed}")
@@ -624,9 +850,18 @@ def main(argv=None) -> None:
     if not args.engine_gate:
         print(f"gate            : accepted={judge.accepted} rejected={judge.rejected} "
               f"partial={judge.partial}")
+    if sessions is not None or use_sessions:
+        print(f"sandbox         : {sandbox.summary()}")
+        # Where to go and read what an episode actually did, and the promise that it
+        # is not in `~/.claude`: a run used to write its transcripts and its TodoWrite
+        # state into the state of whatever session launched it.
+        print(f"session state   : {session_home()}  "
+              f"(isolated from the host's ~/.claude)")
     if log.pending_rework:
         print(f"open rework     : {sorted(log.pending_rework)}")
-    print(f"model usage     : {usage.summary()}")
+    print(f"model usage     : {usage.summary()}"
+          + (f", peak {args._concurrency.peak} concurrent"
+             if args._concurrency.peak else ""))
     report_engine(result)
 
     if args.write_repo:

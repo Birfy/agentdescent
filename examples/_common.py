@@ -18,13 +18,15 @@ sequential held-out loop, and every port paid the same silent wall-clock for it.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
-from typing import Optional
+import threading
+from typing import Callable, Dict, Mapping, Optional
 
 from agentdescent.agents import Usage, claude, openai_compatible
 
 
-PROVIDER_CHOICES = ("claude", "openai", "glm")
+PROVIDER_CHOICES = ("claude", "claude-cli", "openai", "glm")
 # Providers served by the OpenAI-compatible adapter; 'glm' is a legacy alias.
 OPENAI_COMPATIBLE = ("openai", "glm")
 DEFAULT_MODEL = "claude-haiku-4-5"
@@ -36,6 +38,8 @@ def add_standard_args(
     model_default: Optional[str] = DEFAULT_MODEL,
     model_help: str = "model id",
     max_seconds_default: float = 30.0,
+    max_tokens_default: Optional[int] = None,
+    timeout_default: Optional[float] = None,
     async_ratio_default: int = 3,
     eval_concurrency_default: Optional[int] = 8,
     include_val_cap: bool = True,
@@ -68,9 +72,10 @@ def add_standard_args(
         "--provider",
         default="claude",
         choices=PROVIDER_CHOICES,
-        help=("claude, or any OpenAI-compatible endpoint (DeepSeek, GLM, "
-              "vLLM, ...) via OPENAI_BASE_URL + OPENAI_API_KEY; 'glm' is a "
-              "legacy alias"),
+        help=("claude via the API, `claude-cli` via the locally "
+              "authenticated Claude Code binary, or any OpenAI-compatible "
+              "endpoint (DeepSeek, GLM, vLLM, ...) via OPENAI_BASE_URL + "
+              "OPENAI_API_KEY; 'glm' is a legacy alias"),
     )
     parser.add_argument("--model", default=model_default, help=model_help)
     parser.add_argument("--seed", type=int, default=0)
@@ -159,6 +164,30 @@ def add_standard_args(
               "endpoints only). A throughput knob, and a quality one -- see "
               "completion_for"),
     )
+    # Opt-in, by naming a default. Nine ports already declare `--max-tokens`
+    # themselves, each with a number it measured -- 4096, 16000, 32000 -- and
+    # declaring it here unconditionally is an argparse conflict that takes those
+    # ports' entry points down at import. So a port that wants the shared flag asks
+    # for it, the way `include_val_cap` withholds one from a port whose splits are
+    # already frozen.
+    if max_tokens_default is not None:
+        parser.add_argument(
+            "--max-tokens",
+            type=int,
+            default=max_tokens_default,
+            help=(f"output-token cap for one model call (default "
+                  f"{max_tokens_default}). Raise it for a reasoning model, whose "
+                  f"thinking is spent from the same budget -- see completion_for"),
+        )
+    if timeout_default is not None:
+        parser.add_argument(
+            "--timeout",
+            type=float,
+            default=timeout_default,
+            help=(f"seconds for one model call (default {timeout_default:g}). A "
+                  f"reasoning model given a large --max-tokens legitimately exceeds "
+                  f"120s, and the retry wrapper turns each timeout into three"),
+        )
     return parser
 
 
@@ -395,6 +424,169 @@ def worker_count(args: argparse.Namespace, requested: int) -> int:
     return 1
 
 
+#: Variables that hand the Claude Code CLI a provider the *host* chose.
+#:
+#: A managed Claude Code session -- the web app, a CI runner, a cloud container -- does
+#: not authenticate the way a laptop does. Instead of an API key it is handed a session
+#: ingress: a URL and a short-lived token the harness holds. `CLAUDE_CODE_REMOTE` is
+#: what puts the CLI in that mode, and in that mode it uses the ingress and **ignores
+#: whatever credentials are in the environment**. Which is the right default -- it stops
+#: a stray `ANTHROPIC_API_KEY` from silently redirecting a managed session's traffic.
+#:
+#: It also makes it impossible to point a *child* CLI somewhere else from inside such a
+#: session, which is exactly what `--executor claude-code` does. The child inherits the
+#: variable, ignores the `ANTHROPIC_BASE_URL` and key it was given, and 401s. What it
+#: reports is "Authentication error · This may be a temporary network issue, please try
+#: again" -- neither temporary nor a network issue. A run of 28 sessions failed 23 of
+#: them and wrote zero files this way, and the accompanying stderr
+#: (`[claude-code:unrecognized_model] ... "query_source":"generate_session_title"`) is a
+#: red herring: that is the session-title side query, not the agent turn, and it is
+#: emitted just the same on runs that work.
+#:
+#: `CLAUDE_CODE_REMOTE` alone is the switch -- measured, by bisection, against a
+#: third-party Anthropic-compatible endpoint. The rest is the same host's plumbing for
+#: the same decision; dropping it too costs nothing and does not leave a child half in
+#: one mode and half in the other.
+HOST_PROVIDER_VARS = (
+    "CLAUDE_CODE_REMOTE",
+    "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
+    "CLAUDE_SESSION_INGRESS_TOKEN_FILE",
+    "SESSION_INGRESS_URL",
+    "CLAUDE_CODE_POST_FOR_SESSION_INGRESS_V2",
+)
+
+
+def cli_env(base_url: Optional[str] = None, api_key: Optional[str] = None,
+            env: Optional[Mapping[str, str]] = None) -> Dict[str, str]:
+    """The environment to spawn a Claude Code CLI child in.
+
+    Pass through unchanged unless an endpoint is actually being overridden. When one
+    is -- either explicitly here, or because the surrounding environment already names
+    a non-Anthropic `ANTHROPIC_BASE_URL` -- drop :data:`HOST_PROVIDER_VARS` so the
+    child reads the key it was given rather than the host's session ingress, and set
+    both `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN`, since which one a given
+    endpoint wants is not something worth discovering twice.
+
+    Nothing here writes a credential anywhere but this process's child: the key comes
+    from the environment and goes into an `env=` dict.
+    """
+    out = dict(os.environ if env is None else env)
+    url = base_url or out.get("ANTHROPIC_BASE_URL", "")
+    key = api_key or out.get("ANTHROPIC_API_KEY") or out.get("ANTHROPIC_AUTH_TOKEN")
+    third_party = url and "api.anthropic.com" not in url
+    if not third_party:
+        return out
+    for name in HOST_PROVIDER_VARS:
+        out.pop(name, None)
+    out["ANTHROPIC_BASE_URL"] = url
+    if key:
+        out["ANTHROPIC_API_KEY"] = key
+        out["ANTHROPIC_AUTH_TOKEN"] = key
+    return out
+
+
+def claude_cli(model: str = "haiku", *, usage: Optional[Usage] = None,
+               timeout: float = 300.0, binary: str = "claude"):
+    """A ``Completion`` that shells out to the locally authenticated Claude Code CLI.
+
+    The SDK path needs an ``ANTHROPIC_API_KEY``. The CLI is authenticated another way
+    entirely -- an OAuth session, a subscription, a corporate login -- and on a machine
+    where that is the credential that exists, there was no way to run a port at all.
+    A one-shot `claude -p` with every tool denied is a plain prompt-to-text function,
+    which is exactly what a ``Completion`` is.
+
+    Two honest caveats, because they change the output and not only the plumbing. The
+    CLI wraps the prompt in **its own** system prompt, its tool definitions and any
+    `CLAUDE.md` it finds, so a call carries tens of thousands of cached input tokens
+    that the API path would not, and the reply is coloured by an agent harness rather
+    than being a bare completion. And the cost lands on the CLI's credentials, not on
+    an API key any budget flag here can see.
+    """
+    import json as _json
+    import subprocess
+    import time
+
+    def complete(prompt: str) -> str:
+        argv = [binary, "-p", "--output-format", "json", "--model", model,
+                "--max-turns", "1", "--allowedTools", ""]
+        started = time.time()
+        try:
+            done = subprocess.run(argv, input=prompt, capture_output=True, text=True,
+                                  timeout=timeout, env=cli_env())
+        except subprocess.TimeoutExpired:
+            if usage is not None:
+                usage.record(failed=True, seconds=time.time() - started)
+            raise RuntimeError(f"{binary} timed out after {timeout:.0f}s")
+        elapsed = time.time() - started
+        if done.returncode != 0:
+            if usage is not None:
+                usage.record(failed=True, seconds=elapsed)
+            raise RuntimeError(f"{binary} exited {done.returncode}: "
+                               f"{(done.stderr or '').strip()[:300]}")
+        try:
+            envelope = _json.loads(done.stdout)
+        except ValueError:
+            if usage is not None:
+                usage.record(failed=True, seconds=elapsed)
+            raise RuntimeError(f"{binary} did not return JSON: "
+                               f"{done.stdout.strip()[:300]}")
+        if envelope.get("is_error"):
+            if usage is not None:
+                usage.record(failed=True, seconds=elapsed)
+            raise RuntimeError(f"{binary} reported an error: "
+                               f"{str(envelope.get('result'))[:300]}")
+        if usage is not None:
+            counts = envelope.get("usage") or {}
+            # Cache reads and cache writes are prompt tokens that were really sent;
+            # `input_tokens` alone counts only the uncached remainder and would report
+            # 10 for a call that carried 28,000.
+            usage.record(prompt_tokens=sum(int(counts.get(k) or 0) for k in
+                                           ("input_tokens",
+                                            "cache_creation_input_tokens",
+                                            "cache_read_input_tokens")),
+                         completion_tokens=int(counts.get("output_tokens") or 0),
+                         seconds=elapsed)
+        return envelope.get("result") or ""
+
+    return complete
+
+
+class ConcurrencyGauge:
+    """How many model calls were actually in flight at once, and at most.
+
+    `Usage` records calls, tokens and seconds, and none of those answer "how hard did
+    this run lean on the endpoint". The arithmetic that looks like it should --
+    `usage.seconds / wallclock` -- does not: `seconds` covers the whole process
+    including phases that run before `evolve()` does, while the `wallclock` a stage
+    profile reports covers only the stage, so the ratio comes out above the worker
+    count and means nothing. This counts the thing directly.
+
+    `agentdescent/` is not the place for it: the engine's concurrency is its own
+    business and an example asking what it *observed* is the example's business.
+    """
+
+    __slots__ = ("peak", "_live", "_lock")
+
+    def __init__(self) -> None:
+        self.peak = 0
+        self._live = 0
+        self._lock = threading.Lock()
+
+    def wrap(self, complete: Callable[[str], str]) -> Callable[[str], str]:
+        def gauged(prompt: str) -> str:
+            with self._lock:
+                self._live += 1
+                if self._live > self.peak:
+                    self.peak = self._live
+            try:
+                return complete(prompt)
+            finally:
+                with self._lock:
+                    self._live -= 1
+
+        return gauged
+
+
 def completion_for(args: argparse.Namespace, *, usage: Optional[Usage] = None,
                    **kwargs):
     """Build the ``Completion`` that ``--provider`` and ``--model`` select.
@@ -418,14 +610,40 @@ def completion_for(args: argparse.Namespace, *, usage: Optional[Usage] = None,
     leave reasoning *on* while the run reports it off -- which is the failure
     that matters, since the wall-clock would then be attributed to the scheduler.
     """
+    gauge = getattr(args, "_concurrency", None)
+    if args.provider == "claude-cli":
+        if getattr(args, "no_thinking", False):
+            # Silently dropping it is the failure this module exists to prevent: the
+            # run would report thinking off while the CLI kept it on.
+            print("note: --no-thinking has no effect with --provider claude-cli; the "
+                  "CLI decides its own reasoning budget", file=sys.stderr)
+        if getattr(args, "max_tokens", None):
+            print("note: --max-tokens has no effect with --provider claude-cli; the "
+                  "CLI sets its own output cap", file=sys.stderr)
+        built = claude_cli(model=args.model, usage=usage,
+                           timeout=float(getattr(args, "timeout", None) or 300.0))
+        return gauge.wrap(built) if gauge is not None else built
     if is_openai_compatible(args):
-        return openai_compatible(model=args.model, usage=usage, **kwargs)
+        if getattr(args, "max_tokens", None):
+            kwargs.setdefault("max_tokens", int(args.max_tokens))
+        built = openai_compatible(model=args.model, usage=usage, **kwargs)
+        return gauge.wrap(built) if gauge is not None else built
     if getattr(args, "no_thinking", False):
         kwargs.setdefault("thinking", {"type": "disabled"})
+    # A reasoning model spends `max_tokens` on thinking *first* and emits visible
+    # content from what is left, so the default 4096 is not 4096 of answer. Measured:
+    # deepseek-v4-flash answering this package's architect prompt at the default
+    # returned 1708 characters of a JSON object and stopped mid-word -- unparsable,
+    # and the run reported "architect designed 0 nodes, 1 replies unusable" rather
+    # than anything that looked like a token cap. Turning thinking off is the other
+    # lever and a worse one: it changes what the model produces, not just how much.
+    if getattr(args, "max_tokens", None):
+        kwargs.setdefault("max_tokens", int(args.max_tokens))
     # --timeout reaches this path too: claude()'s 120s default assumes Claude
     # latencies, and a thinking model behind an Anthropic-shaped endpoint
     # (GLM-5.2 on GSM-Hard) legitimately exceeds it -- a baseline eval died at
     # 120s x 3 retries before any evolution happened.
     if getattr(args, "timeout", None):
         kwargs.setdefault("timeout", float(args.timeout))
-    return claude(model=args.model, usage=usage, **kwargs)
+    built = claude(model=args.model, usage=usage, **kwargs)
+    return gauge.wrap(built) if gauge is not None else built

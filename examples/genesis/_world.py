@@ -42,6 +42,7 @@ __all__ = [
     "EpisodeRecord",
     "LocalWorld",
     "ROUTING_HEADING",
+    "is_routing_heading",
     "SKILLS_DIR",
     "TRUNCATED",
     "WorldLog",
@@ -91,8 +92,31 @@ TRUNCATED = "... [Content Truncated] ..."
 _ROUTE_LINE = re.compile(
     r"""^\s*[-*]\s*          # a markdown list item
         `?\s*(?P<path>\.?/?[A-Za-z0-9._\-/]+?)\s*/?`?\s*   # the path, backticks optional
+        (?:\(\s*(?P<files>\d+)\s*files?\s*\)\s*)?        # optional "(12 files)"
         (?:$|[-=]+>|\u2192|:)  # end of line, '->', an arrow, or a colon
     """, re.VERBOSE)
+
+
+#: A heading that opens the routing section, however it is written.
+#:
+#: The exact string is what this port *asks* for, and an agent writing markdown by
+#: hand does not always give it back: `### Routing Table` under a deeper document,
+#: `## Routing`, `## 4. Routing Table` under a numbered outline. A prefix match on the
+#: canonical heading rejects all three, and a rejected heading is not a formatting
+#: nit -- the routing table is the map delegation runs on, so the node silently
+#: becomes a leaf. Measured: one session architect wrote a complete five-child table
+#: and the tree recorded zero children.
+#:
+#: Matching is deliberately narrow all the same. The text after the hashes, after an
+#: optional `1.` / `1)` ordinal, has to *start* with "routing" -- so "## Routing Table",
+#: "### Routing", "## 4. Routing Table (children)" are the section, and "## Non-routing
+#: notes" or a sentence mentioning routing is not.
+_ROUTING_HEADING_LINE = re.compile(r"^\s*#{1,6}\s*(?:\d+[.)]\s*)?routing\b", re.I)
+
+
+def is_routing_heading(line: str) -> bool:
+    """Does this line open the routing section?"""
+    return bool(_ROUTING_HEADING_LINE.match(line or ""))
 
 
 def parse_routing(body: str) -> List[str]:
@@ -107,7 +131,7 @@ def parse_routing(body: str) -> List[str]:
     for line in lines:
         stripped = line.strip()
         if stripped.startswith("##"):
-            inside = stripped.lower().startswith(ROUTING_HEADING.lower())
+            inside = is_routing_heading(stripped)
             continue
         if not inside:
             continue
@@ -116,6 +140,70 @@ def parse_routing(body: str) -> List[str]:
             path = normalise(match.group("path"))
             if path and path not in out:
                 out.append(path)
+    return out
+
+
+
+def parse_route_sizes(body: str) -> Dict[str, int]:
+    """``{path: how many files the architect said it holds}`` for one record.
+
+    The size is what refuses a child too small to be a directory, and a
+    *session* architect has nowhere to put it but the routing line -- it writes
+    `CONTEXT.md` with a tool and returns no structured reply at all, the way
+    upstream's Architect does (`agents/architect.ex`, `context_write`). A record
+    that omits the count yields nothing here, and the caller's guard reads a
+    missing count as "not declared" rather than as zero.
+    """
+    if not body:
+        return {}
+    out: Dict[str, int] = {}
+    inside = False
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("##"):
+            inside = is_routing_heading(stripped)
+            continue
+        if not inside:
+            continue
+        match = _ROUTE_LINE.match(line)
+        if match and match.group("files"):
+            path = normalise(match.group("path"))
+            if path:
+                out.setdefault(path, int(match.group("files")))
+    return out
+
+def parse_routes(body: str) -> List[Tuple[str, str]]:
+    """``(path, what it handles)`` for every routing-table entry, in order.
+
+    The right-hand side of a routing line is not decoration: it is the objective the
+    parent is handing that child, written by the architect that opened it. A phase 1
+    resuming from records rather than from replies has nothing else to give a child,
+    and giving it the *parent's* objective instead sends a leaf the whole project --
+    measured: an architect asked to design `.../cell_types/mushroom_body` while
+    carrying the root objective came back with `brain, learning, environment,
+    simulation`, having redesigned the library from the top at depth five.
+    """
+    if not body:
+        return []
+    out: List[Tuple[str, str]] = []
+    seen = set()
+    inside = False
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("##"):
+            inside = is_routing_heading(stripped)
+            continue
+        if not inside:
+            continue
+        match = _ROUTE_LINE.match(line)
+        if match:
+            path = normalise(match.group("path"))
+            if path and path not in seen:
+                seen.add(path)
+                # The regex captures only the path; what the entry *handles* is
+                # whatever follows it on the line.
+                handles = line[match.end():].strip().lstrip("-—>").strip()
+                out.append((path, handles))
     return out
 
 

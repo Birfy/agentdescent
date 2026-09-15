@@ -501,7 +501,20 @@ manager *"Own `src/__init__.py`"*. It delegated every time instead.
 Upstream's Architect works in three phases — *architecture & design →
 implementation delegation → **review & accountability*** — and is "ACCOUNTABLE for
 all code in its node path" (`agents/architect.ex:23`). This port stopped after the
-second. A manager now gets one turn at its own node **after** its children return,
+second, twice over: a manager never wrote its own node, and an architect never came
+back to a node it had designed.
+
+The second of those is now `--refine` (on by default, `--no-refine` turns it off).
+After a node's episode, its record is checked against what is actually in the
+directory — a routing table promising a child nobody created, an `## API Surface`
+that never mentions a file sitting right there — and where it has drifted, an
+architect is re-spawned **on that one node** to rewrite the record against the code
+as it is. It fires on leaves too, and leaves need it most: a leaf is where the code
+lands, so its API Surface is the first thing to go stale. This is where upstream's
+**62 later accepted `CONTEXT.md` updates** come from, against this port's previous
+two occasions — and a `--mode a` run sat at 0.938 for 30 003 rollouts reading a map
+of a layout the work had already left behind, with nothing in the mechanism able to
+say so. A manager now gets one turn at its own node **after** its children return,
 seeing the tree as they left it, restricted to files directly at the node because a
 manager free to rewrite its children's work would make the decomposition
 decorative (`--no-accountability` turns it back into a pure router). `situate()`
@@ -652,6 +665,36 @@ The contract does not move. Three fences, none of which replaces the others:
 It signs in with the local `claude` CLI's credentials rather than the `--model`
 endpoint, which is why it is opt-in and why the run header says so.
 
+**What the worktree does not bound: `--sandbox`.** The worktree bounds what *survives*,
+not what can be *seen*. A session with a shell reads whatever the process can read, and
+in one run four of twelve episodes ran `find /` and opened a previous run's output from
+`/tmp` — one of them read the very `_cli.py` that answered the acceptance failure it had
+been handed to reproduce. The blind property was a line in a prompt.
+
+The engine already owns the fix. `agentdescent/sandbox_container.py` is titled "A
+sandbox that is actually a boundary", and `--sandbox` (on by default where an engine
+answers) runs every agent session inside it. `examples/genesis/_sandbox.py` subclasses
+its `ContainerProvider` and adds the mounts an *agent* session needs and a candidate's
+test run does not: the `claude` binary's own install, the proxy's CA bundle, and a
+per-session CLI state directory so the transcript outlives the container. Nothing else
+of the host. Asked from inside, on this machine:
+
+```
+ls /home/user/agentdescent          No such file or directory
+find / -name 'algo-genesis.md'      (nothing)
+ls /tmp | wc -l                     0
+ls /work                            CONTEXT.md md.py spec src tests
+touch /etc/x                        Read-only file system
+grep CapEff /proc/self/status       CapEff: 0000000000000000
+```
+
+Two honest limits. **The network is on** — `SandboxSpec.network="inherit"`, because a
+session's whole job is to reach a model endpoint — so this is a boundary against
+contamination, which is the failure that happened, and not against hostile code, which
+could still send what it read. And **when no engine answers** the run says so once and
+falls back to a plain directory rather than pretending; the brief's "do not read outside
+this checkout" rule is what is left, and a rule is not a wall.
+
 Exercised once against a real session rather than only the stand-in binary the tests
 drive. One leaf episode at `src/frontend` on `minilang`, twelve turns: it wrote
 `lexer.py` and the package marker, nothing else, and the tokens it emits are
@@ -665,6 +708,103 @@ It also declined to write that line itself, which is the more interesting half: 
 for the entry point as well, a session situated at `src/frontend` wrote only its own
 node and said so, so the port's request channel never even had to fire (`requests=0`).
 The contract held inside the session rather than at the boundary.
+
+### What actually ends an episode
+
+A formation run on the `fly` domain reported `sessions=52 failed=43` — 83% of
+implementation episodes judged failed — while the review rejected only three and the
+spatial contract dropped nothing. The CLI writes a transcript per session, so the
+answer was on disk rather than in the counters, and it is not what the counters
+suggested:
+
+| | sessions | |
+|---|---:|---|
+| ran into the wall (≥ 860 s of a 900 s limit) | **27** | 25 of them killed mid-tool-call |
+| the endpoint dropped the stream first | 17 | 26 s to 830 s, also mid-tool |
+| ended on a text turn, having finished | 8 | |
+| reached the 128-turn child budget | **0** | the busiest made 97 |
+
+Three things follow, and each was a defect rather than a tuning problem.
+
+**The wall is the binding constraint, not the turn budget.** Upstream's 2 048/128 turns
+are this port's numbers too and they are fine; what ends an episode here is wall-clock.
+So it is `--session-timeout`, its own flag, printed in the run header beside the turn
+budget — and *not* `--timeout`, which `examples/_common` documents as "seconds for one
+model call" and defaults to 120 s. A session is a loop of many calls; sharing one number
+between the two means either the call timeout is absurdly long or the session wall is
+absurdly short.
+
+**The executor was the one role running on defaults.** The architect, the manager, the
+reviewer and the extractor were all constructed from the run's session settings; the
+executor was constructed from three arguments of its own, so `--timeout 600` and
+`--thinking-tokens 2048` reached every role except the one that writes the code. It ran
+that whole domain at a 900 s wall nobody had chosen, with no reasoning cap while every
+other role had one.
+
+**A session that hits the wall is interrupted, not refuted.** The port reads the
+worktree, not the exit status, so the work it did before the wall comes back and is
+judged like any other — which is the right behaviour and was already the behaviour. What
+the wall costs is the *report*: there is no JSON after a `SIGKILL`, so `num_turns` is
+never read, and the run that reported `turns=309` had 2 607 assistant turns in its
+transcripts. Timeouts are now counted separately (`failed=43 timeout=27`) because the
+two failures have different fixes.
+
+One more thing the transcripts showed: `subprocess.run(timeout=)` signals the CLI and
+nothing else. A session is told to run the suite, a suite run starts servers, and one of
+them was still listening two hours later with its working directory already deleted.
+Sessions now lead their own process group and the group is killed on the way out —
+after the wall, and after a clean finish too.
+
+### A session launched from a session is not that session
+
+The transcripts turned up a second thing, and it is the more expensive one. A run
+launched from inside a Claude Code session had every episode inheriting that session's
+*situation*. Measured against the same endpoint with the same one-line prompt:
+
+| | input tokens | latency | transcript |
+|---|---:|---:|---:|
+| inherited | **31 850** | 6.7 s | 224 KB |
+| the run's own `--allowedTools` / `--disallowedTools` | 31 099 | | |
+| `--bare --strict-mcp-config` | **1 317** | 2.4 s | 16 KB |
+
+The middle row is the surprise and the whole mechanism. **Permission flags do not
+shorten the request.** `--allowedTools Read,Write,Edit,Glob,Grep,Bash` says what the
+session may *call*; every other tool's schema is still sent, and the port had been
+passing those flags all along.
+
+What is actually in there, from the transcript's own `prompt_snapshot`: the system
+prompt is 5 720 characters, and the **tool schemas are 178 742** — 26 of them, of which
+`Artifact` alone is 64 168, then `Monitor` at 14 335 and `DesignSync` at 13 255. The
+executor is allowed six tools; `Read` and `Bash` together are 6 887 characters of that
+list. Beside it ride a 13.5 KB skill listing, a 3 KB agent listing, 900 bytes of
+deferred tool names, and the user's email address.
+
+So it is not that the episode was given competing instructions — nobody told it to go
+review a pull request. It is that a CLI launched inside a managed session is handed that
+session's *equipment*, and equipment is priced per turn whether or not it is reachable:
+30 000 tokens before the brief, ~50 turns a session, 52 sessions. That feeds straight
+back into the wall above.
+
+Three things were shared and are now not:
+
+* **Identity.** `CLAUDE_CODE_SESSION_ID` and its siblings are dropped, so each episode
+  is its own session. Inherited, all 52 wrote transcripts named with the *host's*
+  session id, and their `TodoWrite` state — keyed by that id — landed in the host's own
+  task list, two hundred entries of "Implement src/brain package".
+* **State.** `CLAUDE_CONFIG_DIR` points at one directory per run, so transcripts, todos
+  and synced skills stay out of `~/.claude`, which one run had left 685 project
+  directories in. The directory is reported at the end of the run and deliberately not
+  deleted: those transcripts are the only record of what an episode did.
+* **Context.** `--bare --strict-mcp-config`, which drops hooks, LSP, plugin sync, commit
+  attribution, auto-memory, MCP servers and `CLAUDE.md` auto-discovery — the artifact
+  carries `CONTEXT.md` records the brief names, not a `CLAUDE.md`.
+
+Bare mode reads credentials strictly from `ANTHROPIC_API_KEY`, never OAuth and never the
+keychain, so it is used **only when the run brought its own key**. A session billed to
+the local CLI's sign-in makes no API call at all with it — measured, `duration_api_ms:
+0` — which is a worse failure than a long prompt. The three fences are untouched: a bare
+session still honours `.claude/settings.local.json`, checked by asking one to append to
+a denied path and watching it refuse.
 
 ## Synchronous or barrier-free, and which one is upstream's
 
@@ -805,7 +945,7 @@ run — the one `md` stands in for — from §4.1 and the appendix tables.
 | wall clock | **123.402 h** (666.385 h of agent time) | 0.6 h | no — the domain is a stand-in, by design |
 | archived agent episodes | **1,019** | 237 (from ~42 proposals over 4 000 rollouts) | in kind only |
 | observed delegation depth | **5** (configured max 8, retries 15) | 3 (configured max 4) | in kind — both bottom out below their ceiling |
-| what one episode *is* | a supervised session of **up to 2 048 root turns / 128 child turns**, with file, shell and test tools | **one model call** (plus one for a manager's accountability turn, one for the parent's review) | **no**, and this is the largest single gap |
+| what one episode *is* | a supervised session of **up to 2 048 root turns / 128 child turns**, with file, shell and test tools | **one model call** by default; `--executor claude-code` makes it a Claude Code session at upstream's own two budgets — 2 048 at the root, 128 below | **with `--executor claude-code`**, and a plain completion otherwise |
 | result size | 750 tracked files, **248 989** physical lines | 25 files, ~700 lines | no |
 | model-token cost | **US$44.3760** | not billed by this endpoint; 2.9 M prompt + 0.15 M completion tokens | no |
 | concurrency | max **22** overlapping episodes | 4 workers | in kind |

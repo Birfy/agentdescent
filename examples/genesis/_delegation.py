@@ -176,6 +176,12 @@ class RecursiveDelegation:
     #: manager gets one turn at its own node. Off makes a manager a pure router,
     #: which is what this port was and why a node's own file never appeared.
     accountability: bool = True
+    #: ``(path, state) -> a rewritten CONTEXT.md, or None``. Upstream's architect does
+    #: not stop at design: it reviews the implementation and re-spawns refinement
+    #: architects where a node misaligns (`agents/architect.ex`). Called once per
+    #: accountability pass; the callable decides whether the node has drifted at all,
+    #: so this module does not have to know what drift looks like.
+    refine: Optional[Callable[[str, Mapping[str, str]], Optional[str]]] = None
     #: The parent's judgement beyond scope. Upstream a parent decides "using the
     #: available tests, constraints and integration evidence" (paper 3.3), which
     #: is a *test* run on the child's work before it is offered to the version
@@ -212,6 +218,10 @@ class RecursiveDelegation:
     #: Review findings carried into a manager's own turn rather than left with the
     #: child that could not act on them -- see `_accountability_pass`.
     accountability_findings: int = 0
+    #: Records rewritten because the code moved on. Upstream's archive shows 26
+    #: `CONTEXT.md` creations and **62 later accepted updates**: a record is
+    #: maintained, not written once.
+    records_revised: int = 0
     #: Edits whose path was written relative to the agent's own node rather than
     #: to the repository. Counted because the alternative to counting is a file
     #: appearing somewhere nobody asked for it.
@@ -306,6 +316,7 @@ class RecursiveDelegation:
                     continue
                 produced.append(Edit(owner=world.path, path=path,
                                      content=raw.content, kind=raw.kind))
+            produced += self._refresh_record(world, state)
             for edit in produced:
                 if edit.path.endswith(CONTEXT_FILE) and state.get(edit.path) != edit.content:
                     self.record_updates += 1
@@ -475,7 +486,7 @@ class RecursiveDelegation:
                       context=world.situate(amended, contracts=self.contracts),
                       state=amended, task=ctx.task, output=ctx.output,
                       reward=ctx.reward, depth=depth)
-        out: List[Edit] = []
+        out: List[Edit] = list(self._refresh_record(world, amended))
         for raw in self.executor(brief) or ():
             path, relative = resolve_edit_path(amended, world.path, raw.path)
             self.resolved_relative += int(relative)
@@ -491,6 +502,24 @@ class RecursiveDelegation:
                 self.accountability_declined += 1
         self.accountability_edits += len(out)
         return out
+
+    def _refresh_record(self, world: LocalWorld,
+                        state: Mapping[str, str]) -> List[Edit]:
+        """Re-spawn an architect on this node if its record no longer fits it.
+
+        Both paths need it and the leaf path needs it more: a manager's record drifts
+        when a child goes somewhere unplanned, but a **leaf** is where the code actually
+        lands, so its `## API Surface` is the one that goes stale first. Hooking only
+        the accountability pass would have missed every leaf in the tree.
+        """
+        if self.refine is None:
+            return []
+        key = f"{world.path}/{CONTEXT_FILE}" if world.path else CONTEXT_FILE
+        revised = self.refine(world.path, state)
+        if not revised or revised == state.get(key):
+            return []
+        self.records_revised += 1
+        return [Edit(owner=world.path, path=key, content=revised, kind="context")]
 
     def _fold(self, held: Dict[str, Edit], owner_of: Dict[str, str],
               returned: Sequence[Edit], child: LocalWorld,
@@ -693,7 +722,8 @@ class RecursiveDelegation:
                 f"node_relative_paths={self.resolved_relative} "
                 f"accountability={self.accountability_edits}/"
                 f"{self.accountability_declined} "
-                f"findings_carried={self.accountability_findings}")
+                f"findings_carried={self.accountability_findings} "
+                f"records_revised={self.records_revised}")
 
 
 def _with_findings(objective: str, path: str,
