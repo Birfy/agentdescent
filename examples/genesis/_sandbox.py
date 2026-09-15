@@ -229,8 +229,21 @@ class SessionSandbox:
             self.reason = (f"the `{binary}` binary is not in a self-contained install, "
                            "so there is nothing to mount into a container")
         self.provider = None
+        #: Containers left behind by a run that was killed, removed at construction.
+        #: A session's container outlives its `release` when the process holding it
+        #: dies -- a session container restart took one run with eight episodes in
+        #: flight, and all eight were still up and idling afterwards. The engine
+        #: already knows how to find them: they carry its label and a start time, and
+        #: `reap` removes the ones past the TTL, which by construction are nobody's.
+        #: (The host workspace directories they were mounted from are a separate
+        #: lease, and `agentdescent.sandbox`'s own reaper is what clears those.)
+        self.reaped = 0
         if not self.reason:
             self.provider = _Provider(self, engine=self.engine, image=self._image)
+            try:
+                self.reaped = self.provider.reap()
+            except Exception:  # noqa: BLE001 - a run should not fail on housekeeping
+                self.reaped = 0
         #: Containers handed out, for the run's own report.
         self.opened = 0
 
@@ -271,7 +284,8 @@ class SessionSandbox:
     def summary(self) -> str:
         if not self.available:
             return f"off ({self.reason})"
-        return (f"{self.engine} {self._image}, {self.opened} container(s); "
+        reaped = f", {self.reaped} orphan(s) reaped" if self.reaped else ""
+        return (f"{self.engine} {self._image}, {self.opened} container(s){reaped}; "
                 f"only the workspace visible, network inherited")
 
 
