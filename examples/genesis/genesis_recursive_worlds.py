@@ -102,6 +102,7 @@ from ._claude_code import ClaudeCodeExecutor, claude_code_available
 from ._extract import ExtractPhase
 from ._judge import ParentJudge
 from ._review import CompletionJudge, ParentCodeReview, chain_reviews
+from ._session import session_home
 from ._suite import TEST_FAILURE
 from ._suite import cold_start, preflight
 from ._octopus import OctopusConflict, git_available
@@ -814,6 +815,12 @@ def main(argv=None) -> None:
     if not args.engine_gate:
         print(f"gate            : accepted={judge.accepted} rejected={judge.rejected} "
               f"partial={judge.partial}")
+    if sessions is not None or use_sessions:
+        # Where to go and read what an episode actually did, and the promise that it
+        # is not in `~/.claude`: a run used to write its transcripts and its TodoWrite
+        # state into the state of whatever session launched it.
+        print(f"session state   : {session_home()}  "
+              f"(isolated from the host's ~/.claude)")
     if log.pending_rework:
         print(f"open rework     : {sorted(log.pending_rework)}")
     print(f"model usage     : {usage.summary()}"

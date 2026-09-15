@@ -50,7 +50,7 @@ from agentdescent.filetree import match_any, materialize
 from .._common import cli_env
 
 from ._delegation import Brief, Edit
-from ._session import run_cli
+from ._session import isolation_flags, run_cli, session_env
 from ._spatial import SITUATED_EDIT_PROTOCOL  # noqa: F401  (documented sibling)
 from ._world import normalise, owns
 
@@ -179,7 +179,8 @@ class ClaudeCodeExecutor:
                   encoding="utf-8") as handle:
             json.dump(settings, handle)
 
-    def _command(self, prompt: str, turns: int) -> List[str]:
+    def _command(self, prompt: str, turns: int,
+                 env: Optional[Mapping[str, str]] = None) -> List[str]:
         tools = ["Read", "Write", "Edit", "Glob", "Grep", "TodoWrite"]
         if self._allow_bash:
             # The point of a session rather than a completion is that it can run the
@@ -191,6 +192,9 @@ class ClaudeCodeExecutor:
                    "--max-turns", str(turns),
                    "--allowedTools", ",".join(tools),
                    "--disallowedTools", "WebFetch,WebSearch,Task"]
+        # The fourth fence, and it faces the other way: the first three keep the
+        # session out of the repository, this one keeps the host out of the session.
+        command += isolation_flags(env or {})
         if self._model:
             command += ["--model", self._model]
         return command
@@ -202,16 +206,17 @@ class ClaudeCodeExecutor:
             failure=self._failure.format(prompt=getattr(brief.task, "prompt", ""),
                                          output=(brief.output or "")[:400],
                                          reward=brief.reward) if self._failure else "")
-        # `cli_env` is a no-op unless this run points ANTHROPIC_BASE_URL at a
-        # third-party endpoint. When it does, it drops the variables by which a
-        # managed session tells the CLI to use the *host's* provider and ignore
-        # the environment -- inherited, they make every session here 401.
-        env = cli_env()
+        # `session_env` carries the credentials and leaves the identity: `cli_env`
+        # underneath it drops the variables by which a managed session tells the CLI
+        # to use the *host's* provider and ignore the environment -- inherited, they
+        # make every session here 401 -- and `session_env` then drops the ones that
+        # say *which* session this is, and points the CLI's state somewhere private.
+        env = session_env()
         if self._thinking_tokens:
             env["MAX_THINKING_TOKENS"] = str(self._thinking_tokens)
         try:
             turns = self._root_turns if brief.depth == 0 else self._max_turns
-            out, code, timed_out = run_cli(self._command(prompt, turns),
+            out, code, timed_out = run_cli(self._command(prompt, turns, env),
                                            cwd=workspace, env=env,
                                            timeout=self._timeout)
         except Exception:  # noqa: BLE001 - a dead session costs its episode

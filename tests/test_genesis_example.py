@@ -2276,6 +2276,82 @@ def test_a_design_session_that_writes_code_is_counted_not_believed(tmp_path):
     assert "strays=1" in designer.summary()
 
 
+#: Reports back the session's own situation: what it was invoked with, and where the
+#: CLI was told to keep its state.
+ECHO_ENV = '''
+import json, os, sys
+if "--version" in sys.argv:
+    print("0.0.0 (fake)"); raise SystemExit(0)
+open("argv.txt", "w").write("\\n".join(sys.argv))
+open("home.txt", "w").write(os.environ.get("CLAUDE_CONFIG_DIR", "(unset)"))
+open("ident.txt", "w").write(",".join(k for k in HOST if os.environ.get(k)))
+print(json.dumps({"is_error": False, "num_turns": 1}))
+'''
+
+
+def test_a_session_does_not_inherit_the_host_s_identity_or_its_state(tmp_path,
+                                                                    monkeypatch):
+    """A session launched from a session is not that session.
+
+    Inherited, the identity variables make every episode in a run *be* the host: one
+    fly run's 52 episodes each wrote a transcript named with the host's session id, and
+    their TodoWrite state -- keyed by that id -- landed in the host's own task list.
+    `CLAUDE_CONFIG_DIR` then moves transcripts, todos and synced skills out of
+    `~/.claude`, which one run had left 685 project directories in.
+    """
+    from examples.genesis._session import (HOST_SESSION_VARS, session_env,
+                                           session_home)
+
+    for name in HOST_SESSION_VARS:
+        monkeypatch.setenv(name, "the-host")
+    env = session_env()
+    assert not [k for k in HOST_SESSION_VARS if k in env]
+    assert env["CLAUDE_CONFIG_DIR"] == session_home()
+    assert not session_home().startswith(os.path.expanduser("~/.claude"))
+
+    script = ECHO_ENV.replace("HOST", repr(list(HOST_SESSION_VARS)))
+    executor = ClaudeCodeExecutor(frozen=md.FROZEN,
+                                  binary=_fake_claude(tmp_path, script))
+    edits = executor(Brief(world=LocalWorld(version=1, path="src", readonly=md.FROZEN),
+                           objective="o", context="", state=dict(md.initial_files()),
+                           task=md.build_tasks()[0], output="FAIL", reward=0.0, depth=1))
+    wrote = {e.path: e.content for e in edits}
+    assert wrote["ident.txt"] == ""                    # none of them reached the session
+    assert wrote["home.txt"] == session_home()
+
+
+def test_a_session_with_its_own_key_is_not_given_the_host_s_whole_situation(tmp_path,
+                                                                           monkeypatch):
+    """31 850 input tokens plain against 1 317 bare, same endpoint, same prompt.
+
+    A CLI launched from inside a Claude Code session inherits that session's MCP
+    servers, skills, agent list, the user's email and a system prompt about reviewing
+    pull requests -- a 24x prefix on every turn of every episode, none of it about the
+    objective. `--bare` drops it, and reads credentials strictly from
+    `ANTHROPIC_API_KEY`, which is why it is used only when the run brought one: a
+    session billed to the local CLI's own sign-in makes no API call at all with it.
+    """
+    from examples.genesis._session import isolation_flags
+
+    assert isolation_flags({}) == []
+    assert isolation_flags({"ANTHROPIC_AUTH_TOKEN": "t"}) == []    # OAuth-shaped: no
+    assert isolation_flags({"ANTHROPIC_API_KEY": "k"}) == ["--bare",
+                                                           "--strict-mcp-config"]
+
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://example.invalid/anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    script = ECHO_ENV.replace("HOST", "[]")
+    executor = ClaudeCodeExecutor(frozen=md.FROZEN,
+                                  binary=_fake_claude(tmp_path, script))
+    edits = executor(Brief(world=LocalWorld(version=1, path="src", readonly=md.FROZEN),
+                           objective="o", context="", state=dict(md.initial_files()),
+                           task=md.build_tasks()[0], output="FAIL", reward=0.0, depth=1))
+    argv = {e.path: e.content for e in edits}["argv.txt"].splitlines()
+    assert "--bare" in argv and "--strict-mcp-config" in argv
+    # the fences are not what bare drops: the deny list is still on the command line
+    assert "--disallowedTools" in argv
+
+
 def test_stackvm_is_deeper_than_minilang_which_is_why_it_exists():
     """The second domain is not "harder code" -- it is somewhere for the
     recursion to go. `src/vm/ops` is a node whose parent is itself a child."""

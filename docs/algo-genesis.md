@@ -725,6 +725,45 @@ them was still listening two hours later with its working directory already dele
 Sessions now lead their own process group and the group is killed on the way out —
 after the wall, and after a clean finish too.
 
+### A session launched from a session is not that session
+
+The transcripts turned up a second thing, and it is the more expensive one. A run
+launched from inside a Claude Code session had every episode inheriting that session's
+*whole situation* — its MCP servers, its skill listing, its agent types, the user's
+email address, and a system prompt about reviewing pull requests and publishing
+artifacts. Measured against the same endpoint with the same one-line prompt:
+
+| | input tokens | latency | transcript |
+|---|---:|---:|---:|
+| inherited | **31 850** | 6.7 s | 224 KB |
+| `--bare --strict-mcp-config` | **1 317** | 2.4 s | 16 KB |
+
+A 24× prefix on every turn of every episode, none of it about the objective and some of
+it competing with it — an executor told it is accountable for a pull request is being
+given a second job. It also feeds straight back into the wall above: 30 000 extra tokens
+per turn, ~50 turns a session, 52 sessions.
+
+Three things were shared and are now not:
+
+* **Identity.** `CLAUDE_CODE_SESSION_ID` and its siblings are dropped, so each episode
+  is its own session. Inherited, all 52 wrote transcripts named with the *host's*
+  session id, and their `TodoWrite` state — keyed by that id — landed in the host's own
+  task list, two hundred entries of "Implement src/brain package".
+* **State.** `CLAUDE_CONFIG_DIR` points at one directory per run, so transcripts, todos
+  and synced skills stay out of `~/.claude`, which one run had left 685 project
+  directories in. The directory is reported at the end of the run and deliberately not
+  deleted: those transcripts are the only record of what an episode did.
+* **Context.** `--bare --strict-mcp-config`, which drops hooks, LSP, plugin sync, commit
+  attribution, auto-memory, MCP servers and `CLAUDE.md` auto-discovery — the artifact
+  carries `CONTEXT.md` records the brief names, not a `CLAUDE.md`.
+
+Bare mode reads credentials strictly from `ANTHROPIC_API_KEY`, never OAuth and never the
+keychain, so it is used **only when the run brought its own key**. A session billed to
+the local CLI's sign-in makes no API call at all with it — measured, `duration_api_ms:
+0` — which is a worse failure than a long prompt. The three fences are untouched: a bare
+session still honours `.claude/settings.local.json`, checked by asking one to append to
+a denied path and watching it refuse.
+
 ## Synchronous or barrier-free, and which one is upstream's
 
 `--async` switches `evolve()` to its barrier-free runtime, and it is a fair question

@@ -46,14 +46,90 @@ import shutil
 import signal
 import subprocess
 import tempfile
+import threading
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 from agentdescent.filetree import materialize
 
 from .._common import cli_env
 
-__all__ = ["AgentSession", "READ_ONLY_TOOLS", "READ_WRITE_TOOLS", "SCRATCH_DIR",
-           "run_cli"]
+__all__ = ["AgentSession", "HOST_SESSION_VARS", "READ_ONLY_TOOLS",
+           "READ_WRITE_TOOLS", "SCRATCH_DIR", "isolation_flags", "run_cli",
+           "session_env", "session_home"]
+
+
+#: How the host tells a CLI it spawns who it is. Inherited, every session in a run
+#: *is* the host: one fly run's 52 episodes each wrote a transcript named with the
+#: host's own session id, and their `TodoWrite` state -- keyed by that id -- landed in
+#: the host's task list, two hundred entries of "Implement src/brain package".
+HOST_SESSION_VARS = (
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_REMOTE_SESSION_ID",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_DIAGNOSTICS_FILE",
+    "CLAUDE_PID",
+)
+
+_HOME_LOCK = threading.Lock()
+_HOME: Optional[str] = None
+
+
+def session_home() -> str:
+    """One CLI state directory for this process's sessions, and not the host's.
+
+    `CLAUDE_CONFIG_DIR` moves everything the CLI keeps per user -- transcripts, todos,
+    synced skills, settings -- out of `~/.claude`. Without it a run writes into the
+    state of whatever session launched it; one left 685 project directories behind.
+
+    It is **not** deleted with the workspace, deliberately. The per-session transcripts
+    are the only record of what an episode actually did, and reading 52 of them is how
+    the wall was found to be what ends an episode. They are in the system temp
+    directory, so they are transient without being gone before they can be read.
+    """
+    global _HOME
+    with _HOME_LOCK:
+        if _HOME is None:
+            _HOME = tempfile.mkdtemp(prefix="genesis-home-")
+        return _HOME
+
+
+def session_env(base: Optional[Mapping[str, str]] = None) -> Dict[str, str]:
+    """The environment a session runs in: the host's credentials, not its identity."""
+    env = dict(cli_env() if base is None else base)
+    for name in HOST_SESSION_VARS:
+        env.pop(name, None)
+    env["CLAUDE_CONFIG_DIR"] = session_home()
+    return env
+
+
+def isolation_flags(env: Mapping[str, str]) -> List[str]:
+    """`--bare --strict-mcp-config` when the run brings its own key, else nothing.
+
+    A session launched from inside a Claude Code session inherits that session's whole
+    situation: the MCP servers it has connected, the skills it can call, the agents it
+    can spawn, the user's email address, and a system prompt about reviewing pull
+    requests and publishing artifacts. Measured against the same endpoint with the same
+    one-line prompt: **31 850 input tokens plain, 1 317 bare** -- a 24x prefix on every
+    turn of every episode, none of it about the objective, some of it competing with
+    it. Latency followed, 6.7 s to 2.4 s.
+
+    Bare mode reads credentials strictly from `ANTHROPIC_API_KEY` -- never OAuth, never
+    the keychain -- so it is used only when the run has one. A session billed to the
+    local CLI's own sign-in would make no API call at all with it (measured:
+    `duration_api_ms: 0`), which is a worse failure than a long prompt.
+
+    What it drops is what a sandboxed executor has no use for: hooks, LSP, plugin sync,
+    commit attribution, auto-memory, and `CLAUDE.md` auto-discovery -- the artifact
+    carries `CONTEXT.md` records the brief names, not a `CLAUDE.md`. The fences are
+    unaffected: a bare session still honours `.claude/settings.local.json`, verified by
+    asking one to append to a denied path and watching it refuse.
+    """
+    if not env.get("ANTHROPIC_API_KEY"):
+        return []
+    return ["--bare", "--strict-mcp-config"]
 
 
 #: Where a session that has to *answer* rather than edit puts its answer.
@@ -239,7 +315,8 @@ class AgentSession:
                   encoding="utf-8") as handle:
             json.dump(settings, handle)
 
-    def _command(self, prompt: str) -> List[str]:
+    def _command(self, prompt: str, env: Optional[Mapping[str, str]] = None,
+                 ) -> List[str]:
         tools = list(self._tools)
         if self._allow_bash and "Bash" not in tools:
             tools.append("Bash")
@@ -252,16 +329,17 @@ class AgentSession:
                    "--max-turns", str(self._max_turns),
                    "--allowedTools", ",".join(tools),
                    "--disallowedTools", ",".join(denied)]
+        command += isolation_flags(env or {})
         if self._model:
             command += ["--model", self._model]
         return command
 
     def _invoke(self, workspace: str, prompt: str) -> bool:
-        env = cli_env()
+        env = session_env()
         if self._thinking_tokens:
             env["MAX_THINKING_TOKENS"] = str(self._thinking_tokens)
         try:
-            out, code, timed_out = run_cli(self._command(prompt), cwd=workspace,
+            out, code, timed_out = run_cli(self._command(prompt, env), cwd=workspace,
                                            env=env, timeout=self._timeout)
         except Exception:  # noqa: BLE001 - a dead session costs its turn
             return False
