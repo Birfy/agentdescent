@@ -61,7 +61,8 @@ from .._common import cli_env
 
 from ._delegation import Brief, Edit
 from ._sandbox import PROVIDER_FILES, LocalSandbox, Workspace
-from ._session import available_tools, isolation_flags, run_cli, session_env
+from ._session import (ARTIFACT_DIRS, ARTIFACT_FILES, available_tools,
+                       isolation_flags, run_cli, session_env)
 from ._spatial import SITUATED_EDIT_PROTOCOL  # noqa: F401  (documented sibling)
 from ._world import normalise, owns
 
@@ -268,11 +269,15 @@ def _read_tree(workspace: str) -> Dict[str, str]:
     """The worktree as a state dict, skipping what is not the project."""
     out: Dict[str, str] = {}
     for base, dirs, files in os.walk(workspace):
-        dirs[:] = [d for d in dirs if d not in (".git", ".claude", "__pycache__")]
+        # What the session *made* is not what it wrote: an episode is told to run the
+        # suite, a suite run leaves `.pytest_cache`, and without this that lands in the
+        # accepted version and is materialised into every later workspace -- where the
+        # next agent reads it as if it were the project. See `_session.ARTIFACT_DIRS`.
+        dirs[:] = [d for d in dirs if d not in ARTIFACT_DIRS]
         for name in files:
             full = os.path.join(base, name)
             rel = os.path.relpath(full, workspace).replace(os.sep, "/")
-            if rel in PROVIDER_FILES:
+            if rel in PROVIDER_FILES or name in ARTIFACT_FILES:
                 continue              # the sandbox's own bookkeeping, not the node's work
             try:
                 with open(full, encoding="utf-8") as handle:

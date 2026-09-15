@@ -54,7 +54,8 @@ from .._common import cli_env
 
 from ._sandbox import PROVIDER_FILES, LocalSandbox, Workspace
 
-__all__ = ["AgentSession", "HOST_SESSION_VARS", "READ_ONLY_TOOLS",
+__all__ = ["ARTIFACT_DIRS", "ARTIFACT_FILES", "AgentSession",
+           "HOST_SESSION_VARS", "READ_ONLY_TOOLS",
            "READ_WRITE_TOOLS", "SCRATCH_DIR", "available_tools",
            "isolation_flags", "run_cli", "session_env", "session_home"]
 
@@ -171,6 +172,31 @@ def available_tools(tools: Sequence[str], flags: Sequence[str]) -> List[str]:
 #: skips it, and the workspace is deleted either way.
 SCRATCH_DIR = ".genesis"
 
+#: Directories a session *makes* rather than writes, skipped when the worktree is read
+#: back. `.git`, `.claude` and `__pycache__` were here from the start; `.pytest_cache`
+#: was not, and an episode is told to run the suite it is judged by, so every one of
+#: them makes one.
+#:
+#: Measured, in a run four hours in: `src/arena/.pytest_cache/` reached the accepted
+#: state, was materialised into every later workspace, and a manager session at
+#: `src/arena` then spent seven turns reading `CACHEDIR.TAG`, `README.md` and
+#: `v/cache/lastfailed` before writing its plan to
+#: `src/arena/.pytest_cache/.genesis/plan.md`. :meth:`AgentSession.run` reads back the
+#: path the caller named and nothing else, so that plan was never read: the episode
+#: cost a session and returned nothing. One of them had nested the directory twice.
+#:
+#: A virtual environment is the same failure with three orders of magnitude more files,
+#: which is why `venv` is here without having been seen yet.
+ARTIFACT_DIRS = frozenset({
+    ".git", ".claude", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+    ".hypothesis", ".tox", ".nox", "node_modules", ".venv", "venv", "htmlcov",
+    ".genesis",
+})
+
+#: The same idea for files that are output rather than work.
+ARTIFACT_FILES = frozenset({".coverage", "coverage.xml", ".DS_Store"})
+
+
 #: What upstream's `:read` agents get, mapped onto the CLI's tool names. The one job a
 #: read-only agent does write -- `CONTEXT.md` -- is granted per role rather than here.
 #:
@@ -244,12 +270,11 @@ def _strays(workspace: str, state: Mapping[str, str],
     skip = set(read) | set(PROVIDER_FILES)
     out: List[str] = []
     for base, dirs, files in os.walk(workspace):
-        dirs[:] = [d for d in dirs
-                   if d not in (".git", ".claude", "__pycache__", SCRATCH_DIR)]
+        dirs[:] = [d for d in dirs if d not in ARTIFACT_DIRS]
         for name in files:
             full = os.path.join(base, name)
             rel = os.path.relpath(full, workspace).replace(os.sep, "/")
-            if rel in skip:
+            if rel in skip or name in ARTIFACT_FILES:
                 continue
             try:
                 with open(full, encoding="utf-8") as handle:

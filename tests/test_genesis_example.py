@@ -2542,6 +2542,48 @@ def test_every_session_role_takes_the_run_s_own_settings():
     assert executor.sandbox is kwargs["sandbox"]
 
 
+#: A session that does what the brief tells it to: writes a module, writes a test, and
+#: runs the suite -- which leaves a `.pytest_cache` behind.
+TIDY = '''
+import json, os, sys
+if "--version" in sys.argv:
+    print("0.0.0 (fake)"); raise SystemExit(0)
+os.makedirs("src/core", exist_ok=True)
+open("src/core/vectors.py", "w").write("def f():\\n    return 1\\n")
+os.makedirs("src/core/.pytest_cache/v/cache", exist_ok=True)
+open("src/core/.pytest_cache/CACHEDIR.TAG", "w").write("Signature: 8a477f597d28d172\\n")
+open("src/core/.pytest_cache/v/cache/lastfailed", "w").write("{}")
+open(".coverage", "w").write("binary-ish")
+print(json.dumps({"is_error": False, "num_turns": 6}))
+'''
+
+
+def test_what_a_session_made_is_not_what_it_wrote(tmp_path):
+    """Running the suite is the job; the cache it leaves is not the work.
+
+    Without this the directory reaches the accepted version and is materialised into
+    every later workspace. Measured four hours into one run: a manager session at
+    `src/arena` spent seven turns reading `CACHEDIR.TAG`, `README.md` and
+    `v/cache/lastfailed`, then wrote its plan to
+    `src/arena/.pytest_cache/.genesis/plan.md` -- which the caller does not read back,
+    so the episode cost a session and returned nothing. One workspace had nested the
+    directory twice.
+    """
+    executor = ClaudeCodeExecutor(frozen=md.FROZEN, binary=_fake_claude(tmp_path, TIDY))
+    edits = executor(Brief(world=LocalWorld(version=1, path="src/core",
+                                            readonly=md.FROZEN),
+                           objective="o", context="", state=dict(md.initial_files()),
+                           task=md.build_tasks()[0], output="FAIL", reward=0.0, depth=2))
+    assert [e.path for e in edits] == ["src/core/vectors.py"]
+
+    # ...and the same for a role session, which reports what it touched
+    from examples.genesis._session import AgentSession
+
+    session = AgentSession(binary=_fake_claude(tmp_path, TIDY))
+    session.run({}, "do it", read=[".genesis/plan.md"])
+    assert session.changed == ["src/core/vectors.py"]
+
+
 def test_stackvm_is_deeper_than_minilang_which_is_why_it_exists():
     """The second domain is not "harder code" -- it is somewhere for the
     recursion to go. `src/vm/ops` is a node whose parent is itself a child."""
