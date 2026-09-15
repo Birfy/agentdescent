@@ -611,9 +611,13 @@ def suite_failures(state: Mapping[str, str], *, audit: bool = False) -> List[str
     问的不是“人的套件过没过” —— 人的套件它看不见 —— 而是**它自己那套过没过**，这正是
     上游 manager 跑 `mix test` 的那一步。`audit` 在这里没有意义：仓库里不存在保留测试，
     保留的那套在仓库外面，由评分路径注入。保留这个形参只是为了和别的域同签名。
+
+    `require_tests=True` 是因为这条路是**闸门**：一套空套件不算跑过。没有它，根 agent
+    写了十六个实现文件、零个测试，也能喊 `complete_task` 并且被信 —— 这跟同一个类对每个
+    子节点执行的规矩正好相反。
     """
     del audit
-    return FLY.own_test_failures(state)
+    return FLY.own_test_failures(state, require_tests=True)
 reward = reward_test
 HELD_OUT_FRAC = FLY.held_out_frac()
 

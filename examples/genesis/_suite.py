@@ -956,7 +956,17 @@ class TestSuite:
         heading = self.requirements.get(stem, "")
         return (f"{heading}\n\n" if heading else "") + f"ACCEPTANCE: {sentence}."
 
-    def own_test_failures(self, state, under: str = "") -> List[str]:
+    @staticmethod
+    def _implementation_files(state, under: str = "") -> List[str]:
+        """Python the agents wrote that is neither a test nor a package marker."""
+        return [path for path in state
+                if path.endswith(".py")
+                and not path.rsplit("/", 1)[-1].startswith("test_")
+                and "__init__" not in path
+                and (not under or path == under or path.startswith(under + "/"))]
+
+    def own_test_failures(self, state, under: str = "",
+                          *, require_tests: bool = False) -> List[str]:
         """The tests **the agents wrote**, run in one interpreter. `mix test`, theirs.
 
         Everything in `state` is the agents' own work by construction: the acceptance
@@ -967,12 +977,25 @@ class TestSuite:
 
         `under` restricts it to one node's subtree, which is what a parent reviewing one
         child's work wants.
+
+        `require_tests` closes the hole that an empty suite is a passing suite. With no
+        test files at all the loop below has nothing to fail on and returns `[]`, which
+        reads as "everything passes" -- so a root agent that wrote sixteen
+        implementation files and zero tests could call `complete_task` and be believed.
+        That is exactly backwards from the rule the same class enforces on every child
+        in :meth:`own_review`: code with no test is not finished. Pass this wherever the
+        answer gates something (the completion precondition, the closing report) and
+        leave it off where the question really is "did anything the agents wrote break",
+        such as a parent reviewing a child that legitimately returned no code yet.
         """
         owned = {path: body for path, body in state.items()
                  if path.endswith(".py")
                  and path.rsplit("/", 1)[-1].startswith("test_")
                  and (not under or path == under or path.startswith(under + "/"))}
         if not owned:
+            if require_tests and self._implementation_files(state, under):
+                return ["no test file anywhere in the repository; "
+                        "tests are the definition of done"]
             return []
         try:
             plan = [(path, func) for path, func, _ in _discover_tests(owned)]
