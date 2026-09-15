@@ -102,6 +102,7 @@ from ._claude_code import ClaudeCodeExecutor, claude_code_available
 from ._extract import ExtractPhase
 from ._judge import ParentJudge
 from ._review import CompletionJudge, ParentCodeReview, chain_reviews
+from ._sandbox import DEFAULT_IMAGE as SANDBOX_IMAGE
 from ._sandbox import LocalSandbox, SessionSandbox
 from ._session import session_home
 from ._suite import TEST_FAILURE
@@ -318,6 +319,13 @@ def build_parser() -> argparse.ArgumentParser:
                               "Without it the blind property is a line in the brief: "
                               "4 of 12 episodes in one run read a previous run's output "
                               "off /tmp, one of them the answer to its own failure"))
+    parser.add_argument("--sandbox-image", default="", metavar="IMAGE",
+                        help=("the image a sandboxed session runs in (default "
+                              f"{SANDBOX_IMAGE}). The default is a name rather than a "
+                              "build, so a run never fails at its first episode for "
+                              "want of a build context -- but it carries no test "
+                              "runner, and an episode is told to run the suite it is "
+                              "judged by, so every one of them pays for installing it"))
     parser.add_argument("--session-timeout", type=float,
                         default=ClaudeCodeExecutor.TIMEOUT, metavar="SECONDS",
                         help=(f"the wall on one agent session, in seconds (default "
@@ -535,7 +543,7 @@ def main(argv=None) -> None:
     if args.sandbox == "off":
         sandbox = LocalSandbox()
     else:
-        sandbox = SessionSandbox(home=session_home())
+        sandbox = SessionSandbox(home=session_home(), image=args.sandbox_image)
         if not sandbox.available:
             if args.sandbox == "container":
                 print(f"--sandbox container: {sandbox.reason}", file=sys.stderr)
