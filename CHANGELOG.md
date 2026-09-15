@@ -31,6 +31,30 @@ All notable changes to AgentDescent are documented here. The format follows
   `rounds.jsonl`), `RunStatus.tokens` lands it in `status.json`, and the CLI
   status line shows `tok=N` when the run has any.
 
+- **`BudgetGovernor`: graceful degradation before the token wall.**
+  `max_tokens` is a brake: when the spend reaches it the run stops. A brake is
+  the floor of cost control, not its ceiling. The last 10% of a token budget is
+  the most expensive part to waste — the search has paid for its exploration,
+  and a round dispatched there may never finish. The governor degrades before
+  the wall on both paths (sync and async):
+
+  - at 75% of the budget (``soft_floor``), stop building fusion tournaments.
+    The tournament is an extra held-out sweep of every survivor plus the fusion
+    — pure ranking spend, and the ranking can survive without it for the last
+    few rounds. The aggregator acceptance gate runs unchanged.
+  - at 90% (``hard_floor``), stop the self-verify rollout. That rollout doubles
+    the cost of every proposal for a delta the acceptance test folds in as a
+    tie-breaker weight; skipping it costs ranking precision on the advantage
+    signal and nothing on the commit gates.
+  - the projection at the round barrier (sync) asks whether the *next* round
+    fits the remaining budget; if it does not, the run ends with a clean merge
+    at the last round it fully paid for.
+
+  All of this is inert without `max_tokens`. `EvolutionResult.budget` carries
+  the governor's summary (spent, remaining, whether degradation fired) so a
+  caller can tell "the run finished because its budget ran out, degraded" from
+  "it converged, at full quality".
+
 - **`evolve(checkpointing=True)`: the search survives a process restart.**
   `repo_path` already resumed the *artifact* -- the ledger's whole job -- but
   the aggregator's search state is only ever in memory, so a resume re-seeded

@@ -324,3 +324,29 @@ def test_async_governor_fusion_degrades():
     # fusion_trials may or may not be populated (depends on whether any merge
     # had survivors before degradation), but the run must not crash.
     assert hasattr(result, "fusion_trials")
+
+
+def test_result_budget_field_populated():
+    """EvolutionResult.budget carries the governor's summary when max_tokens is set."""
+    result, _ = _run_evolve(max_tokens=10_000_000, rounds=2)
+    assert result.budget is not None
+    assert result.budget["max_tokens"] == 10_000_000
+    assert result.budget["spent"] > 0
+    assert result.budget["remaining"] > 0
+    assert result.budget["fusion_degraded"] is False  # generous cap, no degradation
+    assert result.budget["self_verify_degraded"] is False
+
+
+def test_result_budget_none_without_max_tokens():
+    """EvolutionResult.budget is None when no max_tokens was given."""
+    result, _ = _run_evolve(rounds=1)
+    assert result.budget is None
+
+
+def test_result_budget_shows_degradation():
+    """A tight budget produces fusion_degraded=True in the result."""
+    # 300 tokens/call, 2 calls/round = 600 tokens/round.
+    # With max_tokens=700, soft_floor=75% → 525 tokens → fusion degrades round 1.
+    result, _ = _run_evolve(max_tokens=700, rounds=5)
+    assert result.budget is not None
+    assert result.budget["fusion_degraded"] is True

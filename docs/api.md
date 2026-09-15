@@ -61,7 +61,8 @@ EvolutionResult(
     sandboxes_created: int = 0,
     sandboxes_reused: int = 0,
     sandbox_failures: int = 0,
-    fusion_trials: List['FusionTrial'] = <factory>
+    fusion_trials: List['FusionTrial'] = <factory>,
+    budget: Optional[Dict[str, Any]] = None
 ) -> None
 ```
 

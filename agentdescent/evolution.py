@@ -1306,6 +1306,14 @@ class EvolutionResult:
     #: Every fusion tournament the run held, when the fusion policy recorded
     #: them (the shipped one does). Read it through :meth:`fusion_stats`.
     fusion_trials: List["FusionTrial"] = field(default_factory=list)
+    #: What the budget governor did, when a ``max_tokens`` cap was set. ``None``
+    #: when no budget was given (the run ran without a governor at all). The
+    #: dict is the same shape :meth:`~agentdescent.budget.BudgetGovernor.summary`
+    #: returns: ``max_tokens``, ``spent``, ``remaining``, ``fusion_degraded``,
+    #: ``self_verify_degraded``. Read it to tell "the run finished because its
+    #: budget ran out" from "it converged" — and to know whether the tail of
+    #: the search ran degraded (fewer ranking passes) or at full quality.
+    budget: Optional[Dict[str, Any]] = None
 
     def fusion_stats(self) -> "FusionStats":
         """How often merging beat the best single diff -- and how badly it lost.
@@ -3139,6 +3147,7 @@ def evolve(
                              ledger_log=_safe_log(ledger), error=run_error,
                              stop_reason="error" if run_error else stop_reason,
                              fusion_trials=_fusion_trials(aggregator),
+                             budget=governor.summary() if governor.active else None,
                              **_cost_fields(eng.meter))
     eng.cleanup()
     return result
