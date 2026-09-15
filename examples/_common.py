@@ -38,6 +38,8 @@ def add_standard_args(
     model_default: Optional[str] = DEFAULT_MODEL,
     model_help: str = "model id",
     max_seconds_default: float = 30.0,
+    max_tokens_default: Optional[int] = None,
+    timeout_default: Optional[float] = None,
     async_ratio_default: int = 3,
     eval_concurrency_default: Optional[int] = 8,
     include_val_cap: bool = True,
@@ -162,6 +164,30 @@ def add_standard_args(
               "endpoints only). A throughput knob, and a quality one -- see "
               "completion_for"),
     )
+    # Opt-in, by naming a default. Nine ports already declare `--max-tokens`
+    # themselves, each with a number it measured -- 4096, 16000, 32000 -- and
+    # declaring it here unconditionally is an argparse conflict that takes those
+    # ports' entry points down at import. So a port that wants the shared flag asks
+    # for it, the way `include_val_cap` withholds one from a port whose splits are
+    # already frozen.
+    if max_tokens_default is not None:
+        parser.add_argument(
+            "--max-tokens",
+            type=int,
+            default=max_tokens_default,
+            help=(f"output-token cap for one model call (default "
+                  f"{max_tokens_default}). Raise it for a reasoning model, whose "
+                  f"thinking is spent from the same budget -- see completion_for"),
+        )
+    if timeout_default is not None:
+        parser.add_argument(
+            "--timeout",
+            type=float,
+            default=timeout_default,
+            help=(f"seconds for one model call (default {timeout_default:g}). A "
+                  f"reasoning model given a large --max-tokens legitimately exceeds "
+                  f"120s, and the retry wrapper turns each timeout into three"),
+        )
     return parser
 
 
@@ -591,14 +617,28 @@ def completion_for(args: argparse.Namespace, *, usage: Optional[Usage] = None,
             # run would report thinking off while the CLI kept it on.
             print("note: --no-thinking has no effect with --provider claude-cli; the "
                   "CLI decides its own reasoning budget", file=sys.stderr)
+        if getattr(args, "max_tokens", None):
+            print("note: --max-tokens has no effect with --provider claude-cli; the "
+                  "CLI sets its own output cap", file=sys.stderr)
         built = claude_cli(model=args.model, usage=usage,
                            timeout=float(getattr(args, "timeout", None) or 300.0))
         return gauge.wrap(built) if gauge is not None else built
     if is_openai_compatible(args):
+        if getattr(args, "max_tokens", None):
+            kwargs.setdefault("max_tokens", int(args.max_tokens))
         built = openai_compatible(model=args.model, usage=usage, **kwargs)
         return gauge.wrap(built) if gauge is not None else built
     if getattr(args, "no_thinking", False):
         kwargs.setdefault("thinking", {"type": "disabled"})
+    # A reasoning model spends `max_tokens` on thinking *first* and emits visible
+    # content from what is left, so the default 4096 is not 4096 of answer. Measured:
+    # deepseek-v4-flash answering this package's architect prompt at the default
+    # returned 1708 characters of a JSON object and stopped mid-word -- unparsable,
+    # and the run reported "architect designed 0 nodes, 1 replies unusable" rather
+    # than anything that looked like a token cap. Turning thinking off is the other
+    # lever and a worse one: it changes what the model produces, not just how much.
+    if getattr(args, "max_tokens", None):
+        kwargs.setdefault("max_tokens", int(args.max_tokens))
     # --timeout reaches this path too: claude()'s 120s default assumes Claude
     # latencies, and a thinking model behind an Anthropic-shaped endpoint
     # (GLM-5.2 on GSM-Hard) legitimately exceeds it -- a baseline eval died at

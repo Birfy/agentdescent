@@ -180,7 +180,11 @@ def build_parser() -> argparse.ArgumentParser:
         # that arm; barrier-free by default, that dormant number became the thing
         # that ended every run -- a 4 000-episode budget stopping after 12 rollouts.
         # `--episodes` is the budget; this is a stopwatch for when you want one.
+        # The backend factories' own defaults, made reachable from a command
+        # line: a reasoning model spends `max_tokens` on thinking before it
+        # emits anything, and 4096 was not enough for one architect reply.
         parser, model_default=None, max_seconds_default=0.0,
+        max_tokens_default=4096, timeout_default=120.0,
         model_help=("optional: let a model be the manager and executor agents "
                     "(else rule-based offline actors -- see the selected "
                     "--domain module)"))
