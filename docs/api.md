@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-332 public names across 54 modules.
+333 public names across 54 modules.
 
 ---
 
@@ -2685,6 +2685,23 @@ Archive(
 
 Keep the `k` best-scoring candidates and spread the workers over them.
 
+### `CostEfficient(...)`
+
+FlatPuct that pays for exploration out of a budget. **Test-time scaling.**
+
+```python
+CostEfficient(
+    c_puct: float = 1.0,
+    cost_exponent: float = 1.0,
+    prior_exponent: float = 0.0,
+    anneal: bool = True
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `cost_factors(rows: Sequence[Candidate]) -> List[float]` | `cost**alpha` per row, normalised so the mean is 1. |
+
 ### `MCTS(exploration: float = 1.4) -> None`
 
 UCT over the candidate tree: one evolve step is one rollout.
@@ -2715,7 +2732,8 @@ SelectionContext(
     head: Candidate,
     candidates: Sequence[Candidate] = (),
     round: int = 0,
-    n_workers: int = 1
+    n_workers: int = 1,
+    budget_remaining: float = 1.0
 ) -> None
 ```
 

@@ -157,6 +157,20 @@ class BudgetGovernor:
             return True
         return remaining >= avg
 
+    def remaining_fraction(self) -> float:
+        """Fraction of the token budget still unspent, in ``[0, 1]``.
+
+        What a budget-aware :class:`~agentdescent.selection.SelectionPolicy`
+        anneals its exploration on. ``1.0`` when no budget was set -- a run
+        without a ceiling never runs short of one -- and clamped to ``[0, 1]``
+        so an overshoot (the barrier's up-to-one-round lag) reads as "nothing
+        left" rather than a negative fraction that would invert the sign of an
+        exploration term.
+        """
+        if self.max_tokens is None or self.max_tokens <= 0:
+            return 1.0
+        return max(0.0, min(1.0, (self.max_tokens - self._spent) / self.max_tokens))
+
     # -- what the run reports --------------------------------------------------
 
     def summary(self) -> dict:

@@ -927,6 +927,26 @@ def _wants_population(policy) -> bool:
     return policy is not None and type(policy) is not SingleHead
 
 
+def _set_budget_remaining(aggregator: Any, governor: BudgetGovernor) -> None:
+    """Offer the governor's remaining budget fraction to the aggregator.
+
+    A :class:`~agentdescent.population.PopulationAggregator` carries a
+    ``budget_remaining`` slot its selection context reads, so a
+    :class:`~agentdescent.selection.CostEfficient` policy can anneal exploration
+    as the token budget is spent. A plain ``Aggregator`` -- and any custom one --
+    has no such slot and is left untouched, which is the correct default: a
+    selection policy that never asked for a budget must not start seeing one.
+    """
+    if not governor.active:
+        return
+    # Only an aggregator that declares the slot gets it. A plain `Aggregator`
+    # must not gain an attribute nothing reads, and a `PopulationAggregator`
+    # always has it (set in `__init__`), so `hasattr` is the right test.
+    if not hasattr(aggregator, "budget_remaining"):
+        return
+    aggregator.budget_remaining = governor.remaining_fraction()
+
+
 def _cost_fields(meter: Meter) -> Dict[str, Any]:
     """The meter's counters, keyed as :class:`EvolutionResult` fields.
 
@@ -2746,6 +2766,11 @@ def evolve(
                  and "max_calls") or
                 (max_tokens is not None and tokens_spent >= max_tokens
                  and "max_tokens"))
+        # Tell a budget-aware selection policy how much of the budget is left, so
+        # it can anneal exploration before the round body selects a parent. A
+        # plain `Aggregator` has no such slot and is left alone; a
+        # `PopulationAggregator` reads it in `step()`'s SelectionContext.
+        _set_budget_remaining(aggregator, governor)
         if over:
             stop_reason = over
             if verbose:

@@ -822,6 +822,8 @@ def async_evolve(
         if governor.active:
             gov_tokens = eng.meter.usage.total_tokens
             governor.spend(gov_tokens)
+            if hasattr(eng.aggregator, "budget_remaining"):
+                eng.aggregator.budget_remaining = governor.remaining_fraction()
             fp = getattr(eng.aggregator, "fusion_policy", None)
             if fp is not None and hasattr(fp, "tournament"):
                 should = governor.allow_fusion_tournament()

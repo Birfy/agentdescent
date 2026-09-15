@@ -55,6 +55,31 @@ All notable changes to AgentDescent are documented here. The format follows
   caller can tell "the run finished because its budget ran out, degraded" from
   "it converged, at full quality".
 
+- **`SelectionContext.budget_remaining` + `CostEfficient`: spend the budget, don't just count it.**
+  The o1 test-time-scaling decision, as a search parameter. `SelectionContext`
+  gains `budget_remaining` (the unspent fraction, `1.0` with no ceiling), and
+  `Candidate` gains `cost` (`None` = unknown, never zero — the same distinction
+  `score` and `prior` make). `CostEfficient` is `FlatPuct` with two additions:
+
+  - the **exploration** term is divided by cost, so a speculative expansion of an
+    expensive candidate must beat one of a cheap candidate at the same rank. The
+    **exploitation** term is left alone: charging cost against a grounded pick
+    would bias the search against complex solutions (longer artifacts cost more
+    to expand) in favour of short ones, which is not a quality judgment and must
+    not be smuggled in as one;
+  - the exploration bonus **anneals by `budget_remaining`**, so a run explores
+    while it has budget to exploit what it finds and exploits once it does not —
+    what an anytime search has to do, and the difference between spending a
+    budget and allocating it.
+
+  `cost_exponent=0` is `FlatPuct` to the floating-point bit (tested), so the
+  mechanism cannot change a cost-blind run; uniform costs are unchanged too.
+  `anneal=False` is the ablation that separates "cost-aware" from "budget-aware".
+  The population layer fills `Candidate.cost` with a deterministic content-size
+  proxy (the prompt dominates the input tokens, and size is attributable to one
+  candidate without racing a shared meter) and the engine feeds
+  `budget_remaining` from the governor each round, on both sync and async paths.
+
 - **`baselines.Budget(tokens=...)`: the A/B framework can hold cost fixed.**
   The module's own argument is that a budget in one unit is not a comparison —
   "matched on rollouts alone, an arm that asks for more proposals per rollout
