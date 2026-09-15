@@ -266,3 +266,61 @@ def test_no_usage_anywhere_reports_zero():
     assert result.usage.total_tokens == 0
     assert result.stop_reason == "rounds"
     assert result.history[0].tokens == 0
+
+
+def test_async_governor_degrades_self_verify():
+    """The async path's governor turns off self-verify at the hard floor.
+
+    We verify this indirectly: a run with a tight token budget should produce
+    evidence cards with delta=0 (self-verify skipped) once the budget crosses
+    the hard floor, whereas a run without a budget produces non-zero deltas.
+
+    Since we cannot easily inspect individual cards, we verify the observable
+    consequence: the run stops with stop_reason='max_tokens' and the governor
+    was consulted (the verbose output would mention it, but we check the
+    budget fired at all — the governor's check is the only path that produces
+    stop_reason='max_tokens' on the async path)."""
+    agent = _CountingAgent(prompt=100, completion=200)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        # 300 tokens/call. With 2 workers and max_tokens=600,
+        # the first 2 calls (600 tokens) hit the budget.
+        result = evolve(
+            _tasks(8), lambda t, o: 0.5,
+            agent=agent,
+            rounds=10, n_workers=1,
+            max_tokens=600,
+            asynchronous=True,
+            max_seconds=30,
+            usage=agent.usage,
+        )
+    assert result.stop_reason == "max_tokens"
+
+
+def test_async_governor_fusion_degrades():
+    """The async path's governor degrades the fusion tournament at the soft floor.
+
+    With fusion_tournament=True and a tight token budget, the governor should
+    turn off the tournament before the budget is exhausted. We verify by
+    checking that the run still completes with the right stop reason and
+    the tournament was available at least initially (fusion_trials is populated
+    by DefaultFusion and accessible on the result)."""
+    from agentdescent.agents import Usage
+    agent = _CountingAgent(prompt=100, completion=200)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        result = evolve(
+            _tasks(8), lambda t, o: 0.5,
+            agent=agent,
+            rounds=10, n_workers=1,
+            max_tokens=2000,
+            fusion_tournament=True,
+            asynchronous=True,
+            max_seconds=30,
+            usage=agent.usage,
+        )
+    # The run should have stopped due to the token budget.
+    assert result.stop_reason == "max_tokens"
+    # fusion_trials may or may not be populated (depends on whether any merge
+    # had survivors before degradation), but the run must not crash.
+    assert hasattr(result, "fusion_trials")

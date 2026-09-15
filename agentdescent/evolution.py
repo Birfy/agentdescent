@@ -59,6 +59,7 @@ from .sampling import RoundRobin, TaskSampler
 from .selection import SingleHead
 from .scheduler import AuditScheduler
 from .staleness import StalenessPolicy
+from .budget import BudgetGovernor
 
 
 # ---------------------------------------------------------------------------
@@ -2712,6 +2713,11 @@ def evolve(
     dead_rounds = 0            # consecutive rounds where every worker failed
     deadline = time.time() + max_seconds if max_seconds else None
     stop_reason = "rounds"
+    # The cost-aware governor: degrades optional spend (fusion tournaments,
+    # self-verify) before the token wall, and projects whether the *next*
+    # round fits — so a run that cannot afford round N+1 ends at N with a
+    # clean merge instead of being cut mid-round. Inert without max_tokens.
+    governor = BudgetGovernor(max_tokens=max_tokens)
     for r in range(rounds):
         if deadline is not None and time.time() >= deadline:
             stop_reason = "max_seconds"
@@ -2725,6 +2731,7 @@ def evolve(
         # spend it actually incurred instead of the one it was asked for.
         spent = eng.meter.snapshot()
         tokens_spent = spent.prompt_tokens + spent.completion_tokens
+        governor.spend(tokens_spent)
         over = ((max_rollouts is not None and spent.rollouts >= max_rollouts
                  and "max_rollouts") or
                 (max_calls is not None and spent.calls >= max_calls
@@ -2738,6 +2745,38 @@ def evolve(
                       f"({spent.rollouts} rollouts / {spent.calls} calls "
                       f"/ {tokens_spent} tokens)")
             break
+        # The projection: a round that the remaining budget cannot afford is
+        # not dispatched. This lands *before* the snapshot, so the run ends on
+        # the last round it fully paid for rather than one round into the wall
+        # — the difference between a clean merge and a partial one. Reported
+        # as "max_tokens" (the budget that fired), not a separate reason: the
+        # caller's question is "why did my run stop early" and the answer is
+        # the token budget either way.
+        if not governor.affords_next_round():
+            stop_reason = "max_tokens"
+            if verbose:
+                s = governor.summary()
+                print(f"round {r:>3}  stopping: projected next round exceeds "
+                      f"max_tokens ({s['spent']:,} spent, ~"
+                      f"{s['remaining']:,} left)")
+            break
+        # The governor's soft degradation: at the soft floor (75% of budget),
+        # turn off the fusion tournament — it is the most expensive piece of
+        # optional ranking spend, and its absence costs selection refinement,
+        # never a commit gate. Mutating the fusion policy's ``tournament``
+        # flag at the round barrier is safe: ``_tournament`` reads it in
+        # ``step()``, which runs *after* this point in the same round.
+        if governor.active:
+            fp = getattr(aggregator, "fusion_policy", None)
+            if fp is not None and hasattr(fp, "tournament"):
+                should = governor.allow_fusion_tournament()
+                if fp.tournament != should:
+                    fp.tournament = should
+                    if verbose:
+                        tag = "on" if should else "off"
+                        print(f"round {r:>3}  fusion tournament {tag} "
+                              f"(token budget: {governor.summary()['spent']:,}/"
+                              f"{governor.max_tokens:,})")
         try:
             snap = ledger.snapshot(Ledger.DEV)
         except LedgerFailure as e:
@@ -2886,8 +2925,12 @@ def evolve(
                               f"{outside[0]!r}, outside its section {unit.section}")
                     return
             # The self-verify rollout doubles the cost of every proposal, so it is
-            # opt-out here exactly as it is on the async path.
-            if self_verify:
+            # opt-out here exactly as it is on the async path. The governor can
+            # also turn it off mid-run when the token budget is nearly spent:
+            # the delta it produces feeds the acceptance test's tie-breaker
+            # (``observe_delta``), never the commit gates, so skipping it costs
+            # ranking precision on the advantage signal and nothing else.
+            if self_verify and governor.allow_self_verify():
                 after = _checked_reward(
                     reward(task, run(mine.apply(diff).render(), task)), task)
                 delta = after - score

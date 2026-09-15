@@ -39,6 +39,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .advantage import GroupAdvantage
 from .agents import Usage
+from .budget import BudgetGovernor
 from .policies import Policies
 from .evolution import (
     _publish_stable, _safe_log,
@@ -353,6 +354,15 @@ def async_evolve(
         usage=usage, verifier=_pol.verifier, ledger_impl=_pol.ledger,
         policies_bundle=_pol, checkpointing=checkpointing)
     eng.meter.start()
+    # The cost-aware governor for the async path. The merger loop has no round
+    # barrier, so the governor checks per sweep (after each merge, before the
+    # next worker batch's self-verify fires) rather than at the barrier. The
+    # soft floor turns off fusion tournaments between sweeps; the hard floor
+    # turns off self-verify in the worker body — read through eng.checkpointing
+    # would be wrong (that is checkpoint, not budget), so the governor lives on
+    # eng alongside it.
+    governor = BudgetGovernor(max_tokens=max_tokens)
+    eng.governor = governor
     if n_workers < 1:
         raise ValueError(f"n_workers must be >= 1, got {n_workers}")
     policy = staleness_policy or get_policy("guarded")
@@ -622,7 +632,7 @@ def async_evolve(
                             # diff applied for a before/after signal. Faithful repos that
                             # only score the candidate on held-out (e.g. EvoSkill) pass
                             # self_verify=False to skip this extra rollout.
-                            if self_verify:
+                            if self_verify and governor.allow_self_verify():
                                 after = _checked_reward(
                                     eng.reward(task, eng.run(artifact.apply(diff).render(), task)), task)
                                 delta = after - score
@@ -805,6 +815,23 @@ def async_evolve(
                 _discarded()                             # DISCARD -> drop the card
         with eng.meter.timed("merge_gate_seconds"):
             reports = check_reports(_gated_step(), eng.aggregator)
+        # Governor: record the spend after each merge and degrade fusion before
+        # the next sweep. The merger is the single-threaded decision point, so
+        # the mutation is safe — no worker reads ``fusion_policy.tournament``
+        # until the next ``_gated_step`` which is the next sweep.
+        if governor.active:
+            gov_tokens = eng.meter.usage.total_tokens
+            governor.spend(gov_tokens)
+            fp = getattr(eng.aggregator, "fusion_policy", None)
+            if fp is not None and hasattr(fp, "tournament"):
+                should = governor.allow_fusion_tournament()
+                if fp.tournament != should:
+                    fp.tournament = should
+                    if verbose:
+                        tag = "on" if should else "off"
+                        print(f"  fusion tournament {tag} "
+                              f"(token budget: {gov_tokens:,}/"
+                              f"{governor.max_tokens:,})")
         if not reports and not batch:
             # A pipelined poll whose candidate is still being measured has
             # nothing to report yet. Returning keeps the merger draining --
