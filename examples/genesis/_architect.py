@@ -34,10 +34,14 @@ from ._world import (CONTEXT_FILE, LocalWorld, ROUTING_HEADING,
                      STANDARD_SECTIONS, looks_like_file, normalise,
                      parse_routes, parse_routing, shadowed_by_module)
 
-__all__ = ["ARCHITECT_PROMPT", "REFINE_PROMPT", "ArchitectPhase",
+__all__ = ["ARCHITECT_PROMPT", "ARCHITECT_RULES", "REFINE_PROMPT", "ArchitectPhase",
            "harness_record", "misaligned"]
 
-ARCHITECT_PROMPT = """You are an architect agent in a recursive software world, \
+#: The design rules, without a delivery instruction. Both paths use these: the
+#: completion architect appends "reply with JSON", the session architect appends
+#: "write the file". Splitting them is what keeps the two from drifting -- the
+#: rules here are the ones every measured tree in this port came out of.
+ARCHITECT_RULES = """You are an architect agent in a recursive software world, \
 situated at the repository path `{path}`. You design; you do not implement.
 
 {context}
@@ -109,6 +113,12 @@ routers is a tree where almost nothing is built: measured on this port, an archi
 that ignored it produced 600 nodes for one simulator, three quarters of them pure \
 routing, at depth 8. Upstream's 123-hour C compiler run -- 750 files and 249 000 lines \
 -- has **26** nodes and bottomed out at depth 5.
+
+Count honestly."""
+
+
+#: The completion path's delivery: one JSON object carrying record and children.
+ARCHITECT_PROMPT = ARCHITECT_RULES + """
 
 Reply with ONE JSON object and nothing else:
 {{"record": "<the whole CONTEXT.md, markdown>",
@@ -226,8 +236,16 @@ class ArchitectPhase:
 
     def __init__(self, complete, *, contracts: Sequence[str] = (),
                  max_depth: int = 3, max_nodes: int = 12, root_path: str = "",
-                 resume: bool = False, workers: int = 1, on_node=None):
+                 resume: bool = False, workers: int = 1, on_node=None,
+                 session=None):
         self._complete = complete
+        #: An :class:`~examples.genesis._architect_session.ArchitectSession`, or None.
+        #: Given one, a node is designed by an agent session that *writes* its record
+        #: with a file tool -- upstream's shape (`agents/architect.ex` is
+        #: `use EvoGit.Agent`, `agent_type :read_write`, and `CONTEXT.md` is written
+        #: with `context_write`) -- instead of a completion returning JSON. The phase
+        #: drives the levels either way; only how one node is produced changes.
+        self._session = session
         self._contracts = tuple(contracts)
         self._max_depth = max_depth
         self._max_nodes = max_nodes
@@ -445,10 +463,23 @@ class ArchitectPhase:
              depth: int) -> Tuple[Optional[str], List[Dict[str, str]]]:
         world = LocalWorld(version=0, path=path, readonly=self._contracts)
         prefix = f"{path}/" if path else ""
+        situated = world.situate(state, contracts=self._contracts)
+        if self._session is not None:
+            rules = ARCHITECT_RULES.format(path=path or "./", path_prefix=prefix,
+                                           objective=objective, context=situated)
+            try:
+                record, children = self._session(state, path, rules)
+            except Exception:  # noqa: BLE001 - one dead session costs one node
+                record, children = None, []
+            if record is None:
+                # A session that wrote no record and a reply that did not parse are
+                # the same event to the tree: a node nobody designed.
+                self.unparsed += 1
+            return record, children
         try:
             reply = self._complete(ARCHITECT_PROMPT.format(
                 path=path or "./", path_prefix=prefix, objective=objective,
-                context=world.situate(state, contracts=self._contracts))) or ""
+                context=situated)) or ""
         except Exception:  # noqa: BLE001 - one dead call costs one node
             self.unparsed += 1
             return None, []

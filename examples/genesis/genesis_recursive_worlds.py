@@ -75,6 +75,7 @@ Intentional differences
 from __future__ import annotations
 
 import argparse
+import sys
 import posixpath
 
 from agentdescent import Policies, evolve
@@ -95,6 +96,7 @@ from . import _md as md
 from . import _stackvm as stackvm
 from ._architect import (ArchitectPhase, harness_record, misaligned,
                          missing_sections)
+from ._architect_session import ArchitectSession
 from ._claude_code import ClaudeCodeExecutor, claude_code_available
 from ._extract import ExtractPhase
 from ._judge import ParentJudge
@@ -294,6 +296,22 @@ def build_parser() -> argparse.ArgumentParser:
                         help="how many CONTEXT.md records phase 1 may write. The fly "
                              "domain's architect named 17 children it never reached at "
                              "the default, so the tree came out two deep and truncated")
+    parser.add_argument("--thinking-tokens", type=int, default=0,
+                        help="per-turn reasoning cap for an --architect-session "
+                             "design turn (MAX_THINKING_TOKENS); 0 leaves the CLI's "
+                             "own. Upstream carries reasoning strength per model "
+                             "profile (`reasoning_effort`) rather than as a constant. "
+                             "Measured on one fly node against a coding-plan endpoint: "
+                             "uncapped 497s, capped at 2048 203-242s, same record")
+    parser.add_argument("--architect-session", action="store_true",
+                        help="run phase 1's architect as a Claude Code session that "
+                             "WRITES each CONTEXT.md with a file tool, rather than as "
+                             "one completion returning JSON. This is upstream's shape "
+                             "-- `agents/architect.ex` is `use EvoGit.Agent` with "
+                             "`agent_type :read_write`, and the record is written with "
+                             "`context_write` -- and it removes the whole class of "
+                             "failure where a truncated reply leaves phase 1 with no "
+                             "tree. Needs --architect and the claude CLI")
     parser.add_argument("--architect", action="store_true",
                         help="upstream's Phase 1: an agent designs the CONTEXT.md tree "
                              "-- intent, API surface, constraints, routing tables -- "
@@ -493,6 +511,7 @@ def main(argv=None) -> None:
             print(f"           {path or './':<24} {len(parse_routing(record))} routes")
 
     architect = None
+    designer = None
     if args.mode == "b":
         if complete is None:
             print("--mode b needs --model: there is no offline architect, and a "
@@ -504,7 +523,17 @@ def main(argv=None) -> None:
         root = package_root(args.domain)
         initial[CONTEXT_FILE] = harness_record(root, spec.FROZEN,
                                                objective_for(args.domain))
+        if args.architect_session:
+            if not claude_code_available():
+                print("--architect-session needs the `claude` CLI on PATH; phase 1 "
+                      "falls back to one completion per node", file=sys.stderr)
+            else:
+                designer = ArchitectSession(
+                    frozen=spec.FROZEN, model=(args.executor_model or args.model or ""),
+                    timeout=float(getattr(args, "timeout", None) or 900.0),
+                    thinking_tokens=args.thinking_tokens)
         architect = ArchitectPhase(complete, contracts=spec.CONTRACTS,
+                                   session=designer,
                                    max_depth=args.depth, max_nodes=args.nodes,
                                    root_path=root,
                                    # A phase 1 that ran out of budget is worth
@@ -720,6 +749,8 @@ def main(argv=None) -> None:
         print(f"workspace       : {ledger.summary()}")
     if sessions is not None:
         print(f"claude code     : {sessions.summary()}")
+    if designer is not None and designer.sessions:
+        print(f"architect       : {designer.summary()}")
     if code_review is not None:
         print(f"parent review   : read={code_review.reviewed} "
               f"rejected={code_review.rejected} unparsed={code_review.unparsed}")

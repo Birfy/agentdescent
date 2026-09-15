@@ -2152,3 +2152,80 @@ def test_formation_grows_a_working_toolchain_from_the_empty_repository():
     assert result.final_reward > 0.9, result.outcomes()
     assert log.observed_depth() >= 2, "the run never delegated past the first level"
     assert log.contract_violations == 0
+
+
+# -- phase 1's architect as a session -------------------------------------------
+
+def test_a_routing_heading_is_read_at_any_level_or_numbering():
+    """The routing table is the map delegation runs on, so a heading written the way
+    an agent writes markdown -- deeper, numbered, lowercased -- must still open it.
+
+    Measured: a session architect wrote a complete five-child routing table under a
+    heading the exact-prefix match rejected, and the tree recorded the node as a leaf.
+    """
+    from examples.genesis._world import parse_route_sizes, parse_routes
+
+    for heading in ("## Routing Table", "### Routing Table", "## Routing table",
+                    "## Routing", "#### Routing", "## 4. Routing Table",
+                    "## Routing Table (children)"):
+        body = f"{heading}\n\n- `./src/brain/` (3 files) -> the circuits\n"
+        assert parse_routes(body) == [("src/brain", "the circuits")], heading
+        assert parse_route_sizes(body) == {"src/brain": 3}, heading
+    # and a heading that only mentions routing is still not the section
+    assert parse_routes("## Non-routing notes\n\n- `./src/brain/` -> x\n") == []
+
+
+def test_a_routing_line_may_declare_the_child_s_size():
+    """A session architect writes `CONTEXT.md` and returns no structured reply, so the
+    file-count that refuses a child too small to be a directory has to live in the
+    routing line. A record without counts still routes; it just declares nothing.
+    """
+    from examples.genesis._world import parse_route_sizes, parse_routes
+
+    sized = ("## Routing Table\n\n"
+             "- `./src/brain/` (12 files) -> circuits\n"
+             "- `./src/web/` -> the page\n")
+    assert parse_routes(sized) == [("src/brain", "circuits"), ("src/web", "the page")]
+    assert parse_route_sizes(sized) == {"src/brain": 12}
+    assert parse_route_sizes("## Routing Table\n\n- `./src/brain/` -> x\n") == {}
+
+
+def test_the_session_architect_returns_what_the_completion_one_does():
+    """`ArchitectSession` is a drop-in for the completion: same return shape, so the
+    phase's guards -- the file-count threshold, the shadowing refusals -- apply to
+    both. A record the session did not write is `(None, [])`, which the phase counts
+    as an unusable reply, because a node nobody designed is one event either way.
+    """
+    from examples.genesis._architect_session import _children
+
+    record = ("## Routing Table\n\n"
+              "- `./src/brain/` (12 files) -> circuits\n"
+              "- `web/` (4 files) -> the page\n")
+    kids = _children(record, "src/")
+    assert [k["path"] for k in kids] == ["src/brain", "src/web"]
+    assert [k["files"] for k in kids] == [12, 4]
+    assert all(k["objective"] for k in kids)
+
+
+def test_the_design_rules_are_shared_by_both_delivery_paths():
+    """One set of rules, two ways to deliver the record. Duplicating them is how the
+    completion path and the session path would silently grow different trees.
+    """
+    from examples.genesis._architect import ARCHITECT_PROMPT, ARCHITECT_RULES
+
+    assert ARCHITECT_PROMPT.startswith(ARCHITECT_RULES)
+    assert "ONE JSON object" in ARCHITECT_PROMPT
+    assert "ONE JSON object" not in ARCHITECT_RULES
+
+
+def test_a_design_session_is_given_no_shell():
+    """The implementation executor gets Bash because it has to run the suite it is
+    judged by. An architect designs and does not implement, and a shell is how a
+    design session becomes an implementation session by accident.
+    """
+    from examples.genesis._architect_session import ArchitectSession
+
+    command = ArchitectSession(model="m")._command("hi")
+    allowed = command[command.index("--allowedTools") + 1]
+    assert "Bash" not in allowed
+    assert "Bash" in command[command.index("--disallowedTools") + 1]
