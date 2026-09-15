@@ -18,9 +18,10 @@ sequential held-out loop, and every port paid the same silent wall-clock for it.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import threading
-from typing import Callable, Optional
+from typing import Callable, Dict, Mapping, Optional
 
 from agentdescent.agents import Usage, claude, openai_compatible
 
@@ -397,6 +398,67 @@ def worker_count(args: argparse.Namespace, requested: int) -> int:
     return 1
 
 
+#: Variables that hand the Claude Code CLI a provider the *host* chose.
+#:
+#: A managed Claude Code session -- the web app, a CI runner, a cloud container -- does
+#: not authenticate the way a laptop does. Instead of an API key it is handed a session
+#: ingress: a URL and a short-lived token the harness holds. `CLAUDE_CODE_REMOTE` is
+#: what puts the CLI in that mode, and in that mode it uses the ingress and **ignores
+#: whatever credentials are in the environment**. Which is the right default -- it stops
+#: a stray `ANTHROPIC_API_KEY` from silently redirecting a managed session's traffic.
+#:
+#: It also makes it impossible to point a *child* CLI somewhere else from inside such a
+#: session, which is exactly what `--executor claude-code` does. The child inherits the
+#: variable, ignores the `ANTHROPIC_BASE_URL` and key it was given, and 401s. What it
+#: reports is "Authentication error · This may be a temporary network issue, please try
+#: again" -- neither temporary nor a network issue. A run of 28 sessions failed 23 of
+#: them and wrote zero files this way, and the accompanying stderr
+#: (`[claude-code:unrecognized_model] ... "query_source":"generate_session_title"`) is a
+#: red herring: that is the session-title side query, not the agent turn, and it is
+#: emitted just the same on runs that work.
+#:
+#: `CLAUDE_CODE_REMOTE` alone is the switch -- measured, by bisection, against a
+#: third-party Anthropic-compatible endpoint. The rest is the same host's plumbing for
+#: the same decision; dropping it too costs nothing and does not leave a child half in
+#: one mode and half in the other.
+HOST_PROVIDER_VARS = (
+    "CLAUDE_CODE_REMOTE",
+    "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
+    "CLAUDE_SESSION_INGRESS_TOKEN_FILE",
+    "SESSION_INGRESS_URL",
+    "CLAUDE_CODE_POST_FOR_SESSION_INGRESS_V2",
+)
+
+
+def cli_env(base_url: Optional[str] = None, api_key: Optional[str] = None,
+            env: Optional[Mapping[str, str]] = None) -> Dict[str, str]:
+    """The environment to spawn a Claude Code CLI child in.
+
+    Pass through unchanged unless an endpoint is actually being overridden. When one
+    is -- either explicitly here, or because the surrounding environment already names
+    a non-Anthropic `ANTHROPIC_BASE_URL` -- drop :data:`HOST_PROVIDER_VARS` so the
+    child reads the key it was given rather than the host's session ingress, and set
+    both `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN`, since which one a given
+    endpoint wants is not something worth discovering twice.
+
+    Nothing here writes a credential anywhere but this process's child: the key comes
+    from the environment and goes into an `env=` dict.
+    """
+    out = dict(os.environ if env is None else env)
+    url = base_url or out.get("ANTHROPIC_BASE_URL", "")
+    key = api_key or out.get("ANTHROPIC_API_KEY") or out.get("ANTHROPIC_AUTH_TOKEN")
+    third_party = url and "api.anthropic.com" not in url
+    if not third_party:
+        return out
+    for name in HOST_PROVIDER_VARS:
+        out.pop(name, None)
+    out["ANTHROPIC_BASE_URL"] = url
+    if key:
+        out["ANTHROPIC_API_KEY"] = key
+        out["ANTHROPIC_AUTH_TOKEN"] = key
+    return out
+
+
 def claude_cli(model: str = "haiku", *, usage: Optional[Usage] = None,
                timeout: float = 300.0, binary: str = "claude"):
     """A ``Completion`` that shells out to the locally authenticated Claude Code CLI.
@@ -424,7 +486,7 @@ def claude_cli(model: str = "haiku", *, usage: Optional[Usage] = None,
         started = time.time()
         try:
             done = subprocess.run(argv, input=prompt, capture_output=True, text=True,
-                                  timeout=timeout)
+                                  timeout=timeout, env=cli_env())
         except subprocess.TimeoutExpired:
             if usage is not None:
                 usage.record(failed=True, seconds=time.time() - started)

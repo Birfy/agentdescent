@@ -47,6 +47,8 @@ from typing import Callable, Dict, List, Mapping, Optional, Sequence
 
 from agentdescent.filetree import match_any, materialize
 
+from .._common import cli_env
+
 from ._delegation import Brief, Edit
 from ._spatial import SITUATED_EDIT_PROTOCOL  # noqa: F401  (documented sibling)
 from ._world import normalise, owns
@@ -84,7 +86,7 @@ def claude_code_available(binary: str = "claude") -> bool:
         return False
     try:
         out = subprocess.run([binary, "--version"], stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE, timeout=30)
+                             stderr=subprocess.PIPE, timeout=30, env=cli_env())
         return out.returncode == 0
     except Exception:  # noqa: BLE001 - anything at all means "no"
         return False
@@ -185,9 +187,13 @@ class ClaudeCodeExecutor:
                                          reward=brief.reward) if self._failure else "")
         try:
             turns = self._root_turns if brief.depth == 0 else self._max_turns
+            # `cli_env` is a no-op unless this run points ANTHROPIC_BASE_URL at a
+            # third-party endpoint. When it does, it drops the variables by which a
+            # managed session tells the CLI to use the *host's* provider and ignore
+            # the environment -- inherited, they make every session here 401.
             out = subprocess.run(self._command(prompt, turns), cwd=workspace,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                 timeout=self._timeout)
+                                 timeout=self._timeout, env=cli_env())
         except Exception:  # noqa: BLE001 - a dead session costs its episode
             return False
         try:
