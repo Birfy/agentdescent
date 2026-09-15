@@ -3417,7 +3417,7 @@ ArmResult(
 ) -> None
 ```
 
-### `Budget(rollouts: int, calls: Optional[int] = None) -> None`
+### `Budget(rollouts: int, calls: Optional[int] = None, tokens: Optional[int] = None) -> None`
 
 What every arm is allowed to spend.
 

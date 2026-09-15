@@ -55,6 +55,20 @@ All notable changes to AgentDescent are documented here. The format follows
   caller can tell "the run finished because its budget ran out, degraded" from
   "it converged, at full quality".
 
+- **`baselines.Budget(tokens=...)`: the A/B framework can hold cost fixed.**
+  The module's own argument is that a budget in one unit is not a comparison —
+  "matched on rollouts alone, an arm that asks for more proposals per rollout
+  spends more model and the table still says equal budget." That argument was
+  missing the unit cost is measured in: two arms at equal rollouts and equal
+  calls can differ 10x in tokens when one uses a reasoning model, and the table
+  had no column that would show it. `Budget` gains `tokens` (split like the
+  others), `Workload._evolve` passes it to `evolve(max_tokens=)`,
+  `compare(fixed="tokens")` is a valid unit, `ArmResult.tokens` is the measured
+  sum, and the markdown table gains a token column that reads `—` (not `0`)
+  when the actor reported none. A comparison that fixes tokens is the only one
+  that has shown an arm to be more *efficient* rather than merely given more
+  model.
+
 - **`evolve(checkpointing=True)`: the search survives a process restart.**
   `repo_path` already resumed the *artifact* -- the ledger's whole job -- but
   the aggregator's search state is only ever in memory, so a resume re-seeded
