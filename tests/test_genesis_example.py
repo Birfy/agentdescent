@@ -2225,7 +2225,121 @@ def test_a_design_session_is_given_no_shell():
     """
     from examples.genesis._architect_session import ArchitectSession
 
-    command = ArchitectSession(model="m")._command("hi")
+    command = ArchitectSession(model="m").session._command("hi")
     allowed = command[command.index("--allowedTools") + 1]
     assert "Bash" not in allowed
     assert "Bash" in command[command.index("--disallowedTools") + 1]
+
+
+# -- the manager and the extractor as sessions ----------------------------------
+
+def test_a_manager_plan_is_read_line_by_line():
+    """A plan of five children whose fourth line is malformed delegates four, not
+    none. That is the whole reason the deliverable is lines and not JSON: the failure
+    these sessions exist to remove is "the structured reply did not parse".
+    """
+    from examples.genesis._roles import _plan
+
+    assert _plan("# heading\n"
+                 "- `src/brain` -> build the circuits\n"
+                 "src/world -> arena and odour\n"
+                 "a line with no arrow at all\n"
+                 "* src/web: the page\n") == [
+        ("src/brain", "build the circuits"),
+        ("src/world", "arena and odour"),
+        ("src/web", "the page")]
+    assert _plan("") == []          # an empty plan means "handle it here"
+
+
+def test_a_review_verdict_that_does_not_speak_is_not_a_rejection():
+    """The child did the work; a reviewer that cannot say ACCEPT or REJECT is not
+    evidence against it. Same rule the completion reviewer already held.
+    """
+    from examples.genesis._roles import _verdict
+
+    assert _verdict("ACCEPT\nlooks fine") == ("accept", "looks fine")
+    assert _verdict("**REJECT**\nimport does not resolve") == (
+        "reject", "import does not resolve")
+    assert _verdict("I think it is probably ok") == (None, "")
+    assert _verdict("") == (None, "")
+
+
+def test_a_reviewing_session_is_shown_the_child_s_real_files():
+    """`ReviewSession` runs over the candidate -- the parent's state with the child's
+    edits applied -- so Read and Grep reach the work itself. The completion reviewer
+    saw a diff rendered and truncated at 12 000 characters.
+    """
+    import examples.genesis._roles as roles
+
+    seen = {}
+
+    class _Fake:
+        sessions = failed = turns = 0
+
+        def run(self, state, prompt, *, read):
+            seen["state"] = dict(state)
+            seen["prompt"] = prompt
+            return {read[0]: "ACCEPT\n"}
+
+        def summary(self):
+            return ""
+
+    review = roles.ReviewSession.__new__(roles.ReviewSession)
+    review._contracts = ()
+    review.session = _Fake()
+    review.reviewed = review.rejected = review.unparsed = 0
+
+    class _World:
+        path = "src"
+
+        def situate(self, state, contracts=()):
+            return "(context)"
+
+    class _Parent:
+        world = _World()
+        state = {"src/CONTEXT.md": "# src\n"}
+        objective = "build it"
+
+    class _Edit:
+        kind = "work"
+
+        def __init__(self, path, content):
+            self.path, self.content = path, content
+
+    assert review(_Parent(), [_Edit("src/brain/kc.py", "X = 1\n")]) is None
+    assert seen["state"]["src/brain/kc.py"] == "X = 1\n"
+    assert "src/brain/kc.py" in seen["prompt"]
+
+
+def test_an_extractor_session_replaces_files_in_the_prompt():
+    """Upstream's ContextExtractor reads code with a tool. Without one this port had
+    to put the node's own files in the prompt -- capped at eight files of six thousand
+    characters, and the run before that cap invented an API surface off file names.
+    """
+    import inspect
+
+    from examples.genesis._extract import ExtractPhase
+    from examples.genesis._roles import EXTRACT_BRIEF
+
+    assert "session" in inspect.signature(ExtractPhase.__init__).parameters
+    # the record is a file it writes, not a reply it returns
+    assert "{record}" in EXTRACT_BRIEF
+    # and it is told it may not change the code
+    assert "may not change the code" in EXTRACT_BRIEF
+
+
+def test_a_read_only_role_gets_no_shell_and_no_edit():
+    """`agent/tools.ex` gives `:read` agents the read half plus `context_write`. The
+    one thing they write is a record; they do not edit code and they are not given a
+    shell here, which upstream grants for running tests and this port's extractor has
+    no use for.
+    """
+    from examples.genesis._roles import ExtractSession, ManagerSession
+
+    for role in (ExtractSession(model="m"),
+                 ManagerSession(lambda p, o: (p, o), model="m")):
+        command = role.session._command("hi")
+        allowed = command[command.index("--allowedTools") + 1]
+        assert "Edit" not in allowed, allowed
+        assert "Bash" not in allowed, allowed
+        assert "Bash" in command[command.index("--disallowedTools") + 1]

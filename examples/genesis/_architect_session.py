@@ -43,16 +43,9 @@ a shell is how a design session turns into an implementation session by accident
 
 from __future__ import annotations
 
-import json
-import os
-import shutil
-import subprocess
-import tempfile
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
-from agentdescent.filetree import materialize
-
-from .._common import cli_env
+from ._session import READ_WRITE_TOOLS, AgentSession
 from ._world import CONTEXT_FILE, normalise, parse_route_sizes, parse_routes
 
 __all__ = ["ARCHITECT_SESSION_BRIEF", "ArchitectSession"]
@@ -102,116 +95,47 @@ class ArchitectSession:
     def __init__(self, *, frozen: Sequence[str] = (), binary: str = "claude",
                  model: str = "", max_turns: int = 0, timeout: float = 900.0,
                  root: Optional[str] = None, thinking_tokens: int = 0):
-        self._frozen = tuple(frozen)
-        self._binary = binary
-        self._model = model
-        self._max_turns = max_turns or self.TURNS
-        self._timeout = timeout
-        self._root = root
-        #: A per-turn reasoning cap for the session, or 0 to leave the CLI's own.
-        #: Upstream treats reasoning strength as a per-model setting rather than a
-        #: constant -- a model profile carries `reasoning_effort` beside `max_tokens`
-        #: and `concurrency` (`config/schema/definitions.ex`) -- and on a coding-plan
-        #: endpoint this is the difference between a design turn that thinks for
-        #: seconds and one that thinks for minutes. It bounds thinking; it does not
-        #: disable it, which is a different and worse lever: turning reasoning off
-        #: changes what the model produces, not only how long it takes.
-        self._thinking_tokens = max(0, int(thinking_tokens))
-        #: Sessions run, and what came back.
-        self.sessions = 0
-        self.failed = 0
-        self.turns = 0
+        # `:read_write` upstream, minus the shell -- see `_session.READ_WRITE_TOOLS`
+        # for why the executor gets Bash and a design session does not.
+        self.session = AgentSession(
+            tools=READ_WRITE_TOOLS, frozen=frozen, binary=binary, model=model,
+            max_turns=max_turns or self.TURNS, timeout=timeout, root=root,
+            thinking_tokens=thinking_tokens)
         #: Files a session wrote that were not its own record, discarded. An architect
-        #: that starts writing code is the failure mode this counts.
+        #: that starts writing code is the failure mode this counts. The session runs
+        #: in a throwaway copy, so a stray costs nothing but is worth seeing.
         self.strays = 0
+
+    # The phase reads these off the designer; keeping them as properties means one
+    # set of counters rather than two that can disagree.
+    @property
+    def sessions(self) -> int:
+        return self.session.sessions
+
+    @property
+    def failed(self) -> int:
+        return self.session.failed
+
+    @property
+    def turns(self) -> int:
+        return self.session.turns
 
     def __call__(self, state: Mapping[str, str], path: str, rules: str,
                  ) -> Tuple[Optional[str], List[Dict[str, object]]]:
         path = normalise(path)
         record_path = f"{path}/{CONTEXT_FILE}" if path else CONTEXT_FILE
         prefix = f"{path}/" if path else ""
-        workspace = tempfile.mkdtemp(prefix="genesis-arch-", dir=self._root)
-        try:
-            before = dict(state)
-            materialize(before, workspace)
-            self._write_settings(workspace)
-            self.sessions += 1
-            prompt = ARCHITECT_SESSION_BRIEF.format(
-                rules=rules, record_path=record_path, path_prefix=prefix)
-            if not self._run(workspace, prompt):
-                self.failed += 1
-            record = self._read(workspace, record_path, before)
-        finally:
-            shutil.rmtree(workspace, ignore_errors=True)
-        if record is None:
+        prompt = ARCHITECT_SESSION_BRIEF.format(
+            rules=rules, record_path=record_path, path_prefix=prefix)
+        got = self.session.run(state, prompt, read=[record_path])
+        body = (got.get(record_path) or "").strip()
+        if not body:
             return None, []
+        record = body + "\n"
         return record, _children(record, prefix)
 
-    # -- internals ---------------------------------------------------------
-
-    def _write_settings(self, workspace: str) -> None:
-        """Deny the frozen globs by name, as the implementation executor does."""
-        deny: List[str] = []
-        for pattern in self._frozen:
-            deny += [f"Write({pattern})", f"Edit({pattern})",
-                     f"NotebookEdit({pattern})"]
-        settings = {"permissions": {"deny": deny, "additionalDirectories": []}}
-        target = os.path.join(workspace, ".claude")
-        os.makedirs(target, exist_ok=True)
-        with open(os.path.join(target, "settings.local.json"), "w",
-                  encoding="utf-8") as handle:
-            json.dump(settings, handle)
-
-    def _command(self, prompt: str) -> List[str]:
-        # No Bash, no TodoWrite: this session reads and writes one file. Glob and Grep
-        # stay because a node is designed against what is already in the tree.
-        command = [self._binary, "-p", prompt,
-                   "--output-format", "json",
-                   "--permission-mode", "acceptEdits",
-                   "--max-turns", str(self._max_turns),
-                   "--allowedTools", "Read,Write,Edit,Glob,Grep",
-                   "--disallowedTools", "Bash,WebFetch,WebSearch,Task"]
-        if self._model:
-            command += ["--model", self._model]
-        return command
-
-    def _run(self, workspace: str, prompt: str) -> bool:
-        try:
-            env = cli_env()
-            if self._thinking_tokens:
-                env["MAX_THINKING_TOKENS"] = str(self._thinking_tokens)
-            out = subprocess.run(self._command(prompt), cwd=workspace,
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                 timeout=self._timeout, env=env)
-        except Exception:  # noqa: BLE001 - a dead session costs its node
-            return False
-        try:
-            report = json.loads(out.stdout.decode("utf-8", "replace") or "{}")
-            self.turns += int(report.get("num_turns") or 0)
-            return not report.get("is_error", out.returncode != 0)
-        except Exception:  # noqa: BLE001 - no JSON is not a reason to lose a record
-            return out.returncode == 0
-
-    def _read(self, workspace: str, record_path: str,
-              before: Mapping[str, str]) -> Optional[str]:
-        """The record the session wrote, or `None`; everything else it wrote is a stray.
-
-        A session reported as failed may still have written the file before it died --
-        the turn limit, in particular, lands *after* the work -- so the tree is read
-        either way and the file is what decides.
-        """
-        try:
-            with open(os.path.join(workspace, record_path), encoding="utf-8") as handle:
-                record = handle.read()
-        except OSError:
-            record = ""
-        self.strays += _strays(workspace, record_path, before)
-        record = record.strip()
-        return (record + "\n") if record else None
-
     def summary(self) -> str:
-        return (f"sessions={self.sessions} failed={self.failed} "
-                f"turns={self.turns} strays={self.strays}")
+        return f"{self.session.summary()} strays={self.strays}"
 
 
 def _children(record: str, prefix: str) -> List[Dict[str, object]]:

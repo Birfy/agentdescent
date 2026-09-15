@@ -88,7 +88,7 @@ from agentdescent.staleness import get_policy
 from examples._common import (ConcurrencyGauge, add_standard_args, budget_kwargs,
                               completion_for, confirm, report_engine, worker_count)
 
-from ._delegation import RecursiveDelegation
+from ._delegation import Delegation, RecursiveDelegation
 from . import _domain as minilang
 from . import _fly as fly
 from . import _jqx as jqx
@@ -97,6 +97,7 @@ from . import _stackvm as stackvm
 from ._architect import (ArchitectPhase, harness_record, misaligned,
                          missing_sections)
 from ._architect_session import ArchitectSession
+from ._roles import ExtractSession, ManagerSession, ReviewSession
 from ._claude_code import ClaudeCodeExecutor, claude_code_available
 from ._extract import ExtractPhase
 from ._judge import ParentJudge
@@ -303,6 +304,14 @@ def build_parser() -> argparse.ArgumentParser:
                              "profile (`reasoning_effort`) rather than as a constant. "
                              "Measured on one fly node against a coding-plan endpoint: "
                              "uncapped 497s, capped at 2048 203-242s, same record")
+    parser.add_argument("--agent-sessions", action="store_true",
+                        help="run the MANAGER and (with --mode a) the CONTEXT "
+                             "EXTRACTOR as Claude Code sessions with tools, the way "
+                             "upstream runs every agent. The manager may read its "
+                             "subtree before delegating, and reviews the child's real "
+                             "files rather than a diff truncated at 12k characters; "
+                             "the extractor reads the code instead of being shown "
+                             "eight files in its prompt. Needs the claude CLI")
     parser.add_argument("--architect-session", action="store_true",
                         help="run phase 1's architect as a Claude Code session that "
                              "WRITES each CONTEXT.md with a file tool, rather than as "
@@ -501,6 +510,9 @@ def main(argv=None) -> None:
                   "and a rule-based reader would be describing what it was told")
             return
         extractor = ExtractPhase(complete, contracts=spec.CONTRACTS,
+                                 session=(ExtractSession(frozen=spec.FROZEN,
+                                                         **_session_kwargs())
+                                          if use_sessions else None),
                                  max_depth=args.depth + 1,
                                  skip=tuple(p.split("/")[0] for p in spec.FROZEN
                                             if "/" in p))
@@ -509,6 +521,19 @@ def main(argv=None) -> None:
         for path in extractor.nodes:
             record = initial[f"{path}/{CONTEXT_FILE}" if path else CONTEXT_FILE]
             print(f"           {path or './':<24} {len(parse_routing(record))} routes")
+
+    def _session_kwargs():
+        return dict(model=(args.executor_model or args.model or ""),
+                    timeout=float(getattr(args, "timeout", None) or 900.0),
+                    thinking_tokens=args.thinking_tokens)
+
+    #: Whether the manager and extractor run as sessions. Decided once: a run that
+    #: asked for them and has no CLI should say so once, not once per node.
+    use_sessions = bool(args.agent_sessions) and complete is not None
+    if use_sessions and not claude_code_available():
+        print("--agent-sessions needs the `claude` CLI on PATH; the manager and the "
+              "extractor fall back to one completion each", file=sys.stderr)
+        use_sessions = False
 
     architect = None
     designer = None
@@ -528,10 +553,8 @@ def main(argv=None) -> None:
                 print("--architect-session needs the `claude` CLI on PATH; phase 1 "
                       "falls back to one completion per node", file=sys.stderr)
             else:
-                designer = ArchitectSession(
-                    frozen=spec.FROZEN, model=(args.executor_model or args.model or ""),
-                    timeout=float(getattr(args, "timeout", None) or 900.0),
-                    thinking_tokens=args.thinking_tokens)
+                designer = ArchitectSession(frozen=spec.FROZEN,
+                                            **_session_kwargs())
         architect = ArchitectPhase(complete, contracts=spec.CONTRACTS,
                                    session=designer,
                                    max_depth=args.depth, max_nodes=args.nodes,
@@ -564,8 +587,16 @@ def main(argv=None) -> None:
     # results, run the tests, and reject anti-patterns it can see in the code. The
     # middle one is a number and was all this port had; the zero-field run is what
     # that cost. Both now, tests first because they are free.
-    code_review = (None if args.no_parent_review or complete is None else
-                   ParentCodeReview(complete, contracts=spec.CONTRACTS))
+    if args.no_parent_review or complete is None:
+        code_review = None
+    elif use_sessions:
+        # `manager.ex` lists "validate results" among the Manager's five jobs, and a
+        # reviewer handed a rendering of the work truncated at 12 000 characters is
+        # not validating the work. This one reads the files on disk.
+        code_review = ReviewSession(contracts=spec.CONTRACTS, frozen=spec.FROZEN,
+                                    **_session_kwargs())
+    else:
+        code_review = ParentCodeReview(complete, contracts=spec.CONTRACTS)
     ledger = WorktreeLedger() if args.worktrees else None
     if ledger is not None and not git_worktrees_available():
         print("Worktrees: git worktree is unavailable here -- running without it")
@@ -613,7 +644,10 @@ def main(argv=None) -> None:
     delegation = RecursiveDelegation(
         refine=None if (architect is None or args.no_refine) else _refine,
         rollout_factory=(None if ledger is None else lambda: Rollout(ledger)),
-        manager=spec.llm_manager(complete) if complete else spec.offline_manager,
+        manager=(ManagerSession(Delegation, frozen=spec.FROZEN,
+                                **_session_kwargs()) if use_sessions else
+                 spec.llm_manager(complete) if complete
+                 else spec.offline_manager),
         executor=(sessions if sessions is not None else
                   spec.llm_executor(complete) if complete else spec.offline_executor),
         log=log, max_depth=args.depth, max_edits=4, contracts=spec.CONTRACTS,
