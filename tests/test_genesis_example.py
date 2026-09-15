@@ -2513,6 +2513,35 @@ def test_a_sandboxed_session_cannot_read_the_machine_it_runs_on(tmp_path):
         space.close()
 
 
+def test_every_session_role_takes_the_run_s_own_settings():
+    """One kwarg set, five roles, and the driver hands it to all of them.
+
+    It hands them `_session_kwargs()` -- model, wall, reasoning cap, sandbox -- and a
+    role whose signature is spelled out rather than `**kwargs` silently falls out of
+    that contract. Adding the sandbox did exactly that to the architect, and the run
+    died at phase 1 with `unexpected keyword argument 'sandbox'` *after* printing its
+    whole header, which reads like a working run for as long as it takes to scroll.
+    """
+    from examples.genesis._architect_session import ArchitectSession
+    from examples.genesis._roles import ExtractSession, ManagerSession, ReviewSession
+    from examples.genesis._sandbox import LocalSandbox
+
+    kwargs = dict(model="m", timeout=123.0, thinking_tokens=64,
+                  sandbox=LocalSandbox())
+    roles = [ArchitectSession(frozen=md.FROZEN, **kwargs),
+             ManagerSession(Delegation, frozen=md.FROZEN, **kwargs),
+             ReviewSession(contracts=md.CONTRACTS, frozen=md.FROZEN, **kwargs),
+             ExtractSession(frozen=md.FROZEN, **kwargs)]
+    for role in roles:
+        assert role.session._timeout == 123.0
+        assert role.session._thinking_tokens == 64
+        assert role.session.sandbox is kwargs["sandbox"]
+
+    executor = ClaudeCodeExecutor(frozen=md.FROZEN, **kwargs)
+    assert executor._timeout == 123.0 and executor._thinking_tokens == 64
+    assert executor.sandbox is kwargs["sandbox"]
+
+
 def test_stackvm_is_deeper_than_minilang_which_is_why_it_exists():
     """The second domain is not "harder code" -- it is somewhere for the
     recursion to go. `src/vm/ops` is a node whose parent is itself a child."""

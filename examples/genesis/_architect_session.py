@@ -94,13 +94,14 @@ class ArchitectSession:
 
     def __init__(self, *, frozen: Sequence[str] = (), binary: str = "claude",
                  model: str = "", max_turns: int = 0, timeout: float = 900.0,
-                 root: Optional[str] = None, thinking_tokens: int = 0):
+                 root: Optional[str] = None, thinking_tokens: int = 0,
+                 sandbox=None):
         # `:read_write` upstream, minus the shell -- see `_session.READ_WRITE_TOOLS`
         # for why the executor gets Bash and a design session does not.
         self.session = AgentSession(
             tools=READ_WRITE_TOOLS, frozen=frozen, binary=binary, model=model,
             max_turns=max_turns or self.TURNS, timeout=timeout, root=root,
-            thinking_tokens=thinking_tokens)
+            thinking_tokens=thinking_tokens, sandbox=sandbox)
         #: Files a session wrote that were not its own record, discarded. An architect
         #: that starts writing code is the failure mode this counts. The session runs
         #: in a throwaway copy, so a stray costs nothing but is worth seeing.
