@@ -41,6 +41,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from agentdescent.filetree import parse_tree
 
 from ._octopus import three_way
+from ._session import ARTIFACT_DIRS
 
 from ._world import (CONTEXT_FILE, KNOWN_ISSUES, EpisodeRecord, LocalWorld,
                      WorldLog, directly_at, looks_like_file, normalise, owns,
@@ -580,6 +581,18 @@ class RecursiveDelegation:
         if path in state or looks_like_file(path):
             # `in state` catches a file that exists; the shape catches one that does
             # not yet, which is every file in a formation run until someone writes it.
+            self.mistaken_nodes += 1
+            return False
+        if any(part.startswith(".") or part in ARTIFACT_DIRS
+               for part in path.split("/")):
+            # A node is a *source* directory. A tool's own directory is not one even
+            # when it looks like one from here, and `_session.ARTIFACT_DIRS` keeping
+            # them out of the accepted version is the first fence, not the only one:
+            # in one run `.pytest_cache` reached the state anyway and the managers
+            # delegated into it 21 times, nesting three deep --
+            # `src/brain/central_complex/.pytest_cache/.pytest_cache/.pytest_cache`.
+            # Each of those was an episode spent on a cache. Counted as mistaken
+            # because that is exactly what it is: a directory read as a node.
             self.mistaken_nodes += 1
             return False
         if shadowed_by_module(state, path):

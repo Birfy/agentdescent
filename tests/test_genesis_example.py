@@ -2584,6 +2584,36 @@ def test_what_a_session_made_is_not_what_it_wrote(tmp_path):
     assert session.changed == ["src/core/vectors.py"]
 
 
+def test_a_tool_s_own_directory_is_never_a_node():
+    """The second fence on the same failure, and it earned its place.
+
+    `_session.ARTIFACT_DIRS` keeps `.pytest_cache` out of the accepted version, which
+    is where the problem starts. It is not where it ends: in one run the directory got
+    in anyway and the managers delegated *into* it 21 times, nesting three deep at
+    `src/brain/central_complex/.pytest_cache/.pytest_cache/.pytest_cache`. Every one of
+    those was an episode, a container and a session spent on a cache.
+
+    A node is a source directory. A dot directory is never one, and neither is
+    `node_modules` -- so the delegation refuses both and counts them where it already
+    counts a path read as a node when it is not one.
+    """
+    delegation = RecursiveDelegation(manager=lambda brief: [], executor=lambda brief: [],
+                                     log=WorldLog(), max_depth=3,
+                                     contracts=md.CONTRACTS)
+    world = LocalWorld(version=1, path="src", readonly=md.FROZEN)
+    state = dict(md.initial_files())
+
+    for bad in ("src/.pytest_cache", "src/.pytest_cache/v/cache",
+                "src/core/.mypy_cache", "src/node_modules", "src/.venv",
+                "src/core/.pytest_cache/.pytest_cache"):
+        assert not delegation._is_node(world, Delegation(bad, "o"), state), bad
+    assert delegation.mistaken_nodes == 6
+
+    # ...and a real directory beside them still opens
+    assert delegation._is_node(world, Delegation("src/core", "o"), state)
+    assert delegation.mistaken_nodes == 6
+
+
 def test_stackvm_is_deeper_than_minilang_which_is_why_it_exists():
     """The second domain is not "harder code" -- it is somewhere for the
     recursion to go. `src/vm/ops` is a node whose parent is itself a child."""
