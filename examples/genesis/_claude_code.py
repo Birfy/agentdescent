@@ -19,10 +19,12 @@ which is precisely the loop a single completion cannot have.
 **Permissions, and why they are set the way they are.** Three fences, none of which
 replaces the others:
 
-1. *The session's own*: writes are allowed only through `Write`/`Edit`, `Bash` is off
-   by default, and the network tools are off outright. A settings file denies the
-   frozen globs by name, so the suite and the specification cannot be edited even by
-   accident -- a system that can edit its own tests has no tests.
+1. *The session's own*: the network tools are off and `Bash` is off by default, both
+   through `--disallowedTools`, which is the half of the CLI's tool flags that is
+   actually a fence -- `--allowedTools` only auto-approves, and a session reaches for
+   built-in tools that are not on it. A settings file denies the frozen globs by name,
+   so the suite and the specification cannot be edited even by accident -- a system
+   that can edit its own tests has no tests.
 2. *The sandbox*: the session runs with its cwd inside a throwaway worktree holding a
    copy of the accepted version, never the real repository. Nothing it does survives
    except through the diff.
@@ -30,6 +32,15 @@ replaces the others:
    not an error, it is an upward **request** (`agents/executor.ex`), and a write to a
    frozen path is dropped and counted. Both were already enforced on every edit and
    still are -- this module hands them edits and nothing else.
+
+**What the sandbox is not.** It bounds what *survives*, not what can be *seen*. A
+session that has a shell can read anything the process can read, and four of twelve
+episodes in one run ran `find /` and read a previous run's output from `/tmp` -- one of
+them opened the very `_cli.py` that answered the acceptance failure it had been asked
+to reproduce. The brief now says not to, which is a rule and not a wall: the blind
+property here is enforced by the prompt and by what is *in* the worktree, not by the
+operating system. A run that needs it enforced needs a container, and a run on a machine
+with an earlier run's output still on it should clean that up first.
 
 The session is billed to whatever credentials the local `claude` CLI is signed in with,
 which is *not* the `--model` endpoint the rest of the run uses. That is a deliberate
@@ -50,7 +61,7 @@ from agentdescent.filetree import match_any, materialize
 from .._common import cli_env
 
 from ._delegation import Brief, Edit
-from ._session import isolation_flags, run_cli, session_env
+from ._session import available_tools, isolation_flags, run_cli, session_env
 from ._spatial import SITUATED_EDIT_PROTOCOL  # noqa: F401  (documented sibling)
 from ._world import normalise, owns
 
@@ -74,6 +85,11 @@ Rules, in order of importance:
 it: say so in your final message and the agent responsible for that path will be asked.
 - These paths are the contract and are read-only: {frozen}. The suite is what you are \
 judged by; editing it is not a way to pass it.
+- Everything you need is in this checkout. Do not read outside it -- no `find /`, no \
+other directory on this machine. The acceptance suite is not here and never will be, \
+and another copy of this project that you find elsewhere is some other run's work, not \
+this repository's state: reading it tells you nothing true and copying it is not the \
+task.
 - The tests that already pass have to keep passing. Run them.
 - Make the change and stop. Do not refactor beyond the objective.
 
@@ -181,7 +197,11 @@ class ClaudeCodeExecutor:
 
     def _command(self, prompt: str, turns: int,
                  env: Optional[Mapping[str, str]] = None) -> List[str]:
-        tools = ["Read", "Write", "Edit", "Glob", "Grep", "TodoWrite"]
+        # The fourth fence, and it faces the other way: the first three keep the
+        # session out of the repository, this one keeps the host out of the session.
+        flags = isolation_flags(env or {})
+        tools = available_tools(["Read", "Write", "Edit", "Glob", "Grep", "TodoWrite"],
+                                flags)
         if self._allow_bash:
             # The point of a session rather than a completion is that it can run the
             # suite it is judged by. Bash is the only way to do that.
@@ -191,10 +211,7 @@ class ClaudeCodeExecutor:
                    "--permission-mode", "acceptEdits",
                    "--max-turns", str(turns),
                    "--allowedTools", ",".join(tools),
-                   "--disallowedTools", "WebFetch,WebSearch,Task"]
-        # The fourth fence, and it faces the other way: the first three keep the
-        # session out of the repository, this one keeps the host out of the session.
-        command += isolation_flags(env or {})
+                   "--disallowedTools", "WebFetch,WebSearch,Task"] + flags
         if self._model:
             command += ["--model", self._model]
         return command

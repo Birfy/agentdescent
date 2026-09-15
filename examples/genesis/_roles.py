@@ -167,7 +167,7 @@ class ManagerSession:
 
     def __init__(self, delegation_cls, **kwargs):
         self._delegation = delegation_cls
-        kwargs.setdefault("tools", READ_ONLY_TOOLS + ("Write",))
+        kwargs.setdefault("tools", READ_ONLY_TOOLS + ("Write", "Edit"))
         self.session = AgentSession(**kwargs)
 
     def __call__(self, brief) -> Sequence[object]:
@@ -193,7 +193,7 @@ class ReviewSession:
 
     def __init__(self, *, contracts: Sequence[str] = (), **kwargs):
         self._contracts = tuple(contracts)
-        kwargs.setdefault("tools", READ_ONLY_TOOLS + ("Write",))
+        kwargs.setdefault("tools", READ_ONLY_TOOLS + ("Write", "Edit"))
         self.session = AgentSession(**kwargs)
         #: How many children were read, and how many were sent back.
         self.reviewed = 0
@@ -238,7 +238,7 @@ class ExtractSession:
         # own `CONTEXT.md` (`agent/tools.ex` keeps `context_write` in the read-only
         # set for exactly this). Write is granted; the brief scopes it to one file
         # and the caller reads back only that file.
-        kwargs.setdefault("tools", READ_ONLY_TOOLS + ("Write",))
+        kwargs.setdefault("tools", READ_ONLY_TOOLS + ("Write", "Edit"))
         self.session = AgentSession(**kwargs)
 
     def __call__(self, state, path: str, objective: str, *,

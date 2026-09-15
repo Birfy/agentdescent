@@ -665,6 +665,15 @@ The contract does not move. Three fences, none of which replaces the others:
 It signs in with the local `claude` CLI's credentials rather than the `--model`
 endpoint, which is why it is opt-in and why the run header says so.
 
+**What the sandbox is not.** The worktree bounds what *survives*; it does not bound what
+can be *seen*. A session with a shell reads whatever the process can read, and in one
+run four of twelve episodes ran `find /` and opened a previous run's output from `/tmp`
+— one of them read the very `_cli.py` that answered the acceptance failure it had been
+handed to reproduce. The brief now forbids it, which is a rule and not a wall: the blind
+property is enforced by the prompt and by what is *in* the worktree, not by the
+operating system. Enforcing it takes a container; short of that, clean the machine of
+earlier runs' output before starting one.
+
 Exercised once against a real session rather than only the stand-in binary the tests
 drive. One leaf episode at `src/frontend` on `minilang`, twelve turns: it wrote
 `lexer.py` and the package marker, nothing else, and the tokens it emits are

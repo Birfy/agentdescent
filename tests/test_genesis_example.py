@@ -2352,6 +2352,50 @@ def test_a_session_with_its_own_key_is_not_given_the_host_s_whole_situation(tmp_
     assert "--disallowedTools" in argv
 
 
+def test_bare_mode_is_asked_only_for_the_tools_it_carries():
+    """`--bare` does not expose `Write`, and no flag brings it back.
+
+    Measured against the real CLI: a bare session given `--tools Read,Write,Glob,Grep`
+    answers "I only have a file Read tool available". An executor in one run spent a
+    turn discovering it -- `No such tool available: Write. Write is disabled for this
+    session` -- and then wrote every file through `cat > f << EOF` instead, while the
+    same code without `--bare` had made 1,910 successful `Write` calls. `Edit` is there
+    and creates a file that does not exist, which is how all seven phase-1 records in
+    that run were written by sessions with no shell at all.
+    """
+    from examples.genesis._session import READ_WRITE_TOOLS, available_tools
+
+    bare = ["--bare", "--strict-mcp-config"]
+    assert available_tools(READ_WRITE_TOOLS, []) == list(READ_WRITE_TOOLS)
+    kept = available_tools(READ_WRITE_TOOLS, bare)
+    assert "Write" not in kept and "Edit" in kept
+    # a role whose only job is to write one file keeps a way to write it
+    assert "Edit" in available_tools(("Read", "Glob", "Grep", "Write"), bare)
+
+    executor = ClaudeCodeExecutor(frozen=md.FROZEN, binary="claude")
+    command = executor._command("do it", 8, {"ANTHROPIC_API_KEY": "k"})
+    allowed = command[command.index("--allowedTools") + 1].split(",")
+    assert "--bare" in command and "Write" not in allowed and "Edit" in allowed
+    plain = executor._command("do it", 8, {})
+    assert "--bare" not in plain
+    assert "Write" in plain[plain.index("--allowedTools") + 1].split(",")
+
+
+def test_the_brief_keeps_the_session_inside_the_checkout():
+    """The blind property is a rule, not a wall, and the rule has to be stated.
+
+    Four of twelve episodes in one run ran `find /` and read a previous run's output
+    from `/tmp`; one opened the very `_cli.py` that answered the acceptance failure it
+    had been handed to reproduce. A shell can read whatever the process can, so the
+    worktree bounds what survives and not what is seen.
+    """
+    brief = CLAUDE_CODE_BRIEF.format(path="src", objective="o", frozen="REQUIREMENTS.md",
+                                     failure="")
+    assert "Do not read outside it" in brief
+    assert "find /" in brief
+    assert "not this repository's state" in brief
+
+
 def test_stackvm_is_deeper_than_minilang_which_is_why_it_exists():
     """The second domain is not "harder code" -- it is somewhere for the
     recursion to go. `src/vm/ops` is a node whose parent is itself a child."""
@@ -2584,18 +2628,29 @@ def test_an_extractor_session_replaces_files_in_the_prompt():
     assert "may not change the code" in EXTRACT_BRIEF
 
 
-def test_a_read_only_role_gets_no_shell_and_no_edit():
-    """`agent/tools.ex` gives `:read` agents the read half plus `context_write`. The
-    one thing they write is a record; they do not edit code and they are not given a
-    shell here, which upstream grants for running tests and this port's extractor has
-    no use for.
+def test_a_read_only_role_gets_no_shell_and_keeps_only_what_it_was_asked_for(tmp_path):
+    """The fence that holds is the deny list and the readback, not the allow list.
+
+    `--allowedTools` is an auto-approve list, not a whitelist: measured over one run's
+    role sessions, the manager used `Edit` 41 times and the reviewer 6, and `Edit` was
+    never in either one's allowed tools. `--disallowedTools` *is* a fence -- no role
+    session in that run ran a shell, and none reached the network tools -- and the
+    containment for everything else is :meth:`AgentSession.run`, which returns the paths
+    the caller named and nothing else. `agent/tools.ex` gives `:read` agents the read
+    half plus `context_write`; that is what this comes to here.
     """
     from examples.genesis._roles import ExtractSession, ManagerSession
 
     for role in (ExtractSession(model="m"),
                  ManagerSession(lambda p, o: (p, o), model="m")):
         command = role.session._command("hi")
-        allowed = command[command.index("--allowedTools") + 1]
-        assert "Edit" not in allowed, allowed
-        assert "Bash" not in allowed, allowed
-        assert "Bash" in command[command.index("--disallowedTools") + 1]
+        denied = command[command.index("--disallowedTools") + 1]
+        assert "Bash" in denied and "WebFetch" in denied and "Task" in denied
+
+    # ...and a session that writes where it was not asked is not believed.
+    from examples.genesis._session import AgentSession
+
+    session = AgentSession(binary=_fake_claude(tmp_path, BUSY_ARCHITECT))
+    got = session.run({}, "design it", read=["src/CONTEXT.md"])
+    assert set(got) == {"src/CONTEXT.md"}          # src/eager.py was written, not read
+    assert session.changed == ["src/eager.py"]     # seen and counted, never returned

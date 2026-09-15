@@ -54,8 +54,8 @@ from agentdescent.filetree import materialize
 from .._common import cli_env
 
 __all__ = ["AgentSession", "HOST_SESSION_VARS", "READ_ONLY_TOOLS",
-           "READ_WRITE_TOOLS", "SCRATCH_DIR", "isolation_flags", "run_cli",
-           "session_env", "session_home"]
+           "READ_WRITE_TOOLS", "SCRATCH_DIR", "available_tools",
+           "isolation_flags", "run_cli", "session_env", "session_home"]
 
 
 #: How the host tells a CLI it spawns who it is. Inherited, every session in a run
@@ -134,6 +134,27 @@ def isolation_flags(env: Mapping[str, str]) -> List[str]:
     return ["--bare", "--strict-mcp-config"]
 
 
+def available_tools(tools: Sequence[str], flags: Sequence[str]) -> List[str]:
+    """The requested tools, minus the one bare mode does not carry.
+
+    **`--bare` does not expose `Write`**, and neither `--tools` nor `--allowedTools`
+    brings it back: a bare session given `--tools Read,Write,Glob,Grep` answers "I only
+    have a file Read tool available". Asking for it anyway is asking for a tool the
+    session will be told does not exist -- one executor spent a turn discovering that
+    and then wrote every file through `cat > f << EOF` instead.
+
+    `Edit` is there and it creates a file that does not exist, which is how all seven
+    phase-1 records in one run were written by architect sessions that have no shell at
+    all. So under bare the write path is Edit, and the tool list should say so.
+    """
+    if "--bare" not in flags:
+        return list(tools)
+    out = [t for t in tools if t != "Write"]
+    if out != list(tools) and "Edit" not in out:
+        out.append("Edit")            # a role that could write must still be able to
+    return out
+
+
 #: Where a session that has to *answer* rather than edit puts its answer.
 #:
 #: A Manager decides and a reviewer judges; neither produces a file the repository
@@ -144,9 +165,16 @@ def isolation_flags(env: Mapping[str, str]) -> List[str]:
 #: skips it, and the workspace is deleted either way.
 SCRATCH_DIR = ".genesis"
 
-#: What upstream's `:read` agents get, mapped onto the CLI's tool names. No Write:
-#: a role that only has to look does not get to change anything, and the one job a
+#: What upstream's `:read` agents get, mapped onto the CLI's tool names. The one job a
 #: read-only agent does write -- `CONTEXT.md` -- is granted per role rather than here.
+#:
+#: Read this as a *request*, not a fence. `--allowedTools` is the CLI's auto-approve
+#: list, and under `--permission-mode acceptEdits` a session reaches for whatever
+#: built-in tool it likes: measured over one run, the manager used `Edit` 41 times and
+#: the reviewer 6, and neither had `Edit` in its allowed tools. The fences that do hold
+#: are `--disallowedTools` -- no role session in that run ran a shell or reached the
+#: network -- and :meth:`AgentSession.run`, which returns the paths the caller named and
+#: silently drops everything else the session touched.
 READ_ONLY_TOOLS = ("Read", "Glob", "Grep")
 
 #: What upstream's `:read_write` agents get, minus the shell. Bash is granted per role,
@@ -325,13 +353,14 @@ class AgentSession:
         denied = ["WebFetch", "WebSearch", "Task"]
         if not self._allow_bash:
             denied.insert(0, "Bash")
+        flags = isolation_flags(env or {})
+        tools = available_tools(tools, flags)
         command = [self._binary, "-p", prompt,
                    "--output-format", "json",
                    "--permission-mode", "acceptEdits",
                    "--max-turns", str(self._max_turns),
                    "--allowedTools", ",".join(tools),
-                   "--disallowedTools", ",".join(denied)]
-        command += isolation_flags(env or {})
+                   "--disallowedTools", ",".join(denied)] + flags
         if self._model:
             command += ["--model", self._model]
         return command
