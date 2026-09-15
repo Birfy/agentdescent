@@ -679,6 +679,52 @@ for the entry point as well, a session situated at `src/frontend` wrote only its
 node and said so, so the port's request channel never even had to fire (`requests=0`).
 The contract held inside the session rather than at the boundary.
 
+### What actually ends an episode
+
+A formation run on the `fly` domain reported `sessions=52 failed=43` — 83% of
+implementation episodes judged failed — while the review rejected only three and the
+spatial contract dropped nothing. The CLI writes a transcript per session, so the
+answer was on disk rather than in the counters, and it is not what the counters
+suggested:
+
+| | sessions | |
+|---|---:|---|
+| ran into the wall (≥ 860 s of a 900 s limit) | **27** | 25 of them killed mid-tool-call |
+| the endpoint dropped the stream first | 17 | 26 s to 830 s, also mid-tool |
+| ended on a text turn, having finished | 8 | |
+| reached the 128-turn child budget | **0** | the busiest made 97 |
+
+Three things follow, and each was a defect rather than a tuning problem.
+
+**The wall is the binding constraint, not the turn budget.** Upstream's 2 048/128 turns
+are this port's numbers too and they are fine; what ends an episode here is wall-clock.
+So it is `--session-timeout`, its own flag, printed in the run header beside the turn
+budget — and *not* `--timeout`, which `examples/_common` documents as "seconds for one
+model call" and defaults to 120 s. A session is a loop of many calls; sharing one number
+between the two means either the call timeout is absurdly long or the session wall is
+absurdly short.
+
+**The executor was the one role running on defaults.** The architect, the manager, the
+reviewer and the extractor were all constructed from the run's session settings; the
+executor was constructed from three arguments of its own, so `--timeout 600` and
+`--thinking-tokens 2048` reached every role except the one that writes the code. It ran
+that whole domain at a 900 s wall nobody had chosen, with no reasoning cap while every
+other role had one.
+
+**A session that hits the wall is interrupted, not refuted.** The port reads the
+worktree, not the exit status, so the work it did before the wall comes back and is
+judged like any other — which is the right behaviour and was already the behaviour. What
+the wall costs is the *report*: there is no JSON after a `SIGKILL`, so `num_turns` is
+never read, and the run that reported `turns=309` had 2 607 assistant turns in its
+transcripts. Timeouts are now counted separately (`failed=43 timeout=27`) because the
+two failures have different fixes.
+
+One more thing the transcripts showed: `subprocess.run(timeout=)` signals the CLI and
+nothing else. A session is told to run the suite, a suite run starts servers, and one of
+them was still listening two hours later with its working directory already deleted.
+Sessions now lead their own process group and the group is killed on the way out —
+after the wall, and after a clean finish too.
+
 ## Synchronous or barrier-free, and which one is upstream's
 
 `--async` switches `evolve()` to its barrier-free runtime, and it is a fair question

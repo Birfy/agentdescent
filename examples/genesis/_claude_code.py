@@ -50,6 +50,7 @@ from agentdescent.filetree import match_any, materialize
 from .._common import cli_env
 
 from ._delegation import Brief, Edit
+from ._session import run_cli
 from ._spatial import SITUATED_EDIT_PROTOCOL  # noqa: F401  (documented sibling)
 from ._world import normalise, owns
 
@@ -106,9 +107,17 @@ class ClaudeCodeExecutor:
     ROOT_TURNS = 2048
     CHILD_TURNS = 128
 
+    #: What actually ends an episode, measured. Across 52 sessions of one formation
+    #: run, 27 ran to this wall and 25 of those were killed mid-tool-call, 17 more had
+    #: the endpoint drop the stream before it, and **none** reached :attr:`CHILD_TURNS`
+    #: -- the busiest made 97 of its 128. The turn budget is upstream's and it is not
+    #: the binding constraint; this is, so it is a number the run gets to choose rather
+    #: than one buried in a default.
+    TIMEOUT = 900.0
+
     def __init__(self, *, frozen: Sequence[str] = (), binary: str = "claude",
                  model: str = "", max_turns: int = 0, root_turns: int = 0,
-                 timeout: float = 900.0,
+                 timeout: float = 0.0, thinking_tokens: int = 0,
                  allow_bash: bool = True, failure: str = "",
                  root: Optional[str] = None):
         self._frozen = tuple(frozen)
@@ -116,13 +125,21 @@ class ClaudeCodeExecutor:
         self._model = model
         self._max_turns = max_turns or self.CHILD_TURNS
         self._root_turns = root_turns or max_turns or self.ROOT_TURNS
-        self._timeout = timeout
+        self._timeout = float(timeout or self.TIMEOUT)
+        #: The same per-turn reasoning cap the other roles carry. It reaches the CLI
+        #: as an environment variable, and an executor left without it while every
+        #: other role had one is an executor thinking at a different length than the
+        #: run asked for -- which is exactly how it runs out of wall.
+        self._thinking_tokens = max(0, int(thinking_tokens))
         self._allow_bash = allow_bash
         self._failure = failure
         self._root = root
-        #: Sessions run, and what came back.
+        #: Sessions run, and what came back. `failed` is the total; `timeouts` is the
+        #: part of it that was still working when the wall came, and `edits` is
+        #: counted for those too -- a session that ran out of time wrote what it wrote.
         self.sessions = 0
         self.failed = 0
+        self.timeouts = 0
         self.edits = 0
         self.requests = 0
         self.turns = 0
@@ -185,27 +202,38 @@ class ClaudeCodeExecutor:
             failure=self._failure.format(prompt=getattr(brief.task, "prompt", ""),
                                          output=(brief.output or "")[:400],
                                          reward=brief.reward) if self._failure else "")
+        # `cli_env` is a no-op unless this run points ANTHROPIC_BASE_URL at a
+        # third-party endpoint. When it does, it drops the variables by which a
+        # managed session tells the CLI to use the *host's* provider and ignore
+        # the environment -- inherited, they make every session here 401.
+        env = cli_env()
+        if self._thinking_tokens:
+            env["MAX_THINKING_TOKENS"] = str(self._thinking_tokens)
         try:
             turns = self._root_turns if brief.depth == 0 else self._max_turns
-            # `cli_env` is a no-op unless this run points ANTHROPIC_BASE_URL at a
-            # third-party endpoint. When it does, it drops the variables by which a
-            # managed session tells the CLI to use the *host's* provider and ignore
-            # the environment -- inherited, they make every session here 401.
-            out = subprocess.run(self._command(prompt, turns), cwd=workspace,
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                 timeout=self._timeout, env=cli_env())
+            out, code, timed_out = run_cli(self._command(prompt, turns),
+                                           cwd=workspace, env=env,
+                                           timeout=self._timeout)
         except Exception:  # noqa: BLE001 - a dead session costs its episode
             return False
+        if timed_out:
+            # There is no report after the wall, so this episode's turns are not in
+            # `turns` -- which is why the counter read 309 for a run whose transcripts
+            # hold 2 607. The diff is taken either way: the caller reads the worktree
+            # after this returns, and half-finished work is still work.
+            self.timeouts += 1
+            return False
         try:
-            report = json.loads(out.stdout.decode("utf-8", "replace") or "{}")
+            report = json.loads(out.decode("utf-8", "replace") or "{}")
             self.turns += int(report.get("num_turns") or 0)
-            return not report.get("is_error", out.returncode != 0)
+            return not report.get("is_error", code != 0)
         except Exception:  # noqa: BLE001 - no JSON is not a reason to lose the diff
-            return out.returncode == 0
+            return code == 0
 
     def summary(self) -> str:
         return (f"sessions={self.sessions} failed={self.failed} "
-                f"turns={self.turns} edits={self.edits} requests={self.requests}")
+                f"timeout={self.timeouts} turns={self.turns} "
+                f"edits={self.edits} requests={self.requests}")
 
 
 def _read_tree(workspace: str) -> Dict[str, str]:

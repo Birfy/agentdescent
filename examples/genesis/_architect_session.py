@@ -128,6 +128,7 @@ class ArchitectSession:
         prompt = ARCHITECT_SESSION_BRIEF.format(
             rules=rules, record_path=record_path, path_prefix=prefix)
         got = self.session.run(state, prompt, read=[record_path])
+        self.strays += len(self.session.changed)
         body = (got.get(record_path) or "").strip()
         if not body:
             return None, []
@@ -161,23 +162,3 @@ def _children(record: str, prefix: str) -> List[Dict[str, object]]:
                     "objective": handles or f"implement {child}",
                     "files": declared or int(sizes.get(normalise(child), 0))})
     return out
-
-
-def _strays(workspace: str, record_path: str, before: Mapping[str, str]) -> int:
-    """How many files the session wrote that were not its own record."""
-    count = 0
-    for base, dirs, files in os.walk(workspace):
-        dirs[:] = [d for d in dirs if d not in (".git", ".claude", "__pycache__")]
-        for name in files:
-            rel = os.path.relpath(os.path.join(base, name), workspace)
-            rel = rel.replace(os.sep, "/")
-            if rel == record_path:
-                continue
-            try:
-                with open(os.path.join(base, name), encoding="utf-8") as handle:
-                    body = handle.read()
-            except (UnicodeDecodeError, OSError):
-                continue
-            if before.get(rel) != body:
-                count += 1
-    return count

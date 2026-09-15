@@ -9,7 +9,10 @@ verdict is the parent's, and two agents editing one file both survive.
 
 from __future__ import annotations
 
+import ast
+import inspect
 import json
+import os
 import posixpath
 import time
 
@@ -26,6 +29,7 @@ from examples.genesis import _domain as domain
 from examples.genesis import _jqx as jqx
 from examples.genesis import _md as md
 from examples.genesis import _stackvm as stackvm
+from examples.genesis import genesis_recursive_worlds as genesis
 from examples.genesis._delegation import (Brief, Delegation, Edit,
                                           RecursiveDelegation, render_edits)
 from examples.genesis._claude_code import (CLAUDE_CODE_BRIEF,
@@ -2094,6 +2098,182 @@ def test_a_session_that_dies_costs_its_episode_and_nothing_else(tmp_path):
                            objective="o", context="", state=dict(md.initial_files()),
                            task=md.build_tasks()[0], output="FAIL", reward=0.0, depth=1))
     assert edits == [] and executor.failed == 1
+
+
+#: A session that does some work and then never finishes. The wall, not the turn
+#: budget, is what ends an episode in practice: of 52 executor sessions in one fly
+#: run, 27 ran into the wall and the busiest reached 97 of its 128 turns.
+SLOW = '''
+import os, sys, time
+if "--version" in sys.argv:
+    print("0.0.0 (fake)"); raise SystemExit(0)
+os.makedirs("src/core", exist_ok=True)
+open("src/core/vectors.py", "w").write("def minimum_image(a, b, box):\\n    return b\\n")
+time.sleep(120)
+'''
+
+
+def test_a_session_that_runs_out_of_wall_keeps_what_it_wrote(tmp_path):
+    """The wall is an interruption, not a verdict.
+
+    A session killed at the wall wrote what it wrote, and the port reads the worktree
+    rather than the exit status, so the work comes back. What the wall costs is the
+    report -- there is no JSON after a SIGKILL -- which is why the turn counter read
+    309 for a run whose transcripts held 2 607 assistant turns, and why the timeout
+    is counted apart from every other way a session can fail.
+    """
+    executor = ClaudeCodeExecutor(frozen=md.FROZEN, timeout=3.0,
+                                  binary=_fake_claude(tmp_path, SLOW))
+    edits = executor(Brief(world=LocalWorld(version=1, path="src/core",
+                                            readonly=md.FROZEN),
+                           objective="o", context="", state=dict(md.initial_files()),
+                           task=md.build_tasks()[0], output="FAIL", reward=0.0, depth=2))
+    assert [e.path for e in edits] == ["src/core/vectors.py"]
+    assert executor.failed == 1 and executor.timeouts == 1
+    assert executor.turns == 0          # no report to read: the count is not the truth
+
+
+#: A session that starts a server the way the brief tells it to run the suite, and
+#: then hangs. `subprocess.run(timeout=)` signals only the CLI, so one run left a
+#: `python3 _cli.py serve` listening with its working directory already deleted.
+LEAKY = '''
+import os, subprocess, sys, time
+if "--version" in sys.argv:
+    print("0.0.0 (fake)"); raise SystemExit(0)
+subprocess.Popen([sys.executable, "-c",
+                  "import os, sys, time\\n"
+                  "open(sys.argv[1], 'w').write(str(os.getpid()))\\n"
+                  "time.sleep(120)", "MARKER"])
+while not os.path.exists("MARKER") or not open("MARKER").read().strip():
+    time.sleep(0.05)
+time.sleep(120)
+'''
+
+
+def test_a_session_does_not_outlive_the_episode_that_started_it(tmp_path):
+    """The group is killed, not the process.
+
+    An executor has a shell because it has to run the suite it is judged by, and a
+    suite run starts servers. The session leads its own process group and the group
+    goes when the session does -- otherwise the thing the session started is still
+    holding a port when the next 43 episodes come round.
+    """
+    marker = tmp_path / "grandchild.pid"
+    binary = _fake_claude(tmp_path, LEAKY.replace("MARKER", str(marker)))
+    executor = ClaudeCodeExecutor(frozen=md.FROZEN, timeout=5.0, binary=binary)
+    executor(Brief(world=LocalWorld(version=1, path="src", readonly=md.FROZEN),
+                   objective="o", context="", state=dict(md.initial_files()),
+                   task=md.build_tasks()[0], output="FAIL", reward=0.0, depth=1))
+    assert executor.timeouts == 1
+    pid = int(marker.read_text().strip())
+    for _ in range(100):                       # the signal is delivered, not instant
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            break
+        time.sleep(0.05)
+    else:
+        os.kill(pid, 9)
+        raise AssertionError(f"the session's grandchild {pid} outlived the episode")
+
+
+#: Reports back whatever reasoning cap reached the CLI, which is how the run's own
+#: number is checked rather than the one the class would have defaulted to.
+ECHO_THINKING = '''
+import json, os, sys
+if "--version" in sys.argv:
+    print("0.0.0 (fake)"); raise SystemExit(0)
+open("thinking.txt", "w").write(os.environ.get("MAX_THINKING_TOKENS", "(unset)"))
+print(json.dumps({"is_error": False, "num_turns": 2}))
+'''
+
+
+def test_the_executor_gets_the_same_session_settings_as_every_other_role(tmp_path):
+    """The role that does the work is not the role that runs on defaults.
+
+    The architect, the manager, the reviewer and the extractor were all built from the
+    run's session settings; the executor was built from three of its own arguments and
+    inherited neither the wall nor the reasoning cap. It ran a whole fly domain at a
+    900 s default nobody had chosen while `--timeout 600` and `--thinking-tokens 2048`
+    applied to every other role -- so the numbers have to reach it too.
+    """
+    executor = ClaudeCodeExecutor(frozen=md.FROZEN, timeout=17.0, thinking_tokens=2048,
+                                  binary=_fake_claude(tmp_path, ECHO_THINKING))
+    edits = executor(Brief(world=LocalWorld(version=1, path="src", readonly=md.FROZEN),
+                           objective="o", context="", state=dict(md.initial_files()),
+                           task=md.build_tasks()[0], output="FAIL", reward=0.0, depth=1))
+    assert executor._timeout == 17.0
+    assert {e.path: e.content for e in edits}["thinking.txt"] == "2048"
+
+
+def test_the_session_wall_is_not_the_model_call_timeout():
+    """Two different numbers, and sharing one was how the executor lost both.
+
+    `--timeout` is the timeout on one model call -- `examples/_common` says so in its
+    own help, and this port defaults it to 120 s. A session is a loop of many calls,
+    so a 120 s "timeout" would kill every one of them before it read a file.
+    """
+    args = genesis.build_parser().parse_args([])
+    assert args.timeout == 120.0                       # one model call
+    assert args.session_timeout == ClaudeCodeExecutor.TIMEOUT
+    assert args.session_timeout > args.timeout
+
+
+def test_the_session_decisions_are_made_before_the_roles_that_read_them():
+    """`--mode a` builds the extractor, and it is the first role built.
+
+    Both the session settings and the "is there a CLI at all" fallback were written
+    below it, so a `--mode a --agent-sessions` run raised `NameError: use_sessions`
+    where it looked like it would fall back to a completion. Order is the fix, and
+    order is what this checks.
+    """
+    tree = ast.parse(inspect.getsource(genesis.main))
+    defined = {}
+    mode_a = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "_session_kwargs":
+            defined["_session_kwargs"] = node.lineno
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) \
+                and node.id == "use_sessions":
+            defined.setdefault("use_sessions", node.lineno)
+        if isinstance(node, ast.Compare) and isinstance(node.left, ast.Attribute) \
+                and node.left.attr == "mode" \
+                and any(getattr(c, "value", None) == "a" for c in node.comparators):
+            mode_a.append(node.lineno)
+    assert set(defined) == {"_session_kwargs", "use_sessions"}
+    extractor = max(mode_a)                     # the branch that builds the extractor
+    assert defined["_session_kwargs"] < extractor
+    assert defined["use_sessions"] < extractor
+
+
+#: An architect that starts implementing. The record is the job; the module beside
+#: it is the failure mode, and it costs nothing here because the workspace is a copy.
+BUSY_ARCHITECT = '''
+import json, os, sys
+if "--version" in sys.argv:
+    print("0.0.0 (fake)"); raise SystemExit(0)
+os.makedirs("src", exist_ok=True)
+open("src/CONTEXT.md", "w").write("# src\\n\\n## Routing Table\\n- `./core/` (2 files) -> cores\\n")
+open("src/eager.py", "w").write("# an architect that could not help itself\\n")
+print(json.dumps({"is_error": False, "num_turns": 4}))
+'''
+
+
+def test_a_design_session_that_writes_code_is_counted_not_believed(tmp_path):
+    """`strays=0` has to mean nothing strayed.
+
+    The counter was reported on every phase-1 line and incremented nowhere, by a
+    helper that walked the workspace with a module its file never imported -- so it
+    said zero whatever the architect did. The session owns the workspace and deletes
+    it, so the count is taken there, before it is gone.
+    """
+    from examples.genesis._architect_session import ArchitectSession
+
+    designer = ArchitectSession(binary=_fake_claude(tmp_path, BUSY_ARCHITECT))
+    record, children = designer({}, "src", "design it")
+    assert record and [c["path"] for c in children] == ["src/core"]
+    assert designer.strays == 1                       # src/eager.py, and not the record
+    assert "strays=1" in designer.summary()
 
 
 def test_stackvm_is_deeper_than_minilang_which_is_why_it_exists():

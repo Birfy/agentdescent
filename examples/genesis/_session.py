@@ -43,15 +43,17 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import subprocess
 import tempfile
-from typing import Dict, List, Mapping, Optional, Sequence
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 from agentdescent.filetree import materialize
 
 from .._common import cli_env
 
-__all__ = ["AgentSession", "READ_ONLY_TOOLS", "READ_WRITE_TOOLS", "SCRATCH_DIR"]
+__all__ = ["AgentSession", "READ_ONLY_TOOLS", "READ_WRITE_TOOLS", "SCRATCH_DIR",
+           "run_cli"]
 
 
 #: Where a session that has to *answer* rather than edit puts its answer.
@@ -74,6 +76,77 @@ READ_ONLY_TOOLS = ("Read", "Glob", "Grep")
 #: the *implementer* can run the suite it is judged by. A design or review session that
 #: can run things is one that starts implementing.
 READ_WRITE_TOOLS = ("Read", "Write", "Edit", "Glob", "Grep")
+
+
+def run_cli(command: Sequence[str], *, cwd: str, env: Mapping[str, str],
+            timeout: float) -> Tuple[bytes, int, bool]:
+    """Run one session to completion or to the wall; ``(stdout, code, timed_out)``.
+
+    The **process group** is the point, and `subprocess.run(timeout=)` does not have
+    one: it signals the CLI and nothing else, so a shell the session started outlives
+    the episode that started it. One run left a `python3 _cli.py serve` listening with
+    its working directory already deleted, because its parent was the only process that
+    got the signal. Here the session leads its own group and the group is killed on the
+    way out -- after the wall, and after a clean finish too, because a session that
+    leaves a server running has left it running either way.
+
+    `timed_out` is returned rather than folded into the exit status because those are
+    different events with different fixes: a session that hit the wall was still
+    working, and one that died at 26 seconds was not.
+    """
+    proc = subprocess.Popen(list(command), cwd=cwd, env=dict(env),
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            start_new_session=True)
+    timed_out = False
+    try:
+        try:
+            out, _ = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            _kill_group(proc)
+            try:
+                out, _ = proc.communicate(timeout=30)
+            except subprocess.TimeoutExpired:      # a pipe a grandchild still holds
+                out = b""
+    finally:
+        _kill_group(proc)
+    return out or b"", proc.returncode or 0, timed_out
+
+
+def _kill_group(proc: "subprocess.Popen") -> None:
+    """SIGKILL everything the session started, itself included. Never raises."""
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except (OSError, ProcessLookupError, PermissionError):
+        pass
+
+
+def _strays(workspace: str, state: Mapping[str, str],
+            read: Sequence[str]) -> List[str]:
+    """Paths the session changed that were neither its answer nor already there.
+
+    Called before the workspace is deleted, because that is the only moment it can
+    be. The scratch directory is not a stray -- it is where a session that has to
+    answer rather than edit puts its answer -- and neither is anything in `read`.
+    """
+    skip = set(read)
+    out: List[str] = []
+    for base, dirs, files in os.walk(workspace):
+        dirs[:] = [d for d in dirs
+                   if d not in (".git", ".claude", "__pycache__", SCRATCH_DIR)]
+        for name in files:
+            full = os.path.join(base, name)
+            rel = os.path.relpath(full, workspace).replace(os.sep, "/")
+            if rel in skip:
+                continue
+            try:
+                with open(full, encoding="utf-8") as handle:
+                    body = handle.read()
+            except (UnicodeDecodeError, OSError):
+                continue
+            if state.get(rel) != body:
+                out.append(rel)
+    return sorted(out)
 
 
 class AgentSession:
@@ -105,10 +178,18 @@ class AgentSession:
         #: lever -- that changes what the model produces, not only how long it takes.
         self._thinking_tokens = max(0, int(thinking_tokens))
         self._allow_bash = allow_bash
-        #: Sessions run, and what came back.
+        #: Sessions run, and what came back. `failed` is the total; `timeouts` is
+        #: the half of it that was still working when the wall arrived, which is the
+        #: only one of the two that `--session-timeout` can do anything about.
         self.sessions = 0
         self.failed = 0
+        self.timeouts = 0
         self.turns = 0
+        #: Paths the last session changed that it was not asked for -- set by
+        #: :meth:`run` before the workspace is deleted, because afterwards there is
+        #: nothing left to look at. A role that cares (an architect, which is meant
+        #: to write one record and no code) counts them.
+        self.changed: List[str] = []
 
     def run(self, state: Mapping[str, str], prompt: str, *,
             read: Sequence[str]) -> Dict[str, str]:
@@ -134,13 +215,14 @@ class AgentSession:
                     continue
                 if body.strip():
                     out[rel] = body
+            self.changed = _strays(workspace, state, read)
             return out
         finally:
             shutil.rmtree(workspace, ignore_errors=True)
 
     def summary(self) -> str:
         return (f"sessions={self.sessions} failed={self.failed} "
-                f"turns={self.turns}")
+                f"timeout={self.timeouts} turns={self.turns}")
 
     # -- internals ---------------------------------------------------------
 
@@ -179,14 +261,19 @@ class AgentSession:
         if self._thinking_tokens:
             env["MAX_THINKING_TOKENS"] = str(self._thinking_tokens)
         try:
-            out = subprocess.run(self._command(prompt), cwd=workspace,
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                 timeout=self._timeout, env=env)
+            out, code, timed_out = run_cli(self._command(prompt), cwd=workspace,
+                                           env=env, timeout=self._timeout)
         except Exception:  # noqa: BLE001 - a dead session costs its turn
             return False
+        if timed_out:
+            # The wall, and it is worth telling apart: there is no report to read,
+            # so `turns` does not count what this session did. The file it may have
+            # written by then is still read back, which is why `run` reads either way.
+            self.timeouts += 1
+            return False
         try:
-            report = json.loads(out.stdout.decode("utf-8", "replace") or "{}")
+            report = json.loads(out.decode("utf-8", "replace") or "{}")
             self.turns += int(report.get("num_turns") or 0)
-            return not report.get("is_error", out.returncode != 0)
+            return not report.get("is_error", code != 0)
         except Exception:  # noqa: BLE001 - no JSON is not a reason to lose the work
-            return out.returncode == 0
+            return code == 0

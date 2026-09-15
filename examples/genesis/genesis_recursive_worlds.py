@@ -298,12 +298,20 @@ def build_parser() -> argparse.ArgumentParser:
                              "domain's architect named 17 children it never reached at "
                              "the default, so the tree came out two deep and truncated")
     parser.add_argument("--thinking-tokens", type=int, default=0,
-                        help="per-turn reasoning cap for an --architect-session "
-                             "design turn (MAX_THINKING_TOKENS); 0 leaves the CLI's "
-                             "own. Upstream carries reasoning strength per model "
-                             "profile (`reasoning_effort`) rather than as a constant. "
+                        help="per-turn reasoning cap for every session role, executor "
+                             "included (MAX_THINKING_TOKENS); 0 leaves the CLI's own. "
+                             "Upstream carries reasoning strength per model profile "
+                             "(`reasoning_effort`) rather than as a constant. "
                              "Measured on one fly node against a coding-plan endpoint: "
                              "uncapped 497s, capped at 2048 203-242s, same record")
+    parser.add_argument("--session-timeout", type=float,
+                        default=ClaudeCodeExecutor.TIMEOUT, metavar="SECONDS",
+                        help=(f"the wall on one agent session, in seconds (default "
+                              f"{ClaudeCodeExecutor.TIMEOUT:g}). NOT --timeout, which "
+                              "is one model call: a session is a loop of many. This is "
+                              "what actually ends an episode -- of 52 executor sessions "
+                              "in one fly run, 27 ran into this wall and none reached "
+                              "the 128-turn budget"))
     parser.add_argument("--agent-sessions", action="store_true",
                         help="run the MANAGER and (with --mode a) the CONTEXT "
                              "EXTRACTOR as Claude Code sessions with tools, the way "
@@ -396,8 +404,11 @@ def main(argv=None) -> None:
                            f"up to {args.max_turns or ClaudeCodeExecutor.ROOT_TURNS} "
                            f"turns at the root and "
                            f"{args.max_turns or ClaudeCodeExecutor.CHILD_TURNS} below, "
-                           f"frozen paths denied, network "
-                           "tools off -- billed to the local CLI's credentials"
+                           # The wall belongs beside the turn budget because it is the
+                           # one of the two that ends episodes. Printed, a run that
+                           # timed out 27 of 52 sessions says so at the top.
+                           f"{args.session_timeout:g}s each, frozen paths denied, "
+                           "network tools off -- billed to the local CLI's credentials"
                            if args.executor == "claude-code" else
                            "one model call returning whole files"))
     print("Workspace: " + ("a git worktree per episode, a commit per episode, and "
@@ -504,6 +515,26 @@ def main(argv=None) -> None:
               "invent")
         return
 
+    def _session_kwargs():
+        # `--timeout` is the timeout on one *model call* -- `_common` says so in its
+        # own help -- and a session is a loop of many calls, so its wall is its own
+        # flag. Sharing one number put the roles on whatever `--timeout` said while
+        # the executor, handed neither, sat on a default nobody in the run had chosen.
+        return dict(model=(args.executor_model or args.model or ""),
+                    timeout=float(args.session_timeout or ClaudeCodeExecutor.TIMEOUT),
+                    thinking_tokens=args.thinking_tokens)
+
+    #: Whether the manager, the reviewer and the extractor run as sessions. Decided
+    #: once: a run that asked for them and has no CLI should say so once, not once per
+    #: node. Decided *here*, above every role that reads it -- the extractor is built
+    #: inside the `--mode a` branch below, and a name defined after its only use is a
+    #: NameError rather than the fallback it looks like.
+    use_sessions = bool(args.agent_sessions) and complete is not None
+    if use_sessions and not claude_code_available():
+        print("--agent-sessions needs the `claude` CLI on PATH; the manager and the "
+              "extractor fall back to one completion each", file=sys.stderr)
+        use_sessions = False
+
     if args.mode == "a":
         if complete is None:
             print("--mode a needs --model: extracting a Context Tree is reading code, "
@@ -521,19 +552,6 @@ def main(argv=None) -> None:
         for path in extractor.nodes:
             record = initial[f"{path}/{CONTEXT_FILE}" if path else CONTEXT_FILE]
             print(f"           {path or './':<24} {len(parse_routing(record))} routes")
-
-    def _session_kwargs():
-        return dict(model=(args.executor_model or args.model or ""),
-                    timeout=float(getattr(args, "timeout", None) or 900.0),
-                    thinking_tokens=args.thinking_tokens)
-
-    #: Whether the manager and extractor run as sessions. Decided once: a run that
-    #: asked for them and has no CLI should say so once, not once per node.
-    use_sessions = bool(args.agent_sessions) and complete is not None
-    if use_sessions and not claude_code_available():
-        print("--agent-sessions needs the `claude` CLI on PATH; the manager and the "
-              "extractor fall back to one completion each", file=sys.stderr)
-        use_sessions = False
 
     architect = None
     designer = None
@@ -616,10 +634,13 @@ def main(argv=None) -> None:
         # so pointing both the SDK and the CLI at one endpoint is all it takes to put
         # the architect and every executor session on the same model; the flag is there
         # for the case where they should deliberately differ.
+        # The same session settings every other role gets. Without this the one role
+        # that does the work was the one role running on defaults: a wall it was never
+        # told about and no reasoning cap, while the architect, the manager, the
+        # reviewer and the extractor all carried the run's own numbers.
         sessions = ClaudeCodeExecutor(frozen=spec.FROZEN,
                                       failure=getattr(spec, "FAILURE", TEST_FAILURE),
-                                      model=args.executor_model or args.model,
-                                      max_turns=args.max_turns)
+                                      max_turns=args.max_turns, **_session_kwargs())
 
     def _refine(path, state):
         """Upstream's architect Phase 3, as a hook on the accountability pass.
