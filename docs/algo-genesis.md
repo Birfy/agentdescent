@@ -729,19 +729,31 @@ after the wall, and after a clean finish too.
 
 The transcripts turned up a second thing, and it is the more expensive one. A run
 launched from inside a Claude Code session had every episode inheriting that session's
-*whole situation* — its MCP servers, its skill listing, its agent types, the user's
-email address, and a system prompt about reviewing pull requests and publishing
-artifacts. Measured against the same endpoint with the same one-line prompt:
+*situation*. Measured against the same endpoint with the same one-line prompt:
 
 | | input tokens | latency | transcript |
 |---|---:|---:|---:|
 | inherited | **31 850** | 6.7 s | 224 KB |
+| the run's own `--allowedTools` / `--disallowedTools` | 31 099 | | |
 | `--bare --strict-mcp-config` | **1 317** | 2.4 s | 16 KB |
 
-A 24× prefix on every turn of every episode, none of it about the objective and some of
-it competing with it — an executor told it is accountable for a pull request is being
-given a second job. It also feeds straight back into the wall above: 30 000 extra tokens
-per turn, ~50 turns a session, 52 sessions.
+The middle row is the surprise and the whole mechanism. **Permission flags do not
+shorten the request.** `--allowedTools Read,Write,Edit,Glob,Grep,Bash` says what the
+session may *call*; every other tool's schema is still sent, and the port had been
+passing those flags all along.
+
+What is actually in there, from the transcript's own `prompt_snapshot`: the system
+prompt is 5 720 characters, and the **tool schemas are 178 742** — 26 of them, of which
+`Artifact` alone is 64 168, then `Monitor` at 14 335 and `DesignSync` at 13 255. The
+executor is allowed six tools; `Read` and `Bash` together are 6 887 characters of that
+list. Beside it ride a 13.5 KB skill listing, a 3 KB agent listing, 900 bytes of
+deferred tool names, and the user's email address.
+
+So it is not that the episode was given competing instructions — nobody told it to go
+review a pull request. It is that a CLI launched inside a managed session is handed that
+session's *equipment*, and equipment is priced per turn whether or not it is reachable:
+30 000 tokens before the brief, ~50 turns a session, 52 sessions. That feeds straight
+back into the wall above.
 
 Three things were shared and are now not:
 

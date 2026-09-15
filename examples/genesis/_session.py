@@ -108,13 +108,15 @@ def session_env(base: Optional[Mapping[str, str]] = None) -> Dict[str, str]:
 def isolation_flags(env: Mapping[str, str]) -> List[str]:
     """`--bare --strict-mcp-config` when the run brings its own key, else nothing.
 
-    A session launched from inside a Claude Code session inherits that session's whole
-    situation: the MCP servers it has connected, the skills it can call, the agents it
-    can spawn, the user's email address, and a system prompt about reviewing pull
-    requests and publishing artifacts. Measured against the same endpoint with the same
-    one-line prompt: **31 850 input tokens plain, 1 317 bare** -- a 24x prefix on every
-    turn of every episode, none of it about the objective, some of it competing with
-    it. Latency followed, 6.7 s to 2.4 s.
+    A session launched from inside a Claude Code session is handed that session's
+    *equipment*, and equipment is priced per turn whether or not it is reachable.
+    Measured against the same endpoint with the same one-line prompt: **31 850 input
+    tokens plain, 31 099 with this port's own `--allowedTools`/`--disallowedTools`,
+    1 317 bare.** The middle number is the mechanism: permission flags say what may be
+    *called*, and every other schema is sent anyway. From the transcript's own
+    `prompt_snapshot`, the system prompt is 5 720 characters and the tool schemas are
+    178 742, of which `Artifact` alone is 64 168 -- beside a 13.5 KB skill listing, an
+    agent listing, and the user's email address. Latency followed, 6.7 s to 2.4 s.
 
     Bare mode reads credentials strictly from `ANTHROPIC_API_KEY` -- never OAuth, never
     the keychain -- so it is used only when the run has one. A session billed to the
