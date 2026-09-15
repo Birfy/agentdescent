@@ -42,7 +42,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import signal
 import subprocess
 import tempfile
@@ -52,6 +51,8 @@ from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 from agentdescent.filetree import materialize
 
 from .._common import cli_env
+
+from ._sandbox import PROVIDER_FILES, LocalSandbox, Workspace
 
 __all__ = ["AgentSession", "HOST_SESSION_VARS", "READ_ONLY_TOOLS",
            "READ_WRITE_TOOLS", "SCRATCH_DIR", "available_tools",
@@ -71,6 +72,11 @@ HOST_SESSION_VARS = (
     "CLAUDE_CODE_MESSAGING_TOKEN",
     "CLAUDE_CODE_DIAGNOSTICS_FILE",
     "CLAUDE_PID",
+    # Not identity, but the same kind of leak: the reasoning cap the *host* session is
+    # running under is not the one this run chose, and inherited it silently overrides
+    # `--thinking-tokens`. Dropped here so the variable is present only when a role
+    # puts it there.
+    "MAX_THINKING_TOKENS",
 )
 
 _HOME_LOCK = threading.Lock()
@@ -235,7 +241,7 @@ def _strays(workspace: str, state: Mapping[str, str],
     be. The scratch directory is not a stray -- it is where a session that has to
     answer rather than edit puts its answer -- and neither is anything in `read`.
     """
-    skip = set(read)
+    skip = set(read) | set(PROVIDER_FILES)
     out: List[str] = []
     for base, dirs, files in os.walk(workspace):
         dirs[:] = [d for d in dirs
@@ -268,7 +274,11 @@ class AgentSession:
                  frozen: Sequence[str] = (), binary: str = "claude",
                  model: str = "", max_turns: int = 40, timeout: float = 900.0,
                  root: Optional[str] = None, thinking_tokens: int = 0,
-                 allow_bash: bool = False):
+                 allow_bash: bool = False, sandbox=None):
+        #: Where a session runs and what it can see from there -- see `._sandbox`. A
+        #: plain directory unless the run hands over a real one, because a default that
+        #: went looking for a container engine would make every unit test wait for one.
+        self.sandbox = sandbox if sandbox is not None else LocalSandbox(root or "")
         self._tools = tuple(tools)
         self._frozen = tuple(frozen)
         self._binary = binary
@@ -305,26 +315,26 @@ class AgentSession:
         reported as failed is still read: the turn limit in particular lands *after*
         the work, so the file is what decides, not the exit status.
         """
-        workspace = tempfile.mkdtemp(prefix="genesis-sess-", dir=self._root)
+        space = self.sandbox.open("genesis-sess-")
         try:
-            materialize(dict(state), workspace)
-            self._write_settings(workspace)
+            materialize(dict(state), space.path)
+            self._write_settings(space.path)
             self.sessions += 1
-            if not self._invoke(workspace, prompt):
+            if not self._invoke(space, prompt):
                 self.failed += 1
             out: Dict[str, str] = {}
             for rel in read:
                 try:
-                    with open(os.path.join(workspace, rel), encoding="utf-8") as fh:
+                    with open(os.path.join(space.path, rel), encoding="utf-8") as fh:
                         body = fh.read()
                 except (OSError, UnicodeDecodeError):
                     continue
                 if body.strip():
                     out[rel] = body
-            self.changed = _strays(workspace, state, read)
+            self.changed = _strays(space.path, state, read)
             return out
         finally:
-            shutil.rmtree(workspace, ignore_errors=True)
+            space.close()
 
     def summary(self) -> str:
         return (f"sessions={self.sessions} failed={self.failed} "
@@ -365,16 +375,20 @@ class AgentSession:
             command += ["--model", self._model]
         return command
 
-    def _invoke(self, workspace: str, prompt: str) -> bool:
+    def _invoke(self, space: Workspace, prompt: str) -> bool:
         env = session_env()
         if self._thinking_tokens:
             env["MAX_THINKING_TOKENS"] = str(self._thinking_tokens)
         try:
-            out, code, timed_out = run_cli(self._command(prompt, env), cwd=workspace,
-                                           env=env, timeout=self._timeout)
+            out, code, timed_out = run_cli(space.command(self._command(prompt, env), env),
+                                           cwd=space.path, env=env,
+                                           timeout=self._timeout)
         except Exception:  # noqa: BLE001 - a dead session costs its turn
             return False
         if timed_out:
+            # Killing the process group kills the `exec`, not what it is exec'ing into:
+            # inside a container that is a different process tree on the same machine.
+            space.kill()
             # The wall, and it is worth telling apart: there is no report to read,
             # so `turns` does not count what this session did. The file it may have
             # written by then is still read back, which is why `run` reads either way.

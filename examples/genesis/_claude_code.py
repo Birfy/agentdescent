@@ -53,7 +53,6 @@ import json
 import os
 import shutil
 import subprocess
-import tempfile
 from typing import Callable, Dict, List, Mapping, Optional, Sequence
 
 from agentdescent.filetree import match_any, materialize
@@ -61,6 +60,7 @@ from agentdescent.filetree import match_any, materialize
 from .._common import cli_env
 
 from ._delegation import Brief, Edit
+from ._sandbox import PROVIDER_FILES, LocalSandbox, Workspace
 from ._session import available_tools, isolation_flags, run_cli, session_env
 from ._spatial import SITUATED_EDIT_PROTOCOL  # noqa: F401  (documented sibling)
 from ._world import normalise, owns
@@ -135,7 +135,10 @@ class ClaudeCodeExecutor:
                  model: str = "", max_turns: int = 0, root_turns: int = 0,
                  timeout: float = 0.0, thinking_tokens: int = 0,
                  allow_bash: bool = True, failure: str = "",
-                 root: Optional[str] = None):
+                 root: Optional[str] = None, sandbox=None):
+        #: Where an episode runs and what it can see -- see `._sandbox`. The executor is
+        #: the role this matters most for: it is the only one with a shell.
+        self.sandbox = sandbox if sandbox is not None else LocalSandbox(root or "")
         self._frozen = tuple(frozen)
         self._binary = binary
         self._model = model
@@ -162,22 +165,22 @@ class ClaudeCodeExecutor:
 
     def __call__(self, brief: Brief) -> Sequence[Edit]:
         owner = normalise(brief.world.path)
-        workspace = tempfile.mkdtemp(prefix="genesis-cc-", dir=self._root)
+        space = self.sandbox.open("genesis-cc-")
         try:
             before = dict(brief.state)
-            materialize(before, workspace)
-            self._write_settings(workspace)
+            materialize(before, space.path)
+            self._write_settings(space.path)
             self.sessions += 1
-            ok = self._run(workspace, owner, brief)
+            ok = self._run(space, owner, brief)
             if not ok:
                 self.failed += 1
-            after = _read_tree(workspace)
+            after = _read_tree(space.path)
             edits = _diff(before, after, owner)
             self.edits += sum(1 for e in edits if owns(owner, e.path))
             self.requests += sum(1 for e in edits if not owns(owner, e.path))
             return edits
         finally:
-            shutil.rmtree(workspace, ignore_errors=True)
+            space.close()
 
     # -- internals ---------------------------------------------------------
 
@@ -216,7 +219,7 @@ class ClaudeCodeExecutor:
             command += ["--model", self._model]
         return command
 
-    def _run(self, workspace: str, owner: str, brief: Brief) -> bool:
+    def _run(self, space: Workspace, owner: str, brief: Brief) -> bool:
         prompt = CLAUDE_CODE_BRIEF.format(
             path=owner or ".", objective=brief.objective,
             frozen=", ".join(self._frozen) or "(none)",
@@ -233,12 +236,15 @@ class ClaudeCodeExecutor:
             env["MAX_THINKING_TOKENS"] = str(self._thinking_tokens)
         try:
             turns = self._root_turns if brief.depth == 0 else self._max_turns
-            out, code, timed_out = run_cli(self._command(prompt, turns, env),
-                                           cwd=workspace, env=env,
-                                           timeout=self._timeout)
+            out, code, timed_out = run_cli(
+                space.command(self._command(prompt, turns, env), env),
+                cwd=space.path, env=env, timeout=self._timeout)
         except Exception:  # noqa: BLE001 - a dead session costs its episode
             return False
         if timed_out:
+            # The process group that gets killed is the `exec`'s, and inside a container
+            # the session is a different tree on the same machine: stop it explicitly.
+            space.kill()
             # There is no report after the wall, so this episode's turns are not in
             # `turns` -- which is why the counter read 309 for a run whose transcripts
             # hold 2 607. The diff is taken either way: the caller reads the worktree
@@ -266,6 +272,8 @@ def _read_tree(workspace: str) -> Dict[str, str]:
         for name in files:
             full = os.path.join(base, name)
             rel = os.path.relpath(full, workspace).replace(os.sep, "/")
+            if rel in PROVIDER_FILES:
+                continue              # the sandbox's own bookkeeping, not the node's work
             try:
                 with open(full, encoding="utf-8") as handle:
                     out[rel] = handle.read()

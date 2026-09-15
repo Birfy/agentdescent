@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import ast
 import inspect
+import pathlib
+import subprocess
 import json
 import os
 import posixpath
@@ -29,6 +31,13 @@ from examples.genesis import _domain as domain
 from examples.genesis import _jqx as jqx
 from examples.genesis import _md as md
 from examples.genesis import _stackvm as stackvm
+
+
+def _no_engine() -> bool:
+    """Is there a container engine answering? Asked once, at collection."""
+    from examples.genesis._sandbox import sandbox_engine
+
+    return sandbox_engine() is None
 from examples.genesis import genesis_recursive_worlds as genesis
 from examples.genesis._delegation import (Brief, Delegation, Edit,
                                           RecursiveDelegation, render_edits)
@@ -2394,6 +2403,114 @@ def test_the_brief_keeps_the_session_inside_the_checkout():
     assert "Do not read outside it" in brief
     assert "find /" in brief
     assert "not this repository's state" in brief
+
+
+# ---------------------------------------------------------------------------
+# The boundary: what a session can see, rather than what its work becomes
+# ---------------------------------------------------------------------------
+
+def test_the_sandbox_passes_named_variables_and_rewrites_only_the_agent():
+    """Two things the exec has to get right, and both were got wrong first.
+
+    The binary under the mount is the *resolved* one -- `claude` is a symlink out of a
+    node install here, and exec'ing the link's own path inside the container is
+    `stat: no such file or directory`. And only the agent's own argv[0] is rewritten: a
+    shell probe through the same workspace is not the agent, and rewriting it turns
+    `sh -c 'ls /'` into "Please run /login".
+    """
+    from examples.genesis._sandbox import CONTAINER_HOME, Workspace
+
+    space = Workspace("/host/ws", prefix=["docker", "exec", "-w", "/work", "cid"],
+                      env={"HOME": CONTAINER_HOME}, binary="/opt/pkg/bin/claude",
+                      binary_names=("claude", "/usr/bin/claude"))
+    got = space.command(["claude", "-p", "hi"],
+                        {"ANTHROPIC_API_KEY": "k", "CLAUDE_CODE_SESSION_ID": "host"})
+    assert got[-3:] == ["/opt/pkg/bin/claude", "-p", "hi"]
+    assert got[:4] == ["docker", "exec", "-w", "/work"]
+    assert got[got.index("--env") + 1] == "ANTHROPIC_API_KEY=k"
+    assert f"HOME={CONTAINER_HOME}" in got
+    # the host's session identity is not on the list, so it cannot arrive by accident
+    assert not any("CLAUDE_CODE_SESSION_ID" in part for part in got)
+    # a command that is not the agent goes in untouched
+    assert space.command(["sh", "-c", "ls /"], {})[-3:] == ["sh", "-c", "ls /"]
+
+
+def test_a_shared_toolchain_directory_is_not_mounted():
+    """`/usr/bin/claude` would mean mounting the host's system directories.
+
+    The mount exists to put the agent inside a container that has no agent in it. A
+    binary that lives somewhere shared has no install directory of its own, and taking
+    its parent would hand the session exactly what the boundary is for.
+    """
+    from examples.genesis import _sandbox
+
+    calls = {}
+
+    def fake_which(name):
+        return calls.get(name)
+
+    old = _sandbox.shutil.which
+    _sandbox.shutil.which = fake_which
+    try:
+        calls["claude"] = "/opt/claude-code/bin/claude"
+        assert _sandbox.toolchain_root("claude") == "/opt/claude-code"
+        calls["claude"] = "/usr/bin/claude"
+        assert _sandbox.toolchain_root("claude") is None
+        calls["claude"] = None
+        assert _sandbox.toolchain_root("claude") is None
+    finally:
+        _sandbox.shutil.which = old
+
+
+def test_without_an_engine_the_run_says_so_rather_than_pretending(tmp_path):
+    """A fallback that claimed to isolate would be worse than none.
+
+    `LocalSandbox` is what the port did before this module existed, kept as a class so
+    both paths have one shape -- and so the run reports which one it got.
+    """
+    from examples.genesis._sandbox import LocalSandbox
+
+    local = LocalSandbox(str(tmp_path))
+    assert not local.available
+    space = local.open("x-")
+    try:
+        assert space.path.startswith(str(tmp_path))
+        assert space.command(["claude", "-p", "hi"], {}) == ["claude", "-p", "hi"]
+    finally:
+        space.close()
+    assert "can read this machine" in local.summary()
+
+
+@pytest.mark.skipif(_no_engine(), reason="needs a container engine")
+def test_a_sandboxed_session_cannot_read_the_machine_it_runs_on(tmp_path):
+    """The claim, checked against a real engine rather than against the flags.
+
+    Four of twelve episodes in one run read a previous run's output off `/tmp`, and one
+    of them opened the answer to the acceptance failure it had been handed. This is the
+    same filesystem, asked the same questions, from inside.
+    """
+    from examples.genesis._sandbox import SessionSandbox
+
+    sandbox = SessionSandbox(home=str(tmp_path))
+    if not sandbox.available:                       # engine went away between checks
+        pytest.skip(sandbox.reason)
+    space = sandbox.open("test-")
+    try:
+        (pathlib.Path(space.path) / "mine.txt").write_text("the work\n")
+
+        def run(script):
+            out = subprocess.run(space.command(["sh", "-c", script], {}),
+                                 capture_output=True, text=True, timeout=90)
+            return (out.stdout or out.stderr).strip()
+
+        assert "No such file" in run("ls /home/user/agentdescent")
+        assert run("find / -name 'algo-genesis.md' 2>/dev/null; echo END") == "END"
+        assert run("ls /tmp | wc -l") == "0"
+        assert "mine.txt" in run("ls /work")
+        assert "Read-only file system" in run("touch /etc/x 2>&1 | head -1")
+        assert run("grep CapEff /proc/self/status").endswith("0000000000000000")
+    finally:
+        space.close()
 
 
 def test_stackvm_is_deeper_than_minilang_which_is_why_it_exists():

@@ -102,6 +102,7 @@ from ._claude_code import ClaudeCodeExecutor, claude_code_available
 from ._extract import ExtractPhase
 from ._judge import ParentJudge
 from ._review import CompletionJudge, ParentCodeReview, chain_reviews
+from ._sandbox import LocalSandbox, SessionSandbox
 from ._session import session_home
 from ._suite import TEST_FAILURE
 from ._suite import cold_start, preflight
@@ -305,6 +306,18 @@ def build_parser() -> argparse.ArgumentParser:
                              "(`reasoning_effort`) rather than as a constant. "
                              "Measured on one fly node against a coding-plan endpoint: "
                              "uncapped 497s, capped at 2048 203-242s, same record")
+    parser.add_argument("--sandbox", default="auto",
+                        choices=("auto", "container", "off"),
+                        help=("run every agent session inside a container, using the "
+                              "engine's own boundary (`agentdescent.sandbox_container`): "
+                              "only the workspace visible, read-only root, no "
+                              "capabilities, resource ceilings -- with the network "
+                              "inherited, because a session has to reach its model. "
+                              "`auto` uses one when an engine answers and says so when "
+                              "none does; `container` refuses to run without one. "
+                              "Without it the blind property is a line in the brief: "
+                              "4 of 12 episodes in one run read a previous run's output "
+                              "off /tmp, one of them the answer to its own failure"))
     parser.add_argument("--session-timeout", type=float,
                         default=ClaudeCodeExecutor.TIMEOUT, metavar="SECONDS",
                         help=(f"the wall on one agent session, in seconds (default "
@@ -516,6 +529,20 @@ def main(argv=None) -> None:
               "invent")
         return
 
+    #: One boundary for the whole run, decided once: what a session can see is part of
+    #: what the run *is*, and a run that isolated some episodes and not others would be
+    #: two experiments with one set of numbers.
+    if args.sandbox == "off":
+        sandbox = LocalSandbox()
+    else:
+        sandbox = SessionSandbox(home=session_home())
+        if not sandbox.available:
+            if args.sandbox == "container":
+                print(f"--sandbox container: {sandbox.reason}", file=sys.stderr)
+                return
+            print(f"--sandbox auto: {sandbox.reason}", file=sys.stderr)
+            sandbox = LocalSandbox()
+
     def _session_kwargs():
         # `--timeout` is the timeout on one *model call* -- `_common` says so in its
         # own help -- and a session is a loop of many calls, so its wall is its own
@@ -523,7 +550,7 @@ def main(argv=None) -> None:
         # the executor, handed neither, sat on a default nobody in the run had chosen.
         return dict(model=(args.executor_model or args.model or ""),
                     timeout=float(args.session_timeout or ClaudeCodeExecutor.TIMEOUT),
-                    thinking_tokens=args.thinking_tokens)
+                    thinking_tokens=args.thinking_tokens, sandbox=sandbox)
 
     #: Whether the manager, the reviewer and the extractor run as sessions. Decided
     #: once: a run that asked for them and has no CLI should say so once, not once per
@@ -816,6 +843,7 @@ def main(argv=None) -> None:
         print(f"gate            : accepted={judge.accepted} rejected={judge.rejected} "
               f"partial={judge.partial}")
     if sessions is not None or use_sessions:
+        print(f"sandbox         : {sandbox.summary()}")
         # Where to go and read what an episode actually did, and the promise that it
         # is not in `~/.claude`: a run used to write its transcripts and its TodoWrite
         # state into the state of whatever session launched it.

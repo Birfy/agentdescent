@@ -665,14 +665,35 @@ The contract does not move. Three fences, none of which replaces the others:
 It signs in with the local `claude` CLI's credentials rather than the `--model`
 endpoint, which is why it is opt-in and why the run header says so.
 
-**What the sandbox is not.** The worktree bounds what *survives*; it does not bound what
-can be *seen*. A session with a shell reads whatever the process can read, and in one
-run four of twelve episodes ran `find /` and opened a previous run's output from `/tmp`
-— one of them read the very `_cli.py` that answered the acceptance failure it had been
-handed to reproduce. The brief now forbids it, which is a rule and not a wall: the blind
-property is enforced by the prompt and by what is *in* the worktree, not by the
-operating system. Enforcing it takes a container; short of that, clean the machine of
-earlier runs' output before starting one.
+**What the worktree does not bound: `--sandbox`.** The worktree bounds what *survives*,
+not what can be *seen*. A session with a shell reads whatever the process can read, and
+in one run four of twelve episodes ran `find /` and opened a previous run's output from
+`/tmp` — one of them read the very `_cli.py` that answered the acceptance failure it had
+been handed to reproduce. The blind property was a line in a prompt.
+
+The engine already owns the fix. `agentdescent/sandbox_container.py` is titled "A
+sandbox that is actually a boundary", and `--sandbox` (on by default where an engine
+answers) runs every agent session inside it. `examples/genesis/_sandbox.py` subclasses
+its `ContainerProvider` and adds the mounts an *agent* session needs and a candidate's
+test run does not: the `claude` binary's own install, the proxy's CA bundle, and a
+per-session CLI state directory so the transcript outlives the container. Nothing else
+of the host. Asked from inside, on this machine:
+
+```
+ls /home/user/agentdescent          No such file or directory
+find / -name 'algo-genesis.md'      (nothing)
+ls /tmp | wc -l                     0
+ls /work                            CONTEXT.md md.py spec src tests
+touch /etc/x                        Read-only file system
+grep CapEff /proc/self/status       CapEff: 0000000000000000
+```
+
+Two honest limits. **The network is on** — `SandboxSpec.network="inherit"`, because a
+session's whole job is to reach a model endpoint — so this is a boundary against
+contamination, which is the failure that happened, and not against hostile code, which
+could still send what it read. And **when no engine answers** the run says so once and
+falls back to a plain directory rather than pretending; the brief's "do not read outside
+this checkout" rule is what is left, and a rule is not a wall.
 
 Exercised once against a real session rather than only the stand-in binary the tests
 drive. One leaf episode at `src/frontend` on `minilang`, twelve turns: it wrote
