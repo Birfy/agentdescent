@@ -675,6 +675,8 @@ class WorldLog:
         self._rework: Dict[str, str] = {}
         self._contract_violations = 0
         self._shape_violations = 0
+        self._discarded_diffs = 0
+        self._discarded_files = 0
         self._counter = 0
 
     # -- episodes ----------------------------------------------------------
@@ -739,6 +741,11 @@ class WorldLog:
         with self._lock:
             self._shape_violations += n
 
+    def note_discarded_diff(self, files: int) -> None:
+        with self._lock:
+            self._discarded_diffs += 1
+            self._discarded_files += files
+
     @property
     def shape_violations(self) -> int:
         """Edits dropped for making the key space stop being a tree.
@@ -749,6 +756,30 @@ class WorldLog:
         """
         with self._lock:
             return self._shape_violations
+
+    @property
+    def discarded_diffs(self) -> int:
+        """Episodes whose work was thrown away whole for being too many files.
+
+        The two violation counters above are about *authority*: an agent wrote
+        somewhere it may not. This one is about *size*, and it is the only drop
+        that costs the run an entire episode rather than one edit -- the cap is on
+        the diff, so a session that wrote nine good files contributes none of them.
+
+        It exists because the drop used to be silent. Counting distinct file paths
+        written across 309 productive sessions on this machine: 11% wrote more than
+        six files and so lost everything, the largest 23 files. A run that lost an
+        eighth of its work and a run whose agents had nothing to say printed the
+        same header. See ``discarded_files`` for what those episodes were carrying.
+        """
+        with self._lock:
+            return self._discarded_diffs
+
+    @property
+    def discarded_files(self) -> int:
+        """How many files the discarded diffs were carrying, summed."""
+        with self._lock:
+            return self._discarded_files
 
     @property
     def contract_violations(self) -> int:
@@ -769,4 +800,7 @@ class WorldLog:
                 f"rejected={verdicts.get('rejected', 0)}  "
                 f"rework={verdicts.get('rework', 0)}  "
                 f"contract_violations={self.contract_violations}  "
-                f"shape_violations={self.shape_violations}")
+                f"shape_violations={self.shape_violations}  "
+                f"discarded_diffs={self.discarded_diffs}"
+                + (f" ({self.discarded_files} files)"
+                   if self._discarded_diffs else ""))

@@ -755,6 +755,50 @@ them was still listening two hours later with its working directory already dele
 Sessions now lead their own process group and the group is killed on the way out —
 after the wall, and after a clean finish too.
 
+### The cap that discards the episode rather than the surplus
+
+A third thing the transcripts showed, found by counting rather than reading. The spatial
+contract caps a proposal at `max_files_per_diff`, and the cap rejects the **diff**, not
+the files over the line — so an episode one file past it contributes nothing at all.
+Counting distinct paths written per session across 309 productive sessions on this
+machine:
+
+| files written in one episode | sessions | at a cap of 6 |
+|---|---:|---|
+| 1–6 | 274 | kept |
+| 7–12 | 32 | **lost whole** |
+| 13–23 | 3 | **lost whole** |
+
+**11% of the episodes that did work contributed none of it**, the largest of them
+carrying 23 files, and nothing in the run said so: the two violation counters are about
+*authority* — an agent wrote outside its subtree, or mistook a file for a node — and
+neither moves for this. A run that lost an eighth of its work and a run whose agents had
+nothing to say printed the same header.
+
+Both halves were wrong, and they are separate fixes.
+
+The drop is now **counted** — `discarded_diffs=N (M files)` in the world summary —
+because a silent loss is the thing this port keeps finding.
+
+And the cap is no longer a trust region, because it was never doing that job here. The
+trust region is the node's **subtree**, enforced edit by edit by the spatial contract:
+twelve files under `src/brain/olfactory/` are not more dangerous than six, and the
+parent's verdict and the frozen suite judge both the same way. A file count on top of
+that is a third bound that only ever fires on legitimate work. So for a session executor
+it is set where only pathology reaches it — a loop that dumps a tree — and nowhere near
+a node's build:
+
+| cap | episodes lost whole, of 309 |
+|---:|---:|
+| 6 | 35 (11.3%) |
+| 12 | 3 (1.0%) |
+| **24** | **0** |
+| 64 | 0 |
+
+24 is where it stops binding; **64** is the number, three times the largest legitimate
+episode. A single completion asked for whole files keeps the tight 6 — that executor
+proposes one or two files, and six there really is a runaway.
+
 ### A session launched from a session is not that session
 
 The transcripts turned up a second thing, and it is the more expensive one. A run

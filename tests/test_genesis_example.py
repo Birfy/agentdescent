@@ -337,6 +337,50 @@ def test_an_edit_outside_the_authors_subtree_is_dropped_and_counted():
     assert log.contract_violations == 1
 
 
+def test_a_diff_over_the_file_cap_loses_the_whole_episode_and_says_so():
+    """The cap discards the proposal, not the surplus -- so it has to be counted.
+
+    The two violation counters are about authority and cost one edit each. This one
+    is about size and costs the episode: a session that wrote nine files, ran the
+    suite and got it green contributes none of the nine. Measured across 309
+    productive sessions on this machine, 11% wrote more than six files.
+    """
+    log = WorldLog()
+    strategy = _strategy(log=log, max_files_per_diff=2)
+    edits = [Edit("src", f"src/m{i}.py", "x") for i in range(3)]
+    assert strategy.to_diff(strategy.initial(), render_edits(edits, "r"),
+                            "w0", 1, "world") is None
+    assert log.discarded_diffs == 1 and log.discarded_files == 3
+    # Authority was never in question, so neither violation counter moves.
+    assert log.contract_violations == 0 and log.shape_violations == 0
+    assert "discarded_diffs=1 (3 files)" in log.summary()
+    # And under the cap the same edits go through, which is what makes the count
+    # a measure of the cap rather than of the work.
+    assert strategy.to_diff(strategy.initial(), render_edits(edits[:2], "r"),
+                            "w0", 1, "world") is not None
+    assert log.discarded_diffs == 1
+
+
+def test_the_session_executor_gets_a_cap_no_real_episode_reaches():
+    """A runaway guard, not a trust region -- the subtree is the trust region.
+
+    The cap throws away the diff rather than the surplus, so any number it binds at
+    is a number of episodes lost whole. Across 309 productive sessions on this
+    machine the largest legitimate episode carried 23 files; 24 is where the cap
+    stops binding at all. It has to sit above that, not at the size of a node build.
+    """
+    caps = []
+    for node in ast.walk(ast.parse(inspect.getsource(genesis.main))):
+        if not isinstance(node, ast.keyword) or node.arg != "max_files_per_diff":
+            continue
+        assert isinstance(node.value, ast.IfExp), (
+            "the cap no longer depends on which executor is running")
+        caps = [n.value for n in (node.value.body, node.value.orelse)]
+    assert all(isinstance(c, int) for c in caps), caps
+    # 24 is the measured ceiling of legitimate work; below it the cap eats episodes.
+    assert max(caps) > 24 > min(caps), caps
+
+
 def test_a_frozen_path_is_refused_even_to_the_root():
     strategy = _strategy()
     proposal = render_edits([Edit("", "spec/CONTEXT.md", "rewritten")], "r")

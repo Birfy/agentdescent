@@ -635,8 +635,20 @@ def main(argv=None) -> None:
                   + (f", missing {', '.join(gaps)}" if gaps else ""))
 
     log = WorldLog()
-    strategy = SpatialContract(initial_files=initial, frozen=spec.FROZEN,
-                               log=log, max_files_per_diff=6)
+    # The cap rejects the *diff*, not the files over the line, so every number here
+    # is a number of episodes thrown away whole. For a session executor that makes it
+    # a runaway guard and nothing else: the trust region is already the node's own
+    # subtree, which the contract enforces edit by edit, and twelve files under
+    # `src/brain/olfactory/` are not more dangerous than six. So it is set where only
+    # pathology reaches it. Counting distinct paths written across 309 productive
+    # sessions on this machine, the largest legitimate episode carried 23 files, and
+    # a six-file cap lost 11% of them; at 24 nothing legitimate is lost at all and 64
+    # leaves three times that headroom, while still catching a loop that dumps a tree.
+    # A single completion asked for whole files is a different thing -- it proposes
+    # one or two, and six is already a runaway there -- so it keeps the tight number.
+    strategy = SpatialContract(initial_files=initial, frozen=spec.FROZEN, log=log,
+                               max_files_per_diff=(
+                                   64 if args.executor == "claude-code" else 6))
     # `manager.ex` states the parent's validation as three things: review the child's
     # results, run the tests, and reject anti-patterns it can see in the code. The
     # middle one is a number and was all this port had; the zero-field run is what
