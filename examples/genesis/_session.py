@@ -58,7 +58,8 @@ from ._sandbox import PROVIDER_FILES, LocalSandbox, Workspace
 __all__ = ["ARTIFACT_DIRS", "ARTIFACT_FILES", "AgentSession",
            "HOST_SESSION_VARS", "READ_ONLY_TOOLS", "set_session_limit",
            "READ_WRITE_TOOLS", "SCRATCH_DIR", "available_tools",
-           "isolation_flags", "run_cli", "session_env", "session_home"]
+           "isolation_flags", "lean_agent_flags", "run_cli", "session_env",
+           "session_home"]
 
 
 #: How the host tells a CLI it spawns who it is. Inherited, every session in a run
@@ -140,6 +141,53 @@ def isolation_flags(env: Mapping[str, str]) -> List[str]:
     if not env.get("ANTHROPIC_API_KEY"):
         return []
     return ["--bare", "--strict-mcp-config"]
+
+
+#: The name the lean agent is registered under. Arbitrary, but it has to match
+#: between `--agents` and `--agent`.
+LEAN_AGENT = "genesis"
+
+
+def lean_agent_flags(tools: Sequence[str], flags: Sequence[str]) -> List[str]:
+    """`--agents`/`--agent` declaring only the tools a role uses, or nothing.
+
+    `--allowedTools` is an auto-approve list: it says what may be *called*, and every
+    other schema is sent anyway. What decides which schemas exist is which tools are
+    **defined**, and a custom agent defines its own. Measured on one endpoint with the
+    same one-line prompt, signed in rather than keyed:
+
+    | | context per turn |
+    |---|---:|
+    | `--allowedTools Read,Edit,Glob,Grep` | **24 550** |
+    | a `--agents` entry declaring five tools | **6 522** |
+    | `--bare` (needs a key) | 4 868 |
+
+    Forty-two tools arrive by default — `Artifact`, `CronCreate`, `DesignSync`,
+    `PushNotification`, `Workflow`, `ShowOnboardingRolePicker` and the rest — and a
+    session writing code in a throwaway worktree can use none of them. Asked to list
+    what it has, an agent declared this way names only the tools in `tools`.
+
+    It is the fallback for a run **signed in rather than keyed**: `--bare` is the
+    better answer and is used whenever there is a key, but it sets
+    `CLAUDE_CODE_SIMPLE=1`, and that same switch is what makes the CLI refuse to read
+    OAuth — measured, `duration_api_ms: 0` and an authentication error. The two cannot
+    be separated, so a signed-in run takes this instead: 6 522 rather than 4 868, and
+    not 24 550.
+
+    Returns nothing when `--bare` is already in `flags`, because there the schemas are
+    gone anyway and a second mechanism would only be another thing to keep true.
+    """
+    if "--bare" in flags or not tools:
+        return []
+    spec = {LEAN_AGENT: {
+        "description": "implements one node of a recursive software world",
+        # Deliberately thin: the brief is the instruction, and an agent prompt that
+        # said anything substantive would be a second, quieter brief competing with it.
+        "prompt": "Follow the instruction you are given.",
+        "tools": list(tools),
+    }}
+    return ["--agents", json.dumps(spec, separators=(",", ":")),
+            "--agent", LEAN_AGENT]
 
 
 def available_tools(tools: Sequence[str], flags: Sequence[str]) -> List[str]:
@@ -444,6 +492,9 @@ class AgentSession:
                    "--max-turns", str(self._max_turns),
                    "--allowedTools", ",".join(tools),
                    "--disallowedTools", ",".join(denied)] + flags
+        # The schemas follow what is *defined*, not what is allowed. No-op under
+        # `--bare`; this is what a signed-in run gets instead. See `lean_agent_flags`.
+        command += lean_agent_flags(tools, flags)
         if self._model:
             command += ["--model", self._model]
         return command

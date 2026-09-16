@@ -338,6 +338,43 @@ def test_an_edit_outside_the_authors_subtree_is_dropped_and_counted():
     assert log.contract_violations == 1
 
 
+def test_a_signed_in_run_declares_its_toolset_instead_of_shipping_forty_two():
+    """`--allowedTools` auto-approves; what decides the schemas is what is *defined*.
+
+    Measured on one endpoint with the same one-line prompt, signed in rather than
+    keyed: 24 550 tokens of context per turn with `--allowedTools Read,Edit,Glob,Grep`,
+    6 522 with a `--agents` entry declaring five tools, 4 868 under `--bare`. Forty-two
+    tools arrive by default -- Artifact, CronCreate, DesignSync, Workflow and the rest
+    -- and none of them is reachable from a worktree. `--bare` is the better answer and
+    is used whenever the run has a key; it sets CLAUDE_CODE_SIMPLE=1, and that same
+    switch makes the CLI refuse to read OAuth, so a signed-in run takes this instead.
+    """
+    from examples.genesis._session import LEAN_AGENT, lean_agent_flags
+    wanted = ["Read", "Edit", "Glob", "Grep", "Bash"]
+
+    # Keyed: `--bare` already removed the schemas, so this adds nothing.
+    assert lean_agent_flags(wanted, ["--bare", "--strict-mcp-config"]) == []
+
+    flags = lean_agent_flags(wanted, [])
+    assert flags[0] == "--agents" and flags[2:] == ["--agent", LEAN_AGENT]
+    spec = json.loads(flags[1])
+    assert list(spec) == [LEAN_AGENT]
+    # Exactly what the role asked for -- a tool left out here is a tool the session
+    # does not have, which is the point, and one added is a schema nobody needs.
+    assert spec[LEAN_AGENT]["tools"] == wanted
+    assert lean_agent_flags([], []) == [], "no tools is not an empty agent"
+
+
+def test_every_session_role_declares_its_toolset():
+    """Both command builders, because the saving is per session and there are five."""
+    from examples.genesis._claude_code import ClaudeCodeExecutor
+    from examples.genesis._session import AgentSession
+    for cls in (ClaudeCodeExecutor, AgentSession):
+        src = inspect.getsource(cls._command)
+        assert "lean_agent_flags" in src, (
+            f"{cls.__name__}._command ships every schema to a signed-in run")
+
+
 def test_siblings_run_together_and_are_folded_in_order():
     """Concurrency where it costs nothing, determinism where it would cost the merge.
 

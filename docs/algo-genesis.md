@@ -755,6 +755,39 @@ them was still listening two hours later with its working directory already dele
 Sessions now lead their own process group and the group is killed on the way out —
 after the wall, and after a clean finish too.
 
+### A signed-in run pays for thirty-seven tools it cannot reach
+
+`--bare` is what removes the inherited schemas, and it cannot be used by a run that is
+**signed in** rather than keyed: it sets `CLAUDE_CODE_SIMPLE=1`, and that same switch
+makes the CLI refuse to read OAuth. Measured, with a valid sign-in and no key:
+`duration_api_ms: 0` and an authentication error. The two cannot be separated.
+
+So a signed-in run got the full prompt, and the full prompt is mostly tool schemas.
+Asked to list what it has, such a session names **forty-two** tools — `Artifact`,
+`ArtifactComments`, `ArtifactData`, `CronCreate`, `CronDelete`, `CronList`,
+`DesignSync`, `PushNotification`, `ShowOnboardingRolePicker`, `Workflow`, `SendUserFile`
+and the rest — when the run asked for four. `--allowedTools` is an auto-approve list: it
+says what may be *called*, and every other schema is sent anyway.
+
+What decides which schemas exist is which tools are **defined**, and `--agents` defines
+its own. Measured on one endpoint with the same one-line prompt:
+
+| | context per turn | |
+|---|---:|---|
+| signed in, `--allowedTools Read,Edit,Glob,Grep` | **24 550** | 1.00× |
+| signed in, `--agents` declaring five tools | **6 522** | 0.27× |
+| signed in, the port's own executor command | **8 042** | 0.33× |
+| keyed, `--bare` | 4 868 | 0.20× |
+
+The executor's number is higher than the bare probe because it declares three more
+tools — `Write`, `TodoWrite` and `Bash`, the last being the only way a session can run
+the suite it is judged by. The 3 174 that `--bare` still saves is the system prompt
+itself, which `--agents` cannot touch: eight sections, and small beside the schemas.
+
+`lean_agent_flags` returns nothing when `--bare` is already in play, so the two
+mechanisms never both run — a key still takes the better path, and the declaration is
+what a sign-in gets instead.
+
 ### The cap that discards the episode rather than the surplus
 
 A third thing the transcripts showed, found by counting rather than reading. The spatial

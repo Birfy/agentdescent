@@ -63,6 +63,7 @@ from .._common import cli_env
 from ._delegation import Brief, Edit
 from ._sandbox import PROVIDER_FILES, LocalSandbox, Workspace
 from ._session import (ARTIFACT_DIRS, ARTIFACT_FILES, available_tools,
+                       lean_agent_flags,
                        isolation_flags, run_cli, session_env)
 from ._spatial import SITUATED_EDIT_PROTOCOL  # noqa: F401  (documented sibling)
 from ._world import normalise, owns
@@ -226,6 +227,10 @@ class ClaudeCodeExecutor:
                    "--max-turns", str(turns),
                    "--allowedTools", ",".join(tools),
                    "--disallowedTools", "WebFetch,WebSearch,Task"] + flags
+        # Declaring the toolset is what keeps the other thirty-seven schemas out of a
+        # signed-in run; `--allowedTools` above only auto-approves. No-ops under
+        # `--bare`. See `_session.lean_agent_flags`.
+        command += lean_agent_flags(tools, flags)
         if self._model:
             command += ["--model", self._model]
         return command
