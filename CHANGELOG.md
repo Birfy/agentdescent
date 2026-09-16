@@ -8,6 +8,49 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- **Dream-RSI: a finished discovery run replayed as a simulator of itself
+  (`agentdescent.dream`).** `meta_evolve()` evolves a decision rule of
+  `evolve()` and says what that costs -- *"one outer rollout is therefore an
+  entire inner search"*, and the measured run on `docs/meta-evolution.md` asked
+  for eight rounds and delivered two in 2.7 hours. Dream-RSI (Zheng et al.,
+  2026) removes that price for an exploration policy: a completed run already
+  recorded every attempt and where each one started, so an alternative policy
+  can be *scored* by walking that tree -- choosing a branch reveals a node whose
+  outcome is on disk. No agent call, no evaluator, no sandbox.
+
+  It needed no engine change, because the paper's exploration policy -- a
+  discovery tree to a batch of nodes to continue -- is already
+  `SelectionPolicy.select(ctx, n)`. The artifact is the `selection` slot behind
+  `compile_policy_source`'s gate, the outer loop is `meta_evolve()` unchanged,
+  and only the *problem* is new: `ReplayWorld.replay()` instead of an inner
+  search. `explore()` records a world, `SimulatorPool` is the history `H_t`,
+  `ReplayObjective` is Equation 1, `replay_reflector` is the
+  policy-development agent, and `dream_rsi()` closes the loop -- deploy, record,
+  dream over every world so far, redeploy. The selection step is the paper's
+  explicit argmax over {current, evolved} on the whole fixed history, so
+  `V(pi_{t+1}) >= V(pi_t)` by construction; it is not the same check as the
+  held-out gate, and on the example world it kept out a proposal the gate's
+  three held-out worlds had admitted.
+
+  Two deviations are recorded on the page rather than buried: the root carries a
+  multiplicity of `W` (Appendix B.2's "a batch may contain several roots", which
+  the main text's `C` subset-of `A(T)` cannot express and the paper's own seed
+  policy needs), and each world's `V` is normalised by that world's own
+  attainable range, because `evolve()`'s gate averages rewards across tasks and
+  raw `V` is not comparable between a world whose best node scores 0.9 and one
+  whose best scores 0.2. `ReplayObjective.scaled` deliberately does **not**
+  default to equal weights: the cost and parallelism terms are together
+  `N * (b2/k - b1)`, which vanishes at `k = b2/b1` for *any* `N`, and equal
+  weights put that break-even on the round budget itself -- making the objective
+  blind to what a full-length rollout spent, which is the one thing it exists to
+  charge for.
+
+  No code has been released for Dream-RSI, so this follows the paper rather than
+  a repository, and none of its results is reproduced: the shipped example
+  (`examples/dreamrsi/`) is an offline synthetic domain whose branches saturate,
+  which is the property the method needs to be interesting at all. Docs:
+  `docs/algo-dream-rsi.md`. Tests: `tests/test_dream_rsi.py` (44, offline).
+
 - **`evolve(checkpointing=True)`: the search survives a process restart.**
   `repo_path` already resumed the *artifact* -- the ledger's whole job -- but
   the aggregator's search state is only ever in memory, so a resume re-seeded

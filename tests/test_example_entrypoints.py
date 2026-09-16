@@ -1,6 +1,6 @@
 """The command-line contract shared by every standardised entry point.
 
-Twelve of them, because ERA ships five tasks on one search -- the Kaggle
+Thirteen of them, because ERA ships five tasks on one search -- the Kaggle
 regression upstream bundles, the paper's *numerical solution of integrals*,
 double-precision evaluation of the Gauss hypergeometric function, equation
 discovery on LLM-SRBench, and the AlgoTune speedup benchmark -- and because the
@@ -11,7 +11,7 @@ to the fidelity table -- `porous_tree_search` is a *domain application* of the
 ERA search rather than a port of a published algorithm, and does not appear in
 `docs/self-evolution-examples.md` or `docs/port-fidelity.md` at all.
 
-Eleven of the twelve where numpy is absent: the LLM-SRBench task's scoring module
+Twelve of the thirteen where numpy is absent: the LLM-SRBench task's scoring module
 maps its grammar's function names onto numpy's, so its entry point cannot be
 imported without it, and this repository treats numpy as optional.
 """
@@ -45,6 +45,7 @@ from examples.gepa import gepa_prompt_evolution as gepa
 from examples.porous import porous_tree_search as porous
 from examples.openevolve import openevolve_program_evolution as openevolve
 from examples.skillopt import skillopt_skill_training as skillopt
+from examples.dreamrsi import dream_rsi_worlds as dreamrsi
 from examples.metasearch import evolve_search_policy as metasearch
 from examples import _TEMPLATE as port_template
 from examples import _common as common
@@ -124,6 +125,16 @@ PORTS = (
     # synthetic, so the boundary a dry-run must not cross is the outer run
     # itself.
     Port(metasearch, "rounds", "deepseek-v4-flash", 1800.0, "run_outer",
+         provider="openai", async_ratio=1),
+    # Dream-RSI, the other meta-level entry point: the exploration policy is the
+    # artifact, and a rollout is a *replay* of a recorded discovery tree rather
+    # than a fresh search. `--serial` is the one row where it does not mean
+    # `n_workers=1`: W is the discovery agent's own parallelism (it is in the
+    # paper, and it is the N/k term of the replay objective), so the control arm
+    # takes the merge out of the *dreaming* phase instead -- which is the loop
+    # this repository parallelises. Its domain is synthetic, so the boundary a
+    # dry-run must not cross is the outer loop itself.
+    Port(dreamrsi, "rounds", "deepseek-v4-flash", 1800.0, "run_loop",
          provider="openai", async_ratio=1),
     # Genesis. Its model default is `None` for DGM's reason: the offline actors
     # are rule-based and need no API. `--episodes` is upstream's own unit (an

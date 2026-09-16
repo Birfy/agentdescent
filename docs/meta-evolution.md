@@ -183,6 +183,37 @@ which is the defect this line of work hit at four different levels and which has
 failed both ways: committing nothing, and silently committing a rule that lost
 on its own family.
 
+## When a rollout is too expensive to be a rollout
+
+Everything above costs a whole inner search per outer rollout, and the measured
+run on this page is what that buys: **8 rounds asked for, 2 delivered**, 2.7
+hours. [Dream-RSI](algo-dream-rsi.md) is the other way out of that, and it is
+`meta_evolve` unchanged with one substitution — the *problem*.
+
+A finished discovery run already recorded every attempt it made and where each
+one started. Arrange that into a tree and an alternative decision rule can be
+**run over the record**: choosing a branch reveals a node whose outcome is on
+disk, so a rollout that was a search becomes a few hundred dictionary lookups.
+[`agentdescent.dream`](algo-dream-rsi.md) is that simulator, the exploration
+policy it evolves is an ordinary `selection` slot, and
+[`dream_rsi()`](algo-dream-rsi.md) closes the loop: deploy online, record the
+tree, dream over every tree recorded so far, redeploy.
+
+```python
+from agentdescent import ReplayObjective, dream_rsi, exploration_policy
+
+spec = exploration_policy()                    # the batch policy, as gated source
+result = dream_rsi(continue_fn, spec=spec, model=model,
+                   objective=ReplayObjective.scaled(max_nodes=24, n_workers=4),
+                   rounds=4, n_workers=4, online_rounds=6)
+policy = spec.compile(result.rendered)         # -> Policies(selection=policy)
+```
+
+What it buys and what it gives up, in one line each: a rollout costs nothing, and
+a replay can only reorder, subset and stop within **what the recording policy
+already explored**. The page has the fidelity record, the deviations from the
+paper, and the one measured offline run.
+
 ## Where to evolve, where to validate
 
 The outer loop runs a whole inner search per rollout and again per held-out

@@ -44,6 +44,9 @@ SECTIONS: List[Tuple[str, str, str, str]] = [
     ("agentdescent.meta", "Meta-evolution",
      "Evolve a decision slot of `evolve()` itself, and validate it elsewhere.",
      "meta-evolution.md"),
+    ("agentdescent.dream", "Dream-RSI -- replaying a finished run",
+     "Record a discovery run as a tree, then score exploration policies by "
+     "replaying it instead of running one.", "algo-dream-rsi.md"),
     ("agentdescent.agents", "Agents and models",
      "Any `prompt -> text` is a completion; a `WorkspaceAgent` also has a directory.",
      "agents.md"),

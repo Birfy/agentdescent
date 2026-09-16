@@ -96,6 +96,7 @@ nav:
     - Staleness policies: staleness.md
     - The aggregator_factory exit: aggregator-factory.md
     - Meta-evolution — evolving the slots: meta-evolution.md
+    - Dream-RSI — dreaming in a recorded run: algo-dream-rsi.md
   - API reference: api.md
   - Run everything, and extend it: usage.md
   - Examples and results:

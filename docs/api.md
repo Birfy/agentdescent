@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-332 public names across 54 modules.
+351 public names across 55 modules.
 
 ---
 
@@ -538,6 +538,291 @@ transfer_ratio(
     target: str
 ) -> Optional[float]
 ```
+
+---
+
+## Dream-RSI -- replaying a finished run
+
+Record a discovery run as a tree, then score exploration policies by replaying it instead of running one. &nbsp;·&nbsp; `agentdescent.dream` &nbsp;·&nbsp; [guide](algo-dream-rsi.md)
+
+### `Attempt(...)`
+
+What one `CONTINUE(v)` produced: a score, or a failure.
+
+```python
+Attempt(
+    score: Optional[float] = None,
+    valid: bool = True,
+    detail: Mapping[str, Any] = <factory>
+) -> None
+```
+
+### `Continuation`
+
+The discovery agent: resume a node's workspace, produce one scored child.
+
+### `DiscoveryNode(...)`
+
+One recorded attempt: where it started, what it scored, what it said.
+
+```python
+DiscoveryNode(
+    index: int,
+    parent: Optional[int],
+    score: Optional[float] = None,
+    valid: bool = True,
+    detail: Mapping[str, Any] = <factory>
+) -> None
+```
+
+### `DiscoveryTree(nodes: Optional[Sequence[DiscoveryNode]] = None, *, name: str = 'world') -> None`
+
+A rooted tree of attempts -- one online rollout, recorded.
+
+| method | what it does |
+|---|---|
+| `add(parent: int, attempt: Attempt) -> DiscoveryNode` | Append one recorded attempt under `parent` and return its node. |
+| `best() -> Optional[float]` | The best score anywhere in the record -- the ceiling for any replay. |
+| `branch(index: int) -> int` | Which root child heads `index`'s branch; `-1` for the root itself. |
+| `children(index: int) -> Tuple[int, ...]` | The recorded children of `index`, in the order they were created. |
+| `rooted(...)` | A tree holding only the root, at the baseline `score`. |
+
+### `DreamResult(...)`
+
+What `dream_rsi` did, round by round.
+
+```python
+DreamResult(
+    rendered: str,
+    rounds: List[DreamRound] = <factory>,
+    pool: SimulatorPool = <factory>
+) -> None
+```
+
+### `DreamRound(...)`
+
+One outer iteration `t`: explore, construct, dream, select.
+
+```python
+DreamRound(
+    index: int,
+    online_nodes: int,
+    online_best: Optional[float],
+    online_rounds: int,
+    pool_size: int,
+    value_before: float,
+    value_after: float,
+    redeployed: bool,
+    rendered: str,
+    stop_reason: str = ''
+) -> None
+```
+
+### `Replay(...)`
+
+One policy's whole trajectory through one recorded world.
+
+```python
+Replay(
+    world: str,
+    rounds: Tuple[ReplayRound, ...],
+    revealed: Tuple[int, ...],
+    stop_reason: str,
+    quality: float,
+    nodes: int,
+    decision_rounds: int,
+    parallelism: float,
+    value: float,
+    illegal: int,
+    barren: int,
+    error: Optional[str] = None
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `curve() -> List[float]` | Best-so-far after each completed round -- the outcome's `curve`. |
+| `trajectory(*, max_rounds: int = 12) -> List[Dict[str, Any]]` | A compact per-round record for a prompt or a report. |
+
+### `ReplayObjective(beta1: float = 0.0, beta2: float = 0.0) -> None`
+
+Equation 1 -- quality, minus execution cost, plus a parallelism bonus.
+
+| method | what it does |
+|---|---|
+| `bounds(world: 'ReplayWorld', *, n_workers: int, max_rounds: int) -> Tuple[float, float]` | The range `V` can take in `world` -- what `replay_value` divides by. |
+| `scaled(...)` | Coefficients on the scale of a `[0, 1]` score, given the budget. |
+
+### `ReplayRound(...)`
+
+One decision round of a replay: what was asked for, what was revealed.
+
+```python
+ReplayRound(
+    index: int,
+    batch: Tuple[int, ...],
+    revealed: Tuple[int, ...],
+    illegal: int,
+    over_budget: int,
+    best: float
+) -> None
+```
+
+### `ReplayWorld(tree: DiscoveryTree, *, name: Optional[str] = None) -> None`
+
+A recorded `DiscoveryTree`, played back as a simulator.
+
+| method | what it does |
+|---|---|
+| `replay(...)` | Walk `policy` through this world and score it with `objective`. |
+
+### `SimulatorPool(worlds: Optional[Sequence[ReplayWorld]] = None) -> None`
+
+`H_t = (T_1, ..., T_t)` -- every world recorded so far.
+
+| method | what it does |
+|---|---|
+| `add(tree: DiscoveryTree, *, name: Optional[str] = None) -> ReplayWorld` | Append one recorded rollout; the name defaults to `t<index>`. |
+| `problems(...)` | The pool as `meta_evolve`'s `problems`. |
+
+### `dream_rsi(...)`
+
+The recursive loop: explore online, dream offline, redeploy.
+
+```python
+dream_rsi(
+    continue_fn: Continuation,
+    *,
+    spec: Optional[SlotSpec] = None,
+    seed_policy: str = 'class Policy:\n    # Parallel refining (Dream-RSI\'s manually designed exploration policy):\n    # open W workspaces from the root, then refine every open workspace\'s\n    # frontier, one worker each, for as long as the budget lasts.\n    def __init__(self):\n        self.width = 0\n\n    def select(self, ctx, n):\n        legal = [c for c in ctx.candidates if c.state.get("legal") == "1"]\n        if not legal:\n            return []\n        if self.width < 1:\n            self.width = n                      # W, fixed for the episode\n        roots = [c for c in legal if c.parent is None]\n        frontier = sorted((c for c in legal if c.parent is not None),\n                          key=lambda c: c.version)\n        batch = frontier[:self.width]\n        room = min(n, self.width) - len(batch)\n        if roots and room > 0:\n            batch = batch + [roots[0]] * room   # one cell per unopened branch\n        return batch[:n]\n',
+    propose: Optional[Callable[..., Optional[str]]] = None,
+    model: Optional[Completion] = None,
+    objective: Optional[ReplayObjective] = None,
+    pool: Optional[SimulatorPool] = None,
+    rounds: int = 3,
+    n_workers: int = 4,
+    online_rounds: int = 8,
+    online_repeats: int = 4,
+    min_worlds: int = 4,
+    replay_rounds: int = 16,
+    dream_rounds: int = 3,
+    dream_workers: Optional[int] = None,
+    max_concurrency: Optional[int] = None,
+    root_score: float = 0.0,
+    on_round: Optional[Callable[[DreamRound], None]] = None,
+    **dream_kwargs: Any
+) -> DreamResult
+```
+
+| parameter | type | default | what it is |
+|---|---|---|---|
+| `continue_fn` | `Continuation` | *required* | The discovery agent, `(tree, parent, attempt) -> Attempt`. This is the expensive thing, and the reason the whole method exists. |
+| `spec` | `Optional[SlotSpec]` | `None` | The artifact. `spec` defaults to `exploration_policy(seed_policy)`; pass one directly to change the gate or the seed's own description. |
+| `seed_policy` | `str` | *see source* | As `spec`. |
+| `propose` | `Optional[Callable[..., Optional[str]]]` | `None` | The policy-development agent. Pass `propose` directly, or `model` to get `replay_reflector` over the spec. One of the two is required. |
+| `model` | `Optional[Completion]` | `None` | As `propose`. |
+| `objective` | `Optional[ReplayObjective]` | `None` | Equation 1's coefficients. `None` is `ReplayObjective.scaled(max_nodes=n_workers * online_rounds, n_workers=n_workers)` -- the trade-off on the scale of this budget, since the paper publishes no coefficients. |
+| `pool` | `Optional[SimulatorPool]` | `None` | An existing `SimulatorPool` to extend. This is how a second process continues the loop: the worlds are the expensive part and they serialise. |
+| `rounds` | `int` | `3` | Outer iterations `t`. Each one costs `online_repeats` whole online rollouts. |
+| `n_workers` | `int` | `4` | `W` -- the batch cap, online and in replay. |
+| `online_rounds` | `int` | `8` | `K1` and `K2`: the decision-round caps for an online rollout and for one replay. |
+| `online_repeats` | `int` | `4` | **This port's own choice, and not the paper's.** Dream-RSI deploys the policy once per iteration, so `H_1` is a single tree. `evolve()` refuses fewer than four tasks, and more to the point, dreaming on one world while the gate holds out that same world is precisely the fit-to-the-training-landscape failure `docs/meta-evolution.md` documents and `meta_validate` exists to catch. So an iteration deploys the policy `online_repeats` times -- genuinely different trees, because the online transition is stochastic -- and dreaming is skipped, with `stop_reason="pool-too-small"` recorded, until the pool holds `min_worlds`. Set `online_repeats=1` to follow the paper exactly; dreaming then starts at the fourth iteration. |
+| `min_worlds` | `int` | `4` | As `online_repeats`. |
+| `replay_rounds` | `int` | `16` | As `online_rounds`. |
+| `dream_rounds` | `int` | `3` | The dreaming phase's own budget -- rounds of `meta_evolve` per outer iteration, and how many policy revisions it proposes in parallel. Named separately from `rounds` and `n_workers` because the two levels are budgeted in different currencies: an outer round costs a real discovery rollout, a dreaming round costs one model call per worker and no execution at all. `dream_workers` defaults to `n_workers` capped at four. |
+| `dream_workers` | `Optional[int]` | `None` | As `dream_rounds`. |
+| `max_concurrency` | `Optional[int]` | `None` | Threads for one online batch; `None` means `n_workers`. |
+| `root_score` | `float` | `0.0` | What the initial workspace scores before any attempt. |
+| `on_round` | `Optional[Callable[[DreamRound], None]]` | `None` | Called with each `DreamRound` as it completes -- a progress hook, since an outer round is long. |
+| `**dream_kwargs` | `Any` |  | Passed to `meta_evolve` for the dreaming phase (`rounds`, `held_out_frac`, `max_seconds` ...). `slot`, `spec`, `problems`, `meta_reward` and `seeds` are this function's. |
+
+### `exploration_policy(...)`
+
+The Dream-RSI exploration policy, as an evolvable `selection` slot.
+
+```python
+exploration_policy(
+    seed: str = 'class Policy:\n    # Parallel refining (Dream-RSI\'s manually designed exploration policy):\n    # open W workspaces from the root, then refine every open workspace\'s\n    # frontier, one worker each, for as long as the budget lasts.\n    def __init__(self):\n        self.width = 0\n\n    def select(self, ctx, n):\n        legal = [c for c in ctx.candidates if c.state.get("legal") == "1"]\n        if not legal:\n            return []\n        if self.width < 1:\n            self.width = n                      # W, fixed for the episode\n        roots = [c for c in legal if c.parent is None]\n        frontier = sorted((c for c in legal if c.parent is not None),\n                          key=lambda c: c.version)\n        batch = frontier[:self.width]\n        room = min(n, self.width) - len(batch)\n        if roots and room > 0:\n            batch = batch + [roots[0]] * room   # one cell per unopened branch\n        return batch[:n]\n'
+) -> SourceSlot
+```
+
+### `explore(...)`
+
+Stage 1 -- run `policy` against a real discovery agent, and record it.
+
+```python
+explore(
+    continue_fn: Continuation,
+    policy: SelectionPolicy,
+    *,
+    n_workers: int = 4,
+    max_rounds: int = 8,
+    root_score: float = 0.0,
+    root_detail: Optional[Mapping[str, Any]] = None,
+    max_concurrency: Optional[int] = None,
+    attempt_offset: int = 0,
+    name: str = 'world'
+) -> DiscoveryTree
+```
+
+| parameter | type | default | what it is |
+|---|---|---|---|
+| `continue_fn` | `Continuation` | *required* | The discovery agent, as a `Continuation`. |
+| `policy` | `SelectionPolicy` | *required* | The exploration policy. A fresh instance is taken (see `_fresh`), so the caller's object is not left holding this rollout's state. |
+| `n_workers` | `int` | `4` | `W` -- how many continuations may run at once, and the batch cap. |
+| `max_rounds` | `int` | `8` | `K1` -- the decision-round budget. The rollout also ends early on an empty batch. |
+| `root_score` | `float` | `0.0` | The baseline: what the initial workspace scores before any attempt, and whatever the policy should read about it. |
+| `root_detail` | `Optional[Mapping[str, Any]]` | `None` | As `root_score`. |
+| `max_concurrency` | `Optional[int]` | `None` | Threads used for one batch; `None` means `n_workers`. Set to `1` for a serial control, which changes nothing about the decisions. |
+| `attempt_offset` | `int` | `0` | Where this rollout's attempt counter starts. The counter is the only thing a deterministic `continue_fn` has to vary on, so two rollouts that share an offset are the same rollout -- which is what `dream_rsi` is avoiding when it passes a running total. |
+| `name` | `str` | `'world'` | The world's name, which becomes its task id during dreaming. |
+
+### `mean_replay_value(...)`
+
+`V^m` -- the mean normalised replay value of one policy over the pool.
+
+```python
+mean_replay_value(
+    policy: SelectionPolicy,
+    pool: SimulatorPool,
+    objective: ReplayObjective,
+    *,
+    n_workers: int = 4,
+    max_rounds: int = 16
+) -> float
+```
+
+### `replay_problem(...)`
+
+One world as a `Problem`.
+
+```python
+replay_problem(
+    world: ReplayWorld,
+    objective: ReplayObjective,
+    *,
+    n_workers: int = 4,
+    max_rounds: int = 16
+) -> Problem
+```
+
+### `replay_reflector(...)`
+
+The policy-development agent: it reads *trajectories*, not just a score.
+
+```python
+replay_reflector(
+    complete: Completion,
+    spec: SlotSpec,
+    *,
+    max_history: int = 4,
+    max_outcome_chars: int = 2600
+) -> Callable[..., Optional[str]]
+```
+
+### `replay_value() -> MetaReward`
+
+Equation 1, mapped into `[0, 1]` by the world's own attainable range.
 
 ---
 
@@ -3653,6 +3938,10 @@ In-process, single-flight, counted.
 ### `MergeContext`
 
 Everything an `AcceptancePolicy` is allowed to look at.
+
+### `PARALLEL_REFINE_SEED`
+
+The paper's manually designed starting policy, transcribed: *"it launches multiple independent exploration workspaces in parallel, with each workspace maintaining its own local discovery trajectory and repeatedly refining its current candidate based on the history accumulated within that workspace."* Round one has nothing but the root, so the batch is `W` root continuations and `W` branches open at once. Every round after that refines each open branch's frontier, one worker each, and opens a new branch only when a workspace has run out of recorded continuations. It never prunes, never reorders, and never stops early -- which is the point of a baseline: those are exactly the decisions dreaming is supposed to discover.
 
 ### `PLUGIN_FROZEN`
 
