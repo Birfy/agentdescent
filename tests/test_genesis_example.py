@@ -18,6 +18,7 @@ import os
 import posixpath
 import threading
 import time
+from unittest import mock
 
 import pytest
 
@@ -336,6 +337,33 @@ def test_an_edit_outside_the_authors_subtree_is_dropped_and_counted():
     proposal = render_edits([Edit("src/frontend", "src/backend/evaluator.py", "x")], "r")
     assert strategy.to_diff(strategy.initial(), proposal, "w0", 1, "world") is None
     assert log.contract_violations == 1
+
+
+def test_a_signed_in_run_is_told_a_container_cannot_authenticate():
+    """The third way the container sandbox cannot engage, and it used to be silent.
+
+    A key is a string in the environment and crosses into a container with it. A
+    sign-in is not: the CLI reaches the endpoint through the host's session ingress,
+    which the container does not have. Inside one the CLI answers `Not logged in ·
+    Please run /login`, and a run finds out one episode at a time -- measured,
+    `sessions=4 failed=4 edits=0`, a whole run spent on a condition that was knowable
+    before the first episode started. The sandbox says so up front now, the way it
+    already does for a missing engine and an unmountable toolchain.
+    """
+    from examples.genesis._sandbox import SessionSandbox, signed_in_only
+
+    assert not signed_in_only({"ANTHROPIC_API_KEY": "k", "CLAUDE_CODE_REMOTE": "true"})
+    assert not signed_in_only({"ANTHROPIC_AUTH_TOKEN": "k",
+                               "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST": "1"})
+    assert signed_in_only({"CLAUDE_CODE_REMOTE": "true"})
+    assert signed_in_only({"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST": "1"})
+    assert not signed_in_only({}), "no markers at all is not a sign-in"
+
+    # The reason is only reached when the engine and the toolchain are both fine, so
+    # the constructor is exercised for the shape of the check rather than its verdict
+    # on this machine: keyed, the sign-in branch must not be the one that fires.
+    with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "k"}):
+        assert "signed in" not in SessionSandbox().reason
 
 
 def test_a_signed_in_run_declares_its_toolset_instead_of_shipping_forty_two():

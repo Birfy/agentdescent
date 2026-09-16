@@ -755,6 +755,40 @@ them was still listening two hours later with its working directory already dele
 Sessions now lead their own process group and the group is killed on the way out —
 after the wall, and after a clean finish too.
 
+### A signed-in run cannot use the container sandbox at all
+
+Worse than the prompt size, and found the same way. A key is a string in the
+environment, and it crosses into a container with it — that is how `CONTAINER_ENV`
+works and why a keyed run is isolated and authenticated at once. A **sign-in** is not a
+string: the CLI reaches the endpoint through the host's session ingress, which the
+container does not have.
+
+So every containerised session answered `Not logged in · Please run /login`. The run's
+own summary, for four episodes of four:
+
+```
+Phase 1  : architect designed 0 nodes, deepest 0, 1 replies unusable
+claude code : sessions=4 failed=4 timeout=0 turns=4 edits=0 requests=0
+architect   : sessions=1 failed=1 timeout=0 turns=1 strays=0
+```
+
+A whole run for a condition that was knowable before the first episode started. The
+sandbox now says so up front, beside the two reasons it already gave — no container
+engine, and a toolchain that cannot be mounted — and degrades to a plain directory with
+the reason printed rather than failing an episode at a time.
+
+That leaves three arrangements, and the first is the one to prefer:
+
+| | container sandbox | context per turn | where the credential is |
+|---|---|---:|---|
+| **an API key** | yes | **4 868** (`--bare`) | an environment variable, inside the container |
+| signed in, `--sandbox off` | no | 8 042 | on the host, which the session shares anyway |
+| signed in, container | — | — | cannot authenticate |
+
+The middle row is worth reading carefully, because it looks safer than it is: a session
+running without the sandbox is on the host as the host's user, so it reaches everything
+the sign-in reaches regardless. The isolation is what was lost, not the exposure.
+
 ### A signed-in run pays for thirty-seven tools it cannot reach
 
 `--bare` is what removes the inherited schemas, and it cannot be used by a run that is

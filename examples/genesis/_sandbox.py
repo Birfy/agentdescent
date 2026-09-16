@@ -84,6 +84,22 @@ _CA_CANDIDATES = ("/root/.ccr/ca-bundle.crt", "/etc/ssl/certs/ca-certificates.cr
 DEFAULT_IMAGE = "python:3.12-slim"
 
 
+def signed_in_only(env: Optional[Mapping[str, str]] = None) -> bool:
+    """True when the CLI authenticates as a signed-in user rather than from a key.
+
+    A key is a string in the environment and crosses into a container with it. A
+    sign-in is not: the CLI reaches the endpoint through the host's session ingress,
+    which the container does not have and which this module does not put there. So the
+    two arrangements differ in whether an isolated session can authenticate at all, and
+    a run needs to know which one it is *before* it spends episodes finding out.
+    """
+    out = os.environ if env is None else env
+    if out.get("ANTHROPIC_API_KEY") or out.get("ANTHROPIC_AUTH_TOKEN"):
+        return False
+    return any(out.get(name) for name in
+               ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"))
+
+
 def sandbox_engine(preferred: str = "") -> Optional[str]:
     """The container engine this machine can actually use, or ``None``.
 
@@ -228,6 +244,18 @@ class SessionSandbox:
         elif self.toolchain is None:
             self.reason = (f"the `{binary}` binary is not in a self-contained install, "
                            "so there is nothing to mount into a container")
+        elif signed_in_only():
+            # The third way a container cannot work, and the one that used to be
+            # silent. A signed-in CLI does not authenticate from an environment key:
+            # it goes through the host's session ingress, which `CONTAINER_ENV` does
+            # not carry and is not this module's to carry. Inside a container the CLI
+            # therefore answers `Not logged in`, and the run finds out one episode at
+            # a time -- measured, `sessions=4 failed=4`, a whole run for a condition
+            # that was knowable before the first one started.
+            self.reason = ("this CLI is signed in rather than keyed, and a signed-in "
+                           "session cannot authenticate from inside a container; "
+                           "sessions run in a plain directory and can read this "
+                           "machine. Give the run an API key for an isolated one")
         self.provider = None
         #: Containers left behind by a run that was killed, removed at construction.
         #: A session's container outlives its `release` when the process holding it
