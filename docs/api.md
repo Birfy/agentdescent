@@ -225,6 +225,7 @@ evolve(
     max_tokens: Optional[int] = None,
     stop_on_diminishing_returns: bool = False,
     efficiency_floor: float = 0.25,
+    call_budget: Optional['CallBudget'] = None,
     self_verify: bool = True,
     held_out_frac: float = 0.4,
     repo_path: Optional[str] = None,
@@ -279,6 +280,7 @@ evolve(
 | `max_tokens` | `Optional[int]` | `None` | Hard cap on total tokens consumed (`prompt_tokens + completion_tokens`). A reasoning model can spend 40k tokens on hidden thinking in one call, so `max_calls` and `max_rollouts` do not bound cost: a 20-round run with 4 workers is 80 rollouts and ~160 model calls, but at 40k tokens each that is 6.4M tokens -- the bill, not the count, is what a deployment needs to control. Checked at the round barrier alongside the other budgets; the async path checks per-rollout for tighter control. Stops with `stop_reason="max_tokens"`. `None` (default) means unbounded. |
 | `stop_on_diminishing_returns` | `bool` | `False` | Stop when the run's own return per token has fallen off its peak by more than `efficiency_floor`. The economic rule: keep buying compute while it pays, stop when it does not -- *even with budget left*. Off by default, because a run whose reward only rises late would be cut short by it, and because it needs `max_tokens` (return per token needs a cost to divide by). Stops with `stop_reason="diminishing_returns"`. |
 | `efficiency_floor` | `float` | `0.25` | How far below the peak counts as diminishing, when the stop above is on. Self-calibrating against the run's own best rate, so it is a *ratio*, not an absolute quantity: a reward is in `[0, 1]` and a token count is in the millions, and their quotient has no interpretable scale. |
+| `call_budget` | `Optional['CallBudget']` | `None` | An adaptive per-call thinking budget (o1-style test-time scaling). Pass a `CallBudget` whose `base` matches the adapter's configured `max_tokens`, and the engine adjusts the per-call ceiling based on each parent's score and the remaining budget — promising parents get more thinking, dead-end ones get less, and the allocation tightens as the token budget is spent. The adapter must be wrapped with `budgeted_completion` for this to reach it. `None` (default) means the per-call ceiling is the adapter's own and never changes. |
 | `self_verify` | `bool` | `True` | Re-run the trajectory with the diff applied to record a local before/after delta. Doubles the rollouts spent per proposal; ports that score candidates only on held-out should pass `False`. |
 | `held_out_frac` | `float` | `0.4` | Fraction of `tasks` reserved for held-out scoring, in `(0, 1)`. |
 | `repo_path` | `Optional[str]` | `None` | Where the git-backed ledger lives. Omit for a throwaway repo that is removed when this call returns (not held until interpreter exit, so a sweep does not accumulate one git repo per run); **passing the same path again resumes** that ledger, and a caller-supplied path is never deleted. Git runs with an isolated config, so a personal `~/.gitconfig` (`commit.gpgsign`, `core.hooksPath`) cannot fail the ledger's own bookkeeping commits. |
@@ -3104,6 +3106,7 @@ async_evolve(
     max_tokens: Optional[int] = None,
     stop_on_diminishing_returns: bool = False,
     efficiency_floor: float = 0.25,
+    call_budget: Optional[CallBudget] = None,
     target_reward: Optional[float] = None,
     patience: Optional[int] = None,
     max_worker_errors: int = 3,
@@ -3156,6 +3159,7 @@ async_evolve(
 | `max_tokens` | `Optional[int]` | `None` | Stop after this many tokens in total (`prompt + completion`), as the meter measured them. The third budget unit, and the one cost is measured in: `max_calls` and `max_iters` count invocations, and a reasoning model can spend 40k tokens on hidden thinking in a single one, so neither bounds the bill. Checked as each rollout lands (tighter than the synchronous path's round barrier), and a `BudgetGovernor` degrades optional spend -- fusion tournaments at 75% of the budget, self-verify at 90% -- before the wall. `None` (default) means unbounded, and no governor is constructed. |
 | `stop_on_diminishing_returns` | `bool` | `False` | Stop when the run's measured return per token falls off its own peak by more than `efficiency_floor`. Off by default; needs `max_tokens`. See `evolve`. |
 | `efficiency_floor` | `float` | `0.25` | How far below the peak counts as diminishing, when the stop above is on. A self-calibrating ratio, not an absolute rate. See `evolve`. |
+| `call_budget` | `Optional[CallBudget]` | `None` | An adaptive per-call thinking budget (o1-style test-time scaling). See `evolve`; the allocation happens before each worker's `propose` call, gated by the same `score` and `governor.remaining_fraction()` the synchronous path uses. |
 | `target_reward` | `Optional[float]` | `None` | Stop as soon as a sweep's held-out reward reaches this. Compared against the real reward, never against an acceptance probability. |
 | `patience` | `Optional[int]` | `None` | Stop after this many consecutive merge sweeps that fail to beat the best held-out reward seen so far. The async analogue of the synchronous knob: there are no round barriers here, so a *sweep* (one drain-and-merge by the merger) is the unit. `None` disables it. |
 | `max_worker_errors` | `int` | `3` | Consecutive failed rollouts before a worker that has *never* succeeded gives up. Workers that have succeeded at least once never retire; they back off and keep trying until the run's own budget ends it. |

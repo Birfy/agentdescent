@@ -59,7 +59,7 @@ from .sampling import RoundRobin, TaskSampler
 from .selection import SingleHead
 from .scheduler import AuditScheduler
 from .staleness import StalenessPolicy
-from .budget import BudgetGovernor
+from .budget import BudgetGovernor, CallBudget
 
 
 # ---------------------------------------------------------------------------
@@ -2250,6 +2250,23 @@ def evolve(
     #: and not an absolute: a reward is in ``[0, 1]`` and a token count in the
     #: millions, and their quotient has no interpretable scale.
     efficiency_floor: float = 0.25,
+    #: An adaptive per-call thinking budget (o1-style test-time scaling).
+    #: Pass a :class:`~agentdescent.budget.CallBudget` whose ``base`` matches
+    #: the adapter's configured ``max_tokens``, and the engine will adjust the
+    #: per-call ceiling based on each parent's score and the remaining budget —
+    #: promising parents get more thinking, dead-end ones get less, and the
+    #: allocation tightens as the token budget is spent. The adapter must be
+    #: wrapped with :func:`~agentdescent.budget.budgeted_completion` for this to
+    #: reach it. ``None`` (default) means the per-call ceiling is the adapter's
+    #: own and never changes.
+    call_budget: Optional["CallBudget"] = None,
+    #: An adaptive per-call thinking budget (o1-style test-time scaling). Pass
+    #: a :class:`~agentdescent.budget.CallBudget` whose ``base`` matches the
+    #: adapter's configured ``max_tokens``; the engine adjusts the per-call
+    #: ceiling based on each parent's score and the remaining budget — promising
+    #: parents get more thinking, dead-ends get less. The adapter must be
+    #: wrapped with :func:`~agentdescent.budget.budgeted_completion`. ``None``
+    #: (default) means the per-call ceiling never changes.
     self_verify: bool = True,
     held_out_frac: float = 0.4,
     repo_path: Optional[str] = None,
@@ -2476,6 +2493,16 @@ def evolve(
         Self-calibrating against the run's own best rate, so it is a *ratio*, not
         an absolute quantity: a reward is in ``[0, 1]`` and a token count is in
         the millions, and their quotient has no interpretable scale.
+    call_budget:
+        An adaptive per-call thinking budget (o1-style test-time scaling).
+        Pass a :class:`~agentdescent.budget.CallBudget` whose ``base`` matches
+        the adapter's configured ``max_tokens``, and the engine adjusts the
+        per-call ceiling based on each parent's score and the remaining budget
+        — promising parents get more thinking, dead-end ones get less, and the
+        allocation tightens as the token budget is spent. The adapter must be
+        wrapped with :func:`~agentdescent.budget.budgeted_completion` for this
+        to reach it. ``None`` (default) means the per-call ceiling is the
+        adapter's own and never changes.
     self_verify:
         Re-run the trajectory with the diff applied to record a local
         before/after delta. Doubles the rollouts spent per proposal; ports that
@@ -2670,7 +2697,8 @@ def evolve(
             on_round=on_round, stop_when=stop_when, verbose=verbose, usage=usage,
             policies=policies, checkpointing=checkpointing,
             stop_on_diminishing_returns=stop_on_diminishing_returns,
-            efficiency_floor=efficiency_floor)
+            efficiency_floor=efficiency_floor,
+            call_budget=call_budget)
 
     if pipelined_gate:
         # The mirror of the block above, and the same reasoning: a knob accepted
@@ -2976,6 +3004,14 @@ def evolve(
                 health.record_success()
             if score >= solved_threshold:
                 return
+            # o1-style test-time scaling: if an adaptive call budget is
+            # installed, set its per-call ceiling for this expansion based on
+            # the parent's score and the remaining token budget. A promising
+            # parent gets more thinking; a dead-end one gets less; the
+            # allocation tightens as the budget is spent. Inert without
+            # ``call_budget`` — a plain ``propose`` never sees it.
+            if call_budget is not None:
+                call_budget.allocate(score, governor.remaining_fraction())
             proposal = _checked_proposal(
                 propose(mine.render(), task, output, score), task)
             if not proposal:

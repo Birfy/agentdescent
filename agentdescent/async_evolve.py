@@ -39,7 +39,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .advantage import GroupAdvantage
 from .agents import Usage
-from .budget import BudgetGovernor
+from .budget import BudgetGovernor, CallBudget
 from .policies import Policies
 from .evolution import (
     _publish_stable, _safe_log,
@@ -80,6 +80,8 @@ def async_evolve(
     stop_on_diminishing_returns: bool = False,
     #: How far below the peak counts as diminishing. See :func:`evolve`.
     efficiency_floor: float = 0.25,
+    #: An adaptive per-call thinking budget. See :func:`evolve`.
+    call_budget: Optional[CallBudget] = None,
     target_reward: Optional[float] = None,
     patience: Optional[int] = None,
     max_worker_errors: int = 3,
@@ -207,6 +209,11 @@ def async_evolve(
     efficiency_floor:
         How far below the peak counts as diminishing, when the stop above is on.
         A self-calibrating ratio, not an absolute rate. See :func:`evolve`.
+    call_budget:
+        An adaptive per-call thinking budget (o1-style test-time scaling).
+        See :func:`evolve`; the allocation happens before each worker's
+        ``propose`` call, gated by the same ``score`` and
+        ``governor.remaining_fraction()`` the synchronous path uses.
     eval_concurrency:
         How many held-out tasks the merger scores at once. ``1`` restores the old
         sequential behaviour.
@@ -646,6 +653,9 @@ def async_evolve(
                 adv = advantage.observe(
                     advantage.key(base_v, str(task.meta.get("cluster", ""))), score)
                 if score < solved_threshold:
+                    # o1-style test-time scaling: see evolve() for the reasoning.
+                    if call_budget is not None:
+                        call_budget.allocate(score, governor.remaining_fraction())
                     proposal = _checked_proposal(
                         eng.propose(artifact.render(), task, output, score), task)
                     if proposal:

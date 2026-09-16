@@ -34,7 +34,7 @@ spent, never whether the run's numbers mean anything.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Callable, Optional
 
 
 #: Where the fusion tournament stops being built: 75% of the budget spent.
@@ -268,3 +268,118 @@ class BudgetGovernor:
             "fusion_degraded": not self.allow_fusion_tournament(),
             "self_verify_degraded": not self.allow_self_verify(),
         }
+
+
+# ---------------------------------------------------------------------------
+# Adaptive per-call thinking budget (o1-style test-time scaling)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CallBudget:
+    """A mutable per-call max_tokens, set by the engine before each expansion.
+
+    The engine's :class:`BudgetGovernor` decides how many tokens the *next*
+    model call should be allowed to spend, and writes that number here. A
+    :func:`budgeted_completion` wrapper reads it and delegates to the underlying
+    adapter with the right ``max_tokens``.
+
+    The o1 insight, applied to search: a reasoning model's per-call thinking
+    budget should be **proportional to the expected value of that expansion** —
+    a promising, under-explored parent deserves more room to think than a
+    dead-end one the search has already tried five times. The engine knows the
+    parent's score and the remaining budget; the adapter knows how to call the
+    model; this object is the one place they meet.
+
+    ``base`` is the default the adapter was constructed with. The engine never
+    raises ``next`` above ``base`` (a model call that costs more than the
+    caller's configured ceiling is a bill the caller did not agree to), and
+    never drops it below ``base // 4`` (a reasoning model starved below a
+    quarter of its budget returns empty content — measured, see
+    :func:`agentdescent.agents.claude`).
+    """
+
+    #: The adapter's configured max_tokens — the ceiling the engine never
+    #: exceeds.
+    base: int = 4096
+    #: What the next call should use. Set by the engine before each expansion;
+    #: ``None`` means "use ``base``" (the adapter's own default), which is the
+    #: state a run without adaptive budgeting stays in.
+    next: Optional[int] = None
+    #: The floor: a reasoning model below this returns nothing. Measured on
+    #: deepseek-v4-flash at 1024: four of eight reflection prompts came back
+    #: empty. ``base // 4`` is the conservative reading of that.
+    floor: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        if self.floor is None:
+            self.floor = max(256, self.base // 4)
+
+    def allocate(self, score: float, budget_remaining: float,
+                 *, max_boost: float = 1.0) -> None:
+        """Set ``next`` for the upcoming expansion.
+
+        The allocation is a product of two factors:
+
+        * **Score factor** (``0.5 + 0.5 * score``): a high-scoring parent
+          gets the full ``base``; a zero-scoring one gets half. The parent's
+          score is the search's own estimate of how promising it is, so this
+          is "spend more thinking where the search says it is worth it."
+
+        * **Budget factor** (``0.5 + 0.5 * budget_remaining``): early in the
+          run, when there is budget to exploit what exploration finds, the
+          engine allows full thinking; late, when there is not, it tightens.
+          This is the same annealing :class:`CostEfficient` uses on the
+          exploration bonus, applied to the thinking budget — both are "spend
+          more while you still have time to act on it."
+
+        The product ranges from ``base * 0.25`` (dead-end parent, no budget
+        left) to ``base`` (promising parent, full budget), never above ``base``
+        and never below ``floor``. ``max_boost`` > 1 is allowed but only when
+        the caller explicitly sets it — a budget that lets the engine raise
+        the per-call ceiling above the adapter's configured ``max_tokens`` is
+        a bill the caller has to opt into.
+        """
+        s = 0.5 + 0.5 * max(0.0, min(1.0, float(score)))
+        b = 0.5 + 0.5 * max(0.0, min(1.0, float(budget_remaining)))
+        ceiling = int(self.base * max_boost)
+        self.next = max(self.floor, min(ceiling, int(self.base * s * b)))
+
+
+def budgeted_completion(
+    factory: Callable[[int], "Completion"],
+    budget: CallBudget,
+) -> "Completion":
+    """Wrap a ``max_tokens -> Completion`` factory into an adaptive Completion.
+
+    The factory is called once per distinct ``max_tokens`` value (cached), so
+    a run that stays at the default pays one construction and a run that
+    adapts pays one per step it adapts to — not one per call.
+
+    Usage::
+
+        from agentdescent.budget import CallBudget, budgeted_completion
+        from agentdescent.agents import claude, LLMAgent
+
+        budget = CallBudget(base=8192)
+        agent = LLMAgent(budgeted_completion(
+            lambda mt: claude(model="claude-sonnet-4-5", max_tokens=mt, usage=u),
+            budget))
+
+        evolve(tasks, reward, agent=agent, max_tokens=500_000,
+               call_budget=budget, usage=u)
+
+    Without ``call_budget`` the engine never touches ``budget.next`` and the
+    factory is called once with ``budget.base`` — the same cost as constructing
+    ``claude(max_tokens=8192)`` directly.
+    """
+
+    cache: dict[int, "Completion"] = {}
+
+    def complete(prompt: str) -> str:
+        mt = budget.next if budget.next is not None else budget.base
+        if mt not in cache:
+            cache[mt] = factory(mt)
+        return cache[mt](prompt)
+
+    return complete
