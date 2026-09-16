@@ -92,7 +92,7 @@ TRUNCATED = "... [Content Truncated] ..."
 _ROUTE_LINE = re.compile(
     r"""^\s*[-*]\s*          # a markdown list item
         `?\s*(?P<path>\.?/?[A-Za-z0-9._\-/]+?)\s*/?`?\s*   # the path, backticks optional
-        (?:\(\s*(?P<files>\d+)\s*files?\s*\)\s*)?        # optional "(12 files)"
+        (?:\((?P<files>[^)]*)\)\s*)?   # an optional note in brackets, any content
         (?:$|[-=]+>|\u2192|:)  # end of line, '->', an arrow, or a colon
     """, re.VERBOSE)
 
@@ -144,6 +144,25 @@ def parse_routing(body: str) -> List[str]:
 
 
 
+def _count(note: Optional[str]) -> int:
+    """The file count out of a routing line's bracketed note, or 0.
+
+    The note is read loosely on purpose. The brief asks for `(12 files)`, and an
+    architect wrote `(~32 files)` -- "about thirty-two", which is a perfectly good
+    thing to say and which an exact `\\d+` refused. Worse, the refusal did not fall
+    back to "no count": the optional group could not match, so the *whole line* failed
+    and the child vanished. One run designed a tree of exactly one node that way, from
+    a record that named six children in plain sight.
+
+    So the bracket now swallows anything and the number is dug out afterwards: a note
+    that carries no number costs its count, never its child.
+    """
+    if not note:
+        return 0
+    digits = re.search(r"\d+", note)
+    return int(digits.group()) if digits else 0
+
+
 def parse_route_sizes(body: str) -> Dict[str, int]:
     """``{path: how many files the architect said it holds}`` for one record.
 
@@ -166,10 +185,10 @@ def parse_route_sizes(body: str) -> Dict[str, int]:
         if not inside:
             continue
         match = _ROUTE_LINE.match(line)
-        if match and match.group("files"):
+        if match and _count(match.group("files")):
             path = normalise(match.group("path"))
             if path:
-                out.setdefault(path, int(match.group("files")))
+                out.setdefault(path, _count(match.group("files")))
     return out
 
 def parse_routes(body: str) -> List[Tuple[str, str]]:

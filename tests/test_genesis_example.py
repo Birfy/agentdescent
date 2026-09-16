@@ -2614,6 +2614,40 @@ def test_a_tool_s_own_directory_is_never_a_node():
     assert delegation.mistaken_nodes == 6
 
 
+def test_a_bracketed_note_costs_its_count_never_its_child():
+    """`(~32 files)` designed a tree of one node.
+
+    The brief asks for `(12 files)` and the pattern read `\\d+`, so "about
+    thirty-two" -- a perfectly reasonable thing for an architect to write -- did not
+    match. And because the count sat in an *optional group* that still had to match
+    where it appeared, failing it failed the whole line: the child did not lose its
+    size, it vanished. One run's phase 1 reported `architect designed 1 nodes,
+    deepest 0` from a record that named six children in plain sight, and a one-node
+    tree is a run with no delegation, no parent review and no spatial contract in it
+    at all.
+    """
+    from examples.genesis._world import parse_route_sizes, parse_routes
+
+    def table(note):
+        return f"## Routing Table\n- `./src/brain/` {note} -> the brain\n"
+
+    for note in ("(32 files)", "(~32 files)", "(≈32 files)", "(about 32 files)",
+                 "(32 files, maybe more)", "(several files)", ""):
+        assert parse_routes(table(note)) == [("src/brain", "the brain")], note
+
+    # the count is read where there is one, and simply absent where there is not
+    assert parse_route_sizes(table("(~32 files)")) == {"src/brain": 32}
+    assert parse_route_sizes(table("(several files)")) == {}
+    assert parse_route_sizes(table("")) == {}
+
+    # and the whole record parses the way the run needs it to
+    record = ("# src\n\n## Routing Table\n"
+              "- `./src/neural/` (~9 files) -> the spiking engine\n"
+              "- `./src/brain/` (~32 files) -> the brain\n"
+              "- `./src/body/` (~6 files) -> the body\n")
+    assert [p for p, _ in parse_routes(record)] == ["src/neural", "src/brain", "src/body"]
+
+
 def test_stackvm_is_deeper_than_minilang_which_is_why_it_exists():
     """The second domain is not "harder code" -- it is somewhere for the
     recursion to go. `src/vm/ops` is a node whose parent is itself a child."""
