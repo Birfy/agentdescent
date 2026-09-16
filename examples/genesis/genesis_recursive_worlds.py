@@ -762,8 +762,31 @@ def main(argv=None) -> None:
 
     print(f"\nGrowing the world ({args.workers} workers, "
           f"{'barrier-free' if args.asynchronous else 'synchronous DP'})...\n")
+    def _progress(info) -> None:
+        """One line per merger sweep, because a run that prints nothing is a run
+        you have to do archaeology on.
+
+        Between "Growing the world" and the final summary this port printed
+        **nothing at all** -- for a formation run that is hours. Finding out
+        whether work was being accepted meant reading episode transcripts and
+        peering into live containers, and two readings out of three were wrong
+        because what a worktree holds is the base state *plus* whatever the
+        session has written so far, which is not the accepted state and never was.
+
+        `RoundInfo.reasons` is the field that matters: "the gate says my proposals
+        do not help" and "they never reached the gate" both show as committed=0
+        and need opposite fixes.
+        """
+        reasons = "  ".join(f"{k}={v}" for k, v in sorted(info.reasons.items()))
+        print(f"  sweep {info.round:>3}  reward={info.held_out_reward:.3f}  "
+              f"files={info.n_items:<4} committed={info.committed:<3} "
+              f"rejected={info.rejected:<3} rollouts={info.rollouts:<4} "
+              f"{int(info.elapsed_s)//60}m" + (f"  [{reasons}]" if reasons else ""),
+              flush=True)
+
     result = evolve(
         tasks, spec.reward, run=run, propose=_superseded, strategy=strategy,
+        on_round=_progress,
         artifact_id="world", blast_radius=SKILL_BLAST_RADIUS,
         # Say the budget outright rather than letting `rounds` be reinterpreted:
         # `--episodes` is a count of ROOT episodes in both arms, and under the

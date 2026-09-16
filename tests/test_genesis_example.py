@@ -337,6 +337,30 @@ def test_an_edit_outside_the_authors_subtree_is_dropped_and_counted():
     assert log.contract_violations == 1
 
 
+def test_the_growth_phase_reports_progress_rather_than_going_silent():
+    """`evolve` takes an on_round hook and the run has to use it.
+
+    Without it the run printed one line at the start of the growth phase and the
+    next line hours later, at the end. Asking "is anything being accepted" then
+    meant reading CLI transcripts and looking inside live containers -- and what a
+    live worktree holds is the base state *plus* the session's own writes, so two
+    readings out of three were wrong. `RoundInfo.reasons` is the field that
+    separates "the gate refused my work" from "my work never reached the gate".
+    """
+    tree = ast.parse(inspect.getsource(genesis.main))
+    hook = [n for n in ast.walk(tree)
+            if isinstance(n, ast.keyword) and n.arg == "on_round"]
+    assert hook, "the growth phase no longer reports progress"
+    name = hook[0].value
+    assert isinstance(name, ast.Name), "on_round should be a named local, not a lambda"
+    body = [n for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == name.id]
+    assert body, f"{name.id} is passed as on_round but not defined in main()"
+    printed = ast.dump(body[0])
+    for field in ("committed", "rejected", "reasons", "held_out_reward"):
+        assert field in printed, f"the progress line never reports {field}"
+
+
 def test_a_diff_over_the_file_cap_loses_the_whole_episode_and_says_so():
     """The cap discards the proposal, not the surplus -- so it has to be counted.
 
