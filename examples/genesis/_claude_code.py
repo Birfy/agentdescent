@@ -53,6 +53,7 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 from typing import Callable, Dict, List, Mapping, Optional, Sequence
 
 from agentdescent.filetree import match_any, materialize
@@ -157,6 +158,11 @@ class ClaudeCodeExecutor:
         #: Sessions run, and what came back. `failed` is the total; `timeouts` is the
         #: part of it that was still working when the wall came, and `edits` is
         #: counted for those too -- a session that ran out of time wrote what it wrote.
+        #: Siblings run concurrently, so every counter below is incremented
+        #: from more than one thread. `x += 1` is a read and a write with a
+        #: bytecode boundary between them; without this the numbers this port
+        #: reports would quietly undercount exactly when the run is busiest.
+        self._tally = threading.Lock()
         self.sessions = 0
         self.failed = 0
         self.timeouts = 0
@@ -171,14 +177,18 @@ class ClaudeCodeExecutor:
             before = dict(brief.state)
             materialize(before, space.path)
             self._write_settings(space.path)
-            self.sessions += 1
+            with self._tally:
+                self.sessions += 1
             ok = self._run(space, owner, brief)
             if not ok:
-                self.failed += 1
+                with self._tally:
+                    self.failed += 1
             after = _read_tree(space.path)
             edits = _diff(before, after, owner)
-            self.edits += sum(1 for e in edits if owns(owner, e.path))
-            self.requests += sum(1 for e in edits if not owns(owner, e.path))
+            with self._tally:
+                self.edits += sum(1 for e in edits if owns(owner, e.path))
+            with self._tally:
+                self.requests += sum(1 for e in edits if not owns(owner, e.path))
             return edits
         finally:
             space.close()
@@ -250,11 +260,13 @@ class ClaudeCodeExecutor:
             # `turns` -- which is why the counter read 309 for a run whose transcripts
             # hold 2 607. The diff is taken either way: the caller reads the worktree
             # after this returns, and half-finished work is still work.
-            self.timeouts += 1
+            with self._tally:
+                self.timeouts += 1
             return False
         try:
             report = json.loads(out.decode("utf-8", "replace") or "{}")
-            self.turns += int(report.get("num_turns") or 0)
+            with self._tally:
+                self.turns += int(report.get("num_turns") or 0)
             return not report.get("is_error", code != 0)
         except Exception:  # noqa: BLE001 - no JSON is not a reason to lose the diff
             return code == 0

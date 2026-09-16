@@ -43,6 +43,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import contextlib
 import subprocess
 import tempfile
 import threading
@@ -55,7 +56,7 @@ from .._common import cli_env
 from ._sandbox import PROVIDER_FILES, LocalSandbox, Workspace
 
 __all__ = ["ARTIFACT_DIRS", "ARTIFACT_FILES", "AgentSession",
-           "HOST_SESSION_VARS", "READ_ONLY_TOOLS",
+           "HOST_SESSION_VARS", "READ_ONLY_TOOLS", "set_session_limit",
            "READ_WRITE_TOOLS", "SCRATCH_DIR", "available_tools",
            "isolation_flags", "run_cli", "session_env", "session_home"]
 
@@ -216,6 +217,40 @@ READ_ONLY_TOOLS = ("Read", "Glob", "Grep")
 READ_WRITE_TOOLS = ("Read", "Write", "Edit", "Glob", "Grep")
 
 
+#: How many sessions may be in flight at once, across the whole run. Every role
+#: goes through `run_cli`, and sessions never nest -- a manager's own session runs
+#: before and after its children's, never during -- so one semaphore here bounds the
+#: whole tree without any chance of a parent deadlocking on its own children.
+#:
+#: It exists because siblings run concurrently now. Without a bound, a tree of
+#: branching factor *b* and depth *d* puts up to b^d sessions on one endpoint at
+#: once, and the endpoint this port measured answers a 429 within 39 seconds but
+#: takes minutes when it is simply given more than it will serve.
+_SLOTS: Optional[threading.BoundedSemaphore] = None
+_SLOTS_LOCK = threading.Lock()
+
+
+def set_session_limit(limit: int) -> None:
+    """Bound concurrent sessions for this process. ``limit <= 0`` removes the bound."""
+    global _SLOTS
+    with _SLOTS_LOCK:
+        _SLOTS = threading.BoundedSemaphore(limit) if limit > 0 else None
+
+
+@contextlib.contextmanager
+def _slot():
+    with _SLOTS_LOCK:
+        sem = _SLOTS
+    if sem is None:
+        yield
+        return
+    sem.acquire()
+    try:
+        yield
+    finally:
+        sem.release()
+
+
 def run_cli(command: Sequence[str], *, cwd: str, env: Mapping[str, str],
             timeout: float) -> Tuple[bytes, int, bool]:
     """Run one session to completion or to the wall; ``(stdout, code, timed_out)``.
@@ -232,6 +267,12 @@ def run_cli(command: Sequence[str], *, cwd: str, env: Mapping[str, str],
     different events with different fixes: a session that hit the wall was still
     working, and one that died at 26 seconds was not.
     """
+    with _slot():
+        return _run_cli(command, cwd=cwd, env=env, timeout=timeout)
+
+
+def _run_cli(command: Sequence[str], *, cwd: str, env: Mapping[str, str],
+             timeout: float) -> Tuple[bytes, int, bool]:
     proc = subprocess.Popen(list(command), cwd=cwd, env=dict(env),
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             start_new_session=True)
@@ -322,6 +363,11 @@ class AgentSession:
         #: Sessions run, and what came back. `failed` is the total; `timeouts` is
         #: the half of it that was still working when the wall arrived, which is the
         #: only one of the two that `--session-timeout` can do anything about.
+        #: Siblings run concurrently, so every counter below is incremented
+        #: from more than one thread. `x += 1` is a read and a write with a
+        #: bytecode boundary between them; without this the numbers this port
+        #: reports would quietly undercount exactly when the run is busiest.
+        self._tally = threading.Lock()
         self.sessions = 0
         self.failed = 0
         self.timeouts = 0
@@ -344,9 +390,11 @@ class AgentSession:
         try:
             materialize(dict(state), space.path)
             self._write_settings(space.path)
-            self.sessions += 1
+            with self._tally:
+                self.sessions += 1
             if not self._invoke(space, prompt):
-                self.failed += 1
+                with self._tally:
+                    self.failed += 1
             out: Dict[str, str] = {}
             for rel in read:
                 try:
@@ -417,11 +465,13 @@ class AgentSession:
             # The wall, and it is worth telling apart: there is no report to read,
             # so `turns` does not count what this session did. The file it may have
             # written by then is still read back, which is why `run` reads either way.
-            self.timeouts += 1
+            with self._tally:
+                self.timeouts += 1
             return False
         try:
             report = json.loads(out.decode("utf-8", "replace") or "{}")
-            self.turns += int(report.get("num_turns") or 0)
+            with self._tally:
+                self.turns += int(report.get("num_turns") or 0)
             return not report.get("is_error", code != 0)
         except Exception:  # noqa: BLE001 - no JSON is not a reason to lose the work
             return code == 0

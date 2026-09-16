@@ -104,7 +104,7 @@ from ._judge import ParentJudge
 from ._review import CompletionJudge, ParentCodeReview, chain_reviews
 from ._sandbox import DEFAULT_IMAGE as SANDBOX_IMAGE
 from ._sandbox import LocalSandbox, SessionSandbox
-from ._session import session_home
+from ._session import session_home, set_session_limit
 from ._suite import TEST_FAILURE
 from ._suite import cold_start, preflight
 from ._octopus import OctopusConflict, git_available
@@ -203,7 +203,25 @@ def build_parser() -> argparse.ArgumentParser:
                               "nodes deep, stackvm four"))
     parser.add_argument("--episodes", type=int, default=24,
                         help="total ROOT episodes; one root episode is one rollout")
-    parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--workers", type=int, default=4,
+                        help="rollouts in flight. Each one is a whole tree walk, so "
+                             "raising this makes several workers descend the SAME "
+                             "tree at once -- measured on an 8-node tree, two of them "
+                             "landed on the same node at the same moment to do the "
+                             "same work, of which one result could survive. Prefer "
+                             "--node-workers for parallelism and keep this small")
+    parser.add_argument("--node-workers", type=int, default=4, metavar="N",
+                        help="siblings one manager may run at once. The spatial "
+                             "contract is what makes it safe -- a child writes only "
+                             "under its own subtree, so siblings cannot collide -- and "
+                             "the parent still folds their results in delegation "
+                             "order, so the proposal is unchanged. 1 is the serial "
+                             "walk: on an 8-node tree that was about an hour per "
+                             "rollout, one session at a time")
+    parser.add_argument("--max-sessions", type=int, default=0, metavar="N",
+                        help="hard bound on Claude Code sessions in flight across the "
+                             "whole run, which is the number the endpoint actually "
+                             "sees. 0 derives it from --workers x --node-workers")
     parser.add_argument("--depth", type=int, default=3,
                         help="maximum recursive delegation depth (v,p) -> (v,q)")
     parser.add_argument("--max-turns", type=int, default=0,
@@ -422,6 +440,17 @@ def main(argv=None) -> None:
     print(f"Merge    : {merge}" + ("" if git_available() else
                                    "  [git missing: every contested file falls back]"))
     print(f"Gate     : {gate}")
+    # The three numbers that decide how long a run takes, together, because each is
+    # misleading alone. `--workers` is whole tree walks; `--node-workers` is how wide
+    # one level of a walk gets; their product is what the endpoint sees, and that is
+    # the number a rate limit is about.
+    node_workers = max(1, args.node_workers)
+    in_flight = args.max_sessions or (args.workers * node_workers)
+    set_session_limit(in_flight)
+    print(f"Parallel : {args.workers} rollout(s) x {node_workers} sibling(s) "
+          f"= up to {in_flight} session(s) on the endpoint at once"
+          + ("  [serial siblings: one rollout is a depth-first walk, "
+             "one session at a time]" if node_workers == 1 else ""))
     print("Episode  : " + ("one headless Claude Code session in a throwaway worktree, "
                            f"up to {args.max_turns or ClaudeCodeExecutor.ROOT_TURNS} "
                            f"turns at the root and "
@@ -720,6 +749,7 @@ def main(argv=None) -> None:
         executor=(sessions if sessions is not None else
                   spec.llm_executor(complete) if complete else spec.offline_executor),
         log=log, max_depth=args.depth, max_edits=4, contracts=spec.CONTRACTS,
+        node_workers=max(1, args.node_workers),
         readonly=spec.FROZEN,
         # Three links, and the middle one is the only one that can ask "did you test
         # what you just wrote". A domain whose tests are the agents' own supplies it.

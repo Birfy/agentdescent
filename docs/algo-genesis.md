@@ -799,6 +799,53 @@ a node's build:
 episode. A single completion asked for whole files keeps the tight 6 — that executor
 proposes one or two files, and six there really is a runaway.
 
+### One rollout was an hour, and four workers spent it on the same tree
+
+A rollout here is `RecursiveDelegation.propose`: a walk of the whole Context Tree with
+one Claude Code session per node. It was a `for` loop, so the walk was serial — and on
+the `fly` tree (8 nodes, deepest 2) a session takes five to fifteen minutes, which makes
+a rollout about an hour. `py-spy` on a live run, 75 minutes in:
+
+```
+Thread-1: _episode → _episode → _episode → _episode
+Thread-2: _accountability_pass → _episode → _episode → _episode
+Thread-3: _accountability_pass → _episode → _episode
+```
+
+All four workers still inside their **first** `propose()`. The accepted state held three
+files. That looked like an acceptance problem and was not one: the parent gate accepts a
+tie, the reviewer said ACCEPT in four of the five reviews that had run, and the staleness
+policy keeps a card whose reward is merely unchanged. Nothing was being rejected. Nothing
+had finished.
+
+Worse, `--workers` is the number of *whole tree walks* in flight, so four workers were
+four independent descents of the same eight nodes — two of them sat on
+`src/brain/navigation` at the same moment, doing the same node's work, of which only one
+result could ever survive.
+
+So siblings run together now, and the knobs say which kind of parallelism you are asking
+for:
+
+| flag | what it multiplies |
+|---|---|
+| `--workers` | whole tree walks at once (keep small; they duplicate each other) |
+| `--node-workers` | siblings one manager runs at once (this is the useful one) |
+| `--max-sessions` | the hard bound on what the endpoint sees; defaults to their product |
+
+The spatial contract is what makes the concurrency safe rather than a merge problem: a
+child may write only under its own subtree, so two siblings cannot touch the same path,
+and each gets its own throwaway worktree branched from the same base. What the parent
+does *with* the results — the octopus fold, the conflict check, the requests it adopts —
+is unchanged and still runs in `delegations` order, so the same results produce the same
+proposal. The bound lives in `run_cli`, not in the thread pools, because sessions are the
+scarce thing and a pool per level would multiply; sessions never nest (a manager's own
+session runs before and after its children's, never during), so one semaphore there
+bounds the whole tree with no way for a parent to deadlock on its own children.
+
+Every counter the port reports is now incremented under a lock. `x += 1` is a read and a
+write with a bytecode boundary between them, and this port's claim is that its numbers
+are measured.
+
 ### A session launched from a session is not that session
 
 The transcripts turned up a second thing, and it is the more expensive one. A run

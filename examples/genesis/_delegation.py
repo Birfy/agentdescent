@@ -35,7 +35,9 @@ rather than a different algorithm.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, replace
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from agentdescent.filetree import parse_tree
@@ -156,6 +158,12 @@ class RecursiveDelegation:
     log: WorldLog
     max_depth: int = 2
     max_edits: int = 4
+    #: How many siblings one manager may have in flight at once. 1 is the serial
+    #: walk this port started with; above 1 the children of a node run together and
+    #: are folded in `delegations` order afterwards, so the proposal is unchanged.
+    #: The real bound on load is `_session.set_session_limit`, not this -- this only
+    #: says how wide one level may get.
+    node_workers: int = 1
     root_path: str = ""
     #: Human-supplied, read-only files every agent is shown in full, wherever it
     #: stands -- the specification, the constraints, the validation contract. The
@@ -197,6 +205,13 @@ class RecursiveDelegation:
     #: Child nodes opened at a path their parent did not yet route to, and
     #: therefore written into the parent's routing table.
     routes_opened: int = 0
+    #: Guards every counter below. They are incremented from sibling threads now,
+    #: and `self.x += 1` is a read and a write with a bytecode boundary between
+    #: them -- two siblings landing there together lose a count. This port's whole
+    #: claim is that its numbers are measured, so the numbers have to survive the
+    #: concurrency it introduced.
+    _tally: threading.Lock = field(default_factory=threading.Lock, repr=False,
+                                   compare=False)
     #: Delegations refused because the target was a file, not a node.
     mistaken_nodes: int = 0
     #: Delegations refused because the directory would shadow a sibling module of
@@ -235,6 +250,11 @@ class RecursiveDelegation:
 
     # -- the ProposalPolicy protocol ---------------------------------------
 
+    def _bump(self, name: str, n: int = 1) -> None:
+        """One counter, incremented under the tally lock. See `_tally`."""
+        with self._tally:
+            setattr(self, name, getattr(self, name) + n)
+
     def propose(self, ctx) -> Sequence[str]:
         state = _state_of(ctx.rendered)
         self.last_state = dict(state)
@@ -267,7 +287,7 @@ class RecursiveDelegation:
         # A need that reached the top of this episode's chain and still fell
         # outside its root's authority. Counted rather than dropped quietly: it
         # means the decomposition put work where nobody could do it.
-        self.unmet_requests += len(unmet)
+        self._bump("unmet_requests", len(unmet))
 
         edits = self._bound(edits)
         if not edits:
@@ -309,21 +329,21 @@ class RecursiveDelegation:
                 # repository root. Resolve it against the node before anything
                 # else looks at it, and count the ones that needed it.
                 path, relative = resolve_edit_path(state, world.path, raw.path)
-                self.resolved_relative += int(relative)
+                self._bump("resolved_relative", int(relative))
                 if raw.content is not None and shadows_package(state, path):
                     # A file written beside a node directory of the same name makes
                     # that node unreachable from every import -- see `shadows_package`.
-                    self.shadowing_edits += 1
+                    self._bump("shadowing_edits", 1)
                     continue
                 produced.append(Edit(owner=world.path, path=path,
                                      content=raw.content, kind=raw.kind))
             produced += self._refresh_record(world, state)
             for edit in produced:
                 if edit.path.endswith(CONTEXT_FILE) and state.get(edit.path) != edit.content:
-                    self.record_updates += 1
+                    self._bump("record_updates", 1)
             edits = [e for e in produced if owns(world.path, e.path)]
             requests = [e for e in produced if not owns(world.path, e.path)]
-            self.requests_raised += len(requests)
+            self._bump("requests_raised", len(requests))
             record = self.log.record(EpisodeRecord(
                 agent_id=self.log.next_id("executor"), role="executor",
                 path=world.path, depth=depth, version=world.version,
@@ -363,11 +383,43 @@ class RecursiveDelegation:
         #: What this episode's review returned work over, carried into the manager's
         #: own turn below -- see `_accountability_pass`.
         findings: List[Tuple[str, str, str]] = []
-        for delegation in delegations:
-            child = world.delegate(delegation.path)
-            returned, asked, child_record = self._episode(
-                child, delegation.objective, state, ctx, depth=depth + 1,
-                rollout=rollout, base=child_base)
+        # Siblings run **concurrently**, and are folded **in order**.
+        #
+        # What made this serial was not the contract; it was a `for` loop. The
+        # contract is the reason it does not have to be: a child may write only
+        # under its own subtree, so two siblings cannot touch the same path, and
+        # each gets its own throwaway worktree branched from the same `child_base`.
+        # What the parent then does with the results -- the octopus fold, the
+        # conflict check, the pending requests -- is left exactly as it was, in
+        # `delegations` order, so the merge stays deterministic and a rerun with the
+        # same results produces the same proposal.
+        #
+        # The cost of not doing this, measured on an 8-node tree: one rollout is a
+        # depth-first walk with one Claude Code session per node, at five to fifteen
+        # minutes each, so a rollout took about an hour -- and four workers each
+        # walked the *same* tree, two of them landing on `src/brain/navigation` at
+        # the same moment to do the same node's work, of which only one result could
+        # ever survive. After 75 minutes `py-spy` showed all four workers still
+        # inside their first `propose()`. Nothing was being rejected; nothing had
+        # finished.
+        #
+        # `_session.set_session_limit` is what keeps this from becoming a flood --
+        # the bound is on sessions, not on this pool, because sessions are the
+        # scarce thing and a pool per level would multiply.
+        pairs = [(d, world.delegate(d.path)) for d in delegations]
+        if self.node_workers > 1 and len(pairs) > 1:
+            with ThreadPoolExecutor(max_workers=min(self.node_workers, len(pairs)),
+                                    thread_name_prefix="genesis-sibling") as pool:
+                futures = [pool.submit(self._episode, child, d.objective, state, ctx,
+                                       depth=depth + 1, rollout=rollout,
+                                       base=child_base)
+                           for d, child in pairs]
+                outcomes = [f.result() for f in futures]
+        else:
+            outcomes = [self._episode(child, d.objective, state, ctx, depth=depth + 1,
+                                      rollout=rollout, base=child_base)
+                        for d, child in pairs]
+        for (delegation, child), (returned, asked, child_record) in zip(pairs, outcomes):
             children.append(child_record)
             child_record.verdict, child_record.reason = self._judge(
                 child, returned, asked, brief)
@@ -379,7 +431,7 @@ class RecursiveDelegation:
                 mine = [replace(e, owner=world.path) for e in asked
                         if owns(world.path, e.path)]
                 if mine:
-                    self.adopted_requests += len(mine)
+                    self._bump("adopted_requests", len(mine))
                     self._fold(held, owner_of, mine, world, state)
                 pending += [e for e in asked if not owns(world.path, e.path)]
             if child_record.verdict == "rejected":
@@ -480,7 +532,7 @@ class RecursiveDelegation:
             else:
                 amended[edit.path] = edit.content
         if findings:
-            self.accountability_findings += len(findings)
+            self._bump("accountability_findings", len(findings))
         brief = Brief(world=world,
                       objective=_with_findings(f"review and accountability: {objective}",
                                                world.path, findings),
@@ -490,18 +542,18 @@ class RecursiveDelegation:
         out: List[Edit] = list(self._refresh_record(world, amended))
         for raw in self.executor(brief) or ():
             path, relative = resolve_edit_path(amended, world.path, raw.path)
-            self.resolved_relative += int(relative)
+            self._bump("resolved_relative", int(relative))
             if raw.content is not None and shadows_package(amended, path):
                 # The accountability turn is where this actually happened: the manager
                 # at `src/potentials/kernels` delegated `lennard_jones/` to a child and
                 # then wrote `lennard_jones.py` beside it.
-                self.shadowing_edits += 1
+                self._bump("shadowing_edits", 1)
             elif directly_at(world.path, path):
                 out.append(Edit(owner=world.path, path=path, content=raw.content,
                                 kind=raw.kind))
             else:
-                self.accountability_declined += 1
-        self.accountability_edits += len(out)
+                self._bump("accountability_declined", 1)
+        self._bump("accountability_edits", len(out))
         return out
 
     def _refresh_record(self, world: LocalWorld,
@@ -519,7 +571,7 @@ class RecursiveDelegation:
         revised = self.refine(world.path, state)
         if not revised or revised == state.get(key):
             return []
-        self.records_revised += 1
+        self._bump("records_revised", 1)
         return [Edit(owner=world.path, path=key, content=revised, kind="context")]
 
     def _fold(self, held: Dict[str, Edit], owner_of: Dict[str, str],
@@ -545,15 +597,15 @@ class RecursiveDelegation:
                 continue                      # the two agreed; nothing to merge
             if mine.content is None or edit.content is None:
                 conflicts.append(edit.path)   # a delete against an edit
-                self.sibling_conflicts += 1
+                self._bump("sibling_conflicts", 1)
                 continue
             fused = three_way(state.get(edit.path, ""), mine.content, edit.content)
             if fused is None:
                 conflicts.append(edit.path)
-                self.sibling_conflicts += 1
+                self._bump("sibling_conflicts", 1)
                 continue
             held[edit.path] = replace(mine, content=fused)
-            self.sibling_merges += 1
+            self._bump("sibling_merges", 1)
         return conflicts
 
     def _is_node(self, world: LocalWorld, delegation: Delegation,
@@ -581,7 +633,7 @@ class RecursiveDelegation:
         if path in state or looks_like_file(path):
             # `in state` catches a file that exists; the shape catches one that does
             # not yet, which is every file in a formation run until someone writes it.
-            self.mistaken_nodes += 1
+            self._bump("mistaken_nodes", 1)
             return False
         if any(part.startswith(".") or part in ARTIFACT_DIRS
                for part in path.split("/")):
@@ -593,10 +645,10 @@ class RecursiveDelegation:
             # `src/brain/central_complex/.pytest_cache/.pytest_cache/.pytest_cache`.
             # Each of those was an episode spent on a cache. Counted as mistaken
             # because that is exactly what it is: a directory read as a node.
-            self.mistaken_nodes += 1
+            self._bump("mistaken_nodes", 1)
             return False
         if shadowed_by_module(state, path):
-            self.shadowed_nodes += 1
+            self._bump("shadowed_nodes", 1)
             return False
         return True
 
@@ -643,7 +695,7 @@ class RecursiveDelegation:
                 body, changed = updated, True
         if not changed:
             return None
-        self.routes_opened += len(opened)
+        self._bump("routes_opened", len(opened))
         # Creating the record outranks the work; adding a line to one does not.
         return Edit(owner=world.path, path=key, content=body,
                     kind="context" if key in state else "record")
@@ -714,7 +766,7 @@ class RecursiveDelegation:
         ordered = [by_path[p] for p in
                    sorted(by_path, key=lambda p: (order.get(by_path[p].kind, 2), p))]
         if len(ordered) > self.max_edits:
-            self.truncated += len(ordered) - self.max_edits
+            self._bump("truncated", len(ordered) - self.max_edits)
             ordered = ordered[:self.max_edits]
         return ordered
 

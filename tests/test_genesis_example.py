@@ -16,6 +16,7 @@ import subprocess
 import json
 import os
 import posixpath
+import threading
 import time
 
 import pytest
@@ -335,6 +336,84 @@ def test_an_edit_outside_the_authors_subtree_is_dropped_and_counted():
     proposal = render_edits([Edit("src/frontend", "src/backend/evaluator.py", "x")], "r")
     assert strategy.to_diff(strategy.initial(), proposal, "w0", 1, "world") is None
     assert log.contract_violations == 1
+
+
+def test_siblings_run_together_and_are_folded_in_order():
+    """Concurrency where it costs nothing, determinism where it would cost the merge.
+
+    A rollout is a walk of the whole tree with one Claude Code session per node.
+    Serial, on an 8-node tree that was about an hour per rollout -- `py-spy` showed
+    all four workers still inside their first `propose()` after 75 minutes, two of
+    them on the same node doing the same work. The spatial contract is why siblings
+    may overlap: a child writes only under its own subtree, so they cannot collide.
+    The fold must not overlap, so it stays in `delegations` order and the proposal
+    a rollout returns is the same either way.
+    """
+    kids = ["src/a", "src/b", "src/c", "src/d"]
+    lock = threading.Lock()
+
+    def _run(node_workers):
+        live, widest = [], [0]
+
+        def executor(b):
+            with lock:
+                live.append(b.world.path)
+                widest[0] = max(widest[0], len(live))
+            time.sleep(0.05)
+            with lock:
+                live.remove(b.world.path)
+            return [Edit(b.world.path, f"{b.world.path}/e.py", "x = 1\n")]
+
+        policy = RecursiveDelegation(
+            manager=lambda b: ([Delegation(k, "build it") for k in kids]
+                               if b.world.path == "src" else []),
+            executor=executor, log=WorldLog(), max_depth=3, root_path="src",
+            max_edits=16, accountability=False, node_workers=node_workers)
+        proposals = policy.propose(_proposal_ctx({"src/CONTEXT.md": _TABLE},
+                                                 Task(id="t", prompt="x")))
+        paths = [e["path"] for e in parse_situated_edits(proposals[0])]
+        return widest[0], [p for p in paths if p.endswith("e.py")]
+
+    widest_serial, folded_serial = _run(1)
+    assert widest_serial == 1, "serial mode ran siblings at the same time"
+    assert len(folded_serial) == len(kids), folded_serial
+
+    widest_parallel, folded_parallel = _run(4)
+    assert widest_parallel > 1, "siblings still ran one at a time"
+    # Completion order is whatever the pool hands back; the fold is not.
+    assert folded_parallel == folded_serial
+
+
+def test_the_run_bounds_what_the_endpoint_sees():
+    """`--workers` x `--node-workers` is what reaches the API, so it is what the run
+    has to bound. Sessions never nest -- a manager's own session runs before and after
+    its children's, never during -- so one semaphore in `run_cli` bounds the whole tree
+    with no way for a parent to deadlock waiting on its own children."""
+    tree = ast.parse(inspect.getsource(genesis.main))
+    assert [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name) and n.func.id == "set_session_limit"], \
+        "the run never bounds concurrent sessions"
+    from examples.genesis import _session
+    try:
+        _session.set_session_limit(2)
+        held, widest, lock = [], [0], threading.Lock()
+
+        def _one():
+            with _session._slot():
+                with lock:
+                    held.append(1)
+                    widest[0] = max(widest[0], len(held))
+                time.sleep(0.05)
+                with lock:
+                    held.pop()
+        threads = [threading.Thread(target=_one) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert widest[0] == 2, f"the bound let {widest[0]} through"
+    finally:
+        _session.set_session_limit(0)
 
 
 def test_the_growth_phase_reports_progress_rather_than_going_silent():
