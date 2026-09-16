@@ -675,9 +675,9 @@ def main(argv=None) -> None:
     # leaves three times that headroom, while still catching a loop that dumps a tree.
     # A single completion asked for whole files is a different thing -- it proposes
     # one or two, and six is already a runaway there -- so it keeps the tight number.
+    proposal_cap = 64 if args.executor == "claude-code" else 6
     strategy = SpatialContract(initial_files=initial, frozen=spec.FROZEN, log=log,
-                               max_files_per_diff=(
-                                   64 if args.executor == "claude-code" else 6))
+                               max_files_per_diff=proposal_cap)
     # `manager.ex` states the parent's validation as three things: review the child's
     # results, run the tests, and reject anti-patterns it can see in the code. The
     # middle one is a number and was all this port had; the zero-field run is what
@@ -748,7 +748,17 @@ def main(argv=None) -> None:
                  else spec.offline_manager),
         executor=(sessions if sessions is not None else
                   spec.llm_executor(complete) if complete else spec.offline_executor),
-        log=log, max_depth=args.depth, max_edits=4, contracts=spec.CONTRACTS,
+        log=log, max_depth=args.depth, contracts=spec.CONTRACTS,
+        # One rollout is a walk of the WHOLE tree: every leaf writes, the parents
+        # fold, and what comes back is one proposal carrying all of it. Bounding
+        # that at 4 was a trust region sized for a single completion proposing a
+        # file or two, and it silently ruled over the strategy's own cap -- so the
+        # cap raised to 64 there never bound anything. Measured on an 8-node fly
+        # tree: the sessions wrote 153 implementation files, each sweep committed
+        # exactly 4, and the accepted state after three rollouts held nine records
+        # and six Python files. The two bounds are one number for that reason; a
+        # tighter one here is the only one that ever applies.
+        max_edits=proposal_cap,
         node_workers=max(1, args.node_workers),
         readonly=spec.FROZEN,
         # Three links, and the middle one is the only one that can ask "did you test

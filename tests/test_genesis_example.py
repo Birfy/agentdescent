@@ -505,6 +505,59 @@ def test_the_growth_phase_reports_progress_rather_than_going_silent():
         assert field in printed, f"the progress line never reports {field}"
 
 
+def test_the_proposal_cap_is_one_number_not_two():
+    """A rollout walks the WHOLE tree, and two caps were bounding what came back.
+
+    `SpatialContract.max_files_per_diff` is the one this port raised to 64 for a
+    session executor. `RecursiveDelegation.max_edits` sits upstream of it, in
+    `_bound`, and was 4 -- a trust region sized for a single completion proposing a
+    file or two, applied to a proposal carrying every leaf's work. The tighter one
+    is the only one that ever applies, so raising the other changed nothing.
+
+    Measured on an 8-node `fly` tree: the sessions wrote 153 implementation files,
+    every sweep committed exactly 4, and after three rollouts the accepted state held
+    nine records and six Python files.
+    """
+    tree = ast.parse(inspect.getsource(genesis.main))
+    names = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.keyword):
+            continue
+        if node.arg in ("max_files_per_diff", "max_edits"):
+            assert isinstance(node.value, ast.Name), (
+                f"{node.arg} is not the shared cap; a literal here can drift below "
+                "the other and silently rule")
+            names.add(node.value.id)
+    assert names, "neither cap is set from a named value"
+    assert len(names) == 1, f"the two caps read different names: {sorted(names)}"
+
+
+def test_the_whole_tree_survives_a_rollout_when_the_cap_allows_it():
+    """`_bound` keeps a node-creating record, then work, and sheds upkeep first."""
+    policy = RecursiveDelegation(manager=lambda b: [], executor=lambda b: [],
+                                 log=WorldLog(), max_edits=4)
+    edits = [Edit("src/a", "src/a/impl.py", "x", kind="work"),
+             Edit("src/a", "src/a/test_impl.py", "x", kind="work"),
+             Edit("src/b", "src/b/impl.py", "x", kind="work"),
+             Edit("src/b", "src/b/test_impl.py", "x", kind="work"),
+             Edit("src/new", "src/new/CONTEXT.md", "#", kind="record"),
+             Edit("src/a", "src/a/CONTEXT.md", "#", kind="context")]
+    kept = {e.path: e.kind for e in policy._bound(edits)}
+    assert policy.truncated == 2
+    # The record that brings a node into existence is the one thing a later round
+    # cannot re-propose, so it is trimmed last; routine upkeep goes first.
+    assert "src/new/CONTEXT.md" in kept
+    assert "src/a/CONTEXT.md" not in kept
+    assert sum(1 for k in kept.values() if k == "work") == 3
+
+    # Room for all of it, and all of it comes back -- the shape a whole-tree
+    # rollout needs, and what the run's own cap now allows.
+    roomy = RecursiveDelegation(manager=lambda b: [], executor=lambda b: [],
+                                log=WorldLog(), max_edits=64)
+    assert len(roomy._bound(edits)) == len(edits)
+    assert roomy.truncated == 0
+
+
 def test_a_diff_over_the_file_cap_loses_the_whole_episode_and_says_so():
     """The cap discards the proposal, not the surplus -- so it has to be counted.
 
@@ -539,11 +592,14 @@ def test_the_session_executor_gets_a_cap_no_real_episode_reaches():
     """
     caps = []
     for node in ast.walk(ast.parse(inspect.getsource(genesis.main))):
-        if not isinstance(node, ast.keyword) or node.arg != "max_files_per_diff":
+        # The cap is one named value now, shared with `max_edits` -- see
+        # `test_the_proposal_cap_is_one_number_not_two` for why two drifted apart.
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.IfExp):
             continue
-        assert isinstance(node.value, ast.IfExp), (
-            "the cap no longer depends on which executor is running")
+        if not any(isinstance(t, ast.Name) and "cap" in t.id for t in node.targets):
+            continue
         caps = [n.value for n in (node.value.body, node.value.orelse)]
+    assert caps, "the cap no longer depends on which executor is running"
     assert all(isinstance(c, int) for c in caps), caps
     # 24 is the measured ceiling of legitimate work; below it the cap eats episodes.
     assert max(caps) > 24 > min(caps), caps

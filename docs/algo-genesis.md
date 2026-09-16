@@ -822,6 +822,36 @@ itself, which `--agents` cannot touch: eight sections, and small beside the sche
 mechanisms never both run — a key still takes the better path, and the declaration is
 what a sign-in gets instead.
 
+### One rollout is the whole repository, and a cap of four was cutting it to four
+
+`RecursiveDelegation.propose` descends the **entire** Context Tree: the root delegates,
+every leaf writes, the parents fold what came back, and one proposal carries all of it.
+So a rollout is not "pick a node and implement it" — it is a complete draft of the
+repository, judged and merged as one accepted event, which is what `w = (v, p)` means.
+
+Two bounds stood between that draft and the accepted version, and only the tighter one
+ever applied. `SpatialContract.max_files_per_diff` is the one raised to 64 above;
+`RecursiveDelegation.max_edits`, in `_bound`, sits **upstream** of it and was **4** — a
+trust region sized for a single completion proposing a file or two. Measured on an
+8-node `fly` tree, host sign-in, Haiku:
+
+| | |
+|---|---:|
+| implementation files the sessions wrote | **153** |
+| files each sweep committed | **4** |
+| Python files in the accepted state after three rollouts | **6** |
+| `CONTEXT.md` records in it | 9 |
+
+`src/training` wrote 26 files, `src/brain/circuits` 24, `src/arena` 22, `src/frontend`
+21, `src/backend` 17 — and the version grew by four a round. Raising the other cap had
+changed nothing, because this one always cut first.
+
+They are one number now. What `_bound` does *within* the bound was not a defect and is
+worth stating, since it looks like one: a node-creating `record` is trimmed **last**
+(nothing else in the accepted version says the node exists, and the source file it
+would be dropped for is re-proposable next round), `work` next, routine `context`
+upkeep first.
+
 ### The cap that discards the episode rather than the surplus
 
 A third thing the transcripts showed, found by counting rather than reading. The spatial
