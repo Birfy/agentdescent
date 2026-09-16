@@ -2648,6 +2648,36 @@ def test_a_bracketed_note_costs_its_count_never_its_child():
     assert [p for p, _ in parse_routes(record)] == ["src/neural", "src/brain", "src/body"]
 
 
+def test_the_failure_evidence_says_whose_it_is():
+    """Every episode is shown the same failing assertion; most of them do not own it.
+
+    The old wording ended "write your own test that reproduces this and make both
+    pass", which reads as an instruction at whatever node you happen to be, and a node
+    may only write under itself. So a leaf at `src/brain/olfactory`, handed the
+    repository's `No module named '_cli'`, built `src/brain/olfactory/_cli.py` -- a
+    local imitation of a root-level entry point, which cannot fix a root-level import.
+    Across the runs on one machine that produced eight distinct `_cli.py` paths, one
+    per node, 79 writes between them, and only the root's could ever have mattered.
+
+    The brief already has the right answer in it -- report the need upward and let the
+    responsible agent handle it -- and it was being drowned out.
+    """
+    from examples.genesis._suite import BLIND_FAILURE
+
+    text = BLIND_FAILURE.format(prompt="req 3", output="FAIL:ModuleNotFoundError")
+    assert "repository's** evidence, not necessarily yours" in text
+    assert "Judge it against what you own" in text
+    assert "say which path and why" in text
+    assert "a local imitation of a file that has to exist elsewhere fixes nothing" in text
+    # the conditional is what makes it a judgement rather than an order
+    assert "If the fix belongs under your path" in text
+
+    # and it still reaches the episode through the executor's brief
+    brief = CLAUDE_CODE_BRIEF.format(path="src/brain", objective="o",
+                                     frozen="REQUIREMENTS.md", failure=text)
+    assert "not necessarily yours" in brief and "Write only under `src/brain`" in brief
+
+
 def test_stackvm_is_deeper_than_minilang_which_is_why_it_exists():
     """The second domain is not "harder code" -- it is somewhere for the
     recursion to go. `src/vm/ops` is a node whose parent is itself a child."""

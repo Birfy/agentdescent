@@ -370,6 +370,25 @@ way round -- and the tests that already pass have to keep passing."""
 #:
 #: So in blind mode the acceptance suite never enters the repository, the prompt is the
 #: requirement it came from, and the tests *in* the repository are the agents' own.
+#: The evidence an episode is given, and what it is *for*.
+#:
+#: The failing assertion belongs to the whole repository, and every episode in the
+#: rollout is handed the same one -- including a leaf five levels down that owns none
+#: of the code it names. The old wording said only "write your own test that reproduces
+#: this and make both pass", which reads as an instruction whatever node you are at,
+#: and a node may only write under itself. So a leaf at `src/brain/olfactory`, told to
+#: reproduce ``No module named '_cli'``, built `src/brain/olfactory/_cli.py`: a local
+#: imitation of a root-level entry point, which cannot fix a root-level import.
+#:
+#: Measured across the runs on one machine: **eight** distinct `_cli.py` paths, one per
+#: node, 79 writes between them, and only the one at the repository root could ever have
+#: mattered. `src/brain/olfactory/_cli.py` alone was written 21 times.
+#:
+#: The fix is to say what the evidence is rather than only what to do with it. The
+#: request channel the brief already describes -- "say so in your final message and the
+#: agent responsible for that path will be asked" -- is the right answer when the fix
+#: is somebody else's, and it was being drowned out by a sentence that sounded like a
+#: task.
 BLIND_FAILURE = """An acceptance assertion is failing. You cannot read it -- the \
 acceptance suite is not in this repository and never will be. What you get is the \
 requirement it was written from, its name, and what it reported:
@@ -378,8 +397,13 @@ requirement it was written from, its name, and what it reported:
 
 and it reports: {output}
 
-Write your own test that reproduces this, put it beside the code it covers, and make \
-both pass. A test you write is the only test you can read."""
+This is the **repository's** evidence, not necessarily yours: every agent in this \
+rollout is shown the same failure, and the code that has to change may be nobody's but \
+the root's. Judge it against what you own. If the fix belongs under your path, write \
+your own test that reproduces it, put it beside the code it covers, and make both pass \
+-- a test you write is the only test you can read. If it belongs somewhere else, say \
+which path and why in your final message and leave it alone: a local imitation of a \
+file that has to exist elsewhere fixes nothing and is work the parent has to undo."""
 
 
 def llm_manager(complete) -> Callable[[Brief], Sequence[Delegation]]:
