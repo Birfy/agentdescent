@@ -105,10 +105,8 @@ export OPENAI_BASE_URL=https://api.deepseek.com   # or GLM, a local vLLM, OpenAI
 export OPENAI_API_KEY=sk-...                      # your key for *that* endpoint
 ```
 
-Claude is a different variable: `pip install anthropic`,
-`export ANTHROPIC_API_KEY=sk-ant-...`, then `claude(model="claude-haiku-4-5")` in
-place of `openai_compatible(...)`. `agentdescent doctor` reports what a machine
-has; the demo above and `pytest -q` need none of it.
+`agentdescent doctor` reports what a machine has; the demo above and `pytest -q`
+need none of it.
 [Every provider, with its base URL →](https://birfy.github.io/agentdescent/agents/#configuring-your-provider-and-key)
 
 ```python
