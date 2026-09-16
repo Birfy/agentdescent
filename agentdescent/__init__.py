@@ -50,6 +50,7 @@ from .selection import (
     Archive,
     Beam,
     Candidate,
+    CostEfficient,
     MCTS,
     MultiHeadUnsupported,
     ParetoFrontier,
@@ -120,6 +121,7 @@ from .checkpoint import (
     clear_checkpoints,
     list_checkpoints,
 )
+from .budget import BudgetGovernor, CallBudget, budgeted_completion
 from .executor import Executor, Result, ThreadExecutor
 from .sandbox import LocalWorkspaceSandbox, SandboxPool, WorkspaceProvider
 from .sandbox_shared import SharedSandboxPool
@@ -256,6 +258,7 @@ __all__ = [
     "Beam",
     "ParetoFrontier",
     "Archive",
+    "CostEfficient",
     "MCTS",
     "MultiHeadUnsupported",
     "pareto_front",
@@ -440,4 +443,8 @@ __all__ = [
     "resolve_from_mapping",
     "verifier_fingerprint",
     "residual_bias",
+    # the cost-aware search layer
+    "BudgetGovernor",
+    "CallBudget",
+    "budgeted_completion",
 ]

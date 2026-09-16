@@ -8,6 +8,107 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- **`evolve(max_tokens=...)`: a budget in the unit that maps to the bill.**
+  `max_calls` and `max_rollouts` count invocations, and a reasoning model can
+  spend 40k tokens on hidden thinking in a single one -- so a 20-round run with
+  4 workers is 80 rollouts and ~160 calls but, at 40k tokens each, 6.4M tokens.
+  The cap is checked at the round barrier on the sync path (alongside the other
+  budgets) and per-rollout on the async path, stops with
+  `stop_reason="max_tokens"`, and reports the spend it actually incurred.
+
+  Tokens only reach the meter when the model adapter reports them, and the
+  adapters that do (`claude`, `openai_compatible`) take a `Usage` in their
+  constructor. The caller who built `LLMAgent(claude(usage=u))` had to pass
+  `usage=u` **again** to `evolve()` for the meter — and with it `max_tokens`,
+  the `tokens=` column on every round, and `status` — to see the same numbers.
+  Forgetting the second thread made the run report `tokens=0` while the bill
+  went to `u`, an object only the caller held, and a token budget silently
+  never fired. `evolve()` now adopts the agent's own `usage` when the caller
+  did not pass one; an explicit `usage=` still wins, and a bare
+  `run`/`propose` pair still reports zero (the honest reading, not an error).
+
+  `RoundInfo.tokens` carries the cumulative spend to `on_round` (and so to
+  `rounds.jsonl`), `RunStatus.tokens` lands it in `status.json`, and the CLI
+  status line shows `tok=N` when the run has any.
+
+- **`BudgetGovernor`: graceful degradation before the token wall.**
+  `max_tokens` is a brake: when the spend reaches it the run stops. A brake is
+  the floor of cost control, not its ceiling. The last 10% of a token budget is
+  the most expensive part to waste — the search has paid for its exploration,
+  and a round dispatched there may never finish. The governor degrades before
+  the wall on both paths (sync and async):
+
+  - at 75% of the budget (``soft_floor``), stop building fusion tournaments.
+    The tournament is an extra held-out sweep of every survivor plus the fusion
+    — pure ranking spend, and the ranking can survive without it for the last
+    few rounds. The aggregator acceptance gate runs unchanged.
+  - at 90% (``hard_floor``), stop the self-verify rollout. That rollout doubles
+    the cost of every proposal for a delta the acceptance test folds in as a
+    tie-breaker weight; skipping it costs ranking precision on the advantage
+    signal and nothing on the commit gates.
+  - the projection at the round barrier (sync) asks whether the *next* round
+    fits the remaining budget; if it does not, the run ends with a clean merge
+    at the last round it fully paid for.
+
+  All of this is inert without `max_tokens`. `EvolutionResult.budget` carries
+  the governor's summary (spent, remaining, whether degradation fired) so a
+  caller can tell "the run finished because its budget ran out, degraded" from
+  "it converged, at full quality".
+
+- **`SelectionContext.budget_remaining` + `CostEfficient`: spend the budget, don't just count it.**
+  The o1 test-time-scaling decision, as a search parameter. `SelectionContext`
+  gains `budget_remaining` (the unspent fraction, `1.0` with no ceiling), and
+  `Candidate` gains `cost` (`None` = unknown, never zero — the same distinction
+  `score` and `prior` make). `CostEfficient` is `FlatPuct` with two additions:
+
+  - the **exploration** term is divided by cost, so a speculative expansion of an
+    expensive candidate must beat one of a cheap candidate at the same rank. The
+    **exploitation** term is left alone: charging cost against a grounded pick
+    would bias the search against complex solutions (longer artifacts cost more
+    to expand) in favour of short ones, which is not a quality judgment and must
+    not be smuggled in as one;
+  - the exploration bonus **anneals by `budget_remaining`**, so a run explores
+    while it has budget to exploit what it finds and exploits once it does not —
+    what an anytime search has to do, and the difference between spending a
+    budget and allocating it.
+
+  `cost_exponent=0` is `FlatPuct` to the floating-point bit (tested), so the
+  mechanism cannot change a cost-blind run; uniform costs are unchanged too.
+  `anneal=False` is the ablation that separates "cost-aware" from "budget-aware".
+  The population layer fills `Candidate.cost` with a deterministic content-size
+  proxy (the prompt dominates the input tokens, and size is attributable to one
+  candidate without racing a shared meter) and the engine feeds
+  `budget_remaining` from the governor each round, on both sync and async paths.
+
+- **`evolve(stop_on_diminishing_returns=True)`: stop when the search stops
+  paying for itself.** `max_tokens` is a ceiling; the economic question is
+  whether to *spend* it, and the answer is to keep buying compute while it
+  still returns quality and stop when it does not — even with budget left. The
+  governor measures the run's own return per token (`Δreward / Δtokens` per
+  round, from the same reward and meter the run already has) and stops when the
+  recent rate has fallen to `efficiency_floor` (default a quarter) of the run's
+  *peak* rate. Self-calibrating: it compares the run against itself, so there
+  is no absolute rate to guess — a reward is in `[0, 1]`, a token count is in
+  the millions, and their quotient has no interpretable scale. Off by default,
+  because a run whose reward only rises late would be cut short by it, and
+  because it needs `max_tokens`. Stops with
+  `stop_reason="diminishing_returns"`. A run that never improved has no peak to
+  decline *from*, so this stays quiet and the patience counter handles it.
+
+- **`baselines.Budget(tokens=...)`: the A/B framework can hold cost fixed.**
+  The module's own argument is that a budget in one unit is not a comparison —
+  "matched on rollouts alone, an arm that asks for more proposals per rollout
+  spends more model and the table still says equal budget." That argument was
+  missing the unit cost is measured in: two arms at equal rollouts and equal
+  calls can differ 10x in tokens when one uses a reasoning model, and the table
+  had no column that would show it. `Budget` gains `tokens` (split like the
+  others), `Workload._evolve` passes it to `evolve(max_tokens=)`,
+  `compare(fixed="tokens")` is a valid unit, `ArmResult.tokens` is the measured
+  sum, and the markdown table gains a token column that reads `—` (not `0`)
+  when the actor reported none. A comparison that fixes tokens is the only one
+  that has shown an arm to be more *efficient* rather than merely given more
+  model.
+
 - **`evolve(checkpointing=True)`: the search survives a process restart.**
   `repo_path` already resumed the *artifact* -- the ledger's whole job -- but
   the aggregator's search state is only ever in memory, so a resume re-seeded

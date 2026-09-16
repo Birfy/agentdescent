@@ -64,9 +64,10 @@ def _status_line(st: runstore.RunStatus) -> str:
     reward = "" if st.best_reward is None else f" best={st.best_reward:.3f}"
     rounds = f"{st.round}/{st.rounds}" if st.rounds else f"{st.round}"
     usd = "" if st.usd is None else f" ${st.usd:.2f}"
+    tok = f" tok={st.tokens:,}" if st.tokens else ""
     tail = f" [{st.stop_reason}]" if st.stop_reason else ""
     err = f" error: {st.error}" if st.error else ""
-    return (f"{st.run_id}  {st.state:<9} round {rounds:<6} calls={st.calls}{reward}{usd}"
+    return (f"{st.run_id}  {st.state:<9} round {rounds:<6} calls={st.calls}{tok}{reward}{usd}"
             f"  {st.kind or '?'}:{st.target or '?'}{tail}{err}")
 
 

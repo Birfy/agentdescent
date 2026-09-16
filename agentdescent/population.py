@@ -54,6 +54,21 @@ from .selection import (
 __all__ = ["PopulationAggregator", "population_factory"]
 
 
+def _state_size(state: Dict[str, str]) -> int:
+    """A candidate's content size, as a deterministic cost proxy.
+
+    The prompt an expansion sends is dominated by the artifact it renders, so
+    content size is a first-order proxy for the input tokens that expansion
+    costs -- and unlike measured tokens it is attributable to a single candidate
+    without racing a shared meter. A cost-aware policy divides its exploration
+    bonus by this, so a cheap candidate gets more speculative looks than an
+    expensive one at the same rank. It is a *proxy* and the policy treats a
+    missing cost as the pool mean, so an imperfect scale cannot turn an
+    unmeasured candidate into a free one.
+    """
+    return sum(len(str(k)) + len(str(v)) for k, v in state.items())
+
+
 class PopulationAggregator(Aggregator):
     """The shipped merge pipeline plus an archive and a selection policy."""
 
@@ -83,6 +98,12 @@ class PopulationAggregator(Aggregator):
         #: the archive lock: `step()` is the merger's, one thread, while the
         #: lock guards the archive against the workers that `ingest`.
         self._selections = 0
+        #: Fraction of the run's budget still unspent, in ``[0, 1]``, for the
+        #: ``SelectionContext`` a budget-aware policy anneals on. The engine sets
+        #: it each round (from its governor); ``1.0`` is the no-budget default,
+        #: which is what a run without a token ceiling should report -- it never
+        #: runs short of one.
+        self.budget_remaining: float = 1.0
 
     # -- the archive ---------------------------------------------------------
 
@@ -110,7 +131,17 @@ class PopulationAggregator(Aggregator):
                           version=int(entry["version"]),
                           state=dict(entry["state"]),
                           score=float(entry["score"]),
-                          selected=int(entry["selected"]))
+                          selected=int(entry["selected"]),
+                          # A deterministic cost proxy: the artifact's rendered
+                          # content size, which dominates the prompt and so the
+                          # input tokens of expanding it. It is not the measured
+                          # token spend -- that is not attributable to a single
+                          # parent from a shared meter under concurrency -- and
+                          # the policy treats an unmeasured cost as the pool
+                          # mean rather than zero, so a proxy that is wrong in
+                          # scale is far less harmful than one that is wrong in
+                          # *presence*.
+                          cost=float(_state_size(entry["state"])))
                 for entry in self._archive
             ]
 
@@ -211,7 +242,8 @@ class PopulationAggregator(Aggregator):
         # the same entry forever. `Beam(4)` was `Beam(1)`, and `ParetoFrontier`
         # sat on whichever front member was admitted first, usually the seed.
         ctx = SelectionContext(head=head_candidate, candidates=tuple(candidates),
-                               round=self._selections, n_workers=1)
+                               round=self._selections, n_workers=1,
+                               budget_remaining=self.budget_remaining)
         self._selections += 1
         chosen = list(self.selection.select(ctx, 1))
         if not chosen:

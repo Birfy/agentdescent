@@ -144,9 +144,12 @@ def test_fixing_calls_instead_moves_the_divergence_rather_than_removing_it():
     assert any(unit == "rollouts" for _, unit, _, _ in comparison.confounded)
 
 
-def test_the_fixed_unit_must_be_one_of_the_two():
+def test_the_fixed_unit_must_be_one_of_the_three():
+    # rollouts, calls, tokens are the three units the engine can hold fixed.
+    for unit in ("rollouts", "calls", "tokens"):
+        compare([], fixed=unit)  # does not raise
     with pytest.raises(ValueError):
-        compare([], fixed="tokens")
+        compare([], fixed="dollars")
 
 
 def test_an_arm_given_twice_the_budget_is_refused_not_averaged():
@@ -389,3 +392,81 @@ def test_fork_seeds_never_collide_with_the_other_arms():
     assert not (fork_seeds & {0, 1, 2}), \
         f"fork reused a plain arm seed: {sorted(fork_seeds & {0, 1, 2})}"
     assert len(fork_seeds) == 6, "and the two seeds' branches stay distinct"
+
+
+# -- tokens: the third unit --------------------------------------------------
+
+
+def _token_arm(name, tokens, values):
+    """Arms that differ only in token spend, for the token-unit checks."""
+    return [ArmResult(arm=name, seed=i, width=1, rollouts=10, calls=10,
+                      prompt_tokens=t // 2, completion_tokens=t - t // 2,
+                      wallclock=1.0, wallclock_parallel=1.0,
+                      dev_reward=v, test_reward=v)
+            for i, (t, v) in enumerate(zip(tokens, values))]
+
+
+def test_budget_split_splits_tokens_too():
+    """A budget split across independent runs must divide every unit it holds."""
+    b = Budget(rollouts=30, calls=60, tokens=9_000)
+    share = b.split(3)
+    assert share.rollouts == 10
+    assert share.calls == 20
+    assert share.tokens == 3_000
+
+
+def test_budget_split_leaves_none_tokens_none():
+    """An unset token budget stays unset when split."""
+    assert Budget(rollouts=30).split(2).tokens is None
+
+
+def test_arm_result_tokens_is_the_sum():
+    arm = _token_arm("a", [600], [0.5])[0]
+    assert arm.tokens == arm.prompt_tokens + arm.completion_tokens == 600
+
+
+def test_compare_can_fix_tokens():
+    """`fixed="tokens"` is a valid unit, and an arm that spent far more is
+    reported as unequal rather than silently compared."""
+    even = _token_arm("a", [1000, 1000, 1000], [0.6, 0.6, 0.6])
+    even += _token_arm("b", [1000, 1000, 1000], [0.7, 0.7, 0.7])
+    comparison = compare(even, fixed="tokens")
+    assert not comparison.unequal, "equal token spend must not be flagged"
+
+    uneven = _token_arm("a", [1000, 1000, 1000], [0.6, 0.6, 0.6])
+    uneven += _token_arm("b", [3000, 3000, 3000], [0.7, 0.7, 0.7])
+    flagged = compare(uneven, fixed="tokens")
+    assert any(arm == "b" and unit == "tokens"
+               for arm, unit, _, _ in flagged.unequal), \
+        "an arm that spent 3x the tokens while fixing tokens must be flagged"
+
+
+def test_tokens_are_confounded_when_fixing_rollouts():
+    """Fixing rollouts cannot fix tokens: an arm that thinks more per call
+    spends more, and the table has to say so."""
+    even_rollouts = _token_arm("a", [1000, 1000, 1000], [0.6, 0.6, 0.6])
+    even_rollouts += _token_arm("b", [5000, 5000, 5000], [0.7, 0.7, 0.7])
+    comparison = compare(even_rollouts, fixed="rollouts")
+    assert any(arm == "b" and unit == "tokens"
+               for arm, unit, _, _ in comparison.confounded), \
+        "a 5x token difference must appear as a confound"
+
+
+def test_markdown_shows_tokens_or_a_dash():
+    """The token column reads a number when reported and — when not, never 0."""
+    reported = _token_arm("a", [600, 600, 600], [0.5, 0.5, 0.5])
+    table = to_markdown(compare(reported))
+    assert "tokens" in table
+    assert "600" in table
+
+    unreported = _arm("a", [0.5, 0.5, 0.5])  # prompt_tokens=0
+    table2 = to_markdown(compare(unreported))
+    # The row's token cell is —, not 0.
+    assert "| — |" in table2 or "—" in table2
+
+
+def test_compare_empty_returns_empty_not_crash():
+    """An empty sweep is a result to report, not an exception."""
+    comparison = compare([])
+    assert comparison.arms == {}
+    assert comparison.unequal == []

@@ -59,6 +59,7 @@ from .sampling import RoundRobin, TaskSampler
 from .selection import SingleHead
 from .scheduler import AuditScheduler
 from .staleness import StalenessPolicy
+from .budget import BudgetGovernor, CallBudget
 
 
 # ---------------------------------------------------------------------------
@@ -926,6 +927,26 @@ def _wants_population(policy) -> bool:
     return policy is not None and type(policy) is not SingleHead
 
 
+def _set_budget_remaining(aggregator: Any, governor: BudgetGovernor) -> None:
+    """Offer the governor's remaining budget fraction to the aggregator.
+
+    A :class:`~agentdescent.population.PopulationAggregator` carries a
+    ``budget_remaining`` slot its selection context reads, so a
+    :class:`~agentdescent.selection.CostEfficient` policy can anneal exploration
+    as the token budget is spent. A plain ``Aggregator`` -- and any custom one --
+    has no such slot and is left untouched, which is the correct default: a
+    selection policy that never asked for a budget must not start seeing one.
+    """
+    if not governor.active:
+        return
+    # Only an aggregator that declares the slot gets it. A plain `Aggregator`
+    # must not gain an attribute nothing reads, and a `PopulationAggregator`
+    # always has it (set in `__init__`), so `hasattr` is the right test.
+    if not hasattr(aggregator, "budget_remaining"):
+        return
+    aggregator.budget_remaining = governor.remaining_fraction()
+
+
 def _cost_fields(meter: Meter) -> Dict[str, Any]:
     """The meter's counters, keyed as :class:`EvolutionResult` fields.
 
@@ -1000,6 +1021,11 @@ class RoundInfo:
     #: comparison has to be able to ask "where was each configuration after N
     #: calls", which needs the number at every round rather than only at the end.
     calls: int = 0
+    #: Tokens consumed by the end of this round, cumulative
+    #: (``prompt_tokens + completion_tokens``). A reasoning model can spend 40k
+    #: tokens on a single hidden-thinking call, so the total is the only budget
+    #: that maps to cost on a real deployment.
+    tokens: int = 0
 
     # -- what the merge did, this round --------------------------------------
     #
@@ -1203,6 +1229,7 @@ class EvolutionResult:
     error: Optional[str] = None
     #: Why the run ended -- ``"target_reward"`` / ``"patience"`` / ``"rounds"`` /
     #: ``"max_seconds"`` / ``"max_iters"`` / ``"max_rollouts"`` / ``"max_calls"`` /
+    #: ``"max_tokens"`` /
     #: ``"stop_when"`` (the caller's own budget, see ``evolve(stop_when=)``)
     #: / ``"error"``. Without it a budget
     #: expiry is indistinguishable from convergence: ``error`` is ``None`` for
@@ -1299,6 +1326,14 @@ class EvolutionResult:
     #: Every fusion tournament the run held, when the fusion policy recorded
     #: them (the shipped one does). Read it through :meth:`fusion_stats`.
     fusion_trials: List["FusionTrial"] = field(default_factory=list)
+    #: What the budget governor did, when a ``max_tokens`` cap was set. ``None``
+    #: when no budget was given (the run ran without a governor at all). The
+    #: dict is the same shape :meth:`~agentdescent.budget.BudgetGovernor.summary`
+    #: returns: ``max_tokens``, ``spent``, ``remaining``, ``fusion_degraded``,
+    #: ``self_verify_degraded``. Read it to tell "the run finished because its
+    #: budget ran out" from "it converged" — and to know whether the tail of
+    #: the search ran degraded (fewer ranking passes) or at full quality.
+    budget: Optional[Dict[str, Any]] = None
 
     def fusion_stats(self) -> "FusionStats":
         """How often merging beat the best single diff -- and how badly it lost.
@@ -1448,7 +1483,8 @@ class EvolutionResult:
                  "n_items": h.n_items, "committed": h.committed,
                  "rejected": h.rejected, "reasons": h.reasons,
                  "elapsed_s": h.elapsed_s, "rollouts": h.rollouts,
-                 "calls": h.calls, "considered": h.considered,
+                 "calls": h.calls, "tokens": h.tokens,
+                 "considered": h.considered,
                  "discarded_stale": h.discarded_stale,
                  "conflicts_dropped": h.conflicts_dropped, "fused": h.fused}
                 for h in self.history
@@ -1704,6 +1740,7 @@ class _Engine:
         info = RoundInfo(
             index, reward, n_items, committed, len(reports) - committed, reasons,
             elapsed_s=m.elapsed_s, rollouts=m.rollouts, calls=m.calls,
+            tokens=m.prompt_tokens + m.completion_tokens,
             considered=sum(x.considered for x in reports),
             discarded_stale=sum(x.discarded_stale for x in reports),
             conflicts_dropped=sum(x.conflicts_dropped for x in reports),
@@ -1889,6 +1926,18 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     # Wrap the actors before anything else can capture them: `run` is closed over
     # by the runtime, by every worker and by the verifier's `eval_fn`, so a later
     # wrap would miss whichever reference was taken first.
+    #
+    # The `usage` the meter reads defaults to the agent's own, when the agent
+    # has one and the caller did not pass `usage=`: the adapters that report
+    # tokens (`claude`, `openai_compatible`) take a `Usage` in their constructor,
+    # and the caller who built `LLMAgent(claude(usage=u))` has already told the
+    # model where to report. Forcing them to pass `u` again here — the only way
+    # the meter (and with it `max_tokens`, and the `tokens=` column on every
+    # round) would see the same numbers — was a foot-gun the whole token budget
+    # silently missed: the run reported `tokens=0` while the bill went to
+    # `u`, an object only the caller held.
+    if usage is None:
+        usage = getattr(agent, "usage", None)
     meter = Meter(usage=usage) if usage is not None else Meter()
     run, propose = measured(run, meter), measured(propose, meter)
 
@@ -2180,6 +2229,44 @@ def evolve(
     max_seconds: Optional[float] = None,
     max_rollouts: Optional[int] = None,
     max_calls: Optional[int] = None,
+    #: Hard cap on total tokens consumed (``prompt + completion``). A reasoning
+    #: model can spend 40k tokens on hidden thinking in one call, so ``max_calls``
+    #: and ``max_rollouts`` do not bound cost: a 20-round run with 4 workers is
+    #: 80 rollouts and ~160 model calls, but at 40k tokens each that is 6.4M
+    #: tokens -- the bill, not the count, is what a deployment needs to control.
+    #: Checked at the round barrier alongside the other budgets; the run stops
+    #: with ``stop_reason="max_tokens"`` and reports the spend it incurred.
+    max_tokens: Optional[int] = None,
+    #: Stop when the run's *measured* return per token has fallen off its own
+    #: peak by more than ``efficiency_floor`` (see
+    #: :meth:`~agentdescent.budget.BudgetGovernor.diminishing_returns`). The
+    #: economic stop: keep buying compute while it pays, stop when it does not,
+    #: *even with budget left*. Off by default -- it is a spending rule, not a
+    #: safety one, and a run whose reward only rises late would be cut short.
+    #: Needs ``max_tokens`` to be set (efficiency needs a cost to divide by).
+    stop_on_diminishing_returns: bool = False,
+    #: How far below the peak counts as diminishing, when the stop above is on.
+    #: Self-calibrating against the run's own best rate, so this is a *ratio*
+    #: and not an absolute: a reward is in ``[0, 1]`` and a token count in the
+    #: millions, and their quotient has no interpretable scale.
+    efficiency_floor: float = 0.25,
+    #: An adaptive per-call thinking budget (o1-style test-time scaling).
+    #: Pass a :class:`~agentdescent.budget.CallBudget` whose ``base`` matches
+    #: the adapter's configured ``max_tokens``, and the engine will adjust the
+    #: per-call ceiling based on each parent's score and the remaining budget —
+    #: promising parents get more thinking, dead-end ones get less, and the
+    #: allocation tightens as the token budget is spent. The adapter must be
+    #: wrapped with :func:`~agentdescent.budget.budgeted_completion` for this to
+    #: reach it. ``None`` (default) means the per-call ceiling is the adapter's
+    #: own and never changes.
+    call_budget: Optional["CallBudget"] = None,
+    #: An adaptive per-call thinking budget (o1-style test-time scaling). Pass
+    #: a :class:`~agentdescent.budget.CallBudget` whose ``base`` matches the
+    #: adapter's configured ``max_tokens``; the engine adjusts the per-call
+    #: ceiling based on each parent's score and the remaining budget — promising
+    #: parents get more thinking, dead-ends get less. The adapter must be
+    #: wrapped with :func:`~agentdescent.budget.budgeted_completion`. ``None``
+    #: (default) means the per-call ceiling never changes.
     self_verify: bool = True,
     held_out_frac: float = 0.4,
     repo_path: Optional[str] = None,
@@ -2384,6 +2471,38 @@ def evolve(
 
         The async path has no barrier and enforces both per rollout, so it
         overshoots by at most the rollouts already in flight.
+    max_tokens:
+        Hard cap on total tokens consumed (``prompt_tokens + completion_tokens``).
+        A reasoning model can spend 40k tokens on hidden thinking in one call,
+        so ``max_calls`` and ``max_rollouts`` do not bound cost: a 20-round run
+        with 4 workers is 80 rollouts and ~160 model calls, but at 40k tokens
+        each that is 6.4M tokens -- the bill, not the count, is what a
+        deployment needs to control. Checked at the round barrier alongside the
+        other budgets; the async path checks per-rollout for tighter control.
+        Stops with ``stop_reason="max_tokens"``. ``None`` (default) means
+        unbounded.
+    stop_on_diminishing_returns:
+        Stop when the run's own return per token has fallen off its peak by more
+        than ``efficiency_floor``. The economic rule: keep buying compute while
+        it pays, stop when it does not -- *even with budget left*. Off by
+        default, because a run whose reward only rises late would be cut short
+        by it, and because it needs ``max_tokens`` (return per token needs a cost
+        to divide by). Stops with ``stop_reason="diminishing_returns"``.
+    efficiency_floor:
+        How far below the peak counts as diminishing, when the stop above is on.
+        Self-calibrating against the run's own best rate, so it is a *ratio*, not
+        an absolute quantity: a reward is in ``[0, 1]`` and a token count is in
+        the millions, and their quotient has no interpretable scale.
+    call_budget:
+        An adaptive per-call thinking budget (o1-style test-time scaling).
+        Pass a :class:`~agentdescent.budget.CallBudget` whose ``base`` matches
+        the adapter's configured ``max_tokens``, and the engine adjusts the
+        per-call ceiling based on each parent's score and the remaining budget
+        — promising parents get more thinking, dead-end ones get less, and the
+        allocation tightens as the token budget is spent. The adapter must be
+        wrapped with :func:`~agentdescent.budget.budgeted_completion` for this
+        to reach it. ``None`` (default) means the per-call ceiling is the
+        adapter's own and never changes.
     self_verify:
         Re-run the trajectory with the diff applied to record a local
         before/after delta. Doubles the rollouts spent per proposal; ports that
@@ -2564,7 +2683,7 @@ def evolve(
             max_seconds=20.0 if max_seconds is None else max_seconds,
             max_iters=(max_rollouts if max_rollouts is not None
                        else rounds * max(1, n_workers)),
-            max_calls=max_calls, held_out_frac=held_out_frac,
+            max_calls=max_calls, max_tokens=max_tokens, held_out_frac=held_out_frac,
             repo_path=repo_path, agg_config=agg_config, staleness_policy=staleness_policy,
             aggregator_factory=aggregator_factory, oracle_budget=oracle_budget,
             cheap_eval_tasks=cheap_eval_tasks, fusion_tournament=fusion_tournament,
@@ -2576,7 +2695,10 @@ def evolve(
             eval_concurrency=eval_concurrency,
             pipelined_gate=pipelined_gate, gate_workers=gate_workers,
             on_round=on_round, stop_when=stop_when, verbose=verbose, usage=usage,
-            policies=policies, checkpointing=checkpointing)
+            policies=policies, checkpointing=checkpointing,
+            stop_on_diminishing_returns=stop_on_diminishing_returns,
+            efficiency_floor=efficiency_floor,
+            call_budget=call_budget)
 
     if pipelined_gate:
         # The mirror of the block above, and the same reasoning: a knob accepted
@@ -2674,6 +2796,13 @@ def evolve(
     dead_rounds = 0            # consecutive rounds where every worker failed
     deadline = time.time() + max_seconds if max_seconds else None
     stop_reason = "rounds"
+    # The cost-aware governor: degrades optional spend (fusion tournaments,
+    # self-verify) before the token wall, and projects whether the *next*
+    # round fits — so a run that cannot afford round N+1 ends at N with a
+    # clean merge instead of being cut mid-round. Inert without max_tokens.
+    governor = BudgetGovernor(max_tokens=max_tokens,
+                              stop_on_diminishing=stop_on_diminishing_returns,
+                              efficiency_floor=efficiency_floor)
     for r in range(rounds):
         if deadline is not None and time.time() >= deadline:
             stop_reason = "max_seconds"
@@ -2686,16 +2815,74 @@ def evolve(
         # produced -- so the run overshoots by up to a round and reports the
         # spend it actually incurred instead of the one it was asked for.
         spent = eng.meter.snapshot()
+        tokens_spent = spent.prompt_tokens + spent.completion_tokens
+        governor.spend(tokens_spent)
+        # Record the *previous* round's reward so the governor can measure the
+        # run's own return per token. `history[-1]` is that round: this runs at
+        # the top of round r, after r-1 has closed. `None` on the first round.
+        governor.observe(history[-1].held_out_reward if history else None)
         over = ((max_rollouts is not None and spent.rollouts >= max_rollouts
                  and "max_rollouts") or
                 (max_calls is not None and spent.calls >= max_calls
-                 and "max_calls"))
+                 and "max_calls") or
+                (max_tokens is not None and tokens_spent >= max_tokens
+                 and "max_tokens"))
+        # Tell a budget-aware selection policy how much of the budget is left, so
+        # it can anneal exploration before the round body selects a parent. A
+        # plain `Aggregator` has no such slot and is left alone; a
+        # `PopulationAggregator` reads it in `step()`'s SelectionContext.
+        _set_budget_remaining(aggregator, governor)
         if over:
             stop_reason = over
             if verbose:
                 print(f"round {r:>3}  stopping: {over} reached "
-                      f"({spent.rollouts} rollouts / {spent.calls} calls)")
+                      f"({spent.rollouts} rollouts / {spent.calls} calls "
+                      f"/ {tokens_spent} tokens)")
             break
+        # The economic stop: the run's own return per token has fallen off its
+        # peak. Opt-in (``stop_on_diminishing_returns``), and only when a token
+        # budget is in force -- efficiency needs a cost to divide by. This is
+        # the rule that decides *not* to spend the ceiling, which is the whole
+        # difference between a budget and an allocation.
+        if governor.diminishing_returns():
+            stop_reason = "diminishing_returns"
+            if verbose:
+                print(f"round {r:>3}  stopping: diminishing returns "
+                      f"(return per token off its peak; "
+                      f"{tokens_spent:,} tokens spent)")
+            break
+        # The projection: a round that the remaining budget cannot afford is
+        # not dispatched. This lands *before* the snapshot, so the run ends on
+        # the last round it fully paid for rather than one round into the wall
+        # — the difference between a clean merge and a partial one. Reported
+        # as "max_tokens" (the budget that fired), not a separate reason: the
+        # caller's question is "why did my run stop early" and the answer is
+        # the token budget either way.
+        if not governor.affords_next_round():
+            stop_reason = "max_tokens"
+            if verbose:
+                s = governor.summary()
+                print(f"round {r:>3}  stopping: projected next round exceeds "
+                      f"max_tokens ({s['spent']:,} spent, ~"
+                      f"{s['remaining']:,} left)")
+            break
+        # The governor's soft degradation: at the soft floor (75% of budget),
+        # turn off the fusion tournament — it is the most expensive piece of
+        # optional ranking spend, and its absence costs selection refinement,
+        # never a commit gate. Mutating the fusion policy's ``tournament``
+        # flag at the round barrier is safe: ``_tournament`` reads it in
+        # ``step()``, which runs *after* this point in the same round.
+        if governor.active:
+            fp = getattr(aggregator, "fusion_policy", None)
+            if fp is not None and hasattr(fp, "tournament"):
+                should = governor.allow_fusion_tournament()
+                if fp.tournament != should:
+                    fp.tournament = should
+                    if verbose:
+                        tag = "on" if should else "off"
+                        print(f"round {r:>3}  fusion tournament {tag} "
+                              f"(token budget: {governor.summary()['spent']:,}/"
+                              f"{governor.max_tokens:,})")
         try:
             snap = ledger.snapshot(Ledger.DEV)
         except LedgerFailure as e:
@@ -2817,6 +3004,14 @@ def evolve(
                 health.record_success()
             if score >= solved_threshold:
                 return
+            # o1-style test-time scaling: if an adaptive call budget is
+            # installed, set its per-call ceiling for this expansion based on
+            # the parent's score and the remaining token budget. A promising
+            # parent gets more thinking; a dead-end one gets less; the
+            # allocation tightens as the budget is spent. Inert without
+            # ``call_budget`` — a plain ``propose`` never sees it.
+            if call_budget is not None:
+                call_budget.allocate(score, governor.remaining_fraction())
             proposal = _checked_proposal(
                 propose(mine.render(), task, output, score), task)
             if not proposal:
@@ -2844,8 +3039,12 @@ def evolve(
                               f"{outside[0]!r}, outside its section {unit.section}")
                     return
             # The self-verify rollout doubles the cost of every proposal, so it is
-            # opt-out here exactly as it is on the async path.
-            if self_verify:
+            # opt-out here exactly as it is on the async path. The governor can
+            # also turn it off mid-run when the token budget is nearly spent:
+            # the delta it produces feeds the acceptance test's tie-breaker
+            # (``observe_delta``), never the commit gates, so skipping it costs
+            # ranking precision on the advantage signal and nothing else.
+            if self_verify and governor.allow_self_verify():
                 after = _checked_reward(
                     reward(task, run(mine.apply(diff).render(), task)), task)
                 delta = after - score
@@ -3002,7 +3201,8 @@ def evolve(
         if verbose:
             print(f"round {r:>3}  reward={info.held_out_reward:.3f} on "
                   f"{len(held_out)}  size={info.n_items}  "
-                  f"+{info.committed}/-{info.rejected}")
+                  f"+{info.committed}/-{info.rejected}"
+                  + (f"  tokens={info.tokens:,}" if info.tokens else ""))
         if early_stop is not None:
             stop_reason = early_stop
             if verbose:
@@ -3053,6 +3253,7 @@ def evolve(
                              ledger_log=_safe_log(ledger), error=run_error,
                              stop_reason="error" if run_error else stop_reason,
                              fusion_trials=_fusion_trials(aggregator),
+                             budget=governor.summary() if governor.active else None,
                              **_cost_fields(eng.meter))
     eng.cleanup()
     return result

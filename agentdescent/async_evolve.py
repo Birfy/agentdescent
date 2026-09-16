@@ -39,6 +39,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .advantage import GroupAdvantage
 from .agents import Usage
+from .budget import BudgetGovernor, CallBudget
 from .policies import Policies
 from .evolution import (
     _publish_stable, _safe_log,
@@ -73,6 +74,14 @@ def async_evolve(
     max_seconds: float = 20.0,
     max_iters: Optional[int] = None,
     max_calls: Optional[int] = None,
+    max_tokens: Optional[int] = None,
+    #: Stop when the run's measured return per token falls off its own peak.
+    #: See :func:`evolve`; off by default, needs ``max_tokens``.
+    stop_on_diminishing_returns: bool = False,
+    #: How far below the peak counts as diminishing. See :func:`evolve`.
+    efficiency_floor: float = 0.25,
+    #: An adaptive per-call thinking budget. See :func:`evolve`.
+    call_budget: Optional[CallBudget] = None,
     target_reward: Optional[float] = None,
     patience: Optional[int] = None,
     max_worker_errors: int = 3,
@@ -183,6 +192,28 @@ def async_evolve(
         more proposals per rollout, and the cheaper unit is the one a reader
         assumes was held fixed. Both bounds are checked as each rollout lands, so
         a run overshoots only by what was already in flight.
+    max_tokens:
+        Stop after this many tokens in total (``prompt + completion``), as the
+        meter measured them. The third budget unit, and the one cost is measured
+        in: ``max_calls`` and ``max_iters`` count invocations, and a reasoning
+        model can spend 40k tokens on hidden thinking in a single one, so neither
+        bounds the bill. Checked as each rollout lands (tighter than the
+        synchronous path's round barrier), and a :class:`~agentdescent.budget.BudgetGovernor`
+        degrades optional spend -- fusion tournaments at 75% of the budget,
+        self-verify at 90% -- before the wall. ``None`` (default) means
+        unbounded, and no governor is constructed.
+    stop_on_diminishing_returns:
+        Stop when the run's measured return per token falls off its own peak by
+        more than ``efficiency_floor``. Off by default; needs ``max_tokens``.
+        See :func:`evolve`.
+    efficiency_floor:
+        How far below the peak counts as diminishing, when the stop above is on.
+        A self-calibrating ratio, not an absolute rate. See :func:`evolve`.
+    call_budget:
+        An adaptive per-call thinking budget (o1-style test-time scaling).
+        See :func:`evolve`; the allocation happens before each worker's
+        ``propose`` call, gated by the same ``score`` and
+        ``governor.remaining_fraction()`` the synchronous path uses.
     eval_concurrency:
         How many held-out tasks the merger scores at once. ``1`` restores the old
         sequential behaviour.
@@ -352,6 +383,17 @@ def async_evolve(
         usage=usage, verifier=_pol.verifier, ledger_impl=_pol.ledger,
         policies_bundle=_pol, checkpointing=checkpointing)
     eng.meter.start()
+    # The cost-aware governor for the async path. The merger loop has no round
+    # barrier, so the governor checks per sweep (after each merge, before the
+    # next worker batch's self-verify fires) rather than at the barrier. The
+    # soft floor turns off fusion tournaments between sweeps; the hard floor
+    # turns off self-verify in the worker body — read through eng.checkpointing
+    # would be wrong (that is checkpoint, not budget), so the governor lives on
+    # eng alongside it.
+    governor = BudgetGovernor(max_tokens=max_tokens,
+                              stop_on_diminishing=stop_on_diminishing_returns,
+                              efficiency_floor=efficiency_floor)
+    eng.governor = governor
     if n_workers < 1:
         raise ValueError(f"n_workers must be >= 1, got {n_workers}")
     policy = staleness_policy or get_policy("guarded")
@@ -611,6 +653,9 @@ def async_evolve(
                 adv = advantage.observe(
                     advantage.key(base_v, str(task.meta.get("cluster", ""))), score)
                 if score < solved_threshold:
+                    # o1-style test-time scaling: see evolve() for the reasoning.
+                    if call_budget is not None:
+                        call_budget.allocate(score, governor.remaining_fraction())
                     proposal = _checked_proposal(
                         eng.propose(artifact.render(), task, output, score), task)
                     if proposal:
@@ -621,7 +666,7 @@ def async_evolve(
                             # diff applied for a before/after signal. Faithful repos that
                             # only score the candidate on held-out (e.g. EvoSkill) pass
                             # self_verify=False to skip this extra rollout.
-                            if self_verify:
+                            if self_verify and governor.allow_self_verify():
                                 after = _checked_reward(
                                     eng.reward(task, eng.run(artifact.apply(diff).render(), task)), task)
                                 delta = after - score
@@ -723,6 +768,16 @@ def async_evolve(
                     # ratio and the second budget cannot be derived from the first.
                     stop_reason[0] = "max_calls"
                     stop.set()
+                elif max_tokens is not None and eng.meter.usage.total_tokens >= max_tokens:
+                    # Same reasoning as max_calls: read from the meter, because
+                    # a reasoning model can spend 40k tokens on one hidden-thinking
+                    # call and `calls` says nothing about the bill. The async
+                    # path checks per-rollout rather than per-round-barrier, so a
+                    # token budget fires sooner here than on the sync path — which
+                    # is correct: the barrier-free loop is the one that can run
+                    # away with spend if the gate keeps accepting.
+                    stop_reason[0] = "max_tokens"
+                    stop.set()
 
     def _drain_and_merge() -> None:
         with intake_lock:
@@ -794,6 +849,32 @@ def async_evolve(
                 _discarded()                             # DISCARD -> drop the card
         with eng.meter.timed("merge_gate_seconds"):
             reports = check_reports(_gated_step(), eng.aggregator)
+        # Governor: record the spend after each merge and degrade fusion before
+        # the next sweep. The merger is the single-threaded decision point, so
+        # the mutation is safe — no worker reads ``fusion_policy.tournament``
+        # until the next ``_gated_step`` which is the next sweep.
+        if governor.active:
+            gov_tokens = eng.meter.usage.total_tokens
+            governor.spend(gov_tokens)
+            # The previous sweep's reward, for the diminishing-returns measure
+            # (this runs before `record_round` for the current sweep, so
+            # `history[-1]` is the last *completed* one; `None` before any).
+            governor.observe(history[-1].held_out_reward if history else None)
+            if hasattr(eng.aggregator, "budget_remaining"):
+                eng.aggregator.budget_remaining = governor.remaining_fraction()
+            fp = getattr(eng.aggregator, "fusion_policy", None)
+            if fp is not None and hasattr(fp, "tournament"):
+                should = governor.allow_fusion_tournament()
+                if fp.tournament != should:
+                    fp.tournament = should
+                    if verbose:
+                        tag = "on" if should else "off"
+                        print(f"  fusion tournament {tag} "
+                              f"(token budget: {gov_tokens:,}/"
+                              f"{governor.max_tokens:,})")
+            if governor.diminishing_returns() and not stop.is_set():
+                stop_reason[0] = "diminishing_returns"
+                stop.set()
         if not reports and not batch:
             # A pipelined poll whose candidate is still being measured has
             # nothing to report yet. Returning keeps the merger draining --
@@ -859,8 +940,10 @@ def async_evolve(
             epoch[0] += 1                      # every worker resyncs on its next loop
             stall.force()
         if verbose:
+            u = eng.meter.usage
             print(f"sweep {len(history):>3}  reward={r:.3f}  merged={len(batch)}  "
-                  f"+{committed}  pending={len(intake)}")
+                  f"+{committed}  pending={len(intake)}"
+                  + (f"  tokens={u.total_tokens:,}" if u.total_tokens else ""))
         if early_stop is not None:
             stop_reason[0] = early_stop
             stop.set()
