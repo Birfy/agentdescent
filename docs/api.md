@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-333 public names across 54 modules.
+336 public names across 55 modules.
 
 ---
 
@@ -3590,6 +3590,10 @@ Whether a candidate is committed.
 
 Accumulate a deduped list of rules/lessons (append-only, content-addressed).
 
+### `BudgetGovernor`
+
+Tracks token spend against a cap and decides what to degrade.
+
 ### `CALIBRATION_CEILING`
 
 Where a calibration share sits when the improvement pool is still finding new error modes, and where it goes once the pool has stopped. Both are policy choices, not measurements: what a label is worth in each pool depends on whether you are trying to *fix* the verifier or to *correct for* it.
@@ -3601,6 +3605,10 @@ Where a calibration share sits when the improvement pool is still finding new er
 ### `CacheProtocol`
 
 Somewhere to keep evaluations. In one process, across many, or on disk.
+
+### `CallBudget`
+
+A mutable per-call max_tokens, set by the engine before each expansion.
 
 ### `Completion`
 
@@ -3821,6 +3829,10 @@ Agentic backends -- a base agent that *navigates documents with tools*, not just
 ### `baselines`
 
 The control every efficiency number in this repository is missing.
+
+### `budgeted_completion`
+
+Wrap a `max_tokens -> Completion` factory into an adaptive Completion.
 
 ### `dataloader`
 
