@@ -96,6 +96,38 @@ One entry point, `evolve()`, and three building blocks that turn a dataset into
 its arguments. The decisions that are actually yours — your data, how to score
 it, which model — are the ones you still make.
 
+### First, your API key
+
+This is the first step that talks to a model, so it is the first that needs a
+key. Credentials are read from the **environment at call time** — they never
+pass through code, arguments, or a file the repo owns. `openai_compatible` reads
+two variables, and the base URL is what picks the provider:
+
+```bash
+export OPENAI_BASE_URL=https://api.deepseek.com   # the endpoint's root
+export OPENAI_API_KEY=sk-...                      # your key for *that* endpoint
+```
+
+| provider | `OPENAI_BASE_URL` |
+|---|---|
+| DeepSeek | `https://api.deepseek.com` |
+| GLM / Zhipu | `https://open.bigmodel.cn/api/paas/v4` |
+| OpenAI | `https://api.openai.com/v1` — the default, so it may be omitted |
+| local (vLLM, Ollama, LM Studio) | `http://localhost:8000/v1` — the key is unused but must be set |
+
+**Claude is a different variable:** `pip install anthropic`, then
+`export ANTHROPIC_API_KEY=sk-ant-...` (or an `ant auth login` profile) and use
+`claude(model="claude-haiku-4-5")` in place of `openai_compatible(...)`. A CLI
+worker — `claude_code()`, `codex()`, `dsh()`, `opencode()` — inherits these
+variables from your shell, but *not* your logged-in host profile: each worker
+gets its own config directory so it cannot read your real plugins and MCP
+servers.
+
+Put the `export` lines in your shell profile to keep them across sessions, and
+check what a machine actually has with `agentdescent doctor` — it prints which
+CLIs and which keys are present, and the base URL's value, never the key's. The
+demo above, every `--dry-run`, and `pytest -q` need none of this.
+
 ```python
 from agentdescent import SingleSlot, evolve, openai_compatible, reflector, scorer, tasks_from
 from agentdescent.dataloader import hf_rows
