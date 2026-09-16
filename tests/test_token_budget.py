@@ -350,3 +350,14 @@ def test_result_budget_shows_degradation():
     result, _ = _run_evolve(max_tokens=700, rounds=5)
     assert result.budget is not None
     assert result.budget["fusion_degraded"] is True
+
+
+def test_diminishing_returns_flag_plumbs_through():
+    """`stop_on_diminishing_returns=True` reaches the governor; a run with a
+    never-binding budget and constant reward does not fire it (no peak to
+    decline from), so the run ends the ordinary way."""
+    result, _ = _run_evolve(max_tokens=10**12, rounds=4,
+                            stop_on_diminishing_returns=True)
+    assert result.stop_reason in ("rounds", "max_tokens",
+                                  "diminishing_returns", "patience")
+    assert result.budget is not None

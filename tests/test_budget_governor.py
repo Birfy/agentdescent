@@ -146,3 +146,74 @@ def test_custom_floors():
     assert g.allow_self_verify()  # 51% < 80%
     g.spend(810)
     assert not g.allow_self_verify()  # 81% > 80%
+
+
+# --- diminishing returns (the economic stop) ---
+
+
+def test_diminishing_off_by_default():
+    """No opt-in, no economic stop -- even with falling efficiency."""
+    g = BudgetGovernor(max_tokens=1000)
+    for rew, tok in [(0.1, 100), (0.2, 200), (0.3, 300), (0.35, 400), (0.36, 500), (0.36, 600)]:
+        g.spend(tok)
+        g.observe(rew)
+    assert not g.diminishing_returns()
+
+
+def test_diminishing_needs_a_budget():
+    """Efficiency is return per *token*; without a token budget there is nothing
+    to divide by, so the rule cannot fire."""
+    g = BudgetGovernor(max_tokens=None, stop_on_diminishing=True)
+    for rew, tok in [(0.1, 100), (0.2, 200), (0.3, 300), (0.35, 400), (0.36, 500), (0.36, 600)]:
+        g.spend(tok)
+        g.observe(rew)
+    assert not g.diminishing_returns()
+
+
+def test_diminishing_needs_enough_samples():
+    g = BudgetGovernor(max_tokens=1000, stop_on_diminishing=True,
+                       min_efficiency_samples=4)
+    g.spend(100); g.observe(0.1)
+    g.spend(200); g.observe(0.2)
+    g.spend(300); g.observe(0.3)   # only 2 samples yet
+    assert not g.diminishing_returns()
+
+
+def test_diminishing_fires_when_return_per_token_collapses():
+    g = BudgetGovernor(max_tokens=10_000, stop_on_diminishing=True,
+                       min_efficiency_samples=4, efficiency_floor=0.25)
+    for rew, tok in [(0.10, 100), (0.20, 200), (0.30, 300), (0.35, 400),
+                     (0.36, 500), (0.36, 600)]:
+        g.spend(tok)
+        g.observe(rew)
+    assert g.diminishing_returns()
+
+
+def test_diminishing_does_not_fire_while_still_productive():
+    """A run whose efficiency is steady must not be stopped."""
+    g = BudgetGovernor(max_tokens=10_000, stop_on_diminishing=True,
+                       min_efficiency_samples=4, efficiency_floor=0.25)
+    # Constant efficiency: every 100 tokens buys 0.1 reward.
+    for i in range(6):
+        g.spend(100 * (i + 1))
+        g.observe(0.1 * (i + 1))
+    assert not g.diminishing_returns()
+
+
+def test_diminishing_never_fires_when_never_improved():
+    """A run that never improved has no peak to decline from -- patience, not
+    this, is the rule for that."""
+    g = BudgetGovernor(max_tokens=1000, stop_on_diminishing=True,
+                       min_efficiency_samples=4)
+    for i in range(6):
+        g.spend(100 * (i + 1))
+        g.observe(0.5)   # flat
+    assert not g.diminishing_returns()
+
+
+def test_observe_ignores_none_and_missing_cost_rounds():
+    """A round with no reward, or one that spent no tokens, records nothing."""
+    g = BudgetGovernor(max_tokens=1000, stop_on_diminishing=True)
+    g.spend(0); g.observe(None)
+    g.spend(0); g.observe(0.5)      # no tokens -> no sample
+    assert g._efficiencies == []

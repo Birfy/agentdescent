@@ -80,6 +80,21 @@ All notable changes to AgentDescent are documented here. The format follows
   candidate without racing a shared meter) and the engine feeds
   `budget_remaining` from the governor each round, on both sync and async paths.
 
+- **`evolve(stop_on_diminishing_returns=True)`: stop when the search stops
+  paying for itself.** `max_tokens` is a ceiling; the economic question is
+  whether to *spend* it, and the answer is to keep buying compute while it
+  still returns quality and stop when it does not — even with budget left. The
+  governor measures the run's own return per token (`Δreward / Δtokens` per
+  round, from the same reward and meter the run already has) and stops when the
+  recent rate has fallen to `efficiency_floor` (default a quarter) of the run's
+  *peak* rate. Self-calibrating: it compares the run against itself, so there
+  is no absolute rate to guess — a reward is in `[0, 1]`, a token count is in
+  the millions, and their quotient has no interpretable scale. Off by default,
+  because a run whose reward only rises late would be cut short by it, and
+  because it needs `max_tokens`. Stops with
+  `stop_reason="diminishing_returns"`. A run that never improved has no peak to
+  decline *from*, so this stays quiet and the patience counter handles it.
+
 - **`baselines.Budget(tokens=...)`: the A/B framework can hold cost fixed.**
   The module's own argument is that a budget in one unit is not a comparison —
   "matched on rollouts alone, an arm that asks for more proposals per rollout

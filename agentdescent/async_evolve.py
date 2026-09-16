@@ -75,6 +75,11 @@ def async_evolve(
     max_iters: Optional[int] = None,
     max_calls: Optional[int] = None,
     max_tokens: Optional[int] = None,
+    #: Stop when the run's measured return per token falls off its own peak.
+    #: See :func:`evolve`; off by default, needs ``max_tokens``.
+    stop_on_diminishing_returns: bool = False,
+    #: How far below the peak counts as diminishing. See :func:`evolve`.
+    efficiency_floor: float = 0.25,
     target_reward: Optional[float] = None,
     patience: Optional[int] = None,
     max_worker_errors: int = 3,
@@ -185,6 +190,23 @@ def async_evolve(
         more proposals per rollout, and the cheaper unit is the one a reader
         assumes was held fixed. Both bounds are checked as each rollout lands, so
         a run overshoots only by what was already in flight.
+    max_tokens:
+        Stop after this many tokens in total (``prompt + completion``), as the
+        meter measured them. The third budget unit, and the one cost is measured
+        in: ``max_calls`` and ``max_iters`` count invocations, and a reasoning
+        model can spend 40k tokens on hidden thinking in a single one, so neither
+        bounds the bill. Checked as each rollout lands (tighter than the
+        synchronous path's round barrier), and a :class:`~agentdescent.budget.BudgetGovernor`
+        degrades optional spend -- fusion tournaments at 75% of the budget,
+        self-verify at 90% -- before the wall. ``None`` (default) means
+        unbounded, and no governor is constructed.
+    stop_on_diminishing_returns:
+        Stop when the run's measured return per token falls off its own peak by
+        more than ``efficiency_floor``. Off by default; needs ``max_tokens``.
+        See :func:`evolve`.
+    efficiency_floor:
+        How far below the peak counts as diminishing, when the stop above is on.
+        A self-calibrating ratio, not an absolute rate. See :func:`evolve`.
     eval_concurrency:
         How many held-out tasks the merger scores at once. ``1`` restores the old
         sequential behaviour.
@@ -361,7 +383,9 @@ def async_evolve(
     # turns off self-verify in the worker body — read through eng.checkpointing
     # would be wrong (that is checkpoint, not budget), so the governor lives on
     # eng alongside it.
-    governor = BudgetGovernor(max_tokens=max_tokens)
+    governor = BudgetGovernor(max_tokens=max_tokens,
+                              stop_on_diminishing=stop_on_diminishing_returns,
+                              efficiency_floor=efficiency_floor)
     eng.governor = governor
     if n_workers < 1:
         raise ValueError(f"n_workers must be >= 1, got {n_workers}")
@@ -822,6 +846,10 @@ def async_evolve(
         if governor.active:
             gov_tokens = eng.meter.usage.total_tokens
             governor.spend(gov_tokens)
+            # The previous sweep's reward, for the diminishing-returns measure
+            # (this runs before `record_round` for the current sweep, so
+            # `history[-1]` is the last *completed* one; `None` before any).
+            governor.observe(history[-1].held_out_reward if history else None)
             if hasattr(eng.aggregator, "budget_remaining"):
                 eng.aggregator.budget_remaining = governor.remaining_fraction()
             fp = getattr(eng.aggregator, "fusion_policy", None)
@@ -834,6 +862,9 @@ def async_evolve(
                         print(f"  fusion tournament {tag} "
                               f"(token budget: {gov_tokens:,}/"
                               f"{governor.max_tokens:,})")
+            if governor.diminishing_returns() and not stop.is_set():
+                stop_reason[0] = "diminishing_returns"
+                stop.set()
         if not reports and not batch:
             # A pipelined poll whose candidate is still being measured has
             # nothing to report yet. Returning keeps the merger draining --

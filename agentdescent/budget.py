@@ -74,6 +74,24 @@ class BudgetGovernor:
     soft_floor: float = SOFT_FLOOR
     #: Fraction of the budget at which self-verify stops (see HARD_FLOOR).
     hard_floor: float = HARD_FLOOR
+    #: Stop when the run's *measured* return per token has fallen off its own
+    #: peak by more than :attr:`efficiency_floor`. Off by default: it is an
+    #: economic rule, not a safety one, and a run whose reward only ever rises
+    #: late would be cut short by it. Turn it on to spend a budget by value
+    #: rather than by exhaustion -- it is what lets a run finish *under* its
+    #: budget when the search has stopped paying for itself.
+    stop_on_diminishing: bool = False
+    #: How far below the run's own peak efficiency counts as diminishing. The
+    #: default ``0.25`` means "the last rounds returned less than a quarter of
+    #: the best rate this run ever achieved". Self-calibrating: it compares the
+    #: run against itself, so there is no magic absolute rate to set (a reward
+    #: is in ``[0, 1]`` and a token count is in the millions; their ratio has no
+    #: interpretable scale, which is exactly why an absolute floor would be a
+    #: guess).
+    efficiency_floor: float = 0.25
+    #: How many efficiency samples before the rule may fire. Four rounds is the
+    #: floor at which "the peak" and "the recent rate" are different claims.
+    min_efficiency_samples: int = 4
     #: Cumulative spend, set by ``spend``. Kept as a field so ``affords`` can
     #: be asked without re-passing the number the caller just passed.
     _spent: int = 0
@@ -82,6 +100,11 @@ class BudgetGovernor:
     #: The spend at the last ``spend`` call, so a delta can be computed without
     #: the caller tracking the previous value.
     _last: int = 0
+    #: Return-per-token for each completed round, from ``observe``.
+    _efficiencies: list = field(default_factory=list)
+    #: The previous round's reward and spend, so ``observe`` can difference.
+    _prev_reward: Optional[float] = None
+    _prev_spent: int = 0
 
     # -- what the engine reports --------------------------------------------
 
@@ -170,6 +193,59 @@ class BudgetGovernor:
         if self.max_tokens is None or self.max_tokens <= 0:
             return 1.0
         return max(0.0, min(1.0, (self.max_tokens - self._spent) / self.max_tokens))
+
+    def observe(self, reward: Optional[float]) -> None:
+        """Record the reward of the round that just finished.
+
+        Called at the top of each round, after :meth:`spend`, with the reward
+        the previous round produced (``None`` on the first round, and on a round
+        whose measurement failed). The efficiency it records is that round's
+        ``Δreward / Δtokens`` -- the run's own return per token, which
+        :meth:`diminishing_returns` compares against its own peak.
+
+        A round that spent no tokens records nothing: ``Δreward / 0`` is not
+        infinity, it is a round whose cost was not measured, and letting it into
+        the sample would make an unmeasured run look infinitely efficient.
+        """
+        if reward is None or not isinstance(reward, (int, float)):
+            return
+        reward = float(reward)
+        if self._prev_reward is None:
+            self._prev_reward = reward
+            self._prev_spent = self._spent
+            return
+        dtokens = self._spent - self._prev_spent
+        dreward = reward - self._prev_reward
+        self._prev_reward = reward
+        self._prev_spent = self._spent
+        if dtokens > 0:
+            self._efficiencies.append(dreward / dtokens)
+
+    def diminishing_returns(self) -> bool:
+        """Whether the run's return per token has fallen off its own peak.
+
+        The economic stop: keep buying compute while it is still paying, stop
+        when it is not -- *even with budget left*, which is the whole point.
+        ``max_tokens`` is a ceiling; this is the rule that decides not to spend
+        the ceiling.
+
+        Returns ``False`` unless ``stop_on_diminishing`` is set, a budget is in
+        force (efficiency needs a token count) and at least
+        ``min_efficiency_samples`` rounds have been observed. It also returns
+        ``False`` when the run's peak efficiency is not positive: a run that
+        never improved has nothing to have declined *from*, and the patience
+        counter -- not this -- is the rule for "it never got better".
+        """
+        if not self.stop_on_diminishing or self.max_tokens is None:
+            return False
+        samples = self._efficiencies
+        if len(samples) < self.min_efficiency_samples:
+            return False
+        peak = max(samples)
+        if peak <= 0:
+            return False
+        recent = sum(samples[-2:]) / 2.0
+        return recent < self.efficiency_floor * peak
 
     # -- what the run reports --------------------------------------------------
 

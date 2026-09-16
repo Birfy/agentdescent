@@ -2237,6 +2237,19 @@ def evolve(
     #: Checked at the round barrier alongside the other budgets; the run stops
     #: with ``stop_reason="max_tokens"`` and reports the spend it incurred.
     max_tokens: Optional[int] = None,
+    #: Stop when the run's *measured* return per token has fallen off its own
+    #: peak by more than ``efficiency_floor`` (see
+    #: :meth:`~agentdescent.budget.BudgetGovernor.diminishing_returns`). The
+    #: economic stop: keep buying compute while it pays, stop when it does not,
+    #: *even with budget left*. Off by default -- it is a spending rule, not a
+    #: safety one, and a run whose reward only rises late would be cut short.
+    #: Needs ``max_tokens`` to be set (efficiency needs a cost to divide by).
+    stop_on_diminishing_returns: bool = False,
+    #: How far below the peak counts as diminishing, when the stop above is on.
+    #: Self-calibrating against the run's own best rate, so this is a *ratio*
+    #: and not an absolute: a reward is in ``[0, 1]`` and a token count in the
+    #: millions, and their quotient has no interpretable scale.
+    efficiency_floor: float = 0.25,
     self_verify: bool = True,
     held_out_frac: float = 0.4,
     repo_path: Optional[str] = None,
@@ -2451,6 +2464,18 @@ def evolve(
         other budgets; the async path checks per-rollout for tighter control.
         Stops with ``stop_reason="max_tokens"``. ``None`` (default) means
         unbounded.
+    stop_on_diminishing_returns:
+        Stop when the run's own return per token has fallen off its peak by more
+        than ``efficiency_floor``. The economic rule: keep buying compute while
+        it pays, stop when it does not -- *even with budget left*. Off by
+        default, because a run whose reward only rises late would be cut short
+        by it, and because it needs ``max_tokens`` (return per token needs a cost
+        to divide by). Stops with ``stop_reason="diminishing_returns"``.
+    efficiency_floor:
+        How far below the peak counts as diminishing, when the stop above is on.
+        Self-calibrating against the run's own best rate, so it is a *ratio*, not
+        an absolute quantity: a reward is in ``[0, 1]`` and a token count is in
+        the millions, and their quotient has no interpretable scale.
     self_verify:
         Re-run the trajectory with the diff applied to record a local
         before/after delta. Doubles the rollouts spent per proposal; ports that
@@ -2643,7 +2668,9 @@ def evolve(
             eval_concurrency=eval_concurrency,
             pipelined_gate=pipelined_gate, gate_workers=gate_workers,
             on_round=on_round, stop_when=stop_when, verbose=verbose, usage=usage,
-            policies=policies, checkpointing=checkpointing)
+            policies=policies, checkpointing=checkpointing,
+            stop_on_diminishing_returns=stop_on_diminishing_returns,
+            efficiency_floor=efficiency_floor)
 
     if pipelined_gate:
         # The mirror of the block above, and the same reasoning: a knob accepted
@@ -2745,7 +2772,9 @@ def evolve(
     # self-verify) before the token wall, and projects whether the *next*
     # round fits — so a run that cannot afford round N+1 ends at N with a
     # clean merge instead of being cut mid-round. Inert without max_tokens.
-    governor = BudgetGovernor(max_tokens=max_tokens)
+    governor = BudgetGovernor(max_tokens=max_tokens,
+                              stop_on_diminishing=stop_on_diminishing_returns,
+                              efficiency_floor=efficiency_floor)
     for r in range(rounds):
         if deadline is not None and time.time() >= deadline:
             stop_reason = "max_seconds"
@@ -2760,6 +2789,10 @@ def evolve(
         spent = eng.meter.snapshot()
         tokens_spent = spent.prompt_tokens + spent.completion_tokens
         governor.spend(tokens_spent)
+        # Record the *previous* round's reward so the governor can measure the
+        # run's own return per token. `history[-1]` is that round: this runs at
+        # the top of round r, after r-1 has closed. `None` on the first round.
+        governor.observe(history[-1].held_out_reward if history else None)
         over = ((max_rollouts is not None and spent.rollouts >= max_rollouts
                  and "max_rollouts") or
                 (max_calls is not None and spent.calls >= max_calls
@@ -2777,6 +2810,18 @@ def evolve(
                 print(f"round {r:>3}  stopping: {over} reached "
                       f"({spent.rollouts} rollouts / {spent.calls} calls "
                       f"/ {tokens_spent} tokens)")
+            break
+        # The economic stop: the run's own return per token has fallen off its
+        # peak. Opt-in (``stop_on_diminishing_returns``), and only when a token
+        # budget is in force -- efficiency needs a cost to divide by. This is
+        # the rule that decides *not* to spend the ceiling, which is the whole
+        # difference between a budget and an allocation.
+        if governor.diminishing_returns():
+            stop_reason = "diminishing_returns"
+            if verbose:
+                print(f"round {r:>3}  stopping: diminishing returns "
+                      f"(return per token off its peak; "
+                      f"{tokens_spent:,} tokens spent)")
             break
         # The projection: a round that the remaining budget cannot afford is
         # not dispatched. This lands *before* the snapshot, so the run ends on
