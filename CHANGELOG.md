@@ -8,6 +8,53 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- **`Investigator` — a read-only delegation whose findings persist into the record.**
+  The Genesis reference implementation has an `:read` investigator role
+  (`agents/investigator.ex`) that a manager hands a question and that may write only
+  `CONTEXT.md`. `--investigate` ports it: a manager marks a delegation `"investigate":
+  true`, the delegation runs `Investigator` (`examples/genesis/_investigator.py`) instead
+  of the recursion, and what it finds is folded into the node's `CONTEXT.md` under
+  `## Findings` — so it enters the version and the next agent inherits it.
+
+  It exists because of a blind spot in the port, not to complete a roster of roles:
+  `_MANAGER_PROMPT` carries the `CONTEXT.md` chain and a *listing* of the files at a
+  node, never their contents, since this port's agents have no read tool. A manager
+  deciding from the code is deciding blind, and the investigator is the one actor
+  allowed to read a node and leave a note about it.
+
+  Deliberately narrow. The role's fan-out to `subagent_investigator` is **not** ported,
+  because fanning out read-only sub-agents is what a manager with read tools of its own
+  is for, and that is the port's session work. The one write it may make is the record
+  at the node it was sent to; source edits and writes to an ancestor's record are
+  refused and counted.
+
+  14 tests in `tests/test_genesis_investigator.py`, offline and deterministic.
+
+- **`SkillExtractor` — a skill is distilled from an accepted contribution, and the run
+  inherits it.** `LocalWorld.skills()` already collected `.agents/skills/` along the node
+  chain — `hierarchical_skill_names/2`, and what the paper lists among what an
+  accepted version carries (§3.1) — the read half and nothing else.
+  `--extract-skills` adds the write half: `SkillExtractor` (`examples/genesis/_skills.py`)
+  distils the contribution a root just accepted into a skill file, checks the skills that
+  already exist so it does not duplicate one, and places it at the node where it is
+  relevant.
+
+  It runs at the **root episode boundary**, not after the merge. A post-merge version
+  is one no later episode of the run ever sees, so the loop would still be open; inside
+  the episode the skill rides in the same proposal and the next agent inherits it.
+
+  The flag also turns on `LocalWorld.skill_bodies`, which puts inherited skill *bodies*
+  in the brief. Without it the feature is decorative — the brief otherwise carries only
+  names, and fetching a body needs a `skill_read` tool this port's agents do not have, so
+  "read one before using it" was an instruction none of them could follow.
+
+  `skill_add`'s frontmatter is rendered here rather than emitted by the model — the
+  format is the tool's, not the model's. Skills get their own trust-region bucket
+  (`max_skill_edits=2` beside `max_edits=4`), because a lesson trimmed to make room for
+  the file it distils is self-defeating. `skills=None` is the old behaviour exactly.
+
+  22 tests in `tests/test_genesis_skills.py`, offline and deterministic.
+
 - **`evolve(max_tokens=...)`: a budget in the unit that maps to the bill.**
   `max_calls` and `max_rollouts` count invocations, and a reasoning model can
   spend 40k tokens on hidden thinking in a single one -- so a 20-round run with
