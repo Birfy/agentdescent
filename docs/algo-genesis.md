@@ -846,7 +846,8 @@ trust region sized for a single completion proposing a file or two. Measured on 
 21, `src/backend` 17 — and the version grew by four a round. Raising the other cap had
 changed nothing, because this one always cut first.
 
-They are one number now. What `_bound` does *within* the bound was not a defect and is
+They are one number now — and so is a third one behind them, which took another run to
+find; see *Five gates* below. What `_bound` does *within* the bound was not a defect and is
 worth stating, since it looks like one: a node-creating `record` is trimmed **last**
 (nothing else in the accepted version says the node exists, and the source file it
 would be dropped for is re-proposable next round), `work` next, routine `context`
@@ -895,6 +896,60 @@ a node's build:
 24 is where it stops binding; **64** is the number, three times the largest legitimate
 episode. A single completion asked for whole files keeps the tight 6 — that executor
 proposes one or two files, and six there really is a runaway.
+
+### Five gates, and the habit of raising one at a time
+
+Both fixes above were right and neither was enough, because both were found the same
+way: follow the path a proposal takes until something rejects it, raise that, re-run.
+Three runs in a row died that way. The last of them — one rollout, thirteen sessions,
+680 turns, forty minutes, with the two caps above already raised — merged this:
+
+```
+sweep   0  reward=0.000  files=9  committed=0  rejected=1  rollouts=1  40m  [oversized=1]
+world : accepted=5 rejected=4 rework=4 depth=4  discarded_diffs=0  truncated_edits=0
+wrote 9 files  (nine CONTEXT.md records, not one line of implementation)
+```
+
+`discarded_diffs=0` and `truncated_edits=0`: the port's own two bounds passed the
+proposal through cleanly. It was rejected behind them, by a **third** cap, in the engine.
+
+A proposal crosses five bounds between the session that writes a file and the state that
+keeps it. Listing them all was the fix; each of them had been the answer once:
+
+| | where | field | was | now |
+|---|---|---|---:|---:|
+| 1 | `RecursiveDelegation._bound` | `max_edits` | 4 | the cap |
+| 2 | `SpatialContract.to_diff` | `max_files_per_diff` | 6 | the cap |
+| 3 | `SpatialContract.to_diff` | `max_file_bytes` | 28 000 | unchanged |
+| 4 | `Aggregator._apply_trust_region` | `trust_region_ops` | **6** | the cap |
+| 5 | `Aggregator._apply_trust_region` | `trust_region_chars` | 32 000 | ≥ #3 |
+
+4 and 5 are the **engine's** defaults, and this port had never passed an `agg_config`
+at all — so they were invisible from the example, sized for the rule tables the engine
+was built on, and applied unchanged to a proposal carrying an eight-node repository.
+Six ops. The measurement that settles it: across that rollout the largest single file
+any session wrote was **12 813 chars**, well inside both character bounds, so only the
+*op count* was ever binding.
+
+They are one number now, `engine_bounds(strategy)`, and the shape is deliberate: the
+port's cap decides, because it is the one that counts what it drops
+(`discarded_diffs`) and the one whose value is argued for from measurement. The engine's
+two are placed where they cannot bind first — ops at the same cap, chars no tighter than
+the per-file bound that already filtered every op, so a file over #3 is dropped on its
+own instead of returning as a whole diff lost to #5.
+
+One trap on the way, worth writing down because it is silent in the other direction:
+`evolve()` does not fall back to `AggregatorConfig()` when it is passed nothing. It
+builds `AggregatorConfig(batch_trigger=2, max_wait_rounds=1)` — and a config passed in
+replaces that object whole. A run that only wanted a wider trust region would have
+doubled its batch trigger and tripled its wait on the way past. Both arms were measured
+and both arrive at (2, 1); the port carries them across, and a test reads them back out
+of a real `evolve()` rather than repeating the literals, so the day the engine picks
+different ones the port is told rather than drifting.
+
+The habit is the finding, not the constant. Following one path to the first rejection
+finds *a* cap; it cannot tell you it was the only one. Enumerating every gate on the
+path costs one reading of the merge routine and would have saved three runs.
 
 ### One rollout was an hour, and four workers spent it on the same tree
 

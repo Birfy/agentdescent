@@ -79,6 +79,7 @@ import sys
 import posixpath
 
 from agentdescent import Policies, evolve
+from agentdescent.aggregator import AggregatorConfig
 from agentdescent.evolution import EvolvingArtifact
 from agentdescent.agents import Usage
 from agentdescent.filetree import load_tree, match_any
@@ -395,6 +396,47 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def engine_bounds(strategy: SpatialContract) -> AggregatorConfig:
+    """The engine's copy of this port's proposal bounds, so only one of them rules.
+
+    A proposal passes five bounds between the session that wrote the files and the
+    state that keeps them, and raising one at a time is how three runs in a row were
+    thrown away. The whole chain, in order:
+
+    1. ``RecursiveDelegation._bound``       -> ``max_edits``          (the cap)
+    2. ``SpatialContract.to_diff``          -> ``max_files_per_diff`` (the cap)
+    3. ``SpatialContract.to_diff``          -> ``max_file_bytes``     (28 000/file)
+    4. ``Aggregator._apply_trust_region``   -> ``trust_region_ops``   (engine, 6)
+    5. ``Aggregator._apply_trust_region``   -> ``trust_region_chars`` (engine, 32 000)
+
+    1-3 are this port's and were raised together. 4 and 5 are the engine's defaults,
+    and nothing here ever passed an ``agg_config``, so a whole-tree proposal that
+    cleared the first three was rejected by the fourth -- measured: one rollout,
+    thirteen sessions, 680 turns, ``committed=0 rejected=1 [oversized=1]``, nine
+    records written and not one line of implementation.
+
+    What is wanted is one gate, not five. The port's cap is the one that decides,
+    because it is the one that counts what it drops (:attr:`WorldLog.discarded_diffs`)
+    and the one whose number is argued for where it is set. So the engine's two are
+    placed where they cannot bind first: ops at the same cap, chars no tighter than
+    the per-file bound that already filtered every op. A file over ``max_file_bytes``
+    is dropped on its own by 3; it must not come back as a whole diff lost to 5.
+
+    ``batch_trigger`` and ``max_wait_rounds`` are carried across because ``evolve()``
+    builds ``AggregatorConfig(batch_trigger=2, max_wait_rounds=1)`` when it is passed
+    nothing -- not the dataclass's own defaults -- and a config passed in replaces
+    that whole object. Measured in both arms, synchronous and barrier-free. A run
+    that only wanted a wider trust region would otherwise have doubled its batch
+    trigger on the way past.
+    """
+    return AggregatorConfig(
+        batch_trigger=2, max_wait_rounds=1,
+        trust_region_ops=strategy.max_files_per_diff,
+        trust_region_chars=max(AggregatorConfig.trust_region_chars,
+                               strategy.max_file_bytes),
+    )
+
+
 def main(argv=None) -> None:
     args = build_parser().parse_args(argv)
     # Barrier-free by default, and nothing discarded for being late. Upstream has no
@@ -678,6 +720,11 @@ def main(argv=None) -> None:
     proposal_cap = 64 if args.executor == "claude-code" else 6
     strategy = SpatialContract(initial_files=initial, frozen=spec.FROZEN, log=log,
                                max_files_per_diff=proposal_cap)
+    agg_config = engine_bounds(strategy)
+    print(f"Proposal : up to {proposal_cap} file(s) and "
+          f"{strategy.max_file_bytes} chars per file, per episode; the engine's "
+          f"trust region is set to match, so this is the only gate that can "
+          f"reject one for its size")
     # `manager.ex` states the parent's validation as three things: review the child's
     # results, run the tests, and reject anti-patterns it can see in the code. The
     # middle one is a number and was all this port had; the zero-field run is what
@@ -828,6 +875,7 @@ def main(argv=None) -> None:
         tasks, spec.reward, run=run, propose=_superseded, strategy=strategy,
         on_round=_progress,
         artifact_id="world", blast_radius=SKILL_BLAST_RADIUS,
+        agg_config=agg_config,
         # Say the budget outright rather than letting `rounds` be reinterpreted:
         # `--episodes` is a count of ROOT episodes in both arms, and under the
         # barrier-free default that is exactly what a worker rollout is.

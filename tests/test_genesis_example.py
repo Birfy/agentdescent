@@ -505,18 +505,21 @@ def test_the_growth_phase_reports_progress_rather_than_going_silent():
         assert field in printed, f"the progress line never reports {field}"
 
 
-def test_the_proposal_cap_is_one_number_not_two():
-    """A rollout walks the WHOLE tree, and two caps were bounding what came back.
+def test_every_cap_on_a_proposals_path_is_the_same_number():
+    """A rollout walks the WHOLE tree, and five caps stood between it and the state.
 
     `SpatialContract.max_files_per_diff` is the one this port raised to 64 for a
     session executor. `RecursiveDelegation.max_edits` sits upstream of it, in
     `_bound`, and was 4 -- a trust region sized for a single completion proposing a
-    file or two, applied to a proposal carrying every leaf's work. The tighter one
-    is the only one that ever applies, so raising the other changed nothing.
+    file or two, applied to a proposal carrying every leaf's work. Behind both sits
+    the engine's own `trust_region_ops`, which defaults to 6 and which this port
+    never passed at all. The tightest one is the only one that ever applies, so
+    raising any single one of them changed nothing.
 
-    Measured on an 8-node `fly` tree: the sessions wrote 153 implementation files,
-    every sweep committed exactly 4, and after three rollouts the accepted state held
-    nine records and six Python files.
+    Measured on an 8-node `fly` tree: with the first two raised and the third still
+    at its default, one rollout ran thirteen sessions and 680 turns and merged
+    `committed=0 rejected=1 [oversized=1]` -- nine `CONTEXT.md` records and not one
+    line of implementation.
     """
     tree = ast.parse(inspect.getsource(genesis.main))
     names = set()
@@ -530,6 +533,74 @@ def test_the_proposal_cap_is_one_number_not_two():
             names.add(node.value.id)
     assert names, "neither cap is set from a named value"
     assert len(names) == 1, f"the two caps read different names: {sorted(names)}"
+
+    # ...and the engine's two are derived from the strategy that carries that cap,
+    # rather than left at defaults nobody passes.
+    cfg = genesis.engine_bounds(_strategy(max_files_per_diff=64))
+    assert cfg.trust_region_ops == 64, (
+        "the engine's op cap does not follow the port's -- a proposal the port "
+        "allowed is rejected `oversized` behind it")
+    assert cfg.trust_region_chars >= _strategy().max_file_bytes, (
+        "a file the port lets through whole is over the engine's per-op cap, so "
+        "one oversized file loses the entire episode instead of just itself")
+
+
+def test_a_diff_at_the_full_cap_clears_the_engines_trust_region():
+    """The end-to-end version of the above: the port's cap is the only gate.
+
+    This is the test fly26 did not have. It builds a proposal exactly at the cap,
+    puts it through the real `to_diff`, and asks the engine's real trust-region
+    predicate about the result -- which is the pair that disagreed.
+    """
+    from agentdescent.aggregator import Aggregator
+
+    cap = 12
+    strategy = _strategy(max_files_per_diff=cap)
+    edits = [Edit("src", f"src/mod{n}.py", "x" * 4_000) for n in range(cap)]
+    diff = strategy.to_diff(strategy.initial(), render_edits(edits, "r"), "w0", 1, "world")
+    assert diff is not None and diff.size() == cap, "the port dropped it first"
+
+    region = Aggregator._trust_region(
+        type("A", (), {"config": genesis.engine_bounds(strategy)})())
+    assert diff.size() <= region.ops, (
+        f"{diff.size()} ops against a region of {region.ops}: the engine rejects "
+        "a proposal the port was built to allow")
+    assert all(len(v) <= region.chars for v in diff.ops.values())
+
+
+def test_the_run_keeps_the_batching_evolve_would_have_chosen():
+    """Passing `agg_config=` replaces the config `evolve()` builds, in full.
+
+    That config is not `AggregatorConfig()` -- it is `AggregatorConfig(batch_trigger=2,
+    max_wait_rounds=1)`, built inside `evolve()` and unreachable from here. So a run
+    that passes its own config to widen the trust region silently doubles its batch
+    trigger and triples its wait unless it carries those two across. This reads the
+    numbers out of a real `evolve()` rather than repeating the literals, so the day
+    the engine picks different ones the port is told instead of drifting.
+    """
+    import agentdescent.aggregator as aggregator
+
+    seen = []
+    original = aggregator.Aggregator.__init__
+
+    def spy(self, ledger, verifier, audit, config, *args, **kwargs):
+        seen.append(config)
+        return original(self, ledger, verifier, audit, config, *args, **kwargs)
+
+    tasks = [Task(id=f"t{n}", prompt="p") for n in range(10)]
+    with mock.patch.object(aggregator.Aggregator, "__init__", spy):
+        evolve(tasks, lambda state, task: 0.0, run=lambda state, task: "a",
+               propose=lambda rendered, task, output, reward: None,
+               rounds=1, n_workers=1, seed=0)
+    assert seen, "no aggregator was built, so nothing was measured"
+
+    chosen = seen[0]
+    ours = genesis.engine_bounds(_strategy())
+    for field in ("batch_trigger", "max_wait_rounds"):
+        assert getattr(ours, field) == getattr(chosen, field), (
+            f"{field} is {getattr(ours, field)} here and {getattr(chosen, field)} "
+            "in a run that passes no config -- passing one changed more than the "
+            "trust region")
 
 
 def test_the_whole_tree_survives_a_rollout_when_the_cap_allows_it():
