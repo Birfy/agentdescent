@@ -64,8 +64,14 @@ Intentional differences
   surface, known issues -- and the read-only roles exist to do nothing else. Here
   the two writes an agent makes on its own are the routing entry for a node it
   opened and the refusal note for a child it rejected; an LLM executor may write
-  more, and nothing requires it to. Skills (``.agents/skills/``) are not loaded
-  at all.
+  more, and nothing requires it to. Skills (``.agents/skills/``) are inherited by
+  name everywhere, and ``--extract-skills`` adds the other half -- an extractor
+  that distils an accepted contribution into one -- which also makes the brief
+  carry their *bodies*, because this port's agents have no read tool to fetch a
+  body with. ``--investigate`` adds the investigator for the same missing tool: a
+  manager may mark a delegation read-only, and what that investigator reads at the
+  node is recorded in that node's ``CONTEXT.md`` rather than returned only to a
+  parent that is one completion and cannot act on it until the next round.
 * **Multi-repository work, the desktop shell and the dashboard are out of scope.**
   Upstream's task-level accept is a human action on that dashboard
   (``EvoGit.Review.merge_branch/2,3``); here the task-level gate is the
@@ -96,7 +102,9 @@ from ._architect import ArchitectPhase, harness_record, missing_sections
 from ._claude_code import ClaudeCodeExecutor, claude_code_available
 from ._extract import ExtractPhase
 from ._judge import ParentJudge
+from ._investigator import Investigator
 from ._review import CompletionJudge, ParentCodeReview, chain_reviews
+from ._skills import SkillExtractor
 from ._suite import TEST_FAILURE
 from ._suite import cold_start, preflight
 from ._octopus import OctopusConflict, git_available
@@ -281,6 +289,20 @@ def build_parser() -> argparse.ArgumentParser:
                         help="skip the parent reading its child's diff (one model "
                              "call per returned child). The tests alone cannot see "
                              "a function that computes nothing")
+    parser.add_argument("--extract-skills", action="store_true",
+                        help=("port upstream's SkillExtractor: when the root accepts "
+                              "a contribution, distil it into a `.agents/skills/` file "
+                              "the rest of the run inherits. Needs --model. The skill "
+                              "bodies then travel in the brief, because this port's "
+                              "agents have no read tool to fetch them with -- which is "
+                              "why inheritance was inert before this flag existed"))
+    parser.add_argument("--investigate", action="store_true",
+                        help=("port upstream's Investigator: a manager may mark a "
+                              "delegation read-only, and a read-only investigator reads "
+                              "that node's files and records what it finds under "
+                              "`## Findings` in the node's CONTEXT.md. Needs --model. "
+                              "No fan-out to sub-investigators -- that is the manager's "
+                              "own read tools, which are the session work"))
     parser.add_argument("--no-parent-tests", action="store_true",
                         help=("stop the parent running the suite on a child's "
                               "work before accepting it; leaves only the scope "
@@ -479,6 +501,22 @@ def main(argv=None) -> None:
     # that cost. Both now, tests first because they are free.
     code_review = (None if args.no_parent_review or complete is None else
                    ParentCodeReview(complete, contracts=spec.CONTRACTS))
+    if args.extract_skills and complete is None:
+        print("--extract-skills needs --model: distilling a contribution into reusable "
+              "knowledge is a judgement, and a rule-based one would be writing down "
+              "what it was handed")
+        return
+    skill_extractor = (None if not args.extract_skills else
+                       SkillExtractor(complete, contracts=spec.CONTRACTS,
+                                      frozen=spec.FROZEN))
+    if args.investigate and complete is None:
+        print("--investigate needs --model: reading code and saying what matters in it "
+              "is a judgement, and a rule-based reader would be describing what it was "
+              "handed")
+        return
+    investigator = (None if not args.investigate else
+                    Investigator(complete, contracts=spec.CONTRACTS,
+                                 frozen=spec.FROZEN))
     ledger = WorktreeLedger() if args.worktrees else None
     if ledger is not None and not git_worktrees_available():
         print("Worktrees: git worktree is unavailable here -- running without it")
@@ -501,6 +539,8 @@ def main(argv=None) -> None:
         readonly=spec.FROZEN,
         review=chain_reviews(None if args.no_parent_tests else spec.suite_review(tasks),
                              code_review),
+        skills=skill_extractor,
+        investigator=investigator,
         accountability=not args.no_accountability)
     judge = ParentJudge(log=log, enabled=not args.engine_gate)
     octopus = None if args.keyed_union else OctopusConflict()
@@ -614,6 +654,11 @@ def main(argv=None) -> None:
           f"context_updates={delegation.record_updates}")
     if ledger is not None:
         print(f"workspace       : {ledger.summary()}")
+    if skill_extractor is not None:
+        print(f"skills          : written={delegation.skills_written}  "
+              f"{skill_extractor.stats()}")
+    if investigator is not None:
+        print(f"investigation   : {investigator.stats()}")
     if sessions is not None:
         print(f"claude code     : {sessions.summary()}")
     if code_review is not None:
