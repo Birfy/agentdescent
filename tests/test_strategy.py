@@ -3,8 +3,8 @@
 from difflib import SequenceMatcher
 from typing import Optional
 
-from agentdescent.aggregator import diffs_contradict
-from agentdescent.evolution import (
+from agentdescent.merge.aggregator import diffs_contradict
+from agentdescent.loop.evolution import (
     AppendRules,
     KeyedRules,
     Strategy,
@@ -56,7 +56,7 @@ class SingleValueStrategy:
         return state.get("v", "(none)")
 
     def to_diff(self, state, proposal, author, base_version, target):
-        from agentdescent.evolvable import Diff
+        from agentdescent.core.evolvable import Diff
         if state.get("v") == proposal:
             return None
         return Diff(diff_id=f"{author}:{base_version}", target=target,

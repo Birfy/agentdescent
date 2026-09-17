@@ -42,7 +42,7 @@ import random
 import threading
 from typing import Callable, Dict, List, Optional
 
-from agentdescent.evolution import Task
+from agentdescent.loop.evolution import Task
 
 from examples._gsm8k_domain import feedback
 

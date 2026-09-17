@@ -10,7 +10,7 @@ import threading
 
 import pytest
 
-from agentdescent.agents import Usage, echo, metered, with_retries
+from agentdescent.actors.agents import Usage, echo, metered, with_retries
 
 
 def test_metered_counts_calls_and_time():
@@ -94,7 +94,7 @@ def test_adapters_retry_transient_failures_by_default():
     """
     import itertools
 
-    from agentdescent.agents import openai_compatible
+    from agentdescent.actors.agents import openai_compatible
 
     calls = itertools.count()
 
@@ -103,7 +103,7 @@ def test_adapters_retry_transient_failures_by_default():
             raise OSError("Remote end closed connection without response")
         raise AssertionError("reached the third attempt")   # proves it retried
 
-    import agentdescent.agents as agents
+    import agentdescent.actors.agents as agents
     real = agents.urllib.request.urlopen
     agents.urllib.request.urlopen = flaky_urlopen
     os.environ["OPENAI_API_KEY"] = "test-key"
@@ -116,9 +116,9 @@ def test_adapters_retry_transient_failures_by_default():
 
 
 def test_retries_can_be_switched_off():
-    from agentdescent.agents import openai_compatible
+    from agentdescent.actors.agents import openai_compatible
     import inspect
     assert inspect.signature(openai_compatible).parameters["retries"].default == 3
     assert inspect.signature(
-        __import__("agentdescent.agents", fromlist=["claude"]).claude
+        __import__("agentdescent.actors.agents", fromlist=["claude"]).claude
     ).parameters["retries"].default == 3

@@ -131,7 +131,7 @@ def ledger_dies_after(n: int, message: str = "index.lock exists") -> Callable:
     """
     import contextlib
 
-    from agentdescent import ledger as ledger_mod
+    from agentdescent.merge import ledger as ledger_mod
 
     @contextlib.contextmanager
     def patched():

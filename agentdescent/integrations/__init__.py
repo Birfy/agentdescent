@@ -1,6 +1,6 @@
 """Wire the skill and the MCP server into a host: ``agentdescent install <host>``.
 
-All the logic is in the package (:mod:`agentdescent.cli`, :mod:`agentdescent.mcp`);
+All the logic is in the package (:mod:`agentdescent.shell.cli`, :mod:`agentdescent.shell.mcp`);
 what a host needs from this module is *manifests* -- where its skills live,
 how it declares an MCP server, whether it reads hooks -- plus one shared
 ``SKILL.md`` that teaches the host model when and how to call the tools. Each
@@ -574,7 +574,7 @@ DSH_CLIENT_JS = """window.__ModuleLoader__.load({
 """
 
 #: Where the panel the client frame reads is served from.
-#: :func:`~agentdescent.runstore.serve_http` defaults to the same port.
+#: :func:`~agentdescent.shell.runstore.serve_http` defaults to the same port.
 DSH_PANEL_URL = "http://127.0.0.1:8787/"
 
 
@@ -728,7 +728,7 @@ def install(host: str, *, dry_run: bool = False, home: Optional[str] = None) -> 
     HOSTS[host](os.path.expanduser(home or "~"), w)
     # Imported here, not at module scope: `cli` reaches into this module from
     # `cmd_install`, and the reason for a missing SDK belongs in one place.
-    from ..cli import mcp_unavailable
+    from ..shell.cli import mcp_unavailable
 
     why = mcp_unavailable()
     if why:

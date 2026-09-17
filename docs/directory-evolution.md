@@ -8,8 +8,8 @@ agent** that reads those files off disk with its own tools.
 
 ```python
 from agentdescent import FileTree, evolve, load_tree, scorer, tree_reflector, tree_runner
-from agentdescent.agents import claude_code, openai_compatible
-from agentdescent.governance import SKILL_BLAST_RADIUS
+from agentdescent.actors.agents import claude_code, openai_compatible
+from agentdescent.merge.governance import SKILL_BLAST_RADIUS
 
 path = "~/.claude/skills/pdf-audit"
 tree = load_tree(path)                                   # the directory as artifact state
@@ -194,14 +194,14 @@ One call, three settings. What differs is governance and what guards the tree:
 | an agent folder | `HARNESS_BLAST_RADIUS` (`0.6`, L1) | `tree_runner(layout="claude_agent")`, `scorer(…)` | an agent definition is a harness: every merge additionally passes the oracle |
 | agent code | `HARNESS_BLAST_RADIUS` + test gate | `code_runner(entrypoint, test_cmd=…)`, `gated_reward(scorer(…))` | the tree is **executed**; a frozen test suite guards it |
 
-Both constants live in `agentdescent.governance`, next to the L1/L2 boundary
+Both constants live in `agentdescent.merge.governance`, next to the L1/L2 boundary
 they are chosen against.
 
 ### Evolving agent code
 
 ```python
 from agentdescent import code_runner, gated_reward
-from agentdescent.governance import HARNESS_BLAST_RADIUS
+from agentdescent.merge.governance import HARNESS_BLAST_RADIUS
 
 tree = load_tree("./my-agent")
 strategy = FileTree(tree, frozen=["tests/**", "conftest.py"], max_files_per_diff=2)
@@ -255,8 +255,8 @@ questions with different answers. Both are on the [Sandboxes](sandboxes.md) page
   trimmed environment is **not** a boundary; `ContainerProvider` is.
 
 ```python
-from agentdescent.sandbox import SandboxPool
-from agentdescent.sandbox_container import ContainerProvider
+from agentdescent.runtime.sandbox import SandboxPool
+from agentdescent.runtime.sandbox_container import ContainerProvider
 
 pool = SandboxPool(ContainerProvider("python:3.11-slim"), max_sandboxes=8)
 run = code_runner(["python", "main.py"], test_cmd=["pytest", "-q"],

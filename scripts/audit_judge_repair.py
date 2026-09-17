@@ -48,10 +48,10 @@ import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from agentdescent.agents import Usage, anthropic_compatible
+from agentdescent.actors.agents import Usage, anthropic_compatible
 from agentdescent.audit import AuditRecord, Purpose
 from agentdescent.audit.diagnose import evaluate_fix, residual_stats
-from agentdescent.evolution import Task
+from agentdescent.loop.evolution import Task
 
 from scripts.audit_workloads import read_verdict, resolved_records
 from scripts.audit_phase0 import (_JUDGE_TMPL, label_agreement,

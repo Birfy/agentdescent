@@ -9,7 +9,7 @@ intermolecular forces whose packing still leaves permanent, accessible voids.
 |---|---|
 | Kind | Molecular design search (a domain application, not an algorithm port) |
 | Governance layer | L2 (`blast_radius=0.2`) — scoring is a pure function, nothing executes |
-| Selection rule | `agentdescent.selection.FlatPuct`, with a **non-uniform `P(s,a)`** |
+| Selection rule | `agentdescent.schedule.selection.FlatPuct`, with a **non-uniform `P(s,a)`** |
 | Search engine | `evolve()` / `async_evolve()` with `aggregator_factory=` |
 | Dependencies | none — the SMILES parser, kekuliser and validity gate are in this folder |
 

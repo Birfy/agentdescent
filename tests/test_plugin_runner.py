@@ -15,11 +15,11 @@ import sys
 import pytest
 
 from agentdescent import EvolveSpec, SpecError, Task, compose, plugin_runner
-from agentdescent.agents import NESTED_MARKER, cli_agent, worker_env
-from agentdescent.runners import (
+from agentdescent.actors.agents import NESTED_MARKER, cli_agent, worker_env
+from agentdescent.actors.runners import (
     PLUGIN_CONTEXT, PLUGIN_FROZEN, PLUGIN_HOSTS, TEST_FAILURE_MARKER, PluginHost,
 )
-from agentdescent.treestrategy import FileTree
+from agentdescent.artifacts.treestrategy import FileTree
 
 # A host that takes the plugin path on its command line (Claude Code shape) and
 # proves it ran with HOME inside the workspace and the nested marker set.
@@ -65,7 +65,7 @@ def _plugin_dir(tmp_path, mode="forward"):
 
 
 def _tree(path):
-    from agentdescent.filetree import load_tree
+    from agentdescent.artifacts.filetree import load_tree
     return load_tree(path)
 
 
@@ -215,7 +215,7 @@ def test_a_plugin_tree_carries_its_code(tmp_path):
     `load_tree` *raises* on a file it matches but cannot represent and the
     default is shared with every other kind.
     """
-    from agentdescent.evolvespec import EvolveSpec, compose
+    from agentdescent.core.evolvespec import EvolveSpec, compose
 
     plugin = tmp_path / "p"
     (plugin / "lib").mkdir(parents=True)
@@ -242,7 +242,7 @@ def test_every_dsh_context_glob_is_one_the_loader_can_produce():
     """
     from dataclasses import replace as _r
 
-    from agentdescent.filetree import TreeSpec
+    from agentdescent.artifacts.filetree import TreeSpec
 
     plugin_spec = _r(TreeSpec(), include=tuple(TreeSpec().include) + (
         "**/*.js", "**/*.mjs", "**/*.cjs", "**/*.ts", "**/*.jsx", "**/*.tsx"))
@@ -277,8 +277,8 @@ def test_the_host_table_is_complete():
 
 
 def test_plugin_spec_composes_at_the_harness_layer_with_frozen_hooks(tmp_path, monkeypatch):
-    from agentdescent import runners
-    from agentdescent.governance import HARNESS_BLAST_RADIUS
+    from agentdescent.actors import runners
+    from agentdescent.merge.governance import HARNESS_BLAST_RADIUS
 
     monkeypatch.setitem(runners.PLUGIN_HOSTS, "stub", _stub_host(tmp_path))
     monkeypatch.setitem(runners.PLUGIN_FROZEN, "stub", ("hooks/**",))
@@ -317,7 +317,7 @@ def test_every_isolated_config_dir_is_created_not_only_pointed_at(tmp_path):
     isolation reads as working and is not. The set that is created was a second
     list beside the set that is pointed at, and OpenCode was added to one only.
     """
-    from agentdescent.agents import WORKER_CONFIG_DIRS, cli_agent, worker_env
+    from agentdescent.actors.agents import WORKER_CONFIG_DIRS, cli_agent, worker_env
 
     env = worker_env(str(tmp_path))
     for var in WORKER_CONFIG_DIRS:
@@ -343,7 +343,7 @@ def test_a_worker_does_not_inherit_the_users_opencode_config(monkeypatch, tmp_pa
     1.18, a config named by `OPENCODE_CONFIG` still supplied its MCP servers
     with `OPENCODE_CONFIG_DIR` pointed at an empty directory.
     """
-    from agentdescent.agents import worker_env
+    from agentdescent.actors.agents import worker_env
 
     monkeypatch.setenv("OPENCODE_CONFIG_DIR", "/home/me/.config/opencode")
     monkeypatch.setenv("OPENCODE_CONFIG", "/home/me/opencode.jsonc")

@@ -79,7 +79,7 @@ from scripts.audit_workloads import (BBH_SUBTASKS, CODE_TIMEOUT,  # noqa: E402,F
                                      refuse_to_overwrite,
                                      run_tests, task_index, tests_pass)
 from agentdescent.audit import Purpose, residual_bias  # noqa: E402
-from agentdescent.evolution import LLMAgent  # noqa: E402
+from agentdescent.loop.evolution import LLMAgent  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # The two scorers
@@ -306,7 +306,7 @@ def run(args) -> Dict:
     captured: Dict[str, object] = {}
 
     def _factory(ledger, verifier, audit, config, policy):
-        from agentdescent.aggregator import Aggregator
+        from agentdescent.merge.aggregator import Aggregator
         captured["verifier"] = verifier
         return Aggregator(ledger, verifier, audit, config, staleness_policy=policy)
 

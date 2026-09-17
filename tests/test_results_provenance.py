@@ -161,7 +161,7 @@ def test_the_run_records_which_staleness_policy_it_had(monkeypatch):
     """The one field that made those fifteen blocks unattributable: a block
     saying `full` cannot have come from `bench.candidate_methods`, and the run's
     own record used to be silent either way."""
-    from agentdescent.agents import Usage, metered
+    from agentdescent.actors.agents import Usage, metered
     from examples._measure import Recorder
 
     reply = json.dumps({"task_prompt": "State only the final number.",

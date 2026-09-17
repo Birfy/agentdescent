@@ -46,18 +46,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from agentdescent.agents import Usage, with_retries
-from agentdescent.dataloader import select_hard
-from agentdescent.evalcache import FileCache
-from agentdescent.evolution import Task, reflector
-from agentdescent.fusion import reflective_merge
-from agentdescent.meta import (MetaReward, Problem, auc, cached_completion,
+from agentdescent.actors.agents import Usage, with_retries
+from agentdescent.actors.dataloader import select_hard
+from agentdescent.evaluate.evalcache import FileCache
+from agentdescent.loop.evolution import Task, reflector
+from agentdescent.merge.fusion import reflective_merge
+from agentdescent.loop.meta import (MetaReward, Problem, auc, cached_completion,
                                evolve_problem, final_reward,
                                meta_evolve, meta_validate, policy_source, rollouts_to,
                                slot_reflector)
-from agentdescent.policies import Policies
-from agentdescent.rewards import scorer as make_scorer
-from agentdescent.strategies import SingleSlot
+from agentdescent.core.policies import Policies
+from agentdescent.actors.rewards import scorer as make_scorer
+from agentdescent.artifacts.strategies import SingleSlot
 
 from examples._common import add_standard_args, completion_for, confirm, worker_count
 from examples._measure import usage_dict
@@ -75,7 +75,7 @@ class Benchmark:
 
     name: str
     load: Callable[[int], List[dict]]
-    #: A name in :data:`agentdescent.rewards.SCORERS`.
+    #: A name in :data:`agentdescent.actors.rewards.SCORERS`.
     scorer: str
     template: str
     seed_instruction: str
@@ -99,7 +99,7 @@ DEFAULT_OUTPUT = Path("bench/results/metasearch-slots.json")
 
 
 def _gsm8k_rows(limit: int) -> List[dict]:
-    from agentdescent.dataloader import hf_rows
+    from agentdescent.actors.dataloader import hf_rows
 
     rows = hf_rows("openai/gsm8k", "test", config="main", limit=limit)
     return [{"question": r["question"], "answer": r["answer"]} for r in rows]
@@ -119,7 +119,7 @@ def _aime_rows(limit: int) -> List[dict]:
     symbolic comparator written here, which would put the grader in this
     repository's hands. An AIME answer is an integer in [0, 999].
     """
-    from agentdescent.dataloader import hf_rows
+    from agentdescent.actors.dataloader import hf_rows
 
     rows = hf_rows("gneubig/aime-1983-2024", "train", limit=limit)
     return [{"question": r["Question"], "answer": str(r["Answer"])} for r in rows]
@@ -130,7 +130,7 @@ def _hotpotqa_rows(limit: int) -> List[dict]:
     number and the scorer is `contains`. A different modality from the maths
     sets, which is the point of having it -- a sampler that only works on
     arithmetic is not a sampler."""
-    from agentdescent.dataloader import hf_rows
+    from agentdescent.actors.dataloader import hf_rows
 
     rows = hf_rows("hotpotqa/hotpot_qa", "validation", config="distractor", limit=limit)
     out = []
@@ -158,7 +158,7 @@ def _mgsm_zh_rows(limit: int) -> List[dict]:
     English: the task type is identical, so a sampler that transfers between
     GSM-Hard and this one has generalised over something real.
     """
-    from agentdescent.dataloader import fetch_text
+    from agentdescent.actors.dataloader import fetch_text
 
     text = fetch_text(
         "https://raw.githubusercontent.com/ShengranHu/ADAS/main/dataset/mgsm/mgsm_zh.tsv",
@@ -184,7 +184,7 @@ def _gpqa_rows(limit: int) -> List[dict]:
     import csv
     import io
 
-    from agentdescent.dataloader import fetch_text
+    from agentdescent.actors.dataloader import fetch_text
 
     raw = list(csv.DictReader(io.StringIO(fetch_text(
         "https://raw.githubusercontent.com/ShengranHu/ADAS/main/dataset/gpqa_diamond.csv",
@@ -209,7 +209,7 @@ def _triviaqa_rows(limit: int) -> List[dict]:
     one has the evidence in the prompt while the other does not. A sampler that
     behaves the same on both is not keying on retrieval.
     """
-    from agentdescent.dataloader import hf_rows
+    from agentdescent.actors.dataloader import hf_rows
 
     rows = hf_rows("mandarjoshi/trivia_qa", "validation", config="rc.nocontext",
                    limit=limit)
@@ -223,7 +223,7 @@ def _bbh_rows(limit: int) -> List[dict]:
     The prompt already carries its options and the gold is `(B)`-shaped, so
     `contains` grades it without a grader written here.
     """
-    from agentdescent.dataloader import hf_rows
+    from agentdescent.actors.dataloader import hf_rows
 
     rows = hf_rows("lukaemon/bbh", "test", config="date_understanding", limit=limit)
     return [{"question": r["input"], "answer": r["target"]} for r in rows]
@@ -606,7 +606,7 @@ def run_experiment(complete: Callable[[str], str], *, train: Dict[str, Problem],
     """Evolve the sampler on ``train``, then score seed vs evolved on everything.
 
     ``meta_reward`` is what an inner run is worth; ``None`` is
-    :func:`~agentdescent.meta.auc`. See :func:`meta_reward_for` for why the
+    :func:`~agentdescent.loop.meta.auc`. See :func:`meta_reward_for` for why the
     default is not always the right one here.
     """
     if set(train) & set(validate):

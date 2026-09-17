@@ -8,8 +8,8 @@ later prompt.
 
 import pytest
 
-from agentdescent.aggregator import AggregatorConfig
-from agentdescent.evolution import (
+from agentdescent.merge.aggregator import AggregatorConfig
+from agentdescent.loop.evolution import (
     AppendRules,
     ProposalContractError,
     SingleSlot,

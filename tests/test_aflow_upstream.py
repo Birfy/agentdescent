@@ -113,6 +113,6 @@ def test_the_regeneration_is_inside_the_declared_budget():
 
 
 def _task():
-    from agentdescent.evolution import Task
+    from agentdescent.loop.evolution import Task
     return Task(id="train:0", prompt="A pen costs 3 dollars. Two pens cost?",
                 meta={"answer": "6", "split": "train"})

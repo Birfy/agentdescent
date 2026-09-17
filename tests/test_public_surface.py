@@ -5,7 +5,7 @@ almost never used it -- 63 submodule imports against 3 top-level ones, with
 `evolve` never once shown as `from agentdescent import evolve`. So the top-level
 surface was untested by usage, and it showed: a documented helper missing from it
 (`tasks_from`, which the quickstart tells you to import from
-`agentdescent.evolution`), the whole `ContractError` hierarchy unreachable
+`agentdescent.loop.evolution`), the whole `ContractError` hierarchy unreachable
 although `evolve`'s docstring tells callers to distinguish it from a backend
 failure, and two classes exported that cannot be constructed from the public API.
 """
@@ -36,7 +36,7 @@ def test_all_is_sorted_free_of_duplicates():
     "AppendRules", "KeyedRules", "SingleSlot", "EvolutionResult",
 ])
 def test_the_things_a_first_run_needs_are_top_level(name):
-    """`tasks_from` was documented as `from agentdescent.evolution import ...`.
+    """`tasks_from` was documented as `from agentdescent.loop.evolution import ...`.
 
     Everything else the quickstart uses was already top-level, so importing the
     one helper from a submodule made the module layout look like public API.
@@ -72,7 +72,7 @@ def test_the_reference_domain_no_longer_shadows_the_engine_s_task():
     """`Task(id, prompt, meta)` vs `Task(text, label, keyword)` -- disjoint
     fields, no relationship, same name, and `orchestrator`/`worker` imported the
     other one."""
-    from agentdescent.domains.router import RouterTask
+    from agentdescent.reference.domains.router import RouterTask
 
     assert agentdescent.Task is not RouterTask
     assert {f for f in RouterTask.__dataclass_fields__} == {"text", "label", "keyword"}
@@ -81,7 +81,7 @@ def test_the_reference_domain_no_longer_shadows_the_engine_s_task():
 
 def test_the_old_router_task_name_still_works():
     """An alias, so nothing that imported it breaks."""
-    from agentdescent.domains.router import RouterTask, Task as LegacyTask
+    from agentdescent.reference.domains.router import RouterTask, Task as LegacyTask
 
     assert LegacyTask is RouterTask
 
@@ -112,7 +112,7 @@ def test_outcomes_print_the_way_every_doc_shows_them():
 def test_every_category_the_aggregator_emits_is_in_the_vocabulary():
     """The keys of `result.outcomes()` were bare literals written at six
     different return sites; to learn them you had to read the file."""
-    src = (ROOT / "agentdescent" / "aggregator.py").read_text()
+    src = (ROOT / "agentdescent" / "merge" / "aggregator.py").read_text()
     emitted = set(re.findall(r"MergeOutcome\.([A-Z_]+)", src))
     declared = {m.name for m in agentdescent.MergeOutcome}
     assert emitted <= declared, f"emitted but undeclared: {emitted - declared}"

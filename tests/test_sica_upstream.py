@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentdescent.selection import Archive, Candidate
+from agentdescent.schedule.selection import Archive, Candidate
 from examples.sica import sica_self_edit as sica
 
 
@@ -165,7 +165,7 @@ def test_a_merge_that_will_not_compile_is_refused_rather_than_committed():
     Returning `None` is already the "fall back to ranking" signal, so a refused
     merge costs exactly what the old behaviour cost and nothing more.
     """
-    from agentdescent.fusion import ReflectiveFusion
+    from agentdescent.merge.fusion import ReflectiveFusion
 
     broken = ReflectiveFusion(lambda prompt: "def agent_prompt(question: pass",
                               validate=sica._sica_source)
@@ -182,7 +182,7 @@ def test_a_merge_that_breaks_the_ast_gate_is_refused_too():
     """Not only syntax: the gate also refuses calls, assignments and f-strings,
     and a merge is exactly where two valid sources can produce a third that uses
     none of the constructs either of them did."""
-    from agentdescent.fusion import ReflectiveFusion
+    from agentdescent.merge.fusion import ReflectiveFusion
 
     calls_a_method = ('def agent_prompt(question):\n'
                       '    return "x" + question.strip()\n')

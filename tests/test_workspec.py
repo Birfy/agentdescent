@@ -15,8 +15,8 @@ import types
 import pytest
 
 from agentdescent import Task
-from agentdescent.policies import SandboxSpec
-from agentdescent.workspec import Ref, RefError, RolloutSpec, resolve_ref
+from agentdescent.core.policies import SandboxSpec
+from agentdescent.core.workspec import Ref, RefError, RolloutSpec, resolve_ref
 
 
 TASK = Task(id="t1", prompt="what is 6*7?", meta={"gold": "42"})
@@ -34,8 +34,8 @@ def test_the_things_a_caller_actually_passes_cannot_be_pickled():
     which is why "just use ProcessPoolExecutor" is not a smaller version of this
     change but a different one that does not work."""
     from agentdescent import rewards
-    from agentdescent.agents import echo
-    from agentdescent.evolution import reflector
+    from agentdescent.actors.agents import echo
+    from agentdescent.loop.evolution import reflector
 
     pickle.dumps(TASK)                       # data: fine
 
@@ -62,7 +62,7 @@ def test_a_resolved_factory_behaves_like_the_direct_call():
     from agentdescent import rewards
 
     direct = rewards.last_number()
-    viaref = Ref("agentdescent.rewards:last_number").resolve()
+    viaref = Ref("agentdescent.actors.rewards:last_number").resolve()
     for output in ("the answer is 42", "no digits here", "7"):
         assert viaref(TASK, output) == direct(TASK, output)
 
@@ -72,20 +72,20 @@ def test_config_is_the_factories_keyword_arguments():
 
     task = Task(id="t", prompt="p", meta={"expected": "42"})
     direct = rewards.last_number(gold_key="expected")
-    viaref = Ref("agentdescent.rewards:last_number",
+    viaref = Ref("agentdescent.actors.rewards:last_number",
                  {"gold_key": "expected"}).resolve()
     assert viaref(task, "42") == direct(task, "42") == 1.0
 
 
 def test_call_false_takes_the_attribute_itself():
-    ref = Ref("agentdescent.filetree:canonical", call=False)
+    ref = Ref("agentdescent.artifacts.filetree:canonical", call=False)
     assert ref.resolve()({"a.txt": "x"}).strip()
 
 
 def test_a_spec_survives_pickle_and_resolves_the_same_on_the_far_side():
     spec = RolloutSpec(rendered="rules", task=TASK,
-                       run=Ref("agentdescent.agents:echo"),
-                       reward=Ref("agentdescent.rewards:last_number"))
+                       run=Ref("agentdescent.actors.agents:echo"),
+                       reward=Ref("agentdescent.actors.rewards:last_number"))
     back = pickle.loads(pickle.dumps(spec))
     assert back.task.id == TASK.id and back.rendered == "rules"
     _, reward = back.resolve()
@@ -97,8 +97,8 @@ def test_a_lease_id_is_stable_across_the_wire():
     opinion -- a lease id that changed in transit would put two cards for one
     task into the pool."""
     spec = RolloutSpec(rendered="r", task=TASK,
-                       run=Ref("agentdescent.agents:echo"),
-                       reward=Ref("agentdescent.rewards:last_number"))
+                       run=Ref("agentdescent.actors.agents:echo"),
+                       reward=Ref("agentdescent.actors.rewards:last_number"))
     assert pickle.loads(pickle.dumps(spec)).lease_id == spec.lease_id
     assert spec.with_lease("fixed").lease_id == "fixed"
 
@@ -143,25 +143,25 @@ def test_the_allowlist_can_be_widened_deliberately():
 def test_config_rejects_anything_that_is_not_json():
     """An arbitrary object in `config` is a closure wearing a different hat."""
     with pytest.raises(RefError, match="only JSON"):
-        Ref("agentdescent.rewards:last_number", {"fn": lambda: None})
+        Ref("agentdescent.actors.rewards:last_number", {"fn": lambda: None})
     with pytest.raises(RefError, match="closure in disguise"):
-        Ref("agentdescent.rewards:last_number", {"items": [object()]})
-    Ref("agentdescent.rewards:last_number",
+        Ref("agentdescent.actors.rewards:last_number", {"items": [object()]})
+    Ref("agentdescent.actors.rewards:last_number",
         {"a": 1, "b": [1, 2], "c": {"d": None}})        # allowed
 
 
 def test_a_malformed_target_says_which_part_is_wrong():
     with pytest.raises(RefError, match="module:attribute"):
-        Ref("agentdescent.rewards.last_number")
+        Ref("agentdescent.actors.rewards.last_number")
 
 
 def test_failures_name_the_field_rather_than_raising_a_bare_import_error():
     with pytest.raises(RefError, match="has no attribute"):
-        Ref("agentdescent.rewards:no_such_scorer").resolve()
+        Ref("agentdescent.actors.rewards:no_such_scorer").resolve()
     with pytest.raises(RefError, match="cannot import"):
         Ref("agentdescent.nonexistent:thing").resolve()
     with pytest.raises(RefError, match="call=False"):
-        Ref("agentdescent.rewards:last_number", {"nope": 1}).resolve()
+        Ref("agentdescent.actors.rewards:last_number", {"nope": 1}).resolve()
 
 
 def test_a_spec_carries_no_secret_values():
@@ -169,8 +169,8 @@ def test_a_spec_carries_no_secret_values():
     would leak it into all four."""
     spec = RolloutSpec(
         rendered="rules", task=TASK,
-        run=Ref("agentdescent.agents:echo"),
-        reward=Ref("agentdescent.rewards:last_number"),
+        run=Ref("agentdescent.actors.agents:echo"),
+        reward=Ref("agentdescent.actors.rewards:last_number"),
         sandbox=SandboxSpec(env_allowlist=("ANTHROPIC_API_KEY", "PATH")))
     blob = pickle.dumps(spec)
     assert b"ANTHROPIC_API_KEY" in blob            # the name is the whole point
@@ -191,15 +191,15 @@ def test_references_nest_so_composed_actors_can_cross():
     Without nesting, every composition would need a bespoke factory whose only
     job is to flatten its arguments into JSON -- one per combination, written by
     whoever hit the boundary first."""
-    ref = Ref("agentdescent.evolution:reflector",
-              {"complete": Ref("agentdescent.agents:echo")})
+    ref = Ref("agentdescent.loop.evolution:reflector",
+              {"complete": Ref("agentdescent.actors.agents:echo")})
     back = pickle.loads(pickle.dumps(ref))
     assert callable(back.resolve())
 
 
 def test_a_nested_reference_is_checked_like_any_other():
     """The allowlist is not a property of the outermost call."""
-    ref = Ref("agentdescent.evolution:reflector", {"complete": Ref("os:getcwd")})
+    ref = Ref("agentdescent.loop.evolution:reflector", {"complete": Ref("os:getcwd")})
     with pytest.raises(RefError, match="outside the allowed prefixes"):
         ref.resolve()
 
@@ -208,7 +208,7 @@ def test_the_built_in_runners_are_already_addressable():
     """`code_runner` takes argv and strings, so it needs no adapter to cross --
     which is what makes the common directory-evolution case free."""
     import sys
-    ref = Ref("agentdescent.runners:code_runner",
+    ref = Ref("agentdescent.actors.runners:code_runner",
               {"entrypoint": [sys.executable, "main.py"]})
     pickle.loads(pickle.dumps(ref))
     assert callable(ref.resolve())

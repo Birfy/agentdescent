@@ -16,8 +16,8 @@ import time
 
 import pytest
 
-from agentdescent.evalcache import CacheProtocol, FileCache, MemoryCache, cache_key
-from agentdescent.metrics import Meter
+from agentdescent.evaluate.evalcache import CacheProtocol, FileCache, MemoryCache, cache_key
+from agentdescent.observe.metrics import Meter
 
 
 def test_both_backends_satisfy_the_protocol(tmp_path):
@@ -125,7 +125,7 @@ def test_the_key_is_what_the_artifact_renders_to_not_its_state():
     carries bookkeeping beside the artifact re-evaluate the whole held-out set
     because a label changed."""
     from agentdescent import AppendRules
-    from agentdescent.evolution import EvolvingArtifact
+    from agentdescent.loop.evolution import EvolvingArtifact
 
     strategy = AppendRules()
     a = EvolvingArtifact("x", {"r1": "always answer 4"}, 1, 0.2, None, strategy)

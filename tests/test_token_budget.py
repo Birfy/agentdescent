@@ -17,8 +17,8 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
-from agentdescent.agents import Usage
-from agentdescent.evolution import evolve, Task, RoundInfo, EvolutionResult
+from agentdescent.actors.agents import Usage
+from agentdescent.loop.evolution import evolve, Task, RoundInfo, EvolutionResult
 
 
 # --- helpers ---------------------------------------------------------------
@@ -193,7 +193,7 @@ def test_agent_usage_adopted_automatically():
     """When the agent carries a Usage and the caller did not pass usage=,
     the meter adopts the agent's — token budgets and the tokens= column work
     without the caller threading the same object through two parameters."""
-    from agentdescent.agents import Usage
+    from agentdescent.actors.agents import Usage
 
     agent = _CountingAgent(prompt=100, completion=200)
     with warnings.catch_warnings():
@@ -230,7 +230,7 @@ def test_agent_usage_adopted_budget_fires():
 def test_explicit_usage_wins_over_agent_usage():
     """An explicit usage= takes precedence over the agent's — the caller who
     passes both has said which counter is the truth."""
-    from agentdescent.agents import Usage
+    from agentdescent.actors.agents import Usage
 
     agent = _CountingAgent(prompt=100, completion=200)
     mine = Usage()
@@ -305,7 +305,7 @@ def test_async_governor_fusion_degrades():
     checking that the run still completes with the right stop reason and
     the tournament was available at least initially (fusion_trials is populated
     by DefaultFusion and accessible on the result)."""
-    from agentdescent.agents import Usage
+    from agentdescent.actors.agents import Usage
     agent = _CountingAgent(prompt=100, completion=200)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")

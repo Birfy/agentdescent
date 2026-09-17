@@ -16,10 +16,10 @@ to run.
 
 What is shared with the rest of the repository, rather than written again here:
 
-* :class:`agentdescent.selection.FlatPuct` is the selection rule, including the
+* :class:`agentdescent.schedule.selection.FlatPuct` is the selection rule, including the
   ``prior_exponent`` that turns ``P(s,a)`` from ERA's uniform ``1/N`` into a
   real prior;
-* :func:`agentdescent.evolution.evolve` (or ``async_evolve``) supplies the
+* :func:`agentdescent.loop.evolution.evolve` (or ``async_evolve``) supplies the
   workers, the ledger, evidence cards, staleness handling and the merge loop;
 * the aggregator is replaced through ``aggregator_factory=``, which is the seam
   that lets the tree be the optimiser.
@@ -65,19 +65,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from agentdescent.agents import Completion, Usage
-from agentdescent.aggregator import (
+from agentdescent.actors.agents import Completion, Usage
+from agentdescent.merge.aggregator import (
     AggregatorConfig,
     AggregatorProtocol,
     MergeOutcome,
     MergeReport,
 )
-from agentdescent.async_evolve import async_evolve
-from agentdescent.evolution import EvolutionResult, Task, evolve
-from agentdescent.evolvable import Diff, EvidenceCard, vv_staleness
-from agentdescent.ledger import CASConflict, Ledger
-from agentdescent.selection import Candidate, FlatPuct, SelectionContext
-from agentdescent.staleness import StaleAction, get_policy
+from agentdescent.loop.async_evolve import async_evolve
+from agentdescent.loop.evolution import EvolutionResult, Task, evolve
+from agentdescent.core.evolvable import Diff, EvidenceCard, vv_staleness
+from agentdescent.merge.ledger import CASConflict, Ledger
+from agentdescent.schedule.selection import Candidate, FlatPuct, SelectionContext
+from agentdescent.merge.staleness import StaleAction, get_policy
 
 from examples._common import (
     add_standard_args,

@@ -16,7 +16,7 @@ from agentdescent.audit import (AuditedReward, AuditRecord, AuditStore,
                                 DeferredOracle, GoldAnswer, NullOracle, Purpose,
                                 RenderTap, resolve_from_mapping, summarise,
                                 verifier_fingerprint)
-from agentdescent.evolution import Task, evolve
+from agentdescent.loop.evolution import Task, evolve
 
 
 # -- fixtures ----------------------------------------------------------------

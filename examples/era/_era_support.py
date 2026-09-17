@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
-from agentdescent.dataloader import cache_path, fetch_text
+from agentdescent.actors.dataloader import cache_path, fetch_text
 
 
 UPSTREAM_COMMIT = "b836730b5c000526af95116b1d0e2c60c8cf0a10"

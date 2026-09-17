@@ -1,0 +1,214 @@
+"""Ready-made scorers for the common cases.
+
+A `reward` is `(task, output) -> float in [0, 1]`, and writing one is easy --
+but almost everyone writes the *same* three, and gets the same details wrong:
+thousands separators, a trailing period, a model that answers in a sentence, an
+LLM that says "The answer is 42." when the gold is "42".
+
+Every scorer here reads the expected answer from ``task.meta`` (``gold_key``,
+default ``"gold"``), which is also where the reflector looks -- see
+:func:`agentdescent.loop.evolution.reflector`.
+
+    from agentdescent.actors.rewards import last_number
+    evolve(tasks, last_number(), agent=agent)
+
+Bring your own for anything else; these are a convenience, not a contract.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import shlex
+import subprocess
+from typing import Callable, Optional, Sequence, Union
+
+from ..core.evolvable import ContractError
+
+__all__ = ["exact_match", "contains", "last_number", "numeric_close",
+           "SCORERS", "scorer", "command_scorer", "GraderError"]
+
+_NUMBER = re.compile(r"-?\d[\d,]*\.?\d*")
+
+
+def _gold(task, gold_key: str) -> str:
+    meta = getattr(task, "meta", None) or {}
+    if gold_key not in meta:
+        raise KeyError(
+            f"task {getattr(task, 'id', '?')!r} has no meta[{gold_key!r}]. The "
+            f"built-in scorers read the expected answer from Task.meta -- pass "
+            f"gold_key= if yours is under a different name.")
+    return str(meta[gold_key])
+
+
+def _normalise(text: str) -> str:
+    """Casefold, collapse whitespace, drop surrounding punctuation."""
+    return re.sub(r"\s+", " ", (text or "").strip().strip(".!?\"' ")).casefold()
+
+
+def exact_match(gold_key: str = "gold", *, normalise: bool = True) -> Callable:
+    """1.0 when the output equals the gold answer.
+
+    ``normalise`` casefolds, collapses whitespace and strips surrounding
+    punctuation -- without it a model that ends its answer with a period scores
+    zero, which looks like a reasoning failure and is not one.
+    """
+    def reward(task, output) -> float:
+        want, got = _gold(task, gold_key), output or ""
+        if normalise:
+            want, got = _normalise(want), _normalise(got)
+        return 1.0 if got == want else 0.0
+    return reward
+
+
+def contains(gold_key: str = "gold", *, normalise: bool = True) -> Callable:
+    """1.0 when the gold answer appears anywhere in the output.
+
+    The forgiving option for models that answer in a sentence. It is also the
+    easiest to fool -- a gold of ``"2"`` is inside ``"12"`` -- so prefer
+    :func:`last_number` for numeric answers.
+    """
+    def reward(task, output) -> float:
+        want, got = _gold(task, gold_key), output or ""
+        if normalise:
+            want, got = _normalise(want), _normalise(got)
+        return 1.0 if want and want in got else 0.0
+    return reward
+
+
+def last_number(gold_key: str = "gold", *, tolerance: float = 0.0) -> Callable:
+    """1.0 when the **last** number in the output matches the gold number.
+
+    The right default for arithmetic word problems (GSM8K and friends): models
+    show their working, so the answer is the last number, not the first.
+
+    The **gold is read the same way**, which matters more than it sounds: a
+    dataset's answer column is often the whole worked solution ending in the
+    figure (GSM8K's ends ``"#### 72"``). Parsing that column as a bare number
+    fails, and the failure is silent -- every item scores 0 and it reads as a
+    hopeless model rather than a scorer mismatch. Taking the last number from both
+    sides handles ``"72"``, ``"#### 72"`` and ``"The answer is 72."`` alike.
+
+    Handles thousands separators and a leading currency symbol. ``tolerance``
+    compares with a relative tolerance -- use it when the gold is rounded.
+    """
+    def reward(task, output) -> float:
+        want = _last_number_in(_gold(task, gold_key))
+        if want is None:
+            raise ValueError(
+                f"task {getattr(task, 'id', '?')!r}: meta[{gold_key!r}] contains no "
+                f"number, so last_number() can never match it. Use exact_match() or "
+                f"contains(), or point gold_key= at the right column.")
+        found = _NUMBER.findall(output or "")
+        got = _to_float(found[-1]) if found else None
+        if got is None:
+            return 0.0
+        if tolerance <= 0:
+            return 1.0 if got == want else 0.0
+        return 1.0 if abs(got - want) <= tolerance * max(1.0, abs(want)) else 0.0
+    return reward
+
+
+def numeric_close(gold_key: str = "gold", *, tolerance: float = 0.01) -> Callable:
+    """:func:`last_number` with a relative tolerance -- for rounded answers."""
+    return last_number(gold_key, tolerance=tolerance)
+
+
+def _last_number_in(text: str) -> Optional[float]:
+    """The last number in a string, or None if it holds none."""
+    found = _NUMBER.findall(str(text or ""))
+    return _to_float(found[-1]) if found else None
+
+
+def _to_float(text: str) -> Optional[float]:
+    try:
+        return float(str(text).replace(",", "").lstrip("$£€").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+#: Named scorers accepted by :func:`scorer`. Pass a callable for anything else.
+SCORERS = {
+    "last_number": last_number,
+    "exact": exact_match,
+    "contains": contains,
+    "numeric_close": numeric_close,
+}
+
+
+def scorer(score) -> Callable:
+    """Resolve ``score`` -- a name from :data:`SCORERS` or a ``(task, output) ->
+    float`` callable -- into the reward ``evolve()`` takes.
+
+    The one line of glue every dataset-driven run used to write for itself;
+    the names are the common cases, the callable is everything else."""
+    if callable(score):
+        return score
+    if score in SCORERS:
+        return SCORERS[score]()
+    raise ValueError(
+        f"unknown score={score!r}; use one of {sorted(SCORERS)} or pass a "
+        "callable (task, output) -> float")
+
+
+class GraderError(ContractError, RuntimeError):
+    """A :func:`command_scorer` command failed or printed something that is not a score.
+
+    A grader is the caller's own program, so a failure is a caller mistake in the
+    sense of :class:`~agentdescent.core.evolvable.ContractError`: the run stops with
+    the command's stderr rather than teaching the optimizer that every answer
+    scores zero.
+    """
+
+
+def command_scorer(cmd: Union[str, Sequence[str]], *, timeout: float = 60.0,
+                   cwd: Optional[str] = None) -> Callable:
+    """Grade with **any program**: the task as JSON on stdin, a float on stdout.
+
+    This is the scorer for everything the named ones cannot express -- a linter,
+    a compiler, a diff against a golden file, a web check -- and it needs no
+    Python: any language that can read stdin and print a number will do. The
+    contract, in full:
+
+    * stdin receives one JSON object: ``{"id", "prompt", "meta", "output"}``;
+    * the answer is also in the environment as ``ANSWER``, for one-line graders
+      (``sh -c 'test "$ANSWER" = 42 && echo 1 || echo 0'``);
+    * stdout must be a single number in ``[0, 1]`` (the last number printed is
+      read, so a grader may log before it scores);
+    * a non-zero exit, a timeout, or no number raises :class:`GraderError`.
+
+    ``cmd`` is argv, or a string split with :mod:`shlex`. It runs with the
+    caller's environment: a grader is the caller's own program, not
+    model-authored code, so unlike :func:`~agentdescent.actors.runners.code_runner` it
+    is not put behind a trimmed environment.
+    """
+    argv = shlex.split(cmd) if isinstance(cmd, str) else list(cmd)
+    if not argv:
+        raise ValueError("command_scorer needs a non-empty command")
+
+    def reward(task, output) -> float:
+        payload = json.dumps({"id": task.id, "prompt": task.prompt,
+                              "meta": task.meta or {}, "output": output},
+                             ensure_ascii=False)
+        env = {**os.environ, "ANSWER": "" if output is None else str(output)}
+        try:
+            proc = subprocess.run(argv, input=payload, capture_output=True, text=True,
+                                  timeout=timeout, cwd=cwd, env=env)
+        except FileNotFoundError:
+            raise GraderError(f"grader {argv[0]!r} is not installed or not on PATH") from None
+        except subprocess.TimeoutExpired:
+            raise GraderError(f"grader {argv[0]!r} exceeded timeout={timeout}s on task {task.id!r}") from None
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout or "").strip()[:800] or "no output"
+            raise GraderError(f"grader exited {proc.returncode} on task {task.id!r}: {detail}")
+        numbers = _NUMBER.findall(proc.stdout or "")
+        if not numbers:
+            raise GraderError(
+                f"grader printed no number on task {task.id!r}: {proc.stdout.strip()[:200]!r}")
+        value = _to_float(numbers[-1])
+        if value is None:
+            raise GraderError(f"grader printed {numbers[-1]!r}, not a number")
+        return min(1.0, max(0.0, value))
+
+    return reward

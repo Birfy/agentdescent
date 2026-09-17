@@ -6,6 +6,55 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING: the package is grouped into subpackages.** The forty-eight
+  top-level modules were a flat directory, and `docs/modules.md` carried the
+  grouping that made them navigable -- as prose, which nothing enforced. The
+  grouping is now the directory layout:
+
+  | | |
+  |---|---|
+  | `agentdescent.core` | `evolvable` `policies` `workspec` `evolvespec` |
+  | `agentdescent.loop` | `evolution` `async_evolve` `meta` `pipeline` |
+  | `agentdescent.artifacts` | `strategies` `treestrategy` `filetree` |
+  | `agentdescent.actors` | `agents` `backends` `runners` `dataloader` `rewards` |
+  | `agentdescent.schedule` | `parallel` `sampling` `selection` `population` `scheduler` |
+  | `agentdescent.runtime` | `executor` `supervisor` `sandbox` `sandbox_shared` `sandbox_container` |
+  | `agentdescent.merge` | `aggregator` `defaults` `fusion` `advantage` `staleness` `stats` `ledger` `governance` |
+  | `agentdescent.evaluate` | `verifier` `evaluator` `evalcache` |
+  | `agentdescent.observe` | `metrics` `budget` `checkpoint` `baselines` |
+  | `agentdescent.shell` | `cli` `mcp` `runstore` `host_sampling` `demo` |
+  | `agentdescent.reference` | `orchestrator` `async_runtime` `domains/` |
+
+  `agentdescent.audit` and `agentdescent.integrations` are unchanged.
+
+  **The top-level API is untouched.** Everything `agentdescent/__init__.py`
+  exports -- `evolve`, `Task`, `Policies`, `AppendRules`, the lot -- imports
+  from exactly where it did, and `agentdescent.dataloader.hf_rows(...)`,
+  `agentdescent.rewards.*` and `agentdescent.baselines.*` still resolve. A
+  caller who only ever wrote `from agentdescent import ...` has nothing to
+  change.
+
+  **What breaks is a submodule import path.** `from agentdescent.aggregator
+  import Aggregator` is now `from agentdescent.merge.aggregator import
+  Aggregator`. No shim modules are left at the old paths: a shim that silently
+  forwards is the "installed but never runs" failure this package refuses
+  everywhere else, and one that warns is a second surface to keep in step.
+
+  **Saved specs carry module paths.** `EvolveSpec` resolves actors and policies
+  by `module:attribute`, and a run directory under `~/.agentdescent/runs/`
+  holds a `spec.json` written with the old paths -- so `agentdescent resume` on
+  a run created before this change fails at Ref resolution. `SHORT_REFS` (the
+  `"claude"`, `"Beam"`, `"RoundRobin"` short names) is updated, so a spec
+  written with short names resolves either way; a spec that spelled a module
+  out in full needs its prefix edited. New runs are unaffected.
+
+  Nothing about the behaviour of a run changed: the same 2 990 tests pass, and
+  `tests/test_policy_contract.py` now locates a module by name rather than by
+  directory, so the contract it derives from the call sites survives this
+  reorganization and the next one.
+
 ### Added
 
 - **`evolve(max_tokens=...)`: a budget in the unit that maps to the bill.**

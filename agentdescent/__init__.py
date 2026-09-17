@@ -12,7 +12,7 @@ against the code that came out of it, so read ``docs/concepts.md`` for the *why*
 and ``docs/architecture.md`` for how the sections map onto the modules.
 """
 
-from .evolvable import (
+from .core.evolvable import (
     Contract,
     ContractError,
     stable_hash,
@@ -23,18 +23,19 @@ from .evolvable import (
     vv_dominates,
     vv_staleness,
 )
-from .ledger import (
+from .merge.ledger import (
     Ledger, Snapshot, CASConflict, ContractRejected, GitError, LedgerFailure,
 )
-from .verifier import ThreeLayerVerifier, VerifierBudget
+from .evaluate.verifier import ThreeLayerVerifier, VerifierBudget
 from .audit import (
     AuditedReward, AuditRecord, AuditStore, DeferredOracle, GoldAnswer,
     NullOracle, Purpose, RenderTap, resolve_from_mapping, verifier_fingerprint,
     residual_bias,
 )
-from . import backends, dataloader          # submodules: agentdescent.dataloader.hf_rows(...)
-from .dataloader import Dataset, split_dataset
-from .advantage import (
+from .actors import backends
+from .actors import dataloader    # submodules: agentdescent.actors.dataloader.hf_rows(...)
+from .actors.dataloader import Dataset, split_dataset
+from .merge.advantage import (
     AdaptiveTrustRegion,
     AdvantageAcceptance,
     AdvantageConflict,
@@ -43,10 +44,10 @@ from .advantage import (
     TrustRegion,
     state_distance,
 )
-from .defaults import DefaultConflict, DefaultFusion
-from .fusion import KeepContradictions, ReflectiveFusion, reflective_merge
-from .sampling import DifficultyWeighted, RoundRobin, TaskSampler
-from .selection import (
+from .merge.defaults import DefaultConflict, DefaultFusion
+from .merge.fusion import KeepContradictions, ReflectiveFusion, reflective_merge
+from .schedule.sampling import DifficultyWeighted, RoundRobin, TaskSampler
+from .schedule.selection import (
     Archive,
     Beam,
     Candidate,
@@ -59,7 +60,7 @@ from .selection import (
     SingleHead,
     pareto_front,
 )
-from .scheduler import (
+from .schedule.scheduler import (
     AuditScheduler,
     DurationEstimator,
     ResumeQueue,
@@ -68,11 +69,11 @@ from .scheduler import (
     fifo_makespan,
     lpt_schedule,
 )
-from .governance import (
+from .merge.governance import (
     FAST_MAX, FROZEN_IDS, Layer, classify, assert_mutable, GovernanceError,
     L1SerialGate,
 )
-from .aggregator import (
+from .merge.aggregator import (
     Aggregator,
     AggregatorContractError,
     MergeOutcome,
@@ -85,8 +86,8 @@ from .aggregator import (
     MergeReport,
     EvidenceBuffer,
 )
-from .population import PopulationAggregator, population_factory
-from .staleness import (
+from .schedule.population import PopulationAggregator, population_factory
+from .merge.staleness import (
     StaleAction,
     StalenessPolicy,
     FullStaleness,
@@ -94,7 +95,7 @@ from .staleness import (
     ReflectiveStaleness,
     get_policy,
 )
-from .policies import (
+from .core.policies import (
     AcceptDecision,
     AcceptancePolicy,
     ConflictPolicy,
@@ -112,8 +113,8 @@ from .policies import (
     SandboxSpec,
     VerifierProtocol,
 )
-from .evalcache import CacheProtocol, FileCache, MemoryCache
-from .checkpoint import (
+from .evaluate.evalcache import CacheProtocol, FileCache, MemoryCache
+from .observe.checkpoint import (
     save_checkpoint,
     load_checkpoint,
     restore_checkpoint,
@@ -121,21 +122,21 @@ from .checkpoint import (
     clear_checkpoints,
     list_checkpoints,
 )
-from .budget import BudgetGovernor, CallBudget, budgeted_completion
-from .executor import Executor, Result, ThreadExecutor
-from .sandbox import LocalWorkspaceSandbox, SandboxPool, WorkspaceProvider
-from .sandbox_shared import SharedSandboxPool
-from .supervisor import ProcessExecutor
-from .workspec import Ref, RefError, RolloutSpec
-from . import rewards                      # agentdescent.rewards.last_number(...)
-from .rewards import SCORERS, scorer, command_scorer, GraderError
-from .meta import (
+from .observe.budget import BudgetGovernor, CallBudget, budgeted_completion
+from .runtime.executor import Executor, Result, ThreadExecutor
+from .runtime.sandbox import LocalWorkspaceSandbox, SandboxPool, WorkspaceProvider
+from .runtime.sandbox_shared import SharedSandboxPool
+from .runtime.supervisor import ProcessExecutor
+from .core.workspec import Ref, RefError, RolloutSpec
+from .actors import rewards                # agentdescent.actors.rewards.last_number(...)
+from .actors.rewards import SCORERS, scorer, command_scorer, GraderError
+from .loop.meta import (
     SLOTS, SLOT_PROTOCOLS, MetaOutcome, ParamSlot, PrioritySelection, PRIORITY_SEED,
     SlotSpec, SourceSlot, auc, compile_policy_source, compile_priority, evolve_problem,
     final_reward, meta_evolve, meta_validate, policy_source, priority_selection,
     rollouts_to, seed_source, slot_reflector, transfer_ratio,
 )
-from .filetree import (
+from .artifacts.filetree import (
     TreeError,
     TreeSpec,
     canonical,
@@ -144,13 +145,13 @@ from .filetree import (
     parse_tree,
     tree_summary,
 )
-from .treestrategy import EDIT_PROTOCOL, FileTree, parse_edits, tree_reflector
-from .runners import (
+from .artifacts.treestrategy import EDIT_PROTOCOL, FileTree, parse_edits, tree_reflector
+from .actors.runners import (
     LAYOUTS, PLUGIN_FROZEN, PLUGIN_HOSTS, TEST_FAILURE_MARKER, PluginHost, code_runner,
     gated_reward, plugin_runner, tree_runner,
 )
-from .orchestrator import AgentDescent, RoundStat, run_fork_baseline
-from .agents import (
+from .reference.orchestrator import AgentDescent, RoundStat, run_fork_baseline
+from .actors.agents import (
     AgentError,
     Completion,
     Usage,
@@ -167,8 +168,8 @@ from .agents import (
     anthropic_compatible,
     with_retries,
 )
-from .agents import WorkspaceAgent, worker_env
-from .evolution import (
+from .actors.agents import WorkspaceAgent, worker_env
+from .loop.evolution import (
     Agent,
     LLMAgent,
     reflector,
@@ -189,11 +190,11 @@ from .evolution import (
     claude_agent,
     rule_id,
 )
-from .async_evolve import async_evolve
-from .evolvespec import EvolveSpec, SpecError, compose, load_spec, run_spec
-from .async_runtime import AsyncAgentDescent, AsyncConfig, AsyncStats
-from . import baselines                     # agentdescent.baselines.merge_of_n(...)
-from .parallel import (
+from .loop.async_evolve import async_evolve
+from .core.evolvespec import EvolveSpec, SpecError, compose, load_spec, run_spec
+from .reference.async_runtime import AsyncAgentDescent, AsyncConfig, AsyncStats
+from .observe import baselines              # agentdescent.observe.baselines.merge_of_n(...)
+from .schedule.parallel import (
     ParallelMode,
     ParallelStrategy,
     WorkUnit,

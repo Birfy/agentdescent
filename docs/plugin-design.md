@@ -28,7 +28,7 @@ shells:
                  └────────────────────┬─────────────────────────┘
                                       │ EvolveSpec (JSON)  +  Run store (~/.agentdescent/runs)
                  ┌────────────────────┴─────────────────────────┐
-                 │  agentdescent.cli        agentdescent.mcp     │   <- NEW, in this package
+                 │  agentdescent.shell.cli        agentdescent.shell.mcp     │   <- NEW, in this package
                  │  `agentdescent evolve …` `agentdescent mcp`   │
                  └───┬──────────────┬──────────────┬────────────┘
                      │              │              │
@@ -59,7 +59,7 @@ obvious alternative.
 | The engine's callables are closures and cannot be pickled (see `workspec.py`). | The spec uses `Ref` semantics: named scorers (`rewards.SCORERS`), named agents (`claude_code`, `codex`, `dsh`, `openai_compatible`), named policies (`Beam`, `AdvantageAcceptance`, ...), dotted paths for user code. `RolloutSpec`/`Ref` exist for exactly this; the spec reuses them rather than inventing a second scheme. |
 | Merge-side policies now take the verifier and thresholds through `bind`/`configure` when installed, and wrappers default their `inner`. | Policies are **JSON-configurable with no glue**: `{"ref": "AdvantageAcceptance", "strength": 1.0}` resolves to an object the aggregator installs itself. Without the hooks the spec would have had to construct verifiers it cannot reach. The composition rules (`Policies.require_supported`, the one-pair rule, factory exclusivity) are enforced by the engine, so the spec validates by building the `Policies` bundle and letting the engine refuse. |
 | `write_to` overwrites the user's real skill directory. | The plugin **never** auto-applies. A run leaves its result in the run store; `apply` is a separate, explicit tool that backs up first (`write_to(backup=True)`), and `write_to(dry_run=True)` gives the plan to show before asking. |
-| The core depends on numpy and nothing else. | `agentdescent.audit.ppi` needs it for the calibration estimator; the rest of the package, and the CLI, use only the standard library. `agentdescent.mcp` imports the MCP SDK lazily and is installed via an extra: `pip install "agentdescent[mcp]"`. |
+| The core depends on numpy and nothing else. | `agentdescent.audit.ppi` needs it for the calibration estimator; the rest of the package, and the CLI, use only the standard library. `agentdescent.shell.mcp` imports the MCP SDK lazily and is installed via an extra: `pip install "agentdescent[mcp]"`. |
 | Every host has its own plugin manifest format, and they change often (DSH says so explicitly). | Put **all logic** in the package; keep per-host directories to manifests plus a shared `SKILL.md`. A new host is a new manifest, not new code. |
 
 ## 2. The EvolveSpec
@@ -145,9 +145,9 @@ requires `host` and is the subject of section 8.
   web check are all one command. `cmd` graders run through the same
   `_child_env` trimming as candidate code.
 * **`agent` / `reflect` / `policies.*` are `Ref`s** resolved through the
-  allowlist in `workspec.py`. Adding `agentdescent.agents`,
-  `agentdescent.selection`, `agentdescent.sampling`, `agentdescent.advantage`,
-  `agentdescent.fusion` and `agentdescent.staleness` to the default allowed
+  allowlist in `workspec.py`. Adding `agentdescent.actors.agents`,
+  `agentdescent.schedule.selection`, `agentdescent.schedule.sampling`, `agentdescent.merge.advantage`,
+  `agentdescent.merge.fusion` and `agentdescent.merge.staleness` to the default allowed
   prefixes is the only change the resolver needs. `"staleness": "guarded"` is
   sugar for `get_policy("guarded")`. `reflective_merge` is exposed as a single
   ref that fills both `conflict` and `fusion`, so the half-installed pair the
@@ -162,7 +162,7 @@ requires `host` and is the subject of section 8.
   reproducible from the CLI and can be checked into the repo alongside the skill
   it evolves. "Evolve this again with more data" is then a one-line edit.
 
-Implementation: `agentdescent/evolvespec.py` beside `workspec.py`, with
+Implementation: `agentdescent/core/evolvespec.py` beside `workspec.py`, with
 `EvolveSpec.from_dict / to_dict / validate()` and
 `run_spec(spec, *, run_dir, on_round) -> EvolutionResult`. `validate()` builds
 the `Policies` bundle and resolves every `Ref` without running anything, so the
@@ -184,7 +184,7 @@ MCP both call it.
     log.txt            stderr of the run
 ```
 
-* The run is a **detached subprocess**: `python -m agentdescent.cli run
+* The run is a **detached subprocess**: `python -m agentdescent.shell.cli run
   --run-dir <dir>`. Detaching (not a thread) is what survives the MCP server
   being restarted by the host, which Claude Code does on `/mcp` reconnects and
   DSH does on profile reboot. `status.json` is written atomically
@@ -205,7 +205,7 @@ MCP both call it.
 
 ## 4. The CLI (`agentdescent`)
 
-A console script (`[project.scripts] agentdescent = "agentdescent.cli:main"`)
+A console script (`[project.scripts] agentdescent = "agentdescent.shell.cli:main"`)
 that exposes exactly the verbs the MCP server exposes, so a user can do by hand
 anything the agent can do, and the SKILL.md can fall back to shell when a host
 has no MCP.
@@ -230,7 +230,7 @@ worker agent is not on PATH" or "no API key for the reflector", and the host
 agent should run this first and tell the user what is missing rather than start
 a run that fails on round one.
 
-## 5. The MCP server (`agentdescent.mcp`)
+## 5. The MCP server (`agentdescent.shell.mcp`)
 
 Stdio server, launched as `agentdescent mcp`. Tools mirror the CLI one-to-one;
 descriptions are written for the *calling model*, since that is who reads them.
@@ -634,10 +634,10 @@ runnable without a key).
 
 | Step | Lands in | Tests |
 |---|---|---|
-| 1. `evolvespec.py`: schema, `validate()` (refs + `Policies` bundle), `run_spec` composing the four `kind` rows | `agentdescent/evolvespec.py`; allowlist prefixes in `workspec.py` | every `kind` produces the same `evolve()` kwargs as the matching quickstart block; `policies` round-trips through `install_policy`; bad pairs are refused at `validate()` |
-| 2. Run store + detached runner + `status.json` from `on_round` | `agentdescent/runstore.py`, `cli.py` | start with `echo()`, poll, cancel, resume on the same ledger |
+| 1. `evolvespec.py`: schema, `validate()` (refs + `Policies` bundle), `run_spec` composing the four `kind` rows | `agentdescent/core/evolvespec.py`; allowlist prefixes in `workspec.py` | every `kind` produces the same `evolve()` kwargs as the matching quickstart block; `policies` round-trips through `install_policy`; bad pairs are refused at `validate()` |
+| 2. Run store + detached runner + `status.json` from `on_round` | `agentdescent/shell/runstore.py`, `cli.py` | start with `echo()`, poll, cancel, resume on the same ledger |
 | 3. CLI verbs | `cli.py`, `[project.scripts]` | `subprocess` tests against the offline domain |
-| 4. MCP server (`[mcp]` extra) mirroring the CLI | `agentdescent/mcp.py` | tool schema snapshot; plan → start → status → show with `echo()` |
+| 4. MCP server (`[mcp]` extra) mirroring the CLI | `agentdescent/shell/mcp.py` | tool schema snapshot; plan → start → status → show with `echo()` |
 | 5. Shared `SKILL.md` + `install dsh` (tier A) + `integrations/claude-code` plugin + marketplace.json | `integrations/`, `agentdescent/integrations/dsh.py` | patch YAML round-trips; skill lands in a discovery root; plugin manifest validates |
 | 6. `install codex` (+ others); `agents.dsh()` + `dsh_skill`/`agents_skill` layouts; structured-output worker adapters | `agentdescent/integrations/`, `agents.py`, `runners.py` | parse fixtures of `claude -p --output-format json` / `codex exec --json`; `tree_runner(layout="dsh_skill")` materialises under `.dsh/skills/` |
 | 7. `plugin` kind: `plugin_runner` host table, `PLUGIN_FROZEN`, container default, `AGENTDESCENT_NESTED` guard, pnpm store/build cache | `runners.py`, `evolvespec.py`, `mcp.py` | offline: a stub host CLI that echoes its `--plugin-dir` / `$DSH_HOME`; frozen hooks survive a proposal that edits them; nested `start` returns a stub |

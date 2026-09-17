@@ -85,8 +85,8 @@ from agentdescent.audit.coverage import (coverage_of,  # noqa: E402
                                          unseen_mass_overall)
 from agentdescent.audit.diagnose import evaluate_fix, residual_stats  # noqa: E402
 from agentdescent.audit.scorecard import rescan, scorecard  # noqa: E402
-from agentdescent.evolution import LLMAgent  # noqa: E402
-from agentdescent.strategies import AppendRules  # noqa: E402
+from agentdescent.loop.evolution import LLMAgent  # noqa: E402
+from agentdescent.artifacts.strategies import AppendRules  # noqa: E402
 from scripts.audit_workloads import (WORKLOADS,  # noqa: E402
                                      read_verdict, refuse_to_overwrite,
                                      resolved_records, task_index)

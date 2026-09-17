@@ -17,9 +17,9 @@ import time
 
 import pytest
 
-from agentdescent.policies import SandboxSpec
-from agentdescent.sandbox import LEASE_FILE, SandboxPool, WorkspaceProvider
-from agentdescent.sandbox_shared import SharedSandboxPool, live_leases
+from agentdescent.core.policies import SandboxSpec
+from agentdescent.runtime.sandbox import LEASE_FILE, SandboxPool, WorkspaceProvider
+from agentdescent.runtime.sandbox_shared import SharedSandboxPool, live_leases
 
 CTX = mp.get_context("spawn")
 

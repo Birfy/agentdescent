@@ -7,8 +7,8 @@ installation and the report are real.
 
 import pytest
 
-from agentdescent.meta import MetaOutcome, SLOT_PROTOCOLS, policy_source
-from agentdescent.sampling import DifficultyWeighted
+from agentdescent.loop.meta import MetaOutcome, SLOT_PROTOCOLS, policy_source
+from agentdescent.schedule.sampling import DifficultyWeighted
 
 from bench import metasearch_slots as bench
 
@@ -92,7 +92,7 @@ def _sampler_sensitive(bonus):
 #: A correct greedy sampler. The first version of this fixture answered from
 #: its own memory (`min(self.seen, ...)`) rather than from `keys`, which is the
 #: stale-id bug every live reflector proposal had -- and the stricter smoke test
-#: in `agentdescent.meta` caught the fixture too, which is the gate working.
+#: in `agentdescent.loop.meta` caught the fixture too, which is the gate working.
 PROPOSAL = """```python
 class Policy:
     greedy = True
@@ -187,8 +187,8 @@ def test_main_writes_a_complete_result_file(monkeypatch, tmp_path):
     """
     import json
 
-    from agentdescent.agents import Usage
-    from agentdescent.meta import MetaOutcome
+    from agentdescent.actors.agents import Usage
+    from agentdescent.loop.meta import MetaOutcome
 
     calls = {"n": 0}
 
@@ -228,7 +228,7 @@ def test_main_writes_a_complete_result_file(monkeypatch, tmp_path):
 
 
 def test_meta_reward_choices_and_their_shapes():
-    from agentdescent.meta import MetaOutcome
+    from agentdescent.loop.meta import MetaOutcome
 
     rising = MetaOutcome(curve=[0.4, 0.5, 0.8, 0.8], final=0.8)
     flat = MetaOutcome(curve=[0.9, 0.9, 0.9, 0.9], final=0.9)
@@ -329,8 +329,8 @@ def test_an_inner_run_is_a_function_of_the_sampler_when_completions_are_cached(t
 def test_a_run_that_commits_nothing_still_says_what_it_tried():
     """The gap the first four live runs had: `{'oracle-rejected': 3}` could not
     distinguish three samplers that lost from three that never compiled."""
-    from agentdescent.evolution import Task
-    from agentdescent.meta import policy_source
+    from agentdescent.loop.evolution import Task
+    from agentdescent.loop.meta import policy_source
 
     spec = policy_source("task_sampler")
     good = ("class Policy:\n"
@@ -410,7 +410,7 @@ def test_every_benchmark_in_the_registry_is_well_formed():
     """Offline guard on the registry itself: a benchmark whose template is
     missing a placeholder, or whose scorer name does not exist, fails at the
     first live rollout rather than at import."""
-    from agentdescent.rewards import SCORERS, scorer as make_scorer
+    from agentdescent.actors.rewards import SCORERS, scorer as make_scorer
 
     assert len(bench.BENCHMARKS) >= 8
     for name, b in bench.BENCHMARKS.items():

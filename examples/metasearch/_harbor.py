@@ -60,7 +60,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Sequence, Tuple
 
-from agentdescent.agents import Completion, WorkspaceAgent
+from agentdescent.actors.agents import Completion, WorkspaceAgent
 
 from examples.era._era_domain import Domain
 

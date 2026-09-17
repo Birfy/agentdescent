@@ -20,10 +20,10 @@ from __future__ import annotations
 
 import argparse
 
-from agentdescent.agents import Usage
-from agentdescent.dataloader import hf_rows
-from agentdescent.evolution import AppendRules, LLMAgent, Task, evolve
-from agentdescent.rewards import exact_match
+from agentdescent.actors.agents import Usage
+from agentdescent.actors.dataloader import hf_rows
+from agentdescent.loop.evolution import AppendRules, LLMAgent, Task, evolve
+from agentdescent.actors.rewards import exact_match
 from examples._common import (add_standard_args, completion_for, confirm,
                               worker_count)
 
@@ -43,7 +43,7 @@ REWARD = exact_match()
 
 
 def load_tasks(limit: int):
-    """Load through agentdescent.dataloader; never implement HTTP in a port."""
+    """Load through agentdescent.actors.dataloader; never implement HTTP in a port."""
     if DATASET_NAME.startswith("replace-me/"):
         raise RuntimeError("replace the DATASET_* placeholders before a real run")
     rows = hf_rows(DATASET_NAME, DATASET_SPLIT, config=DATASET_CONFIG, limit=limit)

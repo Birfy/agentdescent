@@ -30,9 +30,9 @@ import ast
 from types import FunctionType
 from typing import Callable, Dict, Mapping, Optional
 
-from agentdescent.evolution import Task
-from agentdescent.policies import Policies
-from agentdescent.selection import Archive
+from agentdescent.loop.evolution import Task
+from agentdescent.core.policies import Policies
+from agentdescent.schedule.selection import Archive
 
 from examples._measure import extract_python
 from examples._method_policy import MethodPolicy, ValidatedSlot

@@ -12,7 +12,7 @@ import uuid
 import pytest
 
 from agentdescent.audit import AuditRecord, Purpose
-from agentdescent.strategies import AppendRules
+from agentdescent.artifacts.strategies import AppendRules
 from scripts.audit_workloads import read_verdict
 from scripts.audit_evolve_judge import (_TITLE, MIN_EXAMPLES, _rubric_body,
                                         as_tasks, assess, balanced,

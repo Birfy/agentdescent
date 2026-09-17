@@ -13,7 +13,7 @@ yourself. This is the design's DP/TP mapping (design spec §8) made selectable.
     **raises** — it used to be accepted and quietly ignored, handing every worker
     the whole task list (strictly worse than the DP default, with no signal). The
     PP machinery is still available directly as
-    [`PipelineChain`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/parallel.py)
+    [`PipelineChain`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/schedule/parallel.py)
     — stage ordering, `blame`, counterfactual-replay pairs.
 
 ```bash
@@ -22,7 +22,7 @@ python -m examples.parallelism
 
 Source:
 [`examples/parallelism.py`](https://github.com/Birfy/agentdescent/blob/main/examples/parallelism.py)
-· [`agentdescent/parallel.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/parallel.py).
+· [`agentdescent/schedule/parallel.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/schedule/parallel.py).
 
 ---
 
@@ -178,11 +178,11 @@ class BlockParallel:
 `isinstance(BlockParallel(), ParallelStrategy)` is `True` structurally — pass it
 anywhere a strategy is accepted.
 
-TP additionally provides [`TensorParallelMerge`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/parallel.py)
+TP additionally provides [`TensorParallelMerge`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/schedule/parallel.py)
 (union + a consistency reviewer that rejects out-of-section edits) and
 `assign_key_sections` (a balanced **partition** of a declared key space — unlike
 `section_of`, which is a hash bucket and can leave a section owning nothing). PP
-provides [`PipelineChain`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/parallel.py)
+provides [`PipelineChain`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/schedule/parallel.py)
 (`blame` + counterfactual-replay pairs) — see [Concepts §7](concepts.md#7-parallel-paradigms-dp-tp-pp).
 
 ## What each paradigm actually enforces in `evolve()`

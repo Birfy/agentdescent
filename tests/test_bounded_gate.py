@@ -20,7 +20,7 @@ import warnings
 import pytest
 
 from agentdescent import AppendRules, Task, evolve
-from agentdescent.aggregator import AggregatorConfig
+from agentdescent.merge.aggregator import AggregatorConfig
 
 
 def _tasks(n=12):
@@ -33,8 +33,8 @@ def _reward(task, output):
 
 def _artifact(scores):
     """An artifact whose task rewards are dictated by `scores` (id -> reward)."""
-    from agentdescent.evolution import _Runtime, EvolvingArtifact
-    from agentdescent.evalcache import MemoryCache
+    from agentdescent.loop.evolution import _Runtime, EvolvingArtifact
+    from agentdescent.evaluate.evalcache import MemoryCache
 
     rt = _Runtime(run=lambda rendered, task: rendered,
                   reward=lambda task, out: scores[task.id],
@@ -83,7 +83,7 @@ def test_a_cut_scan_skips_real_evaluations():
     """Otherwise it is a correct no-op. Counted, because the saving is the point."""
     tasks = _tasks(12)
     art, rt = _artifact({t.id: 0.0 for t in tasks})
-    from agentdescent.metrics import Meter
+    from agentdescent.observe.metrics import Meter
     rt.meter = Meter()
 
     assert art.score_bounded(tasks, floor=0.5) <= 0.5
@@ -96,7 +96,7 @@ def test_it_never_cuts_when_the_candidate_is_winning():
     """A scan that stopped on a winner would be reporting a bound as a rate."""
     tasks = _tasks(12)
     art, rt = _artifact({t.id: 1.0 for t in tasks})
-    from agentdescent.metrics import Meter
+    from agentdescent.observe.metrics import Meter
     rt.meter = Meter()
 
     assert art.score_bounded(tasks, floor=0.5) == pytest.approx(1.0)
@@ -197,7 +197,7 @@ def test_the_cut_lands_at_the_earliest_point_it_can(floor, expect_scanned):
     """
     tasks = _tasks(24)
     art, rt = _artifact({t.id: 0.0 for t in tasks})
-    from agentdescent.metrics import Meter
+    from agentdescent.observe.metrics import Meter
     rt.meter = Meter()
     rt.eval_concurrency = 8
 
@@ -210,7 +210,7 @@ def test_a_zero_bar_scans_once_at_full_width():
     """`floor <= 0` can never cut, so chunking it would only cost round-trips."""
     tasks = _tasks(24)
     art, rt = _artifact({t.id: 0.0 for t in tasks})
-    from agentdescent.metrics import Meter
+    from agentdescent.observe.metrics import Meter
     rt.meter = Meter()
     assert art.score_bounded(tasks, 0.0) == pytest.approx(0.0)
     assert rt.meter.snapshot().bounded_scans_cut == 0

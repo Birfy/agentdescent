@@ -16,10 +16,10 @@ import time
 import pytest
 
 from agentdescent import Task
-from agentdescent.executor import Executor, Result, ThreadExecutor
-from agentdescent.filetree import canonical
-from agentdescent.supervisor import ProcessExecutor, _refuse_to_recurse
-from agentdescent.workspec import Ref, RolloutSpec
+from agentdescent.runtime.executor import Executor, Result, ThreadExecutor
+from agentdescent.artifacts.filetree import canonical
+from agentdescent.runtime.supervisor import ProcessExecutor, _refuse_to_recurse
+from agentdescent.core.workspec import Ref, RolloutSpec
 
 TREE = canonical({"main.py": "import os;print(f'42@{os.getpid()}')"})
 
@@ -28,9 +28,9 @@ def spec(i=0, entrypoint=None):
     return RolloutSpec(
         rendered=TREE,
         task=Task(f"t{i}", f"q{i}", meta={"gold": "42"}),
-        run=Ref("agentdescent.runners:code_runner",
+        run=Ref("agentdescent.actors.runners:code_runner",
                 {"entrypoint": entrypoint or [sys.executable, "main.py"]}),
-        reward=Ref("agentdescent.rewards:last_number"))
+        reward=Ref("agentdescent.actors.rewards:last_number"))
 
 
 # ---------------------------------------------------------------------------
@@ -122,8 +122,8 @@ def test_a_closure_is_refused_before_any_rollout_runs():
     """The alternative is a pickling error from a queue's feeder thread, minutes
     in, naming neither the argument nor the fix."""
     bad = RolloutSpec(rendered="r", task=Task("t", "q"),
-                      run=Ref("agentdescent.rewards:last_number"),
-                      reward=Ref("agentdescent.rewards:last_number"))
+                      run=Ref("agentdescent.actors.rewards:last_number"),
+                      reward=Ref("agentdescent.actors.rewards:last_number"))
     object.__setattr__(bad, "run", lambda rendered, task: "x")   # a closure
 
     ex = ProcessExecutor(1)
@@ -243,8 +243,8 @@ def test_infrastructure_failures_are_counted_apart_from_model_failures():
     the window in which sandboxes fail to start. Counting the two together
     retires every worker at startup and finishes the run clean at zero
     concurrency."""
-    from agentdescent.supervisor import _classify
-    from agentdescent.workspec import RefError
+    from agentdescent.runtime.supervisor import _classify
+    from agentdescent.core.workspec import RefError
 
     assert _classify(RefError("nope")) == "caller"
     assert _classify(OSError("no space left on device")) == "infrastructure"
@@ -267,7 +267,7 @@ def test_a_late_result_from_a_presumed_dead_worker_is_dropped_and_counted():
 
     Dropping it is correct and invisible, so it is counted: an over-eager
     re-dispatch policy otherwise looks exactly like a well-tuned one."""
-    from agentdescent.metrics import Meter
+    from agentdescent.observe.metrics import Meter
 
     meter = Meter()
     ex = ProcessExecutor(2, meter=meter)
@@ -289,7 +289,7 @@ def test_a_late_result_from_a_presumed_dead_worker_is_dropped_and_counted():
 
 def test_re_dispatch_is_counted():
     ex = ProcessExecutor(2, hang_timeout=0.5)
-    from agentdescent.metrics import Meter
+    from agentdescent.observe.metrics import Meter
     ex.meter = Meter()
     ex.start()
     try:
@@ -327,7 +327,7 @@ def test_the_round_body_routes_its_rollout_through_the_executor():
     """The seam is load-bearing, not decorative: a counting executor sees every
     rollout the round performs."""
     from agentdescent import AppendRules, Policies, evolve
-    from agentdescent.executor import ThreadExecutor
+    from agentdescent.runtime.executor import ThreadExecutor
 
     seen = []
 
@@ -357,8 +357,8 @@ def test_a_caller_contract_failure_still_stops_the_run():
     meaningless -- and that distinction has to survive the trip through
     `Result.kind`."""
     from agentdescent import AppendRules, Policies, evolve
-    from agentdescent.evolution import ProposalContractError
-    from agentdescent.executor import ThreadExecutor
+    from agentdescent.loop.evolution import ProposalContractError
+    from agentdescent.runtime.executor import ThreadExecutor
 
     tasks = [Task(id=f"t{i}", prompt=f"q{i}", meta={"gold": str(i)}) for i in range(6)]
     ex = ThreadExecutor(2, run=lambda r, t: "x",
@@ -384,7 +384,7 @@ def test_a_supplied_executor_runs_the_callers_actors():
     plausible `final_reward` and no exception.
     """
     from agentdescent import AppendRules, Policies, evolve
-    from agentdescent.executor import ThreadExecutor
+    from agentdescent.runtime.executor import ThreadExecutor
 
     calls = []
     tasks = [Task(id=f"t{i}", prompt=f"q{i}", meta={"gold": str(i)}) for i in range(6)]
@@ -411,7 +411,7 @@ def test_an_executor_evolve_cannot_drive_is_refused_not_run():
     else to give it. Refusing at build time is the only honest answer: the run it
     would otherwise produce measures nothing and says so nowhere."""
     from agentdescent import AppendRules, Policies, evolve
-    from agentdescent.supervisor import ProcessExecutor
+    from agentdescent.runtime.supervisor import ProcessExecutor
 
     tasks = [Task(id=f"t{i}", prompt=f"q{i}", meta={"gold": str(i)}) for i in range(6)]
     with pytest.raises(TypeError) as excinfo:
@@ -429,10 +429,10 @@ def test_a_spec_built_by_evolve_refuses_to_resolve_its_actors():
     the wrong signature -- so the failure arrived as a `TypeError` about argument
     counts, naming neither the cause nor the fix.
     """
-    from agentdescent.evolution import undescribable_actor
-    from agentdescent.workspec import Ref, RefError
+    from agentdescent.loop.evolution import undescribable_actor
+    from agentdescent.core.workspec import Ref, RefError
 
-    ref = Ref("agentdescent.evolution:undescribable_actor", {"which": "reward"})
+    ref = Ref("agentdescent.loop.evolution:undescribable_actor", {"which": "reward"})
     with pytest.raises(RefError) as excinfo:
         ref.resolve()
     assert "reward" in str(excinfo.value)

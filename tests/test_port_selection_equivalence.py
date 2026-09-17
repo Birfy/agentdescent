@@ -25,7 +25,7 @@ import random
 
 import pytest
 
-from agentdescent.selection import (
+from agentdescent.schedule.selection import (
     Archive, Candidate, ParetoFrontier, SelectionContext,
     pareto_win_frequency, sigmoid_novelty_weights,
 )
@@ -86,7 +86,7 @@ def test_the_frontier_is_the_instance_winners_not_the_undominated_set():
 
     cands = tuple(_cand(i, per_task=dict(zip(["t0", "t1"], r)))
                   for i, r in enumerate(rows))
-    from agentdescent.selection import pareto_front
+    from agentdescent.schedule.selection import pareto_front
     plain = pareto_front(cands, tasks=["t0", "t1"])
     assert {c.version for c in plain} == {0, 1, 2}
 

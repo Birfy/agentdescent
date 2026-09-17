@@ -15,16 +15,16 @@ import tempfile
 
 import pytest
 
-from agentdescent.aggregator import Aggregator, AggregatorConfig, MergeReport
-from agentdescent.domains.router import (
+from agentdescent.merge.aggregator import Aggregator, AggregatorConfig, MergeReport
+from agentdescent.reference.domains.router import (
     RouterSkill, deserialize_router, make_task_universe, router_eval,
     serialize_router,
 )
-from agentdescent.evolvable import Diff
-from agentdescent.ledger import Ledger
-from agentdescent.orchestrator import AgentDescent
-from agentdescent.scheduler import AuditScheduler
-from agentdescent.verifier import ThreeLayerVerifier, VerifierBudget
+from agentdescent.core.evolvable import Diff
+from agentdescent.merge.ledger import Ledger
+from agentdescent.reference.orchestrator import AgentDescent
+from agentdescent.schedule.scheduler import AuditScheduler
+from agentdescent.evaluate.verifier import ThreeLayerVerifier, VerifierBudget
 
 
 def _aggregator(tmp_path, promote_after_k=3):
@@ -175,7 +175,7 @@ def test_the_reference_run_actually_reaches_the_stable_branch():
 
 
 def _tasks():
-    from agentdescent.evolution import Task
+    from agentdescent.loop.evolution import Task
     return [Task(id=f"t{i}", prompt=f"item {i}") for i in range(12)]
 
 
@@ -208,7 +208,7 @@ def test_evolve_publishes_its_head_to_stable(tmp_path):
     is the run's whole point -- left `stable` holding the *seed* artifact, while
     `docs/ledger.md` documented the call that was not being made.
     """
-    from agentdescent.evolution import evolve
+    from agentdescent.loop.evolution import evolve
 
     repo = str(tmp_path / "ledger")
     res = evolve(_tasks(), _reward, run=_run, propose=_propose, rounds=6,
@@ -222,7 +222,7 @@ def test_async_evolve_publishes_its_head_to_stable(tmp_path):
     """Same gap, same fix, on the barrier-free path."""
     import warnings
 
-    from agentdescent.async_evolve import async_evolve
+    from agentdescent.loop.async_evolve import async_evolve
 
     repo = str(tmp_path / "ledger")
     with warnings.catch_warnings():
@@ -243,7 +243,7 @@ def test_a_run_that_died_does_not_publish(tmp_path):
     """
     import warnings
 
-    from agentdescent.evolution import evolve
+    from agentdescent.loop.evolution import evolve
 
     def dead(rendered, task):
         raise RuntimeError("backend is down")

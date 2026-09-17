@@ -8,7 +8,7 @@ sees (never a gold trace); the **critic** as the engine's worker self-check
 (`self_verify`): every proposal is re-rolled and judged by the environment
 reward before it reaches the gate, upstream's "judge success from the
 environment, not the agent's claim"; and frontier task focus via the
-:class:`~agentdescent.sampling.DifficultyWeighted` sampler.
+:class:`~agentdescent.schedule.sampling.DifficultyWeighted` sampler.
 
 **The library is not add-only, and this port used to say it was.**
 `SkillManager.add_new_skill` prints *"Skill {name} already exists. Rewriting!"*,
@@ -33,9 +33,9 @@ import random
 import re
 from typing import List, Optional, Sequence, Tuple
 
-from agentdescent.evolution import Task
-from agentdescent.policies import Policies
-from agentdescent.sampling import DifficultyWeighted
+from agentdescent.loop.evolution import Task
+from agentdescent.core.policies import Policies
+from agentdescent.schedule.sampling import DifficultyWeighted
 
 from examples._measure import canonical_json, parse_json_object
 from examples._method_policy import MethodPolicy, SkillLibrary

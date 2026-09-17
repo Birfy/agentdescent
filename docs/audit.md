@@ -989,7 +989,7 @@ the run already uses:
 
 ```python
 from agentdescent.audit import RectifiedAcceptance
-from agentdescent.policies import Policies
+from agentdescent.core.policies import Policies
 
 gate = RectifiedAcceptance(calibrator=cal, verifier_version=audited.verifier_version)
 evolve(tasks, reward=audited, policies=Policies(acceptance=gate), ...)

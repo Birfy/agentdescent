@@ -23,8 +23,8 @@ ledger commit that rewrites the head.**
 
 | Aggregator | What it adds | Where |
 |---|---|---|
-| `Aggregator` | the shipped pipeline: dedupe, staleness, conflict, fusion, statistical acceptance, transactional commit, promotion | `agentdescent.aggregator` |
-| `PopulationAggregator(Aggregator)` | an archive of every distinct committed head (with held-out score) + any standard `SelectionPolicy` picking the next parent, committed back to dev; `finalize()` lands the archive's best | `agentdescent.population` — **not** something you install yourself: `Policies(selection=…)` installs it, on both drivers ([selection](selection.md)) |
+| `Aggregator` | the shipped pipeline: dedupe, staleness, conflict, fusion, statistical acceptance, transactional commit, promotion | `agentdescent.merge.aggregator` |
+| `PopulationAggregator(Aggregator)` | an archive of every distinct committed head (with held-out score) + any standard `SelectionPolicy` picking the next parent, committed back to dev; `finalize()` lands the archive's best | `agentdescent.schedule.population` — **not** something you install yourself: `Policies(selection=…)` installs it, on both drivers ([selection](selection.md)) |
 | `ParetoAggregator` | GEPA's pool with per-instance score rows and Algorithm-2 frontier sampling | `examples/gepa/` |
 | `DGMArchiveAggregator` | DGM's keep-all archive with `sigmoid(perf) × 1/(1+children)` parent selection | `examples/dgm/` |
 | `MetaSearchAggregator` | ADAS's keep-all archive over agent designs (head rule: shipped `Beam(1)`) | `examples/adas/` |
@@ -40,7 +40,7 @@ fields that the default path would wire (`conflict`, `fusion`, `acceptance`,
 Pass them into your aggregator's constructor instead, and strip them from the
 bundle — carried in both places, one copy is silently ignored, which is the
 exact failure `require_supported` exists to prevent on the other path.
-`agentdescent.population.population_factory` shows the pattern.
+`agentdescent.schedule.population.population_factory` shows the pattern.
 
 A declared `selection` policy and an `aggregator_factory=` are refused together
 rather than resolved: both fill the aggregator seat, and a caller who passed

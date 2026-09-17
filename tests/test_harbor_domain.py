@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from agentdescent.meta import PrioritySelection
+from agentdescent.loop.meta import PrioritySelection
 
 from examples.era.era_empirical_software import run_agentdescent_era
 from examples.metasearch import _harbor as hb

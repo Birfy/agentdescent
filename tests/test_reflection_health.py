@@ -10,8 +10,8 @@ prompts came back empty; at 3000, none did.
 
 import warnings
 
-from agentdescent.agents import claude, echo, openai_compatible
-from agentdescent.evolution import LLMAgent, Task
+from agentdescent.actors.agents import claude, echo, openai_compatible
+from agentdescent.loop.evolution import LLMAgent, Task
 
 
 def _agent(reply):

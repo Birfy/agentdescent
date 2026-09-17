@@ -5,9 +5,9 @@ it also drives the rollout. The usual case is the reverse -- you already have an
 agent and want it improved -- so check that path stays a few lines.
 """
 
-from agentdescent.agents import echo
-from agentdescent.async_evolve import async_evolve
-from agentdescent.evolution import SingleSlot, Task, evolve, reflector
+from agentdescent.actors.agents import echo
+from agentdescent.loop.async_evolve import async_evolve
+from agentdescent.loop.evolution import SingleSlot, Task, evolve, reflector
 
 
 def my_agent(system_prompt: str, question: str) -> str:

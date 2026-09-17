@@ -15,11 +15,11 @@ compete and a merge can be worse than either.
 
 import pytest
 
-from agentdescent.baselines import (
+from agentdescent.observe.baselines import (
     ArmResult, Budget, Workload, best_of_n_fork, compare, merge_of_n, serial,
     to_markdown,
 )
-from agentdescent.evolution import EvolutionResult, KeyedRules, Task
+from agentdescent.loop.evolution import EvolutionResult, KeyedRules, Task
 
 
 # -- a workload where diffs can genuinely contradict -------------------------
@@ -352,8 +352,8 @@ def test_a_merge_policy_that_calls_a_model_lands_on_the_arms_bill():
     is asked anything: distinct keys do not contradict, so nothing needs merging.
     """
     from agentdescent import SingleSlot, Usage
-    from agentdescent.fusion import reflective_merge
-    from agentdescent.policies import Policies
+    from agentdescent.merge.fusion import reflective_merge
+    from agentdescent.core.policies import Policies
 
     calls = {"n": 0}
     meter = Usage()

@@ -15,9 +15,9 @@ import time
 
 import pytest
 
-from agentdescent.aggregator import AggregatorConfig
-from agentdescent.evolvable import Contract, Diff
-from agentdescent.ledger import CASConflict, Ledger
+from agentdescent.merge.aggregator import AggregatorConfig
+from agentdescent.core.evolvable import Contract, Diff
+from agentdescent.merge.ledger import CASConflict, Ledger
 
 CTX = mp.get_context("spawn")
 
@@ -50,7 +50,7 @@ class _Aggregatorish:
     """Just enough of an Aggregator to exercise `_commit_with_retry`."""
 
     def __init__(self, ledger, attempts=3, backoff=0.01, meter=None):
-        from agentdescent.aggregator import Aggregator
+        from agentdescent.merge.aggregator import Aggregator
         self.ledger = ledger
         self.config = AggregatorConfig(cas_attempts=attempts, cas_backoff=backoff)
         self.meter = meter
@@ -166,7 +166,7 @@ def test_the_retry_is_bounded(tmp_path):
 def test_conflicts_are_counted(tmp_path):
     """Contention is invisible otherwise: a retry that succeeds looks exactly
     like a commit that never had to."""
-    from agentdescent.metrics import Meter
+    from agentdescent.observe.metrics import Meter
 
     led = _ledger(str(tmp_path / "repo"))
     led.register(Tiny("a", {}))

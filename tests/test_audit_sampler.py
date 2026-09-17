@@ -336,7 +336,7 @@ def test_the_plan_delivers_the_labels_it_planned_for():
     wrong -- it was answering a different question than the one the rate needed.
     """
     from agentdescent.audit import AuditedReward
-    from agentdescent.evolution import Task
+    from agentdescent.loop.evolution import Task
 
     policy = AuditPolicy(enabled=True, target_halfwidth=0.05,
                          calibration_fraction=0.7)

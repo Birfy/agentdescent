@@ -4,7 +4,7 @@
     This is the `staleness` field of the [Policies bundle](policies.md); where a keyword argument exists it is a shortcut onto that field, and an explicit argument wins over a bundle default.
 
 
-*Module:* [`agentdescent.staleness`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/staleness.py)
+*Module:* [`agentdescent.merge.staleness`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/merge/staleness.py)
 · *API:* [`StalenessPolicy`, `FullStaleness`, `GuardedStaleness`, `ReflectiveStaleness`, `get_policy`](api.md#staleness-policies)
 
 This is the problem parallel self-improvement has and serial self-improvement does

@@ -45,19 +45,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from agentdescent.agents import Completion, Usage
-from agentdescent.aggregator import (
+from agentdescent.actors.agents import Completion, Usage
+from agentdescent.merge.aggregator import (
     AggregatorConfig,
     AggregatorProtocol,
     MergeOutcome,
     MergeReport,
 )
-from agentdescent.async_evolve import async_evolve
-from agentdescent.evolution import EvolutionResult, EvolvingArtifact, Task, evolve
-from agentdescent.evolvable import Diff, EvidenceCard, vv_staleness
-from agentdescent.governance import classify
-from agentdescent.ledger import CASConflict, Ledger
-from agentdescent.staleness import StaleAction, get_policy
+from agentdescent.loop.async_evolve import async_evolve
+from agentdescent.loop.evolution import EvolutionResult, EvolvingArtifact, Task, evolve
+from agentdescent.core.evolvable import Diff, EvidenceCard, vv_staleness
+from agentdescent.merge.governance import classify
+from agentdescent.merge.ledger import CASConflict, Ledger
+from agentdescent.merge.staleness import StaleAction, get_policy
 
 from examples._common import (
     add_standard_args,
@@ -208,7 +208,7 @@ def _program_summary(program: Program) -> Dict[str, Any]:
 class EpsilonGreedy:
     """OpenEvolve's in-pool parent rule at the standard selection seam.
 
-    A :class:`~agentdescent.selection.SelectionPolicy`: with probability
+    A :class:`~agentdescent.schedule.selection.SelectionPolicy`: with probability
     ``exploitation_ratio`` take the pool's best-fitness member (first maximal
     wins, as the inline ``max`` did), otherwise draw uniformly. It shares the
     archive's rng, and consumes it in the same order as the inline rule --
@@ -350,7 +350,7 @@ class OpenEvolveArchive:
             if not pool_ids:
                 raise RuntimeError("OpenEvolve archive has no parent candidates")
             # The epsilon-greedy pick at the standard seam (version = pool index).
-            from agentdescent.selection import Candidate, SelectionContext
+            from agentdescent.schedule.selection import Candidate, SelectionContext
             if not hasattr(self, "_selection") or self._selection is None:
                 self._selection = EpsilonGreedy(self._rng, self.exploitation_ratio)
             rows = [Candidate(artifact_id="openevolve", version=i,

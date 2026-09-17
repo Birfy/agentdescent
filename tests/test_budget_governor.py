@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentdescent.budget import BudgetGovernor, SOFT_FLOOR, HARD_FLOOR
+from agentdescent.observe.budget import BudgetGovernor, SOFT_FLOOR, HARD_FLOOR
 
 
 # --- basic thresholds ---

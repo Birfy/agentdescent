@@ -1,9 +1,9 @@
 """Draining the merge path's ranking into the queue a person actually works from.
 
-:class:`~agentdescent.scheduler.AuditScheduler` has ranked every merge decision
+:class:`~agentdescent.schedule.scheduler.AuditScheduler` has ranked every merge decision
 since the beginning -- ``blast_radius * uncertainty / trust`` -- and with
 ``collect=True`` it keeps them in a heap. Nothing in the shipped runtimes has
-ever called :meth:`~agentdescent.scheduler.AuditScheduler.pop`.
+ever called :meth:`~agentdescent.schedule.scheduler.AuditScheduler.pop`.
 
 That is not an oversight, and it is worth saying why before wiring it up.
 ``force_oracle`` decides whether to audit by a *threshold*, and on the shipped
@@ -68,7 +68,7 @@ def drain(scheduler: Any, *,
     """Empty the scheduler's queue into ``signature -> priority``.
 
     ``signature_of(item)`` receives the queued
-    :class:`~agentdescent.scheduler._AuditItem` -- it carries ``diff_id`` and the
+    :class:`~agentdescent.schedule.scheduler._AuditItem` -- it carries ``diff_id`` and the
     ``payload`` the aggregator submitted, which is the ``Diff`` itself -- and
     returns the artifact signature the tap would have recorded, or ``None``.
 
@@ -79,7 +79,7 @@ def drain(scheduler: Any, *,
 
     Priorities come off the heap negated (it is a min-heap used as a max-heap),
     and this un-negates them, so what comes back reads the way
-    :meth:`~agentdescent.scheduler.AuditScheduler.submit` returned it.
+    :meth:`~agentdescent.schedule.scheduler.AuditScheduler.submit` returned it.
     """
     priorities: Dict[str, float] = {}
     popped = unplaced = 0

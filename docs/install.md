@@ -75,7 +75,7 @@ export OPENAI_API_KEY=sk-...
 
 ```python
 from agentdescent import SingleSlot, evolve, openai_compatible, reflector, scorer, tasks_from
-from agentdescent.dataloader import hf_rows
+from agentdescent.actors.dataloader import hf_rows
 
 rows = hf_rows("openai/gsm8k", config="main", split="train", limit=64)
 model = openai_compatible(model="deepseek-v4-flash")

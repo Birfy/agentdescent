@@ -1,8 +1,8 @@
 import pytest
 
-from agentdescent.domains.router import RouterSkill
-from agentdescent.evolvable import Diff
-from agentdescent.parallel import (
+from agentdescent.reference.domains.router import RouterSkill
+from agentdescent.core.evolvable import Diff
+from agentdescent.schedule.parallel import (
     assign_key_sections,
     PipelineChain,
     SectionViolation,
@@ -81,7 +81,7 @@ def test_pp_upstream_lookup():
 
 # -- pluggable parallel strategies (DP / TP / PP + custom) -------------------
 
-from agentdescent.parallel import (
+from agentdescent.schedule.parallel import (
     assign_key_sections,
     DataParallel,
     TensorParallel,
@@ -171,7 +171,7 @@ def test_custom_strategy_is_structural():
 
 
 def _cluster_tasks(n=18, k=3):
-    from agentdescent.evolution import Task
+    from agentdescent.loop.evolution import Task
 
     return [Task(id=f"c{i % k}-{i}", prompt=f"q{i}", meta={"gold": str(i)})
             for i in range(n)]
@@ -184,7 +184,7 @@ def _cluster_of(task_id):
 def test_a_lease_hands_a_worker_one_whole_cluster():
     """The point of leasing clusters rather than sharding tasks: a worker sees a
     coherent slice of the distribution, not one task from each of them."""
-    from agentdescent.parallel import ClusterParallel
+    from agentdescent.schedule.parallel import ClusterParallel
 
     cp = ClusterParallel(cluster_of=_cluster_of)
     units = cp.plan(3, 0, [t.id for t in _cluster_tasks()])
@@ -198,7 +198,7 @@ def test_feedback_reaches_the_scheduler():
     """`plan` was a pure function of its arguments, so a strategy could not learn
     from the rollouts it dispatched -- which is why UCB over clusters lived only
     in the reference runtime."""
-    from agentdescent.parallel import ClusterParallel
+    from agentdescent.schedule.parallel import ClusterParallel
 
     cp = ClusterParallel(cluster_of=_cluster_of)
     units = cp.plan(3, 0, [t.id for t in _cluster_tasks()])
@@ -213,7 +213,7 @@ def test_feedback_reaches_the_scheduler():
 
 def test_a_solved_cluster_loses_its_pull():
     """The difficulty filter: a cluster that always passes carries no gradient."""
-    from agentdescent.parallel import ClusterParallel
+    from agentdescent.schedule.parallel import ClusterParallel
 
     cp = ClusterParallel(cluster_of=_cluster_of)
     units = cp.plan(3, 0, [t.id for t in _cluster_tasks()])
@@ -229,7 +229,7 @@ def test_a_solved_cluster_loses_its_pull():
 def test_an_unknown_task_id_is_ignored_rather_than_raising():
     """`cluster_of` is caller code over ids the caller supplied; a stray one must
     not take the round down from inside a worker thread."""
-    from agentdescent.parallel import ClusterParallel
+    from agentdescent.schedule.parallel import ClusterParallel
 
     cp = ClusterParallel(cluster_of=_cluster_of)
     units = cp.plan(3, 0, [t.id for t in _cluster_tasks()])
@@ -240,8 +240,8 @@ def test_evolve_drives_it_end_to_end():
     """The hook has to be load-bearing in the round body, not just callable."""
     import warnings
 
-    from agentdescent.evolution import AppendRules, evolve
-    from agentdescent.parallel import ClusterParallel
+    from agentdescent.loop.evolution import AppendRules, evolve
+    from agentdescent.schedule.parallel import ClusterParallel
 
     tasks = _cluster_tasks(n=18, k=3)
     cp = ClusterParallel(cluster_of=_cluster_of)
@@ -263,7 +263,7 @@ def test_evolve_drives_it_end_to_end():
 
 def test_a_strategy_without_the_hook_is_untouched():
     """`observe` is optional; DataParallel and TensorParallel do not define it."""
-    from agentdescent.parallel import DataParallel, TensorParallel
+    from agentdescent.schedule.parallel import DataParallel, TensorParallel
 
     assert not hasattr(DataParallel(), "observe")
     assert not hasattr(TensorParallel(n_sections=2, keys=["a", "b"]), "observe")

@@ -1,7 +1,7 @@
 """The contracts must describe the code, not the other way round.
 
 The rule this file enforces: if an existing implementation fails one of these
-Protocols, **the Protocol is wrong**. `agentdescent/policies.py` is a description
+Protocols, **the Protocol is wrong**. `agentdescent/core/policies.py` is a description
 of what the engine already calls, so a mismatch means the description drifted --
 which is exactly what happened to `docs/verifier.md`, where a missing
 `learned_eval` turned into an `AttributeError` half an hour into a run.
@@ -18,18 +18,18 @@ from pathlib import Path
 
 import pytest
 
-from agentdescent.aggregator import Aggregator, AggregatorConfig, AggregatorProtocol
-from agentdescent.evolvable import Evolvable
-from agentdescent.ledger import Ledger
-from agentdescent.policies import (
+from agentdescent.merge.aggregator import Aggregator, AggregatorConfig, AggregatorProtocol
+from agentdescent.core.evolvable import Evolvable
+from agentdescent.merge.ledger import Ledger
+from agentdescent.core.policies import (
     AcceptDecision, AcceptancePolicy, ConflictPolicy, FusionPolicy, LedgerProtocol,
     MergeContext, Policies, Promotion, PromotionPolicy, ProposalContext,
     ProposalPolicy, SandboxProvider, SandboxSpec, VerifierProtocol,
 )
-from agentdescent.sampling import DifficultyWeighted, RoundRobin
-from agentdescent.scheduler import AuditScheduler
-from agentdescent.staleness import get_policy
-from agentdescent.verifier import ThreeLayerVerifier, VerifierBudget
+from agentdescent.schedule.sampling import DifficultyWeighted, RoundRobin
+from agentdescent.schedule.scheduler import AuditScheduler
+from agentdescent.merge.staleness import get_policy
+from agentdescent.evaluate.verifier import ThreeLayerVerifier, VerifierBudget
 
 SRC = Path(__file__).resolve().parent.parent / "agentdescent"
 
@@ -45,11 +45,23 @@ def _protocol_methods(proto) -> set:
     return {a for a in attrs if not a.startswith("_")}
 
 
+def _module(name: str) -> Path:
+    """Locate a module by bare filename, wherever its subpackage sits.
+
+    The package is grouped into subpackages, and this test exists to follow the
+    *call sites* rather than a directory layout -- so it finds the file instead
+    of being told where it lives. A name that matches nothing, or more than one
+    file, is an error worth failing on rather than silently skipping."""
+    hits = [q for q in SRC.rglob(name) if "__pycache__" not in q.parts]
+    assert len(hits) == 1, f"{name}: expected exactly one match, got {hits}"
+    return hits[0]
+
+
 def _called_on(attr: str, *files: str) -> set:
     """Every ``<attr>.<method>`` the given sources actually call."""
     found = set()
     for name in files:
-        text = (SRC / name).read_text(encoding="utf-8")
+        text = _module(name).read_text(encoding="utf-8")
         found |= set(re.findall(rf"\b(?:self\.|eng\.)?{attr}\.([a-z_]+)\b", text))
     return {m for m in found if not m.startswith("_")}
 
@@ -86,7 +98,7 @@ def test_the_shipped_aggregator_satisfies_the_contract(tmp_path):
 
 def test_the_shipped_samplers_satisfy_the_bundle_field():
     """`task_sampler` was already a Protocol; the bundle must not narrow it."""
-    from agentdescent.sampling import TaskSampler
+    from agentdescent.schedule.sampling import TaskSampler
     assert isinstance(RoundRobin(), TaskSampler)
     assert isinstance(DifficultyWeighted(), TaskSampler)
 
@@ -351,7 +363,7 @@ def test_the_async_path_refuses_an_executor_it_would_otherwise_ignore():
     `asynchronous=True` would silently stop honouring it.
     """
     from agentdescent import async_evolve
-    from agentdescent.executor import ThreadExecutor
+    from agentdescent.runtime.executor import ThreadExecutor
 
     ex = ThreadExecutor(2, run=lambda r, t: "x", reward=lambda t, o: 0.0)
     try:
@@ -365,7 +377,7 @@ def test_the_async_path_refuses_an_executor_it_would_otherwise_ignore():
 
 def test_the_sync_path_still_honours_an_executor():
     """The other half: narrowing the async set must not narrow evolve()'s."""
-    from agentdescent.executor import ThreadExecutor
+    from agentdescent.runtime.executor import ThreadExecutor
 
     seen = []
 
@@ -388,13 +400,13 @@ def test_a_multi_proposal_policy_is_refused_rather_than_truncated():
     class ThreeAtATime:
         def propose(self, ctx): return ["a", "b", "c"]
 
-    from agentdescent.evolution import ProposalContractError
+    from agentdescent.loop.evolution import ProposalContractError
     with pytest.raises(ProposalContractError, match="one proposal per rollout"):
         _run_evolve(policies=Policies(proposal=ThreeAtATime()))
 
 
 def test_a_single_proposal_policy_is_equivalent_to_the_callable():
-    from agentdescent.defaults import SingleProposal
+    from agentdescent.merge.defaults import SingleProposal
     plain = _run_evolve()
     viapolicy = _run_evolve(policies=Policies(
         proposal=SingleProposal(lambda r, t, o, s: t.id)))
@@ -412,7 +424,7 @@ def test_an_injected_verifier_is_called_exactly_as_the_built_in_one_is():
     A wrapper that adds or drops a gate call changes what the run costs while
     leaving every result identical -- invisible to a trace comparison, and the
     reason this counts calls rather than checking the outcome."""
-    from agentdescent.verifier import ThreeLayerVerifier
+    from agentdescent.evaluate.verifier import ThreeLayerVerifier
 
     counts = {}
 
@@ -431,7 +443,7 @@ def test_an_injected_verifier_is_called_exactly_as_the_built_in_one_is():
 
     def factory(ledger, verifier, audit, config, policy):
         seen["verifier"] = verifier
-        from agentdescent.aggregator import Aggregator
+        from agentdescent.merge.aggregator import Aggregator
         return Aggregator(ledger, verifier, audit, config, staleness_policy=policy)
 
     inner = ThreeLayerVerifier(eval_fn=lambda a, ts: 1.0, held_out=[1, 2, 3])
@@ -448,7 +460,7 @@ def test_an_in_memory_ledger_is_enough_to_finish_a_run(tmp_path):
 
     This is the first thing that proves the protocol covers `register`, `log` and
     `close` -- the three the aggregator never calls and the engine always does."""
-    from agentdescent.ledger import Ledger
+    from agentdescent.merge.ledger import Ledger
 
     calls = []
 
@@ -475,7 +487,7 @@ def test_an_in_memory_ledger_is_enough_to_finish_a_run(tmp_path):
                                         "blast_radius": a.blast_radius},
                    deserialize=lambda aid, v, d: None)
     # the engine deserialises with its own artifact type, so borrow the real one
-    from agentdescent.evolution import EvolvingArtifact
+    from agentdescent.loop.evolution import EvolvingArtifact
     inner._deserialize = lambda aid, v, d: EvolvingArtifact(
         aid, d.get("state", {}), v, d.get("blast_radius", 0.2))
 

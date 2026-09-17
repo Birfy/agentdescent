@@ -14,7 +14,7 @@ import pytest
 from agentdescent.audit import AuditRecord, AuditStore, Purpose
 from agentdescent.audit.queue import DrainReport, drain, prioritise
 from agentdescent.audit.service import audit_pending
-from agentdescent.scheduler import AuditScheduler
+from agentdescent.schedule.scheduler import AuditScheduler
 
 
 class _Diff:
@@ -121,7 +121,7 @@ def test_the_ranking_only_matters_when_the_oracle_is_dear():
     `full_eval` measures the same held-out set the acceptance test just did, so
     every merge past the threshold gets one and a ranking has nothing to do.
     """
-    from agentdescent.verifier import ThreeLayerVerifier
+    from agentdescent.evaluate.verifier import ThreeLayerVerifier
 
     verifier = ThreeLayerVerifier(lambda artifact, tasks: 1.0, ["t1", "t2"])
     assert verifier.full_eval_matches_counts, (

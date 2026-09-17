@@ -67,7 +67,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from agentdescent.dataloader import cache_path
+from agentdescent.actors.dataloader import cache_path
 
 from examples.era._era_srbench_expr import (
     DIGIT_CAP,
@@ -211,7 +211,7 @@ class SrProblem:
 def _download(path: str, timeout: float = 900.0) -> Path:
     """Fetch one mirror file into the dataloader's cache, streaming.
 
-    :func:`agentdescent.dataloader.fetch_bytes` is the house helper and is used
+    :func:`agentdescent.actors.dataloader.fetch_bytes` is the house helper and is used
     everywhere else, but it returns the whole body: the two LSR-Transform shards
     are 172 MB and 181 MB, and holding either in memory to write it straight
     back out is a cost with nothing to buy it.

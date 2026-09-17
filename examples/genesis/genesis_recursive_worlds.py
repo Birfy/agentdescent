@@ -78,12 +78,12 @@ import argparse
 import posixpath
 
 from agentdescent import Policies, evolve
-from agentdescent.evolution import EvolvingArtifact
-from agentdescent.agents import Usage
-from agentdescent.filetree import load_tree, match_any
-from agentdescent.governance import SKILL_BLAST_RADIUS, classify
-from agentdescent.sampling import DifficultyWeighted
-from agentdescent.staleness import get_policy
+from agentdescent.loop.evolution import EvolvingArtifact
+from agentdescent.actors.agents import Usage
+from agentdescent.artifacts.filetree import load_tree, match_any
+from agentdescent.merge.governance import SKILL_BLAST_RADIUS, classify
+from agentdescent.schedule.sampling import DifficultyWeighted
+from agentdescent.merge.staleness import get_policy
 from examples._common import (add_standard_args, budget_kwargs, completion_for,
                               confirm, report_engine, worker_count)
 

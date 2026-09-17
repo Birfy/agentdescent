@@ -1,12 +1,12 @@
 import pytest
 
-from agentdescent.domains.router import (
+from agentdescent.reference.domains.router import (
     RouterSkill,
     deserialize_router,
     serialize_router,
 )
-from agentdescent.evolvable import Diff
-from agentdescent.ledger import CASConflict, Ledger
+from agentdescent.core.evolvable import Diff
+from agentdescent.merge.ledger import CASConflict, Ledger
 
 
 def make_ledger(tmp_path):
@@ -78,8 +78,8 @@ def test_cas_requires_the_base_version_to_declare_the_artifact(tmp_path):
     defaulted to the current head, so an empty (or unrelated) vector always
     committed -- exactly the lost update CAS exists to prevent.
     """
-    from agentdescent.evolution import EvolvingArtifact
-    from agentdescent.ledger import CASConflict, Ledger
+    from agentdescent.loop.evolution import EvolvingArtifact
+    from agentdescent.merge.ledger import CASConflict, Ledger
 
     lg = Ledger(str(tmp_path), lambda a: {"state": dict(a.state)},
                 lambda aid, v, s: EvolvingArtifact(aid, s.get("state", {}), v))
@@ -99,8 +99,8 @@ def test_cas_requires_the_base_version_to_declare_the_artifact(tmp_path):
 
 
 def test_commit_atomic_also_requires_declared_bases(tmp_path):
-    from agentdescent.evolution import EvolvingArtifact
-    from agentdescent.ledger import CASConflict, Ledger
+    from agentdescent.loop.evolution import EvolvingArtifact
+    from agentdescent.merge.ledger import CASConflict, Ledger
 
     lg = Ledger(str(tmp_path), lambda a: {"state": dict(a.state)},
                 lambda aid, v, s: EvolvingArtifact(aid, s.get("state", {}), v))
@@ -122,8 +122,8 @@ def test_reads_do_not_fork_git_when_branch_is_current(tmp_path):
     """
     import time
 
-    from agentdescent.evolution import EvolvingArtifact
-    from agentdescent.ledger import Ledger
+    from agentdescent.loop.evolution import EvolvingArtifact
+    from agentdescent.merge.ledger import Ledger
 
     lg = Ledger(str(tmp_path), lambda a: {"state": dict(a.state)},
                 lambda aid, v, s: EvolvingArtifact(aid, s.get("state", {}), v))
@@ -139,8 +139,8 @@ def test_reads_do_not_fork_git_when_branch_is_current(tmp_path):
 
 def test_branch_switching_still_works_with_the_cached_branch(tmp_path):
     """The tracker must not break dual-branch reads or dev->stable promotion."""
-    from agentdescent.evolution import EvolvingArtifact
-    from agentdescent.ledger import Ledger
+    from agentdescent.loop.evolution import EvolvingArtifact
+    from agentdescent.merge.ledger import Ledger
 
     lg = Ledger(str(tmp_path), lambda a: {"state": dict(a.state)},
                 lambda aid, v, s: EvolvingArtifact(aid, s.get("state", {}), v))

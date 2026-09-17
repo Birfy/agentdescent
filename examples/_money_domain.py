@@ -36,7 +36,7 @@ import re
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
-from agentdescent.evolution import Task
+from agentdescent.loop.evolution import Task
 
 
 STARTING_INSTRUCTION = (

@@ -1,7 +1,7 @@
 # Async — removing the round barrier
 
-*Modules:* [`agentdescent.async_evolve`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/async_evolve.py)
-· [`agentdescent.async_runtime`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/async_runtime.py)
+*Modules:* [`agentdescent.loop.async_evolve`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/loop/async_evolve.py)
+· [`agentdescent.reference.async_runtime`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/reference/async_runtime.py)
 · *API:* [`async_evolve`](api.md#barrier-free-evolution), [`AsyncAgentDescent`, `AsyncConfig`, `AsyncStats`](api.md#the-async-orchestrator)
 
 The synchronous loop runs a barrier: every worker steps, then one
@@ -163,7 +163,7 @@ which is what makes the parallelism claims testable offline.
 
 ```python
 from agentdescent import AsyncAgentDescent, AsyncConfig, get_policy
-from agentdescent.domains.router import make_task_universe
+from agentdescent.reference.domains.router import make_task_universe
 
 cfg = AsyncConfig(n_workers=6, async_ratio=4, noise=0.12,
                   target_accuracy=0.95, max_seconds=15.0, seed=1)

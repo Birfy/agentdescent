@@ -1,7 +1,7 @@
 # Fusion policies — merging what survived
 
-*Module:* [`agentdescent.fusion`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/fusion.py),
-[`agentdescent.defaults`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/defaults.py)
+*Module:* [`agentdescent.merge.fusion`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/merge/fusion.py),
+[`agentdescent.merge.defaults`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/merge/defaults.py)
 · *Contract:* `FusionPolicy.select(artifact, diffs) -> (diff, applied, fused)`
 
 After conflict resolution the surviving diffs are pairwise non-contradicting,
@@ -38,7 +38,7 @@ records `contested = 0` for a whole run.
 
 ```python
 from agentdescent import Policies, evolve
-from agentdescent.fusion import reflective_merge
+from agentdescent.merge.fusion import reflective_merge
 
 evolve(tasks, reward, agent=agent, n_workers=4,
        policies=Policies(**reflective_merge(completion)))

@@ -316,7 +316,7 @@ def _in_pattern_order(state: Mapping[str, str],
     contract an agent actually receives depend on filenames, under a budget that
     cannot hold all of them. A domain lists its contract in order of importance.
     """
-    from agentdescent.filetree import match_any
+    from agentdescent.artifacts.filetree import match_any
 
     seen, out = set(), []
     for pattern in patterns:
@@ -390,7 +390,7 @@ class LocalWorld:
         """
         if not self.readonly:
             return False
-        from agentdescent.filetree import match_any
+        from agentdescent.artifacts.filetree import match_any
         under = [key for key in state if owns(child, key)]
         return bool(under) and all(match_any(key, self.readonly) for key in under)
 
@@ -555,7 +555,7 @@ class WorldLog:
     runs its own recursion into the same log.
 
     ``rework`` is how "request more work" survives a boundary the engine has no
-    third outcome for. :class:`~agentdescent.policies.AcceptDecision` is a
+    third outcome for. :class:`~agentdescent.core.policies.AcceptDecision` is a
     boolean, so a parent's *not yet* is recorded here and read by the next
     round's manager, which re-delegates to that path instead of choosing freely.
     That is the upstream behaviour reconstructed out of parts the engine already

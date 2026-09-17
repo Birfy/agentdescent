@@ -6,7 +6,7 @@ repository whose FEEDBACK and REFINE are **one call**, not two.
 """
 from __future__ import annotations
 
-from agentdescent.evolution import Task
+from agentdescent.loop.evolution import Task
 
 from examples.self_refine import self_refine_feedback_loop as sr
 

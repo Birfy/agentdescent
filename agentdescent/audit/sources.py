@@ -52,7 +52,7 @@ class GoldAnswer:
     """Synchronous truth: a gold answer, an exact match, a checker, a simulator.
 
     Wraps a plain ``(task, output) -> float`` -- the same
-    :data:`~agentdescent.evolution.Reward` signature the loop already uses,
+    :data:`~agentdescent.loop.evolution.Reward` signature the loop already uses,
     which is the point. The cheap agent judge and the truth it is a proxy for
     have identical types, so pairing them is a matter of calling both on the
     same output rather than of building a parallel evaluation stack.

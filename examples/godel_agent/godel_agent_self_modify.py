@@ -17,8 +17,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from agentdescent.evolution import Task
-from agentdescent.policies import AcceptDecision, Policies
+from agentdescent.loop.evolution import Task
+from agentdescent.core.policies import AcceptDecision, Policies
 
 from examples._measure import extract_python
 from examples._method_policy import MethodPolicy, ValidatedSlot

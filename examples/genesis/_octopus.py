@@ -1,4 +1,4 @@
-"""``git merge --octopus``, as a :class:`~agentdescent.policies.ConflictPolicy`.
+"""``git merge --octopus``, as a :class:`~agentdescent.core.policies.ConflictPolicy`.
 
 The engine's contradiction rule is one line::
 
@@ -18,7 +18,7 @@ artifact's current content, and the cards it reconciles stop contradicting -- at
 which point the engine's own fusion unions them exactly as it would for edits to
 different files. Only the values that genuinely overlap fall through to the inner
 rule, which is the shipped
-:class:`~agentdescent.defaults.DefaultConflict` unless a caller passes another.
+:class:`~agentdescent.merge.defaults.DefaultConflict` unless a caller passes another.
 
 This is the third arm of the comparison the README's headline row is about
 (``keyed union fuses 0 of 48 · reflective merge 42 of 48``): keyed union, textual
@@ -39,8 +39,8 @@ import tempfile
 from dataclasses import dataclass, replace
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from agentdescent.defaults import DefaultConflict
-from agentdescent.evolvable import EvidenceCard, Evolvable
+from agentdescent.merge.defaults import DefaultConflict
+from agentdescent.core.evolvable import EvidenceCard, Evolvable
 
 __all__ = ["OctopusConflict", "three_way", "git_available"]
 

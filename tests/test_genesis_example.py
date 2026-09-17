@@ -14,12 +14,12 @@ import posixpath
 
 import pytest
 
-from agentdescent.aggregator import AggregatorConfig, MergeOutcome, diffs_contradict
-from agentdescent.defaults import DefaultAcceptance, DefaultConflict
-from agentdescent.evolution import EvolvingArtifact, RoundInfo, Task, evolve
-from agentdescent.evolvable import Diff, EvidenceCard
-from agentdescent.filetree import canonical, match_any
-from agentdescent.policies import MergeContext, Policies, ProposalContext
+from agentdescent.merge.aggregator import AggregatorConfig, MergeOutcome, diffs_contradict
+from agentdescent.merge.defaults import DefaultAcceptance, DefaultConflict
+from agentdescent.loop.evolution import EvolvingArtifact, RoundInfo, Task, evolve
+from agentdescent.core.evolvable import Diff, EvidenceCard
+from agentdescent.artifacts.filetree import canonical, match_any
+from agentdescent.core.policies import MergeContext, Policies, ProposalContext
 
 from examples.genesis import _domain as domain
 from examples.genesis import _jqx as jqx

@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Sequence, TypeVar
 
-from agentdescent.agents import Completion, Usage
+from agentdescent.actors.agents import Completion, Usage
 
 
 MODES = ("serial", "sync_parallel", "async_pipeline")

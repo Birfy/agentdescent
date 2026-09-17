@@ -1,6 +1,6 @@
 # Meta-evolution — evolving the slots of `evolve()`
 
-*Module:* [`agentdescent.meta`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/meta.py)
+*Module:* [`agentdescent.loop.meta`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/loop/meta.py)
 · *Example:* [`examples/metasearch/`](https://github.com/Birfy/agentdescent/tree/main/examples/metasearch)
 · *Design record:* [design-meta-evolution.md](design-meta-evolution.md)
 

@@ -198,7 +198,7 @@ def run_tests(code: str, tests: Sequence[str], *,
     .. warning:: **Process isolation, not a sandbox.**
 
        This runs model-authored Python with this user's permissions, exactly as
-       :func:`agentdescent.runners.code_runner` does and with the same caveat:
+       :func:`agentdescent.actors.runners.code_runner` does and with the same caveat:
        a trimmed environment, a scratch working directory and a hard timeout are
        not a security boundary. It is here because the alternative -- asking a
        model whether the code is correct -- is the thing being *measured*. Run
@@ -649,7 +649,7 @@ class Workload:
     index_with: Optional[Callable[[int], Dict[str, Task]]] = None
 
     def rows(self, limit: int) -> List[Dict]:
-        from agentdescent.dataloader import hf_rows
+        from agentdescent.actors.dataloader import hf_rows
 
         return hf_rows(self.dataset, self.split, config=self.config,
                        limit=limit)
@@ -692,7 +692,7 @@ def _bbh_sample(n: int, seed: int) -> List[Task]:
     measures is mostly a property of the shape. Spreading the draw is what makes
     it a second *workload* and not a second sample of the first.
     """
-    from agentdescent.dataloader import hf_rows
+    from agentdescent.actors.dataloader import hf_rows
 
     rng = random.Random(seed)
     per = max(1, n // len(BBH_SUBTASKS))
@@ -715,7 +715,7 @@ def _bbh_sample(n: int, seed: int) -> List[Task]:
 
 
 def _bbh_index(rows: int) -> Dict[str, Task]:
-    from agentdescent.dataloader import hf_rows
+    from agentdescent.actors.dataloader import hf_rows
 
     out: Dict[str, Task] = {}
     for name in BBH_SUBTASKS:

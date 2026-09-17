@@ -8,7 +8,7 @@ template that rots, so this file runs on every ``pytest -q`` like any other.
 """
 
 from examples import _TEMPLATE as port
-from agentdescent.evolution import Task
+from agentdescent.loop.evolution import Task
 
 
 def test_strategy_turns_one_proposal_into_one_diff():

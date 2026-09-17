@@ -13,7 +13,7 @@ import tempfile
 
 import pytest
 
-from agentdescent.agents import (
+from agentdescent.actors.agents import (
     AgentError,
     Completion,
     Usage,
@@ -23,7 +23,7 @@ from agentdescent.agents import (
     codex,
     echo,
 )
-from agentdescent.backends import document_agent
+from agentdescent.actors.backends import document_agent
 
 
 def _echo_cli():
@@ -135,7 +135,7 @@ def test_document_agent_passes_skills_through():
 
 def test_openhands_shares_the_same_contract():
     """Constructing it must not require the optional dependency (lazy import)."""
-    from agentdescent.backends import openhands
+    from agentdescent.actors.backends import openhands
 
     agent = openhands(model="openai/x")
     assert isinstance(agent, WorkspaceAgent)
@@ -143,7 +143,7 @@ def test_openhands_shares_the_same_contract():
 
 
 def test_openhands_backend_is_now_just_a_composition():
-    from agentdescent.backends import openhands_backend
+    from agentdescent.actors.backends import openhands_backend
 
     assert hasattr(openhands_backend(model="openai/x"), "answer")
 
@@ -234,7 +234,7 @@ def test_the_prompt_points_at_the_skills_instead_of_carrying_them():
 
 def test_a_backend_without_a_workspace_falls_back_to_inlining_them():
     # dropping them silently would make the skills invisible on the retriever path.
-    from agentdescent.backends import tool_loop_backend
+    from agentdescent.actors.backends import tool_loop_backend
 
     seen = {}
 

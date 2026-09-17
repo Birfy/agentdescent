@@ -7,7 +7,7 @@ import subprocess
 
 import pytest
 
-from agentdescent import cli
+from agentdescent.shell import cli
 from agentdescent.integrations import (
     DSH_FORWARDED_KEYS, HOSTS, install, marketplace_manifest, render_claude_plugin, skill_text,
 )
@@ -36,9 +36,9 @@ def test_the_skill_names_every_tool_kind_and_verb_that_exists():
     going badly had no way to know it could stop it."""
     import re
 
-    from agentdescent import cli
-    from agentdescent.evolvespec import KINDS, SHORT_REFS
-    from agentdescent.mcp import TOOL_DESCRIPTIONS
+    from agentdescent.shell import cli
+    from agentdescent.core.evolvespec import KINDS, SHORT_REFS
+    from agentdescent.shell.mcp import TOOL_DESCRIPTIONS
 
     text = skill_text()
     missing = [t for t in TOOL_DESCRIPTIONS if not re.search(rf"\b{t}\b", text)]
@@ -191,7 +191,7 @@ def test_install_warns_when_the_mcp_sdk_is_missing(tmp_path, monkeypatch):
     import sys
 
     import agentdescent.integrations as integrations
-    from agentdescent.cli import MCP_MIN_PYTHON
+    from agentdescent.shell.cli import MCP_MIN_PYTHON
 
     monkeypatch.setattr(integrations, "mcp_sdk_missing", lambda: True)
     lines = install("claude-code", dry_run=True, home=str(tmp_path))
@@ -214,7 +214,7 @@ def test_agentdescent_mcp_without_the_sdk_says_how_to_get_it(monkeypatch, capsys
     import builtins
     import sys
 
-    from agentdescent import cli
+    from agentdescent.shell import cli
 
     real = builtins.__import__
 
@@ -463,7 +463,7 @@ def test_the_mcp_extra_is_gated_on_the_python_it_needs():
 
 def test_an_old_interpreter_is_told_the_truth_not_a_pip_line(monkeypatch):
     """On 3.9 `pip install agentdescent[mcp]` is the one thing that cannot help."""
-    from agentdescent import cli
+    from agentdescent.shell import cli
 
     monkeypatch.setattr(cli.sys, "version_info", (3, 9, 23, "final", 0))
     why = cli.mcp_unavailable()
@@ -621,8 +621,8 @@ def test_the_native_dsh_plugin_also_boots(tmp_path):
 
 
 def test_plan_warns_when_the_named_agent_cannot_run_here(monkeypatch, tmp_path):
-    from agentdescent.cli import plan_payload
-    from agentdescent.evolvespec import EvolveSpec
+    from agentdescent.shell.cli import plan_payload
+    from agentdescent.core.evolvespec import EvolveSpec
 
     cases = tmp_path / "cases.jsonl"
     cases.write_text('{"prompt": "q", "gold": "a"}\n', encoding="utf-8")
@@ -658,7 +658,7 @@ def test_a_provider_error_survives_to_the_user_whole():
     said *"refer to the documentation ... to select a compatible model"* fell
     off the end, and that half is the only actionable part.
     """
-    from agentdescent.pipeline import describe as _describe
+    from agentdescent.loop.pipeline import describe as _describe
 
     long = ("https://endpoint/v3 returned HTTP 404 for model 'x': " + "detail. " * 60)
     once = _describe(RuntimeError(long))
@@ -684,8 +684,8 @@ def test_plan_says_when_workers_buy_selection_rather_than_merging(tmp_path):
     only agent is a file-editing CLI, where paying an agent session per merge
     is not something to switch on unasked.
     """
-    from agentdescent.cli import plan_payload
-    from agentdescent.evolvespec import EvolveSpec
+    from agentdescent.shell.cli import plan_payload
+    from agentdescent.core.evolvespec import EvolveSpec
 
     cases = tmp_path / "cases.jsonl"
     cases.write_text('{"prompt": "q", "gold": "a"}\n', encoding="utf-8")
@@ -714,7 +714,7 @@ def test_doctor_reports_the_base_url_not_just_that_one_is_set():
     secret, and it is the only clue that the provider is not OpenAI."""
     import os
 
-    from agentdescent.cli import doctor_report
+    from agentdescent.shell.cli import doctor_report
 
     before = os.environ.get("OPENAI_BASE_URL")
     os.environ["OPENAI_BASE_URL"] = "https://example.invalid/v3"

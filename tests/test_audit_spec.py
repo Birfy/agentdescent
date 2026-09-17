@@ -16,15 +16,15 @@ import pathlib
 
 import pytest
 
-from agentdescent import runstore
+from agentdescent.shell import runstore
 from agentdescent.audit import Audit, AuditedReward
 from agentdescent.audit.gate import RectifiedAcceptance
-from agentdescent.cli import plan_payload, status_payload
-from agentdescent.evolvespec import EvolveSpec, SpecError, compose
+from agentdescent.shell.cli import plan_payload, status_payload
+from agentdescent.core.evolvespec import EvolveSpec, SpecError, compose
 
 from tests.test_evolvespec import _dir_spec, stub_reflect  # noqa: F401
 
-ORACLE = "agentdescent.rewards:exact_match"
+ORACLE = "agentdescent.actors.rewards:exact_match"
 
 
 _counter = itertools.count()
@@ -106,7 +106,7 @@ def test_the_acceptance_policy_a_spec_named_is_wrapped_not_replaced(tmp_path):
     the spec asked for."""
     spec = _spec(tmp_path, {"oracle": ORACLE},
                  policies={"acceptance": {
-                     "ref": "agentdescent.advantage:AdvantageAcceptance"}})
+                     "ref": "agentdescent.merge.advantage:AdvantageAcceptance"}})
     comp = compose(spec)
     gate = comp.kwargs["policies"].acceptance
     assert isinstance(gate, RectifiedAcceptance)

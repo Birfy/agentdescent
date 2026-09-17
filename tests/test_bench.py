@@ -243,7 +243,7 @@ def test_the_progress_line_never_formats_a_missing_score():
 
 def test_the_run_survives_an_arm_that_produced_no_score(capsys):
     """End to end through the runner's own printing path, with a None score."""
-    from agentdescent.baselines import ArmResult
+    from agentdescent.observe.baselines import ArmResult
     from bench.baselines_run import _fmt
 
     arm = ArmResult(arm="serial", seed=0, width=1, rollouts=8, calls=8,

@@ -16,7 +16,7 @@ import warnings
 import pytest
 
 import faults
-from agentdescent.evolution import SingleSlot, Task, evolve
+from agentdescent.loop.evolution import SingleSlot, Task, evolve
 
 TASKS = [Task(id=str(i), prompt=str(i), meta={"gold": str(i)}) for i in range(8)]
 
@@ -135,8 +135,8 @@ def test_eval_concurrency_is_reachable_and_changes_behaviour():
     the class attribute silently did nothing because dataclasses bake defaults
     into __init__. That made it impossible to measure or tune."""
     import inspect
-    from agentdescent.evolution import evolve as _evolve
-    from agentdescent.async_evolve import async_evolve
+    from agentdescent.loop.evolution import evolve as _evolve
+    from agentdescent.loop.async_evolve import async_evolve
     assert "eval_concurrency" in inspect.signature(_evolve).parameters
     assert "eval_concurrency" in inspect.signature(async_evolve).parameters
 

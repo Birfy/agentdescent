@@ -45,7 +45,7 @@ import subprocess
 import tempfile
 from typing import Callable, Dict, List, Mapping, Optional, Sequence
 
-from agentdescent.filetree import match_any, materialize
+from agentdescent.artifacts.filetree import match_any, materialize
 
 from ._delegation import Brief, Edit
 from ._spatial import SITUATED_EDIT_PROTOCOL  # noqa: F401  (documented sibling)

@@ -11,7 +11,7 @@ shared ledger goes through it.
 
 ---
 
-*Module:* [`agentdescent.aggregator`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/aggregator.py)
+*Module:* [`agentdescent.merge.aggregator`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/merge/aggregator.py)
 · *API:* [`Aggregator`, `AggregatorConfig`, `MergeOutcome`, …](api.md#the-aggregator-the-optimizer)
 · *Neighbours:* [verifier](verifier.md) scores candidates · [ledger](ledger.md) commits them ·
 [staleness](staleness.md) decides what to do with an out-of-date diff ·
@@ -24,7 +24,7 @@ touching `Aggregator`:
 
 ```python
 from agentdescent import Policies, evolve
-from agentdescent.policies import AcceptDecision
+from agentdescent.core.policies import AcceptDecision
 
 class AcceptEverything:
     def accept(self, ctx):

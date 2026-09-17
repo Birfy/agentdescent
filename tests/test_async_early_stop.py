@@ -8,8 +8,8 @@ import warnings
 
 import pytest
 
-from agentdescent.evolution import SingleSlot, Task, evolve
-from agentdescent.parallel import TensorParallel
+from agentdescent.loop.evolution import SingleSlot, Task, evolve
+from agentdescent.schedule.parallel import TensorParallel
 
 TASKS = [Task(id=str(i), prompt="p", meta={"gold": "x"}) for i in range(6)]
 
@@ -23,7 +23,7 @@ def _flat_run(**kw):
 
 def test_patience_reaches_the_async_runtime():
     """It was accepted by evolve() and never forwarded -- the run ignored it."""
-    from agentdescent.async_evolve import async_evolve
+    from agentdescent.loop.async_evolve import async_evolve
     import inspect
     assert "patience" in inspect.signature(async_evolve).parameters
 
@@ -50,7 +50,7 @@ def test_no_evolve_argument_is_dropped_without_notice():
 
     `patience=` was silently dropped for exactly as long as nobody checked."""
     import inspect, re
-    from agentdescent.evolution import evolve as _evolve
+    from agentdescent.loop.evolution import evolve as _evolve
     src = inspect.getsource(_evolve)
     forwarded = set(re.findall(r"(\w+)=", src.split("return async_evolve(")[1]
                                               .split(")\n")[0]))
@@ -89,7 +89,7 @@ def test_a_work_budget_stop_merges_the_evidence_it_paid_for():
     """
     import time as _time
 
-    from agentdescent.aggregator import Aggregator
+    from agentdescent.merge.aggregator import Aggregator
 
     ingested = []
 

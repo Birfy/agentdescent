@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentdescent.evolvespec import EvolveSpec, SpecError, compose
+from agentdescent.core.evolvespec import EvolveSpec, SpecError, compose
 
 PROBLEMS = "examples.metasearch.evolve_search_policy:source_problems"
 
@@ -20,7 +20,7 @@ PROBLEMS = "examples.metasearch.evolve_search_policy:source_problems"
 def _spec(**over):
     d = {"kind": "policy_slot", "target": "selection",
          "data": {"problems": PROBLEMS, "seeds": [0]},
-         "agent": {"ref": "agentdescent.agents:echo", "call": True},
+         "agent": {"ref": "agentdescent.actors.agents:echo", "call": True},
          "allow": ["examples"]}
     d.update(over)
     return EvolveSpec.from_dict(d)
@@ -93,7 +93,7 @@ def test_it_asks_whether_the_seed_moves_rather_than_assuming():
 
 def test_the_spec_path_and_the_library_path_cannot_drift():
     """`compose` and `meta_evolve` both assemble through `meta_parts`."""
-    from agentdescent.meta import meta_parts, priority_selection, slot_reflector
+    from agentdescent.loop.meta import meta_parts, priority_selection, slot_reflector
 
     spec = priority_selection()
     tasks, reward, kwargs = meta_parts(
@@ -112,7 +112,7 @@ def test_it_runs_end_to_end_and_commits_a_better_rule(monkeypatch):
     landscape -- the hand-tuned sweep puts `c -> 0` at +0.0227 -- so a commit
     here is the gate working, not the stub being waved through.
     """
-    import agentdescent.evolvespec as es
+    import agentdescent.core.evolvespec as es
 
     monkeypatch.setattr(
         es, "_TEST_STUB",
@@ -121,7 +121,7 @@ def test_it_runs_end_to_end_and_commits_a_better_rule(monkeypatch):
         raising=False)
     comp = compose(_spec(
         data={"problems": PROBLEMS, "seeds": [0, 1, 2, 3, 4]},
-        agent={"ref": "agentdescent.evolvespec:_TEST_STUB", "call": False},
+        agent={"ref": "agentdescent.core.evolvespec:_TEST_STUB", "call": False},
         evolve={"rounds": 2, "n_workers": 1, "held_out_frac": 0.4}))
     result = comp.run()
     assert result.outcomes().get("committed") == 1
@@ -136,8 +136,8 @@ def test_a_meta_reward_that_cannot_score_is_refused_before_the_run():
     `rollouts_to` is `rollouts_to(target) -> MetaReward`, and naming it where
     `auc` goes scored every outcome 0.000 with nothing to say why.
     """
-    from agentdescent.evolution import Task
-    from agentdescent.meta import MetaOutcome
+    from agentdescent.loop.evolution import Task
+    from agentdescent.loop.meta import MetaOutcome
 
     outcome = MetaOutcome(curve=[0.5, 0.8, 0.95, 0.95], final=0.95, rollouts=4).to_json()
     assert compose(_spec(score="auc")).reward(Task("t", "p"), outcome) == pytest.approx(0.8)
@@ -150,7 +150,7 @@ def test_a_meta_reward_that_cannot_score_is_refused_before_the_run():
     assert configured.reward(Task("t", "p"), outcome) == pytest.approx(1 / 3)
 
     # and any other shape that cannot score is caught by `meta_parts` itself
-    from agentdescent.meta import meta_parts, priority_selection, slot_reflector
+    from agentdescent.loop.meta import meta_parts, priority_selection, slot_reflector
 
     slot = priority_selection()
     with pytest.raises(ValueError, match="could not score"):
@@ -185,11 +185,11 @@ def test_an_import_from_the_whitelist_is_a_function_not_a_bound_method():
     the namespace object is prepended to every call. Two of the eleven
     whitelisted names are functions -- and they are exactly the helpers a
     `conflict` or `fusion` policy imports."""
-    from agentdescent.meta import compile_policy_source
+    from agentdescent.loop.meta import compile_policy_source
 
     conflict = '''class Policy:
     def resolve(self, artifact, cards):
-        from agentdescent.aggregator import diffs_contradict
+        from agentdescent.merge.aggregator import diffs_contradict
         kept, dropped = [], 0
         for card in cards:
             if any(diffs_contradict(card.diff, k.diff) for k in kept):
@@ -200,7 +200,7 @@ def test_an_import_from_the_whitelist_is_a_function_not_a_bound_method():
 '''
     fusion = '''class Policy:
     def select(self, artifact, diffs):
-        from agentdescent.aggregator import fuse_diffs
+        from agentdescent.merge.aggregator import fuse_diffs
         if len(diffs) == 1:
             return diffs[0], artifact.apply(diffs[0]), False
         union = fuse_diffs(list(diffs))

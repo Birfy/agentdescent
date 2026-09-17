@@ -61,14 +61,14 @@ import random
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Tuple
 
-from agentdescent.aggregator import AggregatorProtocol, MergeReport
-from agentdescent.dataloader import Dataset, hf_rows, split_dataset
-from agentdescent.evolvable import Diff, EvidenceCard
-from agentdescent.evolution import EvolvingArtifact, Task, evolve
-from agentdescent.governance import classify
-from agentdescent.ledger import CASConflict, Ledger
-from agentdescent.selection import Archive, sigmoid_novelty_weights
-from agentdescent.staleness import get_policy
+from agentdescent.merge.aggregator import AggregatorProtocol, MergeReport
+from agentdescent.actors.dataloader import Dataset, hf_rows, split_dataset
+from agentdescent.core.evolvable import Diff, EvidenceCard
+from agentdescent.loop.evolution import EvolvingArtifact, Task, evolve
+from agentdescent.merge.governance import classify
+from agentdescent.merge.ledger import CASConflict, Ledger
+from agentdescent.schedule.selection import Archive, sigmoid_novelty_weights
+from agentdescent.merge.staleness import get_policy
 from examples._common import (add_standard_args, completion_for, confirm,
                               worker_count,
                               budget_kwargs, report_engine)
@@ -94,7 +94,7 @@ CAPABILITY_POOL = [
 
 
 #: ``p_i proportional to sigmoid(10*(score-0.5)) * 1/(1+children_i)``, now
-#: shipped as :func:`agentdescent.selection.sigmoid_novelty_weights`. It was
+#: shipped as :func:`agentdescent.schedule.selection.sigmoid_novelty_weights`. It was
 #: written out here *and* byte-identically in `examples/adas`, which is how two
 #: copies of a published formula quietly stop being the same formula.
 dgm_parent_weights = sigmoid_novelty_weights
@@ -352,7 +352,7 @@ class DGMArchiveAggregator(AggregatorProtocol):
         # DGM parent selection at the standard seam: sample the next head
         # ~ sigmoid(perf) x 1/(1+children). Candidate.version carries the
         # archive index so the pick maps straight back.
-        from agentdescent.selection import Candidate, SelectionContext
+        from agentdescent.schedule.selection import Candidate, SelectionContext
         rows = [Candidate(artifact_id=self.aid, version=i,
                           score=a.score, selected=a.children)
                 for i, a in enumerate(self.ctx.archive)]
@@ -478,7 +478,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--staleness", default="guarded",
                    choices=["guarded", "reflective", "full"],
                    help="what to do with a self-edit proposed against a head the "
-                        "merger has since moved (agentdescent.staleness)")
+                        "merger has since moved (agentdescent.merge.staleness)")
     p.add_argument("--selfimprove-size", type=int, default=2)
     p.add_argument("--archive", default="keep_all", choices=["keep_all", "keep_better"])
     return p
@@ -493,7 +493,7 @@ def _main_real(args) -> None:
     matters -- `run_dgm_real` builds the same `DGMArchiveAggregator`.
     """
     from examples.dgm.real_objective import load_tasks, run_dgm_real
-    from agentdescent.filetree import parse_tree
+    from agentdescent.artifacts.filetree import parse_tree
 
     art = EvolvingArtifact("coding_agent", blast_radius=0.6)
     cases = load_tasks()

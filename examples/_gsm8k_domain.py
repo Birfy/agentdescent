@@ -29,7 +29,7 @@ Two transports, because the study runs on a host that cannot reach
 * the **parquet files**, over ``HF_ENDPOINT`` (default ``hf-mirror.com``),
   which is the whole split in one request -- 7473 train rows and 1319 test;
 * the **datasets-server** ``/rows`` API through
-  :mod:`agentdescent.dataloader`, where that host is reachable.
+  :mod:`agentdescent.actors.dataloader`, where that host is reachable.
 
 The parquet path is tried first and the row counts are asserted, because the
 failure that matters here is silent: an interrupted download of GSM8K's raw
@@ -45,7 +45,7 @@ import re
 import urllib.request
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from agentdescent.evolution import Task
+from agentdescent.loop.evolution import Task
 
 
 DATASET = "openai/gsm8k"
@@ -190,13 +190,13 @@ def _from_parquet(split: str) -> List[dict]:
 
 
 def _from_datasets_server(split: str) -> List[dict]:
-    from agentdescent.dataloader import hf_rows
+    from agentdescent.actors.dataloader import hf_rows
 
     return hf_rows(DATASET, split, config=CONFIG, limit=EXPECTED_ROWS[split])
 
 
 def _cache_file(split: str) -> str:
-    from agentdescent.dataloader import cache_path
+    from agentdescent.actors.dataloader import cache_path
 
     return cache_path("gsm8k", f"{split}.jsonl")
 

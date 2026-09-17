@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from agentdescent.selection import FlatPuct
+from agentdescent.schedule.selection import FlatPuct
 
 from examples.era import era_empirical_software as era
 from examples.era._era_support import Program

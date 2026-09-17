@@ -17,18 +17,18 @@ being installed says so instead of dying on a ``NoneType``.
 import pytest
 
 from agentdescent import Policies, SingleSlot, Task, evolve
-from agentdescent.advantage import (
+from agentdescent.merge.advantage import (
     AdvantageAcceptance, AdvantageConflict, StableDistanceAcceptance,
 )
-from agentdescent.aggregator import Aggregator, AggregatorConfig, install_policy
-from agentdescent.defaults import (
+from agentdescent.merge.aggregator import Aggregator, AggregatorConfig, install_policy
+from agentdescent.merge.defaults import (
     DefaultAcceptance, DefaultConflict, DefaultFusion, DefaultPromotion,
     PolicyUnboundError,
 )
-from agentdescent.evolvable import Diff
-from agentdescent.ledger import Ledger
-from agentdescent.scheduler import AuditScheduler
-from agentdescent.verifier import ThreeLayerVerifier, VerifierBudget
+from agentdescent.core.evolvable import Diff
+from agentdescent.merge.ledger import Ledger
+from agentdescent.schedule.scheduler import AuditScheduler
+from agentdescent.evaluate.verifier import ThreeLayerVerifier, VerifierBudget
 
 
 def _verifier():
@@ -131,7 +131,7 @@ def test_a_wrapper_around_an_unbound_rule_reports_the_inner_rule():
 
 
 def test_an_unconfigured_gate_says_so():
-    from agentdescent.policies import MergeContext
+    from agentdescent.core.policies import MergeContext
     ctx = MergeContext(artifact=None, candidate=None, cards=(),
                        base_counts=(1.0, 1.0), cand_counts=(2.0, 0.0))
     with pytest.raises(PolicyUnboundError, match="DefaultAcceptance.*configure"):

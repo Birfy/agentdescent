@@ -135,12 +135,12 @@ wants the second.
     being a new mechanism *and* with it being an engineering convenience.
 
     One quantity distinguishes them: held-out quality at **equal rollout budget**,
-    merge-of-N against best-of-N fork. `agentdescent.baselines` runs the three
+    merge-of-N against best-of-N fork. `agentdescent.observe.baselines` runs the three
     arms that produce it — `serial`, `best_of_n_fork`, `merge_of_n` — over one
     `Workload`, so the arms cannot drift in anything but execution shape.
 
 ```python
-from agentdescent.baselines import Budget, Workload, best_of_n_fork, compare, merge_of_n, serial, to_markdown
+from agentdescent.observe.baselines import Budget, Workload, best_of_n_fork, compare, merge_of_n, serial, to_markdown
 
 workload = Workload(tasks=tasks, reward=reward, test_eval=score_on_test,
                     agent=agent, evolve_kwargs={"rounds": 10_000})

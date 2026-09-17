@@ -1,16 +1,16 @@
-"""agentdescent.meta: the decision slots of evolve() as the artifact. Offline."""
+"""agentdescent.loop.meta: the decision slots of evolve() as the artifact. Offline."""
 
 import json
 
 import pytest
 
 from agentdescent import Policies, Task, evolve
-from agentdescent.meta import (SLOTS, SLOT_PROTOCOLS, MetaOutcome, ParamSlot, PrioritySelection,
+from agentdescent.loop.meta import (SLOTS, SLOT_PROTOCOLS, MetaOutcome, ParamSlot, PrioritySelection,
                                PRIORITY_SEED, SourceSlot, auc, compile_priority,
                                evolve_problem, final_reward, meta_evolve,
                                meta_validate, priority_selection, rollouts_to,
                                slot_reflector, transfer_ratio)
-from agentdescent.selection import Beam, FlatPuct, SingleHead
+from agentdescent.schedule.selection import Beam, FlatPuct, SingleHead
 
 
 # -- outcomes and meta-rewards ------------------------------------------------
@@ -70,7 +70,7 @@ def test_source_slot_strips_fences_and_gates():
 
 
 def test_the_priority_seed_is_flat_puct():
-    from agentdescent.selection import Candidate, SelectionContext
+    from agentdescent.schedule.selection import Candidate, SelectionContext
 
     rows = tuple(Candidate("a", v, score=s, selected=n, parent=p)
                  for v, s, n, p in [(0, 0.1, 5, None), (1, 0.7, 2, 0), (2, 0.3, 1, 0),
@@ -172,7 +172,7 @@ def test_slot_reflector_shows_the_spec_the_value_and_the_outcome():
 
 @pytest.mark.parametrize("slot", ["selection", "task_sampler", "staleness"])
 def test_policy_source_seeds_satisfy_their_protocol(slot):
-    from agentdescent.meta import SLOT_PROTOCOLS, policy_source
+    from agentdescent.loop.meta import SLOT_PROTOCOLS, policy_source
 
     spec = policy_source(slot)
     value = spec.compile(spec.render(spec.initial()))
@@ -193,14 +193,14 @@ def test_policy_source_seeds_satisfy_their_protocol(slot):
     ("class Other:\n    def select(self, ctx, n): return [ctx.head]", "exactly one class"),
 ])
 def test_the_general_gate_refuses(source, reason):
-    from agentdescent.meta import compile_policy_source
+    from agentdescent.loop.meta import compile_policy_source
 
     with pytest.raises(ValueError, match=reason):
         compile_policy_source("selection", source)
 
 
 def test_a_method_level_import_from_the_allowlist_works():
-    from agentdescent.meta import compile_policy_source
+    from agentdescent.loop.meta import compile_policy_source
 
     policy = compile_policy_source("selection", (
         "class Policy:\n"
@@ -208,13 +208,13 @@ def test_a_method_level_import_from_the_allowlist_works():
         "        import random\n"
         "        rng = random.Random(ctx.round)\n"
         "        return [rng.choice(list(ctx.candidates)) for _ in range(n)]\n"))
-    from agentdescent.selection import Candidate, SelectionContext
+    from agentdescent.schedule.selection import Candidate, SelectionContext
     rows = (Candidate("a", 0), Candidate("a", 1, parent=0))
     assert len(policy.select(SelectionContext(head=rows[0], candidates=rows), 2)) == 2
 
 
 def test_meta_evolve_over_class_source_for_the_selection_slot():
-    from agentdescent.meta import policy_source
+    from agentdescent.loop.meta import policy_source
 
     spec = policy_source("selection")
     rewrite = """```python
@@ -228,7 +228,7 @@ class Policy:
 
     def problem(value, seed):
         # A curve that rewards a policy which picks the best-scored candidate.
-        from agentdescent.selection import Candidate, SelectionContext
+        from agentdescent.schedule.selection import Candidate, SelectionContext
         rows = (Candidate("a", 0, score=0.2), Candidate("a", 1, score=0.9, parent=0))
         pick = value.select(SelectionContext(head=rows[0], candidates=rows), 1)[0]
         base = 0.9 if pick.version == 1 else 0.2
@@ -245,7 +245,7 @@ class Policy:
 
 @pytest.mark.parametrize("slot", SLOTS)
 def test_every_slot_ships_a_seed_that_passes_its_own_gate(slot):
-    from agentdescent.meta import policy_source, seed_source
+    from agentdescent.loop.meta import policy_source, seed_source
 
     spec = policy_source(slot)
     assert spec.render(spec.initial()).strip() == seed_source(slot).strip()
@@ -255,7 +255,7 @@ def test_every_slot_ships_a_seed_that_passes_its_own_gate(slot):
 @pytest.mark.parametrize("slot", [s for s in SLOTS if s != "proposal"])
 def test_every_seed_runs_inside_a_real_inner_evolve(slot):
     """The seeds are not only shaped right: the engine installs and honours them."""
-    from agentdescent.meta import policy_source
+    from agentdescent.loop.meta import policy_source
 
     problem = evolve_problem(_inner_tasks(), lambda t, o: 1.0 if "yes" in o else 0.0,
                              slot=slot,
@@ -269,7 +269,7 @@ def test_every_seed_runs_inside_a_real_inner_evolve(slot):
 
 
 def test_the_proposal_seed_drives_an_inner_evolve_on_its_own():
-    from agentdescent.meta import policy_source
+    from agentdescent.loop.meta import policy_source
 
     # The proposal policy replaces the actor's propose entirely, so the inner
     # run's only proposals are the seed's placeholder rule.
@@ -299,7 +299,7 @@ def test_the_proposal_seed_drives_an_inner_evolve_on_its_own():
      "sequence of strings"),
 ])
 def test_the_merge_side_smokes_catch_shape_errors(slot, source, reason):
-    from agentdescent.meta import compile_policy_source
+    from agentdescent.loop.meta import compile_policy_source
 
     with pytest.raises(ValueError, match=reason):
         compile_policy_source(slot, source)
@@ -311,7 +311,7 @@ def test_accepts_answers_the_gate_without_side_effects():
     Written after a benchmark re-implemented the check, forgot that `to_diff`
     strips a code fence, and logged every accepted proposal as refused.
     """
-    from agentdescent.meta import policy_source
+    from agentdescent.loop.meta import policy_source
 
     spec = policy_source("task_sampler")
     fenced = ("```python\nclass Policy:\n"
@@ -332,7 +332,7 @@ def test_outer_tasks_interleave_so_a_positional_split_sees_every_problem():
     """`evolve()` cuts train/held-out by position, so grouping by problem would
     train on one problem and gate on another -- measured, and the reason the
     order here is seed-major."""
-    from agentdescent.meta import _outer_tasks
+    from agentdescent.loop.meta import _outer_tasks
 
     tasks, named = _outer_tasks({"a": _scripted_problem, "b": _scripted_problem},
                                 seeds=[0, 1, 2, 3])
@@ -381,7 +381,7 @@ def test_the_sampler_smoke_walks_a_changing_shard(source, reason):
     returned a stale id, which the engine turns into a KeyError two rounds in.
     A fixed key list could not see it; the smoke test now walks the branches.
     """
-    from agentdescent.meta import compile_policy_source
+    from agentdescent.loop.meta import compile_policy_source
 
     with pytest.raises(ValueError, match=reason):
         compile_policy_source("task_sampler", source)
@@ -389,8 +389,8 @@ def test_the_sampler_smoke_walks_a_changing_shard(source, reason):
 
 def test_the_shipped_samplers_pass_the_stricter_smoke():
     """A gate that rejects the engine's own policies would be wrong, not strict."""
-    from agentdescent.meta import _smoke_task_sampler, compile_policy_source, seed_source
-    from agentdescent.sampling import DifficultyWeighted, RoundRobin
+    from agentdescent.loop.meta import _smoke_task_sampler, compile_policy_source, seed_source
+    from agentdescent.schedule.sampling import DifficultyWeighted, RoundRobin
 
     for policy in (RoundRobin(), DifficultyWeighted()):
         _smoke_task_sampler(policy)
@@ -400,7 +400,7 @@ def test_the_shipped_samplers_pass_the_stricter_smoke():
 def test_accepts_and_compile_answer_the_same_question():
     """`accepts` said yes and `compile` then raised on the same string, because
     only one of them stripped the code fence a proposal arrives in."""
-    from agentdescent.meta import SLOT_PROTOCOLS, policy_source
+    from agentdescent.loop.meta import SLOT_PROTOCOLS, policy_source
 
     spec = policy_source("task_sampler")
     fenced = ("```python\nclass Policy:\n"
@@ -421,8 +421,8 @@ def test_a_stochastic_policy_is_seeded_and_therefore_reproducible():
     inner run being a function of `(value, seed)`, and a rule drawing from the
     process-wide stream is not. `meta_validate` would then be scoring the dice.
     """
-    from agentdescent.meta import compile_policy_source
-    from agentdescent.selection import Candidate, SelectionContext
+    from agentdescent.loop.meta import compile_policy_source
+    from agentdescent.schedule.selection import Candidate, SelectionContext
 
     source = ("class Policy:\n"
               "    def select(self, ctx, n):\n"
@@ -450,7 +450,7 @@ def test_a_candidate_cannot_reach_an_unseeded_generator():
     reproducible; the bound generator simply does not have it, and the slot's
     own smoke test turns that into a refusal at the gate rather than a surprise
     on some later call."""
-    from agentdescent.meta import compile_policy_source
+    from agentdescent.loop.meta import compile_policy_source
 
     source = ("class Policy:\n"
               "    def select(self, ctx, n):\n"
@@ -463,8 +463,8 @@ def test_a_candidate_cannot_reach_an_unseeded_generator():
 def test_a_candidate_may_still_seed_its_own_generator():
     """The well-behaved stochastic policy: `random.Random(ctx.round)` is already
     reproducible, and must keep working."""
-    from agentdescent.meta import compile_policy_source
-    from agentdescent.selection import Candidate, SelectionContext
+    from agentdescent.loop.meta import compile_policy_source
+    from agentdescent.schedule.selection import Candidate, SelectionContext
 
     policy = compile_policy_source("selection", (
         "class Policy:\n"

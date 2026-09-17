@@ -92,7 +92,7 @@ import fnmatch
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Iterable, Optional, Sequence, Tuple, Union
 
-from ..advantage import _ForwardsInstall
+from ..merge.advantage import _ForwardsInstall
 from .calibrator import STALE_INFLATION, Calibrator, Rectification
 
 __all__ = ["Adjustment", "RectifiedAcceptance", "VerifierWatch",
@@ -223,7 +223,7 @@ def discount_for(counts: Tuple[float, float], extra_var: float,
 class RectifiedAcceptance(_ForwardsInstall):
     """An acceptance gate that knows its measurement came from a proxy.
 
-    Wraps another :class:`~agentdescent.policies.AcceptancePolicy`. The Beta
+    Wraps another :class:`~agentdescent.core.policies.AcceptancePolicy`. The Beta
     test, the regression guard and the annealing schedule are untouched; what
     changes is the evidence handed to them, which is discounted by however much
     the verifier disagrees with ground truth.
@@ -271,7 +271,7 @@ class RectifiedAcceptance(_ForwardsInstall):
                  inflate_when_stale: float = STALE_INFLATION,
                  explain_refusals: Optional[bool] = None,
                  min_kappa: float = MIN_KAPPA) -> None:
-        from ..defaults import DefaultAcceptance
+        from ..merge.defaults import DefaultAcceptance
 
         if inflate_when_stale < 1.0:
             raise ValueError("inflate_when_stale below 1.0 would make an "
@@ -483,7 +483,7 @@ class VerifierWatch:
         if artifact_id in self.artifact_ids:
             return f"{artifact_id!r} committed, and it is the verifier"
         if self.layers:
-            from ..governance import classify
+            from ..merge.governance import classify
 
             try:
                 layer = classify(artifact)

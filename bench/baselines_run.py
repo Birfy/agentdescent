@@ -4,8 +4,8 @@
         --width 4 --seeds 0,1,2 --provider openai --model GLM-5.2 --yes
 
 Three arms -- `serial`, `best_of_n_fork`, `merge_of_n` -- over one
-:class:`~agentdescent.baselines.Workload`, so only the execution shape varies.
-See `agentdescent/baselines.py` for why this exists: every efficiency number in
+:class:`~agentdescent.observe.baselines.Workload`, so only the execution shape varies.
+See `agentdescent/observe/baselines.py` for why this exists: every efficiency number in
 this repository is a throughput speedup, and throughput cannot distinguish
 merging from sampling-and-selecting because fork-and-select is parallel too.
 
@@ -39,17 +39,17 @@ import threading
 from typing import Callable, List, Optional, Sequence
 
 from agentdescent import SingleSlot, Usage
-from agentdescent.dataloader import hf_rows
-from agentdescent.evolution import Task
-from agentdescent.baselines import (
+from agentdescent.actors.dataloader import hf_rows
+from agentdescent.loop.evolution import Task
+from agentdescent.observe.baselines import (
     ArmResult, Budget, Workload, best_of_n_fork, compare, merge_of_n, serial,
     to_markdown,
 )
 from dataclasses import replace
 
-from agentdescent.evolution import EvolutionResult
-from agentdescent.fusion import reflective_merge
-from agentdescent.policies import Policies
+from agentdescent.loop.evolution import EvolutionResult
+from agentdescent.merge.fusion import reflective_merge
+from agentdescent.core.policies import Policies
 from examples._common import completion_for, confirm, score_tasks
 
 
@@ -148,8 +148,8 @@ def _gsm8k(fetch: int, seed: int, completion, *, self_verify: bool = True,
     without `--reflective-merge`. That is deliberate; it is the shape the merge
     question is being asked on.
     """
-    from agentdescent.dataloader import split_dataset
-    from agentdescent.evolution import LLMAgent
+    from agentdescent.actors.dataloader import split_dataset
+    from agentdescent.loop.evolution import LLMAgent
 
     rows = hf_rows("openai/gsm8k", "train", config="main", limit=fetch)
     tasks = [Task(id=str(i), prompt=r["question"],
@@ -210,8 +210,8 @@ def _bbh(fetch: int, seed: int, completion, *, task: str = "dyck_languages",
     `InstructionSlot`, so this is a one-key workload: every pair of proposals
     contradicts, and `merge_of_n` cannot fuse without `--reflective-merge`.
     """
-    from agentdescent.dataloader import split_dataset
-    from agentdescent.evolution import LLMAgent
+    from agentdescent.actors.dataloader import split_dataset
+    from agentdescent.loop.evolution import LLMAgent
 
     rows = hf_rows("lukaemon/bbh", "test", config=task, limit=fetch)
     tasks = [Task(id=str(i), prompt=r["input"],
@@ -282,9 +282,9 @@ def _bbh_keyed(fetch: int, seed: int, completion, *, task: str = "dyck_languages
     tasks with `KeyedRules` over the categories a failure diagnosis naturally
     falls into. Nothing about the engine changes.
     """
-    from agentdescent.dataloader import split_dataset
-    from agentdescent.evolution import LLMAgent
-    from agentdescent.strategies import KeyedRules
+    from agentdescent.actors.dataloader import split_dataset
+    from agentdescent.loop.evolution import LLMAgent
+    from agentdescent.artifacts.strategies import KeyedRules
 
     rows = hf_rows("lukaemon/bbh", "test", config=task, limit=fetch)
     tasks = [Task(id=str(i), prompt=r["input"],
@@ -356,8 +356,8 @@ def _bbeh(fetch: int, seed: int, completion, *, task: str = "disambiguation qa",
     different shape scores zero, and the run then optimises formatting while the
     numbers look like reasoning. A label cannot be right in two formats.
     """
-    from agentdescent.dataloader import split_dataset
-    from agentdescent.evolution import LLMAgent
+    from agentdescent.actors.dataloader import split_dataset
+    from agentdescent.loop.evolution import LLMAgent
 
     rows = [r for r in hf_rows("BBEH/bbeh", "train", limit=5000)
             if r["task"] == task][:fetch]
@@ -436,21 +436,21 @@ def split_sizes(args) -> tuple:
         from examples.gepa import gepa_prompt_evolution as gepa
         return gepa.load_dataset(args.fetch, seed=0).sizes()
     if args.dataset == "bbeh":
-        from agentdescent.dataloader import split_dataset
+        from agentdescent.actors.dataloader import split_dataset
         rows = [r for r in hf_rows("BBEH/bbeh", "train", limit=5000)
                 if r["task"] == args.bbeh_task][:args.fetch]
         tasks = [Task(id=str(i), prompt=r["input"], meta={})
                  for i, r in enumerate(rows)]
         return split_dataset(tasks, ratios=(0.5, 0.25, 0.25), seed=0).sizes()
     if args.dataset in ("bbh", "bbh-keyed"):
-        from agentdescent.dataloader import split_dataset
+        from agentdescent.actors.dataloader import split_dataset
         rows = hf_rows("lukaemon/bbh", "test", config=args.bbh_task,
                        limit=args.fetch)
         tasks = [Task(id=str(i), prompt=r["input"], meta={})
                  for i, r in enumerate(rows)]
         return split_dataset(tasks, ratios=(0.5, 0.25, 0.25), seed=0).sizes()
     if args.dataset == "gsm8k":
-        from agentdescent.dataloader import split_dataset
+        from agentdescent.actors.dataloader import split_dataset
         rows = hf_rows("openai/gsm8k", "train", config="main", limit=args.fetch)
         tasks = [Task(id=str(i), prompt=r["question"], meta={}) 
                  for i, r in enumerate(rows)]

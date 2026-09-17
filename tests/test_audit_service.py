@@ -19,7 +19,7 @@ from agentdescent.audit.service import (OUTPUT_PREVIEW, audit_drift,
                                         audit_rescan, audit_resolve,
                                         audit_scorecard, audit_status,
                                         pick_version)
-from agentdescent.mcp import TOOL_DESCRIPTIONS, Tools
+from agentdescent.shell.mcp import TOOL_DESCRIPTIONS, Tools
 
 
 def _store(path, *, n=120, version="v1", bias=0.3, base=0.5, seed=0,
@@ -326,7 +326,7 @@ def test_the_rescan_allowlist_is_not_a_tool_parameter():
     """
     import inspect
 
-    from agentdescent.mcp import RESCAN_ALLOW_ENV, Tools, rescan_allow_from_env
+    from agentdescent.shell.mcp import RESCAN_ALLOW_ENV, Tools, rescan_allow_from_env
 
     assert "allow" not in inspect.signature(Tools.audit_rescan).parameters
 
@@ -338,7 +338,7 @@ def test_the_rescan_allowlist_is_not_a_tool_parameter():
 
 def test_a_reference_outside_the_allowlist_is_still_refused(tmp_path):
     """The point of the allowlist, from the tool a model actually calls."""
-    from agentdescent.mcp import Tools
+    from agentdescent.shell.mcp import Tools
 
     store = tmp_path / "audit.jsonl"
     store.write_text("", encoding="utf-8")

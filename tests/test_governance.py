@@ -1,7 +1,7 @@
 import pytest
 
-from agentdescent.domains.router import RouterSkill
-from agentdescent.governance import (
+from agentdescent.reference.domains.router import RouterSkill
+from agentdescent.merge.governance import (
     GovernanceError,
     L1SerialGate,
     Layer,

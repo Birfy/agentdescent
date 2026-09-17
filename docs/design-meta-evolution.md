@@ -8,7 +8,7 @@
 > 这样切、切在哪、哪些没做。要*怎么用*，看 [Meta-evolution](meta-evolution.md)；
 > 一个可离线跑通的实例在 [`examples/metasearch/`](https://github.com/Birfy/agentdescent/tree/main/examples/metasearch)。
 >
-> 落地的模块：`agentdescent/meta.py`（§3 全部）、`examples/era/era_empirical_software.py`
+> 落地的模块：`agentdescent/loop/meta.py`（§3 全部）、`examples/era/era_empirical_software.py`
 > 的两处注入口（§3.5）、`examples/metasearch/`（§4 的 stage 0 与 stage 2 的适配器
 > `_harbor.py`）、`bench/metasearch_algotune.py`（stage 1 的跑批脚本）。
 > **已补跑**：AlgoTune 与 SWE-bench-Science 都在线跑过了；两个都是 null，
@@ -22,10 +22,10 @@
 | 问题 | 结论 |
 |---|---|
 | port 是怎么插进 `evolve()` 的？ | 两条路：11 个微移植是 `MethodPolicy`，机制走 `engine=Policies(...)`；8 个基准移植直接调 `evolve()`，用 `strategy=` 和 `aggregator_factory=`。树搜索（ERA）是后者：`EraTree` + `FlatPuct`（一个 `SelectionPolicy`）包在 factory 里 |
-| "演化这个 policy"里的 policy 指什么？ | `agentdescent.policies.Policies` 的某个字段——引擎的**决策面**。八个插槽：`selection` / `task_sampler` / `acceptance` / `conflict` / `fusion` / `promotion` / `staleness` / `proposal` |
+| "演化这个 policy"里的 policy 指什么？ | `agentdescent.core.policies.Policies` 的某个字段——引擎的**决策面**。八个插槽：`selection` / `task_sampler` / `acceptance` / `conflict` / `fusion` / `promotion` / `staleness` / `proposal` |
 | 之前能演化它吗？ | 不能。`EraTree.__post_init__` 把 `FlatPuct` 写死；而且引擎没有"把插槽值当 artifact"的概念 |
 | 方案是什么？ | **把普通引擎往上抬一层**：外层 `evolve()` 的 artifact = 插槽的值；一次外层 rollout = 用候选值跑一整个内层搜索；外层 reward = 内层 held-out 曲线的 AUC；治理 L1 |
-| 引擎要改吗？ | **`evolution.py` / `aggregator.py` / `ledger.py` 一行未改**。新增 `agentdescent/meta.py` 一个模块；ERA 例子开两个注入口（`EraTree(policy=)`、`run_agentdescent_era(selection=)`），默认行为不变，上游 FUTS 复现测试仍过 |
+| 引擎要改吗？ | **`evolution.py` / `aggregator.py` / `ledger.py` 一行未改**。新增 `agentdescent/loop/meta.py` 一个模块；ERA 例子开两个注入口（`EraTree(policy=)`、`run_agentdescent_era(selection=)`），默认行为不变，上游 FUTS 复现测试仍过 |
 | 在哪演化、在哪验证？ | 演化放在**便宜**的内层域（合成地形 → AlgoTune），验证放在**贵但真实**的 2026 科研 agent 基准（SWE-bench-Science、Terminal-Bench-Science）。理由在 §4.1 的成本公式 |
 | 离线跑出来什么？ | 一个更贪的选择规则在源地形赢（+0.008，11 胜 4 负），迁移比 0.06——即到了目标地形不灵。**这正是设计要让人看见的那种结果** |
 
@@ -161,7 +161,7 @@ def describe(self) -> str                    # 告诉反思模型这个面是什
 
 1. **AST 走查**：`import` 只允许白名单（`math` / `random` / `statistics` / `itertools` /
    `collections` / `functools` / `dataclasses` / `typing` / `enum` / `heapq` / `bisect`，
-   以及 `agentdescent.selection/staleness/policies` 里的值类型），禁 dunder 名字与属性，
+   以及 `agentdescent.schedule.selection/staleness/policies` 里的值类型），禁 dunder 名字与属性，
    禁 `exec` / `eval` / `open` / `getattr` / `type` / `super` 等能触到解释器的调用，禁
    `global` / `nonlocal`；
 2. **受限命名空间构建**：只有安全 builtins、白名单模块、引擎值类型；`__import__` 换成
@@ -511,7 +511,7 @@ vs 一个新鲜抽样"，配对差的 sd 是 `sd×√2` ≈ 0.076，10 个 held-
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | P0 | `EraTree(policy=)` / `run_agentdescent_era(selection=)` 注入口，默认不变 | ✅ |
-| P1 | `agentdescent/meta.py`：`MetaOutcome` / `Problem` / `auc` 等 / `ParamSlot` / `SourceSlot` / `priority_selection` / `PrioritySelection` / `meta_evolve` / `meta_validate` / `transfer_ratio` | ✅ |
+| P1 | `agentdescent/loop/meta.py`：`MetaOutcome` / `Problem` / `auc` 等 / `ParamSlot` / `SourceSlot` / `priority_selection` / `PrioritySelection` / `meta_evolve` / `meta_validate` / `transfer_ratio` | ✅ |
 | P2 | `policy_source(slot, seed)` 通用门 + `seed_source` + `SLOT_PROTOCOLS` | ✅ |
 | P3 | `examples/metasearch/`：合成地形、离线端到端、`--dry-run`、加入 PORTS 契约 | ✅ |
 | P4a | GSM 跑批脚本 `bench/metasearch_slots.py`：演进 `task_sampler`，内层是完整的内层 `evolve()`，报告分三组（演进过的 / 同基准未见切片 / 另一个基准）各自的迁移比 | ✅ 脚本 + 离线测试 + **在线跑出结果**（`bench/results/metasearch-slots.md`） |

@@ -11,8 +11,8 @@ import warnings
 
 import pytest
 
-from agentdescent.async_evolve import async_evolve
-from agentdescent.evolution import Task, evolve
+from agentdescent.loop.async_evolve import async_evolve
+from agentdescent.loop.evolution import Task, evolve
 
 
 def _tasks(n=10):
@@ -28,7 +28,7 @@ def _propose(rendered, task, output, reward):
 
 
 def test_out_of_range_reward_is_rejected_with_a_useful_message():
-    from agentdescent.evolution import RewardContractError
+    from agentdescent.loop.evolution import RewardContractError
 
     with pytest.raises(RewardContractError) as e:
         evolve(_tasks(), lambda t, o: 85.0, run=_run, propose=_propose, rounds=2)
@@ -44,7 +44,7 @@ def test_negative_reward_is_rejected():
 
 
 def test_non_numeric_reward_is_rejected_clearly():
-    from agentdescent.evolution import RewardContractError
+    from agentdescent.loop.evolution import RewardContractError
 
     with pytest.raises(RewardContractError) as e:
         evolve(_tasks(), lambda t, o: None, run=_run, propose=_propose, rounds=2)

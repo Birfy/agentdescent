@@ -13,9 +13,9 @@ import pytest
 
 from agentdescent.audit import Audit, AuditStore, attach
 from agentdescent.audit.sources import GoldAnswer, NullOracle
-from agentdescent.defaults import DefaultAcceptance
-from agentdescent.evolution import Task, evolve
-from agentdescent.policies import AcceptDecision, MergeContext
+from agentdescent.merge.defaults import DefaultAcceptance
+from agentdescent.loop.evolution import Task, evolve
+from agentdescent.core.policies import AcceptDecision, MergeContext
 
 from tests.test_audit_sparse import GoodAgent, _generous_judge, _tasks, _truth
 

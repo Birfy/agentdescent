@@ -12,10 +12,10 @@ None of them assert that fusion wins. Whether it does is the empirical question
 
 import pytest
 
-from agentdescent.evolution import (
+from agentdescent.loop.evolution import (
     AppendRules, EvolutionResult, FusionStats, KeyedRules, Task, evolve,
 )
-from agentdescent.policies import FusionTrial
+from agentdescent.core.policies import FusionTrial
 
 
 # -- the record --------------------------------------------------------------
@@ -153,7 +153,7 @@ def test_a_single_worker_run_has_nothing_to_fuse():
 def test_an_uninstrumented_fusion_policy_reports_zero_trials_not_zero_wins():
     """A replaced `FusionPolicy` keeps no trials, and that must not read as
     evidence about fusion."""
-    from agentdescent.aggregator import Aggregator
+    from agentdescent.merge.aggregator import Aggregator
 
     class Blind:
         def __init__(self, verifier):
@@ -253,7 +253,7 @@ def test_identical_proposals_are_not_a_fusion():
     produce was counting non-events. Workers that draw the same task, or
     converge on the same fix, propose the same text; it is not a corner case.
     """
-    from agentdescent.evolution import SingleSlot
+    from agentdescent.loop.evolution import SingleSlot
 
     stats = evolve(
         _tasks(), _reward,
@@ -282,7 +282,7 @@ def test_a_single_slot_artifact_can_never_fuse():
 
     `contested == 0` is how a reader finds that out without reading the strategy.
     """
-    from agentdescent.evolution import SingleSlot
+    from agentdescent.loop.evolution import SingleSlot
 
     stats = evolve(
         _tasks(), _reward,

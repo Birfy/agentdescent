@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 
-from agentdescent.selection import Candidate, FlatPuct, SelectionContext
+from agentdescent.schedule.selection import Candidate, FlatPuct, SelectionContext
 from examples.era import _era_support as support
 from examples.era import era_empirical_software as port
 

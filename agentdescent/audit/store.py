@@ -33,7 +33,7 @@ from .records import SCHEMA_VERSION, AuditRecord, Purpose
 #: on every record ever written, so a file from before this existed still loads.
 MOMENTS_KIND = "unlabelled_moments"
 #: Snapshot line holding ``artifact_signature -> priority``, drained from the
-#: merge path's :class:`~agentdescent.scheduler.AuditScheduler`. Last one wins,
+#: merge path's :class:`~agentdescent.schedule.scheduler.AuditScheduler`. Last one wins,
 #: like the moments -- a priority is a current opinion, not a measurement, and
 #: keeping the history of it would only invite averaging opinions.
 PRIORITY_KIND = "audit_priority"

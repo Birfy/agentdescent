@@ -1,7 +1,7 @@
 {
   "experiment": "issue #74 remaining candidate methods on AgentDescent: serial vs sync vs async",
   "method": {
-    "runtime": "serial/sync use agentdescent.evolution.evolve; async uses agentdescent.async_evolve.async_evolve",
+    "runtime": "serial/sync use agentdescent.loop.evolution.evolve; async uses agentdescent.loop.async_evolve.async_evolve",
     "provider_calls": "live calls; no replay or synthetic latency",
     "mode_order": "rotated by repeat and algorithm index",
     "quality": "strict disjoint held-out task/environment reward",

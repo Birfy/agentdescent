@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentdescent.selection import (
+from agentdescent.schedule.selection import (
     Candidate,
     FlatPuct,
     CostEfficient,
@@ -179,8 +179,8 @@ def test_single_candidate_returns_head():
 def test_population_aggregator_fills_candidate_cost():
     """The archive's candidates carry a content-size cost proxy."""
     import threading
-    from agentdescent.population import PopulationAggregator
-    from agentdescent.selection import Archive
+    from agentdescent.schedule.population import PopulationAggregator
+    from agentdescent.schedule.selection import Archive
 
     agg = PopulationAggregator.__new__(PopulationAggregator)
     agg.selection = Archive(sampling="novelty")
@@ -204,7 +204,7 @@ def test_population_passes_budget_remaining_to_context():
     """PopulationAggregator.step() hands its budget_remaining to the selection
     context, so a budget-aware policy sees it."""
     import threading
-    from agentdescent.population import PopulationAggregator
+    from agentdescent.schedule.population import PopulationAggregator
 
     captured = {}
 
@@ -227,7 +227,7 @@ def test_population_passes_budget_remaining_to_context():
     # `step()` calls a lot of super() machinery; call the selection part the
     # way step() does, so the assertion is about the context construction.
     cands = agg._candidates()
-    from agentdescent.selection import SelectionContext
+    from agentdescent.schedule.selection import SelectionContext
     ctx = SelectionContext(head=cands[0], candidates=tuple(cands),
                           round=agg._selections, n_workers=1,
                           budget_remaining=agg.budget_remaining)
@@ -239,7 +239,7 @@ def test_population_passes_budget_remaining_to_context():
 
 
 def test_governor_remaining_fraction():
-    from agentdescent.budget import BudgetGovernor
+    from agentdescent.observe.budget import BudgetGovernor
     g = BudgetGovernor(max_tokens=1000)
     assert g.remaining_fraction() == 1.0
     g.spend(250)
@@ -251,13 +251,13 @@ def test_governor_remaining_fraction():
 
 
 def test_governor_remaining_fraction_no_budget():
-    from agentdescent.budget import BudgetGovernor
+    from agentdescent.observe.budget import BudgetGovernor
     assert BudgetGovernor(max_tokens=None).remaining_fraction() == 1.0
 
 
 def test_set_budget_remaining_only_touches_declaring_aggregators():
-    from agentdescent.evolution import _set_budget_remaining
-    from agentdescent.budget import BudgetGovernor
+    from agentdescent.loop.evolution import _set_budget_remaining
+    from agentdescent.observe.budget import BudgetGovernor
 
     g = BudgetGovernor(max_tokens=1000)
     g.spend(500)
@@ -283,10 +283,10 @@ def test_evolve_with_cost_efficient_and_token_budget():
     """The whole chain: evolve(selection=CostEfficient(), max_tokens=N) runs,
     the governor drives budget_remaining, and the policy anneals on it."""
     import warnings
-    from agentdescent.agents import Usage
-    from agentdescent.evolution import evolve, Task
-    from agentdescent.policies import Policies
-    from agentdescent.selection import CostEfficient
+    from agentdescent.actors.agents import Usage
+    from agentdescent.loop.evolution import evolve, Task
+    from agentdescent.core.policies import Policies
+    from agentdescent.schedule.selection import CostEfficient
 
     class Agent:
         def __init__(self):

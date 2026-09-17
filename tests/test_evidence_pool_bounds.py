@@ -4,8 +4,8 @@
 -- and nothing in the library reads the pool back. Unbounded, it retained exactly
 the payloads the trust region exists to reject.
 """
-from agentdescent.aggregator import EvidenceBuffer
-from agentdescent.evolvable import Diff, EvidenceCard
+from agentdescent.merge.aggregator import EvidenceBuffer
+from agentdescent.core.evolvable import Diff, EvidenceCard
 
 
 def _card(i, value="v"):
@@ -49,7 +49,7 @@ def test_accounting_stays_consistent_across_evictions():
 
 def test_a_real_run_leaves_a_bounded_pool():
     """End-to-end: oversized proposals go through the aggregator, not a stub."""
-    from agentdescent.evolution import SingleSlot, Task, evolve
+    from agentdescent.loop.evolution import SingleSlot, Task, evolve
 
     tasks = [Task(id=str(i), prompt="p") for i in range(6)]
     res = evolve(tasks, lambda t, o: 0.5, run=lambda a, t: "x",

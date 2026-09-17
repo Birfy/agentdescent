@@ -43,9 +43,9 @@ import json
 import random
 from typing import Optional, Sequence
 
-from agentdescent.evolution import Task
-from agentdescent.policies import Policies
-from agentdescent.selection import SelectionContext, SingleHead
+from agentdescent.loop.evolution import Task
+from agentdescent.core.policies import Policies
+from agentdescent.schedule.selection import SelectionContext, SingleHead
 
 from examples._measure import parse_json_object
 from examples._method_policy import FieldSlots, MethodPolicy, read_fields

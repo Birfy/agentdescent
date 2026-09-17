@@ -1,6 +1,6 @@
 # The verifier — rule, learned, oracle
 
-*Module:* [`agentdescent.verifier`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/verifier.py)
+*Module:* [`agentdescent.evaluate.verifier`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/evaluate/verifier.py)
 · *API:* [`ThreeLayerVerifier`, `VerifierBudget`](api.md#the-verifier)
 
 The [aggregator](aggregator.md) needs to score candidates at two very different
@@ -37,7 +37,7 @@ together means sizing them for whichever matters less.
 
 ```python
 from agentdescent import Policies, evolve
-from agentdescent.evaluator import EvaluatorGroup
+from agentdescent.evaluate.evaluator import EvaluatorGroup
 
 evolve(tasks, reward, agent=agent,
        n_workers=8,                                    # exploration

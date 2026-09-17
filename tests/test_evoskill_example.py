@@ -147,7 +147,7 @@ def test_the_library_is_keyed_by_path_and_installs_as_a_directory():
     """The migration's point: the artifact is a directory, not a name->text dict."""
     import tempfile
 
-    from agentdescent.filetree import load_tree, materialize
+    from agentdescent.artifacts.filetree import load_tree, materialize
 
     from examples.evoskill.evoskill_skill_discovery import skills_of
 
@@ -170,7 +170,7 @@ def test_the_retriever_prompt_is_unchanged_by_the_move_to_paths():
     `render()` is now the artifact's lossless serialisation rather than the prompt
     text, so `run` reassembles the prompt -- and it has to come out identical, or
     the port measures something else than it did before."""
-    from agentdescent.filetree import parse_tree
+    from agentdescent.artifacts.filetree import parse_tree
 
     from examples.evoskill.evoskill_skill_discovery import (
         SkillLibraryTree, render_skills, skill_path, skills_of)

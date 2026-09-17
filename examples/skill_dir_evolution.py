@@ -34,8 +34,8 @@ import tempfile
 from agentdescent import (
     AggregatorConfig, FileTree, evolve, load_tree, scorer, tree_reflector, tree_runner,
 )
-from agentdescent.agents import claude_code, cli_agent, codex, openai_compatible
-from agentdescent.governance import SKILL_BLAST_RADIUS
+from agentdescent.actors.agents import claude_code, cli_agent, codex, openai_compatible
+from agentdescent.merge.governance import SKILL_BLAST_RADIUS
 
 SKILL_NAME = "csv-total"
 

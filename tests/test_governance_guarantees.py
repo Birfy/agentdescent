@@ -8,8 +8,8 @@ loosened by accident.
 
 import pytest
 
-from agentdescent.evolution import AppendRules, EvolvingArtifact, Task, evolve
-from agentdescent.governance import (
+from agentdescent.loop.evolution import AppendRules, EvolvingArtifact, Task, evolve
+from agentdescent.merge.governance import (
     FROZEN_IDS,
     GovernanceError,
     Layer,
@@ -51,7 +51,7 @@ def test_evolve_refuses_to_evolve_a_frozen_artifact():
 
 
 def test_async_evolve_also_refuses_a_frozen_artifact():
-    from agentdescent.async_evolve import async_evolve
+    from agentdescent.loop.async_evolve import async_evolve
 
     with pytest.raises(GovernanceError):
         async_evolve(_tasks(), lambda t, o: 0.0, agent=_Agent(),
@@ -75,7 +75,7 @@ def test_governance_is_checked_before_any_rollout():
     """
     import time
 
-    from agentdescent.async_evolve import async_evolve
+    from agentdescent.loop.async_evolve import async_evolve
 
     calls = {"n": 0}
 

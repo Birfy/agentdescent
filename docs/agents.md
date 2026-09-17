@@ -3,8 +3,8 @@
 > **Plugs into [`evolve`](evolution.md) via** `agent=LLMAgent(<completion>)` (or
 > `run=`/`propose=`). This page is the completion layer that `LLMAgent` wraps.
 
-`agentdescent.agents` is the **general "talk to a model/agent" layer**. It is
-deliberately separate from `agentdescent.evolution` — how you reach a model has
+`agentdescent.actors.agents` is the **general "talk to a model/agent" layer**. It is
+deliberately separate from `agentdescent.loop.evolution` — how you reach a model has
 nothing to do with skill evolution, and any application built on the framework
 can use it.
 
@@ -18,7 +18,7 @@ Anything that maps a prompt to text is a completion — an LLM call, a tool-usin
 agent loop, a canned stub. Adapters build completions; higher layers turn a
 completion into whatever task interface they need.
 
-*Module:* [`agentdescent.agents`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/agents.py)
+*Module:* [`agentdescent.actors.agents`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/actors/agents.py)
 · *API:* [`Completion`, `claude`, `openai_compatible`, `cli_agent`, …](api.md#agents-and-models)
 · *See also:* [backends](backends.md) for document tasks, and
 [runners](directory-evolution.md) for giving an agent the evolving directory.
@@ -198,7 +198,7 @@ model = from_callable(openai_completion)
 
 ## Using it in skill evolution
 
-`agentdescent.evolution` consumes a completion through `LLMAgent`:
+`agentdescent.loop.evolution` consumes a completion through `LLMAgent`:
 
 ```python
 from agentdescent import claude
@@ -208,7 +208,7 @@ agent = LLMAgent(claude(model="claude-haiku-4-5"))
 ```
 
 `claude_agent(model=...)` in the evolution engine is just a convenience for
-`LLMAgent(claude(model))` — the provider code lives here, in `agentdescent.agents`.
+`LLMAgent(claude(model))` — the provider code lives here, in `agentdescent.actors.agents`.
 
 ## Tool-using agents — the same contract
 
@@ -219,7 +219,7 @@ everything that takes a completion takes all of them with no special-casing:
 
 ```python
 from agentdescent import claude, openai_compatible, claude_code, codex, cli_agent
-from agentdescent.backends import openhands
+from agentdescent.actors.backends import openhands
 
 claude(model="claude-haiku-4-5")                    # API model
 openai_compatible(model="deepseek-v4-flash")        # any OpenAI-compatible endpoint

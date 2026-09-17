@@ -30,7 +30,7 @@ import random
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence
 
-from agentdescent.selection import SelectionPolicy
+from agentdescent.schedule.selection import SelectionPolicy
 
 from examples.era._era_support import Program
 from examples.era.era_empirical_software import EraTree

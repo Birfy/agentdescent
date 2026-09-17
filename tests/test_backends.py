@@ -1,4 +1,4 @@
-"""Offline tests for agentdescent.backends.
+"""Offline tests for agentdescent.actors.backends.
 
 The tool-loop backend and the grep helper are exercised with a stub completion
 (no network). The OpenHands backend needs Python >= 3.12 + openhands-ai, so here
@@ -7,7 +7,7 @@ we only assert it fails with a clear, actionable error when that's absent.
 
 import pytest
 
-from agentdescent.backends import _grep, openhands_backend, tool_loop_backend
+from agentdescent.actors.backends import _grep, openhands_backend, tool_loop_backend
 
 
 DOC = """Budget expenditures, by year

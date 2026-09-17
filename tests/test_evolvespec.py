@@ -15,18 +15,18 @@ import pytest
 from agentdescent import (
     AggregatorConfig, EvolveSpec, Policies, SpecError, Task, compose, load_spec,
 )
-from agentdescent.advantage import AdvantageAcceptance, AdvantageConflict
-from agentdescent.evolvespec import (
+from agentdescent.merge.advantage import AdvantageAcceptance, AdvantageConflict
+from agentdescent.core.evolvespec import (
     KIND_ROWS, KINDS, SHORT_REFS, build_policies, estimate, to_ref,
 )
-from agentdescent.evolution import SingleSlot
-from agentdescent.fusion import KeepContradictions, ReflectiveFusion
-from agentdescent.governance import HARNESS_BLAST_RADIUS, SKILL_BLAST_RADIUS
-from agentdescent.sampling import DifficultyWeighted
-from agentdescent.selection import Beam
-from agentdescent.staleness import FullStaleness
-from agentdescent.treestrategy import FileTree
-from agentdescent.workspec import Ref
+from agentdescent.loop.evolution import SingleSlot
+from agentdescent.merge.fusion import KeepContradictions, ReflectiveFusion
+from agentdescent.merge.governance import HARNESS_BLAST_RADIUS, SKILL_BLAST_RADIUS
+from agentdescent.schedule.sampling import DifficultyWeighted
+from agentdescent.schedule.selection import Beam
+from agentdescent.merge.staleness import FullStaleness
+from agentdescent.artifacts.treestrategy import FileTree
+from agentdescent.core.workspec import Ref
 
 # ---------------------------------------------------------------------------
 # fixtures: a skill directory, a dataset, a stub agent and reflector
@@ -111,11 +111,11 @@ def test_every_short_ref_resolves_to_a_public_factory():
 
 
 def test_to_ref_accepts_the_three_spellings_and_nests():
-    assert to_ref("claude_code", where="x") == Ref("agentdescent.agents:claude_code")
+    assert to_ref("claude_code", where="x") == Ref("agentdescent.actors.agents:claude_code")
     assert to_ref("pkg.mod:fn", where="x") == Ref("pkg.mod:fn")
     r = to_ref({"ref": "reflective_merge", "complete": {"ref": "echo"}}, where="x")
-    assert r.target == "agentdescent.fusion:reflective_merge"
-    assert r.config["complete"] == Ref("agentdescent.agents:echo")
+    assert r.target == "agentdescent.merge.fusion:reflective_merge"
+    assert r.config["complete"] == Ref("agentdescent.actors.agents:echo")
     assert to_ref({"ref": "pkg.mod:fn", "call": False}, where="x").call is False
     with pytest.raises(SpecError, match="not a known short name"):
         to_ref("nonsense", where="agent")
@@ -227,7 +227,7 @@ def test_the_merge_pair_survives_an_unrelated_policy_slot(tmp_path):
     assert with_other.fusion is not None and with_other.conflict is not None
     assert with_other.staleness is not None, "and the slot the spec did name still applies"
 
-    named = policies_for(policies={"conflict": "agentdescent.defaults:DefaultConflict"})
+    named = policies_for(policies={"conflict": "agentdescent.merge.defaults:DefaultConflict"})
     assert named.fusion is None, "a spec that names a merge rule gets exactly that"
 
 
@@ -237,7 +237,7 @@ def test_agent_dir_is_the_same_call_at_the_harness_layer(tmp_path):
 
 
 def test_agent_code_gates_the_reward_and_freezes_the_tests(tmp_path):
-    from agentdescent.runners import TEST_FAILURE_MARKER
+    from agentdescent.actors.runners import TEST_FAILURE_MARKER
 
     spec = _dir_spec(str(tmp_path), kind="agent_code", entrypoint=["python", "main.py"])
     comp = compose(spec)
@@ -288,7 +288,7 @@ def test_spec_evolve_block_overrides_kind_defaults_and_caller_overrides_win(tmp_
 
 
 def test_hooks_reach_evolve(tmp_path):
-    from agentdescent.agents import Usage
+    from agentdescent.actors.agents import Usage
 
     def on_round(info):
         pass
@@ -340,7 +340,7 @@ def test_cmd_scorer_gets_the_task_on_stdin(tmp_path):
 
 
 def test_ref_scorer(tmp_path):
-    spec = _dir_spec(str(tmp_path), score={"ref": "agentdescent.rewards:contains"})
+    spec = _dir_spec(str(tmp_path), score={"ref": "agentdescent.actors.rewards:contains"})
     t = Task(id="t", prompt="q", meta={"gold": "b"})
     assert compose(spec).reward(t, "abc") == 1.0
 

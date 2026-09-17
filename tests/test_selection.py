@@ -15,11 +15,11 @@ committed, because a state no rollout produced has never been through the gate.
 
 import pytest
 
-from agentdescent.async_evolve import async_evolve
-from agentdescent.evolution import AppendRules, Task, evolve
-from agentdescent.evolvable import ContractError
-from agentdescent.policies import Policies
-from agentdescent.selection import (
+from agentdescent.loop.async_evolve import async_evolve
+from agentdescent.loop.evolution import AppendRules, Task, evolve
+from agentdescent.core.evolvable import ContractError
+from agentdescent.core.policies import Policies
+from agentdescent.schedule.selection import (
     Archive, Beam, Candidate, MCTS, MultiHeadUnsupported, ParetoFrontier,
     SelectionContext, SingleHead, pareto_front,
 )

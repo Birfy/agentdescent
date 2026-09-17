@@ -1,7 +1,7 @@
 # Acceptance policies — whether a candidate commits
 
-*Module:* [`agentdescent.defaults`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/defaults.py),
-[`agentdescent.advantage`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/advantage.py)
+*Module:* [`agentdescent.merge.defaults`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/merge/defaults.py),
+[`agentdescent.merge.advantage`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/merge/advantage.py)
 · *Contract:* `AcceptancePolicy.accept(ctx: MergeContext) -> AcceptDecision`
 
 The gate at the end of the merge pipeline: given the merged candidate's
@@ -48,7 +48,7 @@ forwards them to its `inner` rule. A policy with neither is left alone. A
 shipped default used **without** having been installed (driven by hand, outside
 `evolve()`) raises `PolicyUnboundError` naming the missing piece rather than
 failing on a `None` in the middle of a merge; call the hook yourself, or use
-`install_policy(policy, verifier, config)` from `agentdescent.aggregator`.
+`install_policy(policy, verifier, config)` from `agentdescent.merge.aggregator`.
 
 ## What the default knows that a replacement must be told
 

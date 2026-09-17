@@ -38,8 +38,8 @@ stub.
 
 ```python
 from agentdescent import FileTree, evolve, load_tree, scorer, tree_reflector, tree_runner
-from agentdescent.agents import claude_code, openai_compatible
-from agentdescent.governance import SKILL_BLAST_RADIUS
+from agentdescent.actors.agents import claude_code, openai_compatible
+from agentdescent.merge.governance import SKILL_BLAST_RADIUS
 
 path = "~/.claude/skills/pdf-audit"                      # your directory
 tree = load_tree(path)                                   # -> {"SKILL.md": ..., ...}
@@ -124,7 +124,7 @@ Agent code runs behind a **frozen test suite the candidate cannot rewrite**:
 
 ```python
 from agentdescent import code_runner, gated_reward
-from agentdescent.governance import HARNESS_BLAST_RADIUS
+from agentdescent.merge.governance import HARNESS_BLAST_RADIUS
 
 tree = load_tree("./my-agent")
 strategy = FileTree(tree, frozen=["tests/**", "conftest.py"], max_files_per_diff=2)

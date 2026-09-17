@@ -1,4 +1,4 @@
-from agentdescent.staleness import (
+from agentdescent.merge.staleness import (
     FullStaleness,
     GuardedStaleness,
     ReflectiveStaleness,
@@ -63,9 +63,9 @@ def test_an_evidence_card_with_nothing_to_score_says_so():
     """
     import warnings
 
-    from agentdescent.evalcache import MemoryCache
-    from agentdescent.evolution import EvolvingArtifact, _Runtime
-    from agentdescent.evolvable import Diff, EvidenceCard
+    from agentdescent.evaluate.evalcache import MemoryCache
+    from agentdescent.loop.evolution import EvolvingArtifact, _Runtime
+    from agentdescent.core.evolvable import Diff, EvidenceCard
 
     runtime = _Runtime(run=lambda rendered, t: "x", reward=lambda t, o: 1.0,
                        cache=MemoryCache())
@@ -85,9 +85,9 @@ def test_a_card_carrying_real_tasks_is_silent():
     """The warning must not fire on the ordinary path."""
     import warnings
 
-    from agentdescent.evalcache import MemoryCache
-    from agentdescent.evolution import EvolvingArtifact, Task, _Runtime
-    from agentdescent.evolvable import Diff, EvidenceCard
+    from agentdescent.evaluate.evalcache import MemoryCache
+    from agentdescent.loop.evolution import EvolvingArtifact, Task, _Runtime
+    from agentdescent.core.evolvable import Diff, EvidenceCard
 
     runtime = _Runtime(run=lambda rendered, t: "x", reward=lambda t, o: 1.0,
                        cache=MemoryCache())
@@ -110,7 +110,7 @@ def _observed_etas(refresh_interval):
     """Run the synchronous engine and collect every eta the policy was asked about."""
     import warnings
 
-    from agentdescent.evolution import AppendRules, Task, evolve
+    from agentdescent.loop.evolution import AppendRules, Task, evolve
 
     seen = []
 

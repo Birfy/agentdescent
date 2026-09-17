@@ -36,7 +36,7 @@ That is the whole input.
 
 ```python
 from agentdescent import SingleSlot, evolve, openai_compatible, reflector, scorer, tasks_from
-from agentdescent.dataloader import hf_rows
+from agentdescent.actors.dataloader import hf_rows
 
 rows = hf_rows("hotpotqa/hotpot_qa", "validation", config="distractor", limit=40)
 model = openai_compatible(model="deepseek-v4-flash")
@@ -64,8 +64,8 @@ A skill folder, a folder of subagent definitions, or the agent's own code:
 
 ```python
 from agentdescent import FileTree, evolve, load_tree, scorer, tree_reflector, tree_runner
-from agentdescent.agents import claude_code, openai_compatible
-from agentdescent.governance import SKILL_BLAST_RADIUS
+from agentdescent.actors.agents import claude_code, openai_compatible
+from agentdescent.merge.governance import SKILL_BLAST_RADIUS
 
 path = "~/.claude/skills/pdf-audit"                      # your directory
 tree = load_tree(path)                                   # -> {"SKILL.md": ..., ...}

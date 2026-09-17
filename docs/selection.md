@@ -52,7 +52,7 @@ competing with one.
 
 ```python
 from agentdescent import Policies, evolve
-from agentdescent.selection import (
+from agentdescent.schedule.selection import (
     Archive, Beam, FlatPuct, MCTS, ParetoFrontier, SingleHead)
 
 evolve(tasks, reward, agent=agent,

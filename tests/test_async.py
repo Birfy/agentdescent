@@ -9,9 +9,9 @@ import tempfile
 
 import pytest
 
-from agentdescent.async_runtime import AsyncAgentDescent, AsyncConfig
-from agentdescent.domains.router import make_task_universe
-from agentdescent.staleness import get_policy
+from agentdescent.reference.async_runtime import AsyncAgentDescent, AsyncConfig
+from agentdescent.reference.domains.router import make_task_universe
+from agentdescent.merge.staleness import get_policy
 
 
 def _run(policy_name, async_ratio=4, seconds=15.0, noise=0.12, seed=1,

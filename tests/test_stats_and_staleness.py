@@ -1,5 +1,5 @@
-from agentdescent.evolvable import vv_dominates, vv_staleness
-from agentdescent.stats import (
+from agentdescent.core.evolvable import vv_dominates, vv_staleness
+from agentdescent.merge.stats import (
     BetaPosterior,
     annealed_delta,
     prob_improvement,
@@ -52,8 +52,8 @@ def test_acceptance_mc_seed_varies_per_candidate_but_stays_reproducible():
     them all. Seeding from (version, diff_id) decorrelates the draws while keeping
     the run reproducible.
     """
-    from agentdescent.evolvable import stable_hash
-    from agentdescent.stats import BetaPosterior, prob_improvement
+    from agentdescent.core.evolvable import stable_hash
+    from agentdescent.merge.stats import BetaPosterior, prob_improvement
 
     def knife():
         c, b = BetaPosterior(), BetaPosterior()
@@ -87,9 +87,9 @@ def test_acceptance_seeds_its_draw_from_the_candidate():
     `DefaultAcceptance`, and a test that greps one method goes green the moment
     the logic moves -- whether or not it survived the move.
     """
-    from agentdescent.defaults import DefaultAcceptance
-    from agentdescent.evolvable import Diff
-    from agentdescent.policies import MergeContext
+    from agentdescent.merge.defaults import DefaultAcceptance
+    from agentdescent.core.evolvable import Diff
+    from agentdescent.core.policies import MergeContext
 
     class _Art:
         version = 3

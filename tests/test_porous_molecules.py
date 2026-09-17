@@ -22,8 +22,8 @@ import random
 
 import pytest
 
-from agentdescent.aggregator import AggregatorConfig
-from agentdescent.selection import Candidate, FlatPuct, SelectionContext
+from agentdescent.merge.aggregator import AggregatorConfig
+from agentdescent.schedule.selection import Candidate, FlatPuct, SelectionContext
 
 from examples.porous import porous_tree_search as port
 from examples.porous._depict import coordinates, svg
@@ -612,8 +612,8 @@ def test_a_late_expansion_is_kept_because_the_tree_cannot_go_stale():
     built a 17-node one, on the same rollouts. On a live run each of those
     discards is a five-minute model call.
     """
-    from agentdescent.evolvable import Diff, EvidenceCard
-    from agentdescent.staleness import get_policy
+    from agentdescent.core.evolvable import Diff, EvidenceCard
+    from agentdescent.merge.staleness import get_policy
 
     def filtered(policy_name):
         aggregator = port.PorousTreeAggregator(

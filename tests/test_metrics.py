@@ -16,9 +16,9 @@ import threading
 import pytest
 
 from agentdescent import AppendRules, Task, evolve
-from agentdescent.agents import Usage
-from agentdescent.evolution import EvolutionResult, RoundInfo
-from agentdescent.metrics import Meter, measured
+from agentdescent.actors.agents import Usage
+from agentdescent.loop.evolution import EvolutionResult, RoundInfo
+from agentdescent.observe.metrics import Meter, measured
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +114,7 @@ def test_measured_preserves_arity_for_the_signature_check():
     A bare `*args` wrapper makes every arity check pass -- including the typo
     the check exists to catch -- so the wrapper has to keep the real signature.
     """
-    from agentdescent.evolution import _check_callable
+    from agentdescent.loop.evolution import _check_callable
 
     def run(rendered, task):
         return ""
@@ -202,7 +202,7 @@ def test_usage_calls_equals_actor_invocations():
 
 def test_the_cache_counts_hits_and_misses():
     """N evaluations of one (artifact, task) is 1 miss and N-1 hits."""
-    from agentdescent.evolution import _EvalCache
+    from agentdescent.loop.evolution import _EvalCache
 
     m = Meter()
     cache = _EvalCache(m)

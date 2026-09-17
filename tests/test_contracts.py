@@ -9,9 +9,9 @@ contract violations share one base so both engines treat them identically.
 
 import pytest
 
-from agentdescent.aggregator import AggregatorContractError
-from agentdescent.evolvable import ContractError
-from agentdescent.evolution import (
+from agentdescent.merge.aggregator import AggregatorContractError
+from agentdescent.core.evolvable import ContractError
+from agentdescent.loop.evolution import (
     AppendRules,
     ProposalContractError,
     RewardContractError,
@@ -104,7 +104,7 @@ def test_a_backend_failure_is_still_absorbed_not_raised():
 
 
 def test_the_async_path_agrees():
-    from agentdescent.async_evolve import async_evolve
+    from agentdescent.loop.async_evolve import async_evolve
 
     with pytest.raises(ContractError):
         async_evolve(_tasks(), lambda t, o: 85.0, run=GOOD_RUN,

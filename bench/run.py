@@ -66,7 +66,7 @@ def _dataset(seed: int, n_keywords: int = 16, per_keyword: int = 6):
     of honest numbers measuring nothing. Here a rule names a **keyword** shared by
     many tasks, so learning generalises and the test column can move.
     """
-    from agentdescent.domains.router import make_task_universe
+    from agentdescent.reference.domains.router import make_task_universe
 
     universe = make_task_universe(n_keywords=n_keywords,
                                   tasks_per_keyword=per_keyword, seed=seed)

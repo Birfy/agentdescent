@@ -20,9 +20,9 @@ from difflib import SequenceMatcher
 
 import pytest
 
-from agentdescent.defaults import DefaultAcceptance
-from agentdescent.evolution import Task, evolve
-from agentdescent.policies import MergeContext
+from agentdescent.merge.defaults import DefaultAcceptance
+from agentdescent.loop.evolution import Task, evolve
+from agentdescent.core.policies import MergeContext
 
 from tests.test_audit_sparse import GoodAgent
 

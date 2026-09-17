@@ -63,10 +63,10 @@ these docs. So a process pool fails on the first submit no matter how good the
 pool is, and the fix is a way to *describe* the work:
 
 ```python
-Ref("agentdescent.rewards:last_number", {"gold_key": "gold"})
-Ref("agentdescent.runners:code_runner", {"entrypoint": ["python", "main.py"]})
-Ref("agentdescent.evolution:reflector",              # references nest
-    {"complete": Ref("agentdescent.agents:claude", {"model": "..."})})
+Ref("agentdescent.actors.rewards:last_number", {"gold_key": "gold"})
+Ref("agentdescent.actors.runners:code_runner", {"entrypoint": ["python", "main.py"]})
+Ref("agentdescent.loop.evolution:reflector",              # references nest
+    {"complete": Ref("agentdescent.actors.agents:claude", {"model": "..."})})
 ```
 
 The worker resolves these against **its own** copy of the code. `cloudpickle`
@@ -124,9 +124,9 @@ executor directly:
 ```python
 if __name__ == "__main__":                      # required — see the warning below
     specs = [RolloutSpec(rendered=artifact.render(), task=t,
-                         run=Ref("agentdescent.runners:code_runner",
+                         run=Ref("agentdescent.actors.runners:code_runner",
                                  {"entrypoint": ["python", "main.py"]}),
-                         reward=Ref("agentdescent.rewards:last_number"))
+                         reward=Ref("agentdescent.actors.rewards:last_number"))
              for t in tasks]
     with_executor = ProcessExecutor(4)
     for result in with_executor.map_rollouts(specs):

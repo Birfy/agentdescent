@@ -134,7 +134,7 @@ if ! command -v agentdescent >/dev/null 2>&1 && [ "$DRY" = 0 ]; then
   info "  Hosts start it as a subprocess, so it must be on the PATH of whatever"
   info "  launches your agent -- not just this shell. Add pip's bin directory:"
   info "    export PATH=\"\$(python3 -m site --user-base)/bin:\$PATH\""
-  info "  Until then, 'python3 -m agentdescent.cli' works everywhere."
+  info "  Until then, 'python3 -m agentdescent.shell.cli' works everywhere."
 fi
 
 # --- 4. wire up each host ---------------------------------------------------

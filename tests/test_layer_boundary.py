@@ -15,12 +15,12 @@ import warnings
 
 import pytest
 
-from agentdescent.aggregator import Aggregator, AggregatorConfig
-from agentdescent.evolution import EvolvingArtifact, Task, evolve
-from agentdescent.governance import (
+from agentdescent.merge.aggregator import Aggregator, AggregatorConfig
+from agentdescent.loop.evolution import EvolvingArtifact, Task, evolve
+from agentdescent.merge.governance import (
     FAST_MAX, FROZEN_IDS, GovernanceError, Layer, classify,
 )
-from agentdescent.scheduler import AuditScheduler
+from agentdescent.schedule.scheduler import AuditScheduler
 
 
 def _artifact(blast_radius):
@@ -65,7 +65,7 @@ def test_there_is_no_second_threshold_constant():
     `classify` never read it, so 0.31 and 0.99 classified identically and the
     comment documented a rule that did not exist.
     """
-    import agentdescent.governance as gov
+    import agentdescent.merge.governance as gov
     assert not hasattr(gov, "SLOW_MAX"), \
         "a threshold nothing reads is worse than no threshold"
 

@@ -1,7 +1,7 @@
 """The tap: a reward function that also, sometimes, asks the truth.
 
 :class:`AuditedReward` wraps the cheap verifier and satisfies
-:data:`~agentdescent.evolution.Reward` exactly, so it goes in where the reward
+:data:`~agentdescent.loop.evolution.Reward` exactly, so it goes in where the reward
 already goes::
 
     evolve(tasks, reward=AuditedReward(judge, oracle=GoldAnswer(exact_match)), ...)
@@ -14,7 +14,7 @@ one call that could leak truth into the loop is the `return`, and it returns `f`
 
 ## Why here and not at the verifier
 
-:class:`~agentdescent.verifier.ThreeLayerVerifier` looks like the natural home,
+:class:`~agentdescent.evaluate.verifier.ThreeLayerVerifier` looks like the natural home,
 and it is the wrong one. Its layers all score ``(artifact, tasks) -> float``: an
 aggregate over a task list. Estimating a bias needs *paired* observations --
 this unit scored `f` by the verifier and `Y` by the truth -- and an aggregate has
@@ -26,7 +26,7 @@ removes.
 At the reward level both score the **same output**, which the artifact was run
 to produce anyway. The expensive half is already paid; the oracle adds only its
 own cost. And because this sits below the verifier, the merge path is untouched:
-:meth:`~agentdescent.aggregator.Aggregator._audit`, which calls
+:meth:`~agentdescent.merge.aggregator.Aggregator._audit`, which calls
 ``verifier.full_eval`` synchronously and would happily block a merger for the
 duration of a wet-lab experiment, is never involved.
 """
@@ -153,7 +153,7 @@ class AuditedReward:
     shared stream would make whether a unit is audited depend on how many other
     units happened to be scored first -- so the same run, replayed, would audit a
     different sample and the seed would document nothing.
-    :meth:`~agentdescent.verifier.ThreeLayerVerifier.learned_eval` seeds
+    :meth:`~agentdescent.evaluate.verifier.ThreeLayerVerifier.learned_eval` seeds
     per-artifact for the same reason.
     """
 

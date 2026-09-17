@@ -61,21 +61,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from agentdescent.agents import Completion, Usage
-from agentdescent.aggregator import (
+from agentdescent.actors.agents import Completion, Usage
+from agentdescent.merge.aggregator import (
     AggregatorConfig,
     AggregatorProtocol,
     MergeOutcome,
     MergeReport,
 )
-from agentdescent.async_evolve import async_evolve
-from agentdescent.evolution import EvolutionResult, EvolvingArtifact, Task, evolve
-from agentdescent.evolvable import Diff, EvidenceCard, vv_staleness
-from agentdescent.governance import classify
-from agentdescent.ledger import CASConflict, Ledger
-from agentdescent.selection import (Candidate, FlatPuct, SelectionContext,
+from agentdescent.loop.async_evolve import async_evolve
+from agentdescent.loop.evolution import EvolutionResult, EvolvingArtifact, Task, evolve
+from agentdescent.core.evolvable import Diff, EvidenceCard, vv_staleness
+from agentdescent.merge.governance import classify
+from agentdescent.merge.ledger import CASConflict, Ledger
+from agentdescent.schedule.selection import (Candidate, FlatPuct, SelectionContext,
                                     SelectionPolicy)
-from agentdescent.staleness import StaleAction, get_policy
+from agentdescent.merge.staleness import StaleAction, get_policy
 
 from examples._common import (
     add_standard_args,
@@ -236,12 +236,12 @@ class EraTree:
     candidate_limit: Optional[int] = None
     metric_key: str = "rmse"
     #: Which node the next expansion starts from. ``None`` is upstream's rule,
-    #: :class:`~agentdescent.selection.FlatPuct` built from ``c_puct`` and
+    #: :class:`~agentdescent.schedule.selection.FlatPuct` built from ``c_puct`` and
     #: ``prior_exponent`` -- so a tree that names no policy is the port
     #: upstream ships, and ``tests/test_era_example.py`` pins that against a
     #: transcription of ``futs.search``. Anything else satisfying
-    #: :class:`~agentdescent.selection.SelectionPolicy` is asked the same
-    #: question with the same :class:`~agentdescent.selection.SelectionContext`;
+    #: :class:`~agentdescent.schedule.selection.SelectionPolicy` is asked the same
+    #: question with the same :class:`~agentdescent.schedule.selection.SelectionContext`;
     #: the visit reservation and back-propagation stay here, because they are
     #: the tree's invariants rather than the policy's opinion. This is the seam
     #: ``examples/metasearch`` evolves through: the search *algorithm* becomes

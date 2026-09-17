@@ -227,7 +227,7 @@ def test_the_calibrator_clusters_by_task_by_default():
 def test_the_tap_audits_a_task_whole_or_not_at_all():
     """`draw_by="task"` is what makes the halves disjoint."""
     from agentdescent.audit import AuditedReward
-    from agentdescent.evolution import Task
+    from agentdescent.loop.evolution import Task
 
     audited = AuditedReward(lambda task, out: 1.0, sample_rate=0.5, seed=3)
     task = Task("t1", "q")
@@ -243,7 +243,7 @@ def test_the_purpose_split_is_task_level_too():
     """Otherwise one task's units land in both pools, and the improvement pool's
     edits are informed by a task the calibration pool also measures."""
     from agentdescent.audit import AuditedReward
-    from agentdescent.evolution import Task
+    from agentdescent.loop.evolution import Task
 
     audited = AuditedReward(lambda task, out: 1.0, seed=1)
     task = Task("t1", "q")
@@ -284,7 +284,7 @@ def test_a_task_is_never_in_both_halves_when_the_strata_differ_in_rate():
     and what costs the interval its coverage. Measured before the fix: 33 of the
     35 eligible tasks out of 40.
     """
-    from agentdescent.evolution import Task
+    from agentdescent.loop.evolution import Task
 
     tap, seen = _split_tap({"lo": 0.05, "hi": 0.90})
     both = 0
@@ -317,7 +317,7 @@ def test_the_partition_costs_neither_the_allocation_nor_the_weights():
     """
     from collections import Counter
 
-    from agentdescent.evolution import Task
+    from agentdescent.loop.evolution import Task
 
     rates = {"lo": 0.05, "hi": 0.90}
     tap, seen = _split_tap(rates)
@@ -340,7 +340,7 @@ def test_the_partition_costs_neither_the_allocation_nor_the_weights():
 
 def test_one_rate_everywhere_changes_nothing():
     """The drop is a fix for unequal rates and must be inert without them."""
-    from agentdescent.evolution import Task
+    from agentdescent.loop.evolution import Task
 
     tap, seen = _split_tap({"lo": 0.5, "hi": 0.5})
     for i in range(200):
@@ -354,7 +354,7 @@ def test_one_rate_everywhere_changes_nothing():
 def test_drawing_per_output_is_left_alone():
     """`draw_by="output"` never promised whole-task inclusion, and a per-unit
     draw against a per-unit threshold is already internally consistent."""
-    from agentdescent.evolution import Task
+    from agentdescent.loop.evolution import Task
 
     tap, _ = _split_tap({"lo": 0.05, "hi": 0.90}, draw_by="output")
     for i in range(200):
@@ -382,7 +382,7 @@ def test_a_skipped_unit_stays_in_the_population_frame():
     of the mean PPI borrows, which the next test pins.
     """
     from agentdescent.audit.sampler import observed_weights
-    from agentdescent.evolution import Task
+    from agentdescent.loop.evolution import Task
 
     tap, _ = _split_tap({"lo": 0.1, "hi": 0.9})
     n = 6000
@@ -398,7 +398,7 @@ def test_a_skipped_unit_stays_in_the_population_frame():
 
 def test_a_skipped_unit_never_reaches_the_moments_ppi_borrows():
     """It has no score. Folding it into `n` would claim one."""
-    from agentdescent.evolution import Task
+    from agentdescent.loop.evolution import Task
 
     tap, seen = _split_tap({"lo": 0.1, "hi": 0.9})
     for i in range(2000):

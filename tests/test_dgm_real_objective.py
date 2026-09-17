@@ -11,7 +11,7 @@ import os
 
 import pytest
 
-from agentdescent.treestrategy import FileTree
+from agentdescent.artifacts.treestrategy import FileTree
 from examples.dgm import real_objective as R
 
 

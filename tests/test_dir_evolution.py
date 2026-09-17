@@ -20,12 +20,12 @@ from agentdescent import (
     AggregatorConfig, evolve, gated_reward, load_tree, scorer, tasks_from,
     tree_reflector,
 )
-from agentdescent.agents import cli_agent, echo
-from agentdescent.evolution import EvolutionResult, Task
-from agentdescent.filetree import TreeError, canonical
-from agentdescent.governance import HARNESS_BLAST_RADIUS, SKILL_BLAST_RADIUS
-from agentdescent.runners import TEST_FAILURE_MARKER, code_runner, tree_runner
-from agentdescent.treestrategy import FileTree
+from agentdescent.actors.agents import cli_agent, echo
+from agentdescent.loop.evolution import EvolutionResult, Task
+from agentdescent.artifacts.filetree import TreeError, canonical
+from agentdescent.merge.governance import HARNESS_BLAST_RADIUS, SKILL_BLAST_RADIUS
+from agentdescent.actors.runners import TEST_FAILURE_MARKER, code_runner, tree_runner
+from agentdescent.artifacts.treestrategy import FileTree
 
 # ---------------------------------------------------------------------------
 # a real workspace agent: it reads the skill it was given and obeys it
@@ -334,8 +334,8 @@ def test_write_to_refuses_a_result_that_is_not_a_file_tree():
 
 
 def test_an_agent_directory_runs_at_the_harness_layer():
-    from agentdescent.evolution import EvolvingArtifact
-    from agentdescent.governance import Layer, classify
+    from agentdescent.loop.evolution import EvolvingArtifact
+    from agentdescent.merge.governance import Layer, classify
 
     path = _skill_dir()
     result = _evolve_dir(

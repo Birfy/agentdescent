@@ -146,7 +146,7 @@ first, so a port whose domain is a real benchmark — PromptBreeder, AFlow,
 Self-Refine, Reflexion, SICA, Gödel Agent — loads and caches its split during a
 dry run, and prints that it did.
 
-Datasets go through the shared [**`agentdescent.dataloader`**](dataloader.md)
+Datasets go through the shared [**`agentdescent.actors.dataloader`**](dataloader.md)
 layer — dependency-free (`urllib` only), cached under `~/.cache/agentdescent/`,
 from each benchmark's canonical source. Every port has an offline test suite
 exercising its pure logic, named on its page. Where a paper's full setup needs

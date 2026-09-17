@@ -18,7 +18,7 @@ argument:
 
 ```python
 from agentdescent import SingleSlot, evolve, openai_compatible, reflector, scorer, tasks_from
-from agentdescent.dataloader import hf_rows
+from agentdescent.actors.dataloader import hf_rows
 
 rows = hf_rows("hotpotqa/hotpot_qa", "validation", config="distractor", limit=40)
 model = openai_compatible(model="deepseek-v4-flash")
@@ -75,7 +75,7 @@ job, not a stuck run.
 
 ## The scorers
 
-`agentdescent.rewards` covers the common cases, and gets the details right that
+`agentdescent.actors.rewards` covers the common cases, and gets the details right that
 are easy to get wrong:
 
 | `scorer(…)` | matches when | notes |

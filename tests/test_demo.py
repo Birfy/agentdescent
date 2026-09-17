@@ -13,7 +13,7 @@ from contextlib import redirect_stdout
 
 import pytest
 
-from agentdescent import cli, demo, runstore
+from agentdescent.shell import cli, demo, runstore
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -45,9 +45,9 @@ def test_the_demo_spec_needs_no_credentials_and_no_allowlist_widening(tmp_path):
 def test_the_offline_agent_obeys_the_skill_it_is_given(tmp_path):
     """It is a real workspace agent: the skill on disk changes its answer."""
     from agentdescent import Task
-    from agentdescent.filetree import load_tree
-    from agentdescent.runners import tree_runner
-    from agentdescent.treestrategy import FileTree
+    from agentdescent.artifacts.filetree import load_tree
+    from agentdescent.actors.runners import tree_runner
+    from agentdescent.artifacts.treestrategy import FileTree
 
     demo.build(str(tmp_path))
     tree = load_tree(str(tmp_path / demo.DEMO_SKILL))
@@ -95,7 +95,7 @@ def test_the_demo_command_runs_a_real_evolution_and_fixes_the_skill(tmp_path, mo
 
 def test_demo_is_reachable_from_a_bare_install():
     """A newcomer's first command must work from the console script alone."""
-    proc = subprocess.run([sys.executable, "-m", "agentdescent.cli", "--help"],
+    proc = subprocess.run([sys.executable, "-m", "agentdescent.shell.cli", "--help"],
                           capture_output=True, text=True, cwd=ROOT, timeout=120)
     assert proc.returncode == 0
     assert "demo" in proc.stdout

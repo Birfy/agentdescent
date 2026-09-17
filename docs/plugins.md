@@ -167,7 +167,7 @@ flag) or it will be swallowed as another tool name.
 
 What the agent writes from your words, and what you can write yourself. It is
 an `evolve()` call as data: every field is an ordinary argument or a public
-building block, and `agentdescent.evolvespec.compose` is the only place the two
+building block, and `agentdescent.core.evolvespec.compose` is the only place the two
 are joined.
 
 ```json

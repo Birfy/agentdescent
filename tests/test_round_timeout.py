@@ -8,7 +8,7 @@ the background but no longer holds up the round).
 
 import time
 
-from agentdescent.evolution import AppendRules, Task, evolve
+from agentdescent.loop.evolution import AppendRules, Task, evolve
 
 
 class _OneHangs:

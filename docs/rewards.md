@@ -1,6 +1,6 @@
 # Rewards — the scorers everyone writes
 
-*Module:* [`agentdescent.rewards`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/rewards.py)
+*Module:* [`agentdescent.actors.rewards`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/actors/rewards.py)
 · *API:* [`exact_match`, `contains`, `last_number`, `numeric_close`](api.md#ready-made-scorers)
 
 A reward is `(task, output) -> float` in `[0, 1]`, and writing one is easy —
@@ -9,7 +9,7 @@ wrong: thousands separators, a trailing period, a model that answers in a
 sentence, a gold column that is a whole worked solution rather than a number.
 
 ```python
-from agentdescent.rewards import last_number
+from agentdescent.actors.rewards import last_number
 
 evolve(tasks, last_number(), agent=agent)
 ```

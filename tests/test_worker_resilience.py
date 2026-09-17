@@ -14,7 +14,7 @@ import warnings
 
 import pytest
 
-from agentdescent.evolution import SingleSlot, Task, evolve
+from agentdescent.loop.evolution import SingleSlot, Task, evolve
 
 TASKS = [Task(id=str(i), prompt=str(i), meta={"gold": str(i)}) for i in range(8)]
 
@@ -78,7 +78,7 @@ def test_a_worker_that_dies_after_working_warns_rather_than_going_quiet():
 
 def test_retired_workers_survives_save_and_load():
     import os, tempfile
-    from agentdescent.evolution import EvolutionResult
+    from agentdescent.loop.evolution import EvolutionResult
 
     def run(rendered, task):
         raise RuntimeError("dead")
@@ -132,7 +132,7 @@ def test_the_merger_survives_a_transient_too():
 
 def test_a_caller_bug_in_the_merger_still_propagates():
     """The merger's blanket except used to absorb ContractError as a backend outage."""
-    from agentdescent.evolvable import ContractError
+    from agentdescent.core.evolvable import ContractError
 
     class BadAggregator:
         def __init__(self, *a, **kw): pass
@@ -211,6 +211,6 @@ def test_a_failing_held_out_score_does_not_escape_the_driver():
 
 def test_a_caller_bug_still_propagates_from_a_sync_worker():
     """Tolerating backend failures must not swallow contract violations."""
-    from agentdescent.evolution import RewardContractError
+    from agentdescent.loop.evolution import RewardContractError
     with pytest.raises(RewardContractError):
         _sync(lambda rendered, t: "wrong", reward=lambda t, o: "not a number")

@@ -19,9 +19,9 @@ import warnings
 
 import pytest
 
-import agentdescent.evolution as ev
-from agentdescent.agents import openai_compatible
-from agentdescent.evolution import LLMAgent, SingleSlot, Task, evolve
+import agentdescent.loop.evolution as ev
+from agentdescent.actors.agents import openai_compatible
+from agentdescent.loop.evolution import LLMAgent, SingleSlot, Task, evolve
 
 
 # -- the provider contract ------------------------------------------------------
@@ -160,7 +160,7 @@ def test_stop_reason_survives_save_and_load(tmp_path):
         res = _quick(rounds=20, target_reward=0.5)
     path = tmp_path / "r.json"
     res.save(str(path))
-    from agentdescent.evolution import EvolutionResult
+    from agentdescent.loop.evolution import EvolutionResult
     assert EvolutionResult.load(str(path)).stop_reason == "target_reward"
 
 

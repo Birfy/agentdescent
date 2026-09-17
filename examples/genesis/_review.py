@@ -266,7 +266,7 @@ class CompletionJudge:
         state = self._state_of()
         if state is None:
             return False
-        from agentdescent.filetree import canonical
+        from agentdescent.artifacts.filetree import canonical
         from ._world import LocalWorld
 
         rendered = canonical(state)

@@ -1,5 +1,5 @@
 """The responsible parent's verdict, as an
-:class:`~agentdescent.policies.AcceptancePolicy`.
+:class:`~agentdescent.core.policies.AcceptancePolicy`.
 
 Upstream, acceptance is not statistical. A parent agent decides whether a
 returned contribution is **accepted, rejected, or needs more work**, using the
@@ -19,9 +19,9 @@ engine's gate silently emptied an artifact whose entire claim was accumulation.
 
 Two things this cannot do, stated rather than worked around:
 
-* :class:`~agentdescent.policies.AcceptDecision` is a boolean, and its
+* :class:`~agentdescent.core.policies.AcceptDecision` is a boolean, and its
   ``category`` is a **closed vocabulary** -- the aggregator turns it into a
-  :class:`~agentdescent.aggregator.MergeOutcome`, so a policy that invents a name
+  :class:`~agentdescent.merge.aggregator.MergeOutcome`, so a policy that invents a name
   raises inside the merge rather than reporting a new reason. "Needs more work"
   therefore commits the partial progress (which is upstream's rule) and leaves a
   request in the :class:`~examples.genesis._world.WorldLog` that the next round's
@@ -44,8 +44,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from agentdescent.defaults import DefaultAcceptance
-from agentdescent.policies import AcceptDecision, MergeContext
+from agentdescent.merge.defaults import DefaultAcceptance
+from agentdescent.core.policies import AcceptDecision, MergeContext
 
 from ._world import WorldLog, normalise
 
@@ -58,7 +58,7 @@ class ParentJudge:
 
     With ``enabled=False`` every call is forwarded to ``inner`` untouched, so the
     default run is the engine's and a golden comparison against
-    :class:`~agentdescent.defaults.DefaultAcceptance` is exact.
+    :class:`~agentdescent.merge.defaults.DefaultAcceptance` is exact.
     """
 
     log: Optional[WorldLog] = None

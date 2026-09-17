@@ -4,7 +4,7 @@ Stage 1 of the meta-evolution plan (`docs/design-meta-evolution.md`, §4): the
 inner problem is a whole ERA flat-PUCT search on one AlgoTune task, scored in
 speedup over the task's reference implementation; the outer artifact is the
 ``priority(rank, visits, total, prior, depth, n_nodes)`` rule that decides which
-node the tree expands next (`agentdescent.meta.priority_selection`).
+node the tree expands next (`agentdescent.loop.meta.priority_selection`).
 
 Train tasks and validation tasks are disjoint AlgoTune tasks. After the outer
 run, the seed rule (upstream ERA's flat PUCT) and the evolved rule are scored on
@@ -35,8 +35,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
-from agentdescent.agents import Usage, with_retries
-from agentdescent.meta import (MetaOutcome, Problem, auc, cached_completion,
+from agentdescent.actors.agents import Usage, with_retries
+from agentdescent.loop.meta import (MetaOutcome, Problem, auc, cached_completion,
                                meta_evolve, meta_validate, priority_selection,
                                slot_reflector, transfer_ratio)
 
@@ -64,7 +64,7 @@ def algotune_problem(task: str, complete: Callable[[str], str], *,
                      test_shards: int = 2, problems: int = 2, mode: str = "serial",
                      staleness: str = "full", candidate_timeout: float = 120.0,
                      max_seconds: float = 1800.0, suite_seed: int = 0) -> Problem:
-    """One AlgoTune task as an inner :class:`~agentdescent.meta.Problem`.
+    """One AlgoTune task as an inner :class:`~agentdescent.loop.meta.Problem`.
 
     ``(selection policy, seed) -> MetaOutcome``: a whole ERA search on the task
     with the candidate rule choosing parents. The suite (problem sizes, seed

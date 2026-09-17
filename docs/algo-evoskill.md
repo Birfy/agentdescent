@@ -66,7 +66,7 @@ Traced from the repo (`src/loop/runner.py`, `src/registry/manager.py`,
 ## Plug-ins implemented
 
 In [`examples/evoskill/evoskill_skill_discovery.py`](https://github.com/Birfy/agentdescent/blob/main/examples/evoskill/evoskill_skill_discovery.py)
-(+ [`agentdescent/backends.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/backends.py)):
+(+ [`agentdescent/actors/backends.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/actors/backends.py)):
 
 | Plug-in | `evolve()` slot | What it does |
 |---|---|---|
@@ -75,7 +75,7 @@ In [`examples/evoskill/evoskill_skill_discovery.py`](https://github.com/Birfy/ag
 | **`TopKFrontierAggregator`** + **`Frontier`** | `aggregator_factory=` | the bounded top-K aggregate frontier, on every arm; scores every candidate on held-out, commits the best member as the dev head |
 | `make_propose(...)` | `propose=` | **batch-level** failure-driven Skill Proposer + Generator — one `SKILL.md` per `batch_size` failures (shared across workers) |
 | `self_verify=False` | async runtime | skip the per-trajectory re-run — the repo scores the child on val only |
-| **`openhands_backend` / `tool_loop_backend`** (`agentdescent.backends`) | the base agent | real OpenHands tool agent, a grep/read ReAct loop, or the default keyword retriever — selected by `--backend` |
+| **`openhands_backend` / `tool_loop_backend`** (`agentdescent.actors.backends`) | the base agent | real OpenHands tool agent, a grep/read ReAct loop, or the default keyword retriever — selected by `--backend` |
 
 ## The base agent — `--backend` (this is what makes it work)
 
@@ -83,7 +83,7 @@ OfficeQA answers are figures buried in **200 KB – 1.2 MB financial tables**, o
 needing *grep + computation* (e.g. summing the monthly "national defense" rows for
 a calendar year → `2,602`). A single LLM call with a keyword excerpt scores
 **0.000** — the bottleneck is document navigation, not a learnable skill. So the
-base agent is pluggable ([`agentdescent.backends`](dataloader.md)):
+base agent is pluggable ([`agentdescent.actors.backends`](dataloader.md)):
 
 | `--backend` | Base agent | Runs where |
 |---|---|---|
@@ -103,7 +103,7 @@ OPENAI_BASE_URL=https://api.deepseek.com OPENAI_API_KEY=... \
 ```
 
 ```python
-from agentdescent.backends import openhands_backend, tool_loop_backend
+from agentdescent.actors.backends import openhands_backend, tool_loop_backend
 backend = openhands_backend(model="openai/deepseek-v4-pro",
                             base_url="https://api.deepseek.com")   # or tool_loop_backend(completion)
 answer = backend.answer(question, document_text, skills=rendered_skills)

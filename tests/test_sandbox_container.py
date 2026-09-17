@@ -19,8 +19,8 @@ import tempfile
 
 import pytest
 
-from agentdescent.policies import SandboxSpec
-from agentdescent.sandbox_container import (
+from agentdescent.core.policies import SandboxSpec
+from agentdescent.runtime.sandbox_container import (
     CONTAINER_WORKDIR, ContainerProvider, ContainerSandbox, engine_available,
 )
 
@@ -316,7 +316,7 @@ def test_a_timeout_kills_the_container_not_the_exec():
 def test_the_provider_satisfies_the_protocol_without_extra_methods():
     """The check on #60's contract. A second implementation needing a fourth
     method would mean the protocol was shaped around its only user."""
-    from agentdescent.policies import SandboxProvider
+    from agentdescent.core.policies import SandboxProvider
     assert isinstance(ContainerProvider(IMAGE, runner=lambda c, timeout=None: "x"), SandboxProvider)
 
 
@@ -353,7 +353,7 @@ def test_the_local_provider_does_not_stop_what_this_one_does(engine, shared_root
     `HOME` redirection changes where a *lookup* goes; it does not change what a
     *path* reaches. Candidate code that names the host's home directory outright
     gets it under the local provider and does not under this one."""
-    from agentdescent.sandbox import WorkspaceProvider
+    from agentdescent.runtime.sandbox import WorkspaceProvider
 
     probe = f"import os; print(os.path.exists({host_marker!r}))"
 
@@ -477,10 +477,10 @@ def test_a_rollout_runs_inside_the_container(engine, shared_root):
 
     Staging is deliberately still a host operation, so `materialize` and the
     frozen-file overlay are untouched; only execution moves."""
-    from agentdescent.evolution import Task
-    from agentdescent.filetree import canonical
-    from agentdescent.runners import code_runner
-    from agentdescent.sandbox import SandboxPool
+    from agentdescent.loop.evolution import Task
+    from agentdescent.artifacts.filetree import canonical
+    from agentdescent.actors.runners import code_runner
+    from agentdescent.runtime.sandbox import SandboxPool
 
     pool = SandboxPool(ContainerProvider(IMAGE, engine=engine), max_sandboxes=2)
     run = code_runner(["python", "main.py"], sandbox_pool=pool,
@@ -497,10 +497,10 @@ def test_a_rollout_runs_inside_the_container(engine, shared_root):
 def test_a_candidate_cannot_read_the_host_from_inside_a_rollout(engine, shared_root, host_marker):
     """The same guarantee, reached through the runner rather than the provider --
     because that is the path a real run takes."""
-    from agentdescent.evolution import Task
-    from agentdescent.filetree import canonical
-    from agentdescent.runners import code_runner
-    from agentdescent.sandbox import SandboxPool
+    from agentdescent.loop.evolution import Task
+    from agentdescent.artifacts.filetree import canonical
+    from agentdescent.actors.runners import code_runner
+    from agentdescent.runtime.sandbox import SandboxPool
 
     pool = SandboxPool(ContainerProvider(IMAGE, engine=engine), max_sandboxes=1)
     run = code_runner(["python", "main.py"], sandbox_pool=pool,
@@ -517,10 +517,10 @@ def test_a_candidate_cannot_read_the_host_from_inside_a_rollout(engine, shared_r
 def test_the_frozen_test_gate_still_runs_and_still_gates(engine, shared_root):
     """`frozen` is the reason a candidate cannot weaken its own tests, and it has
     to keep working when the tests run in a container."""
-    from agentdescent.evolution import Task
-    from agentdescent.filetree import canonical
-    from agentdescent.runners import TEST_FAILURE_MARKER, code_runner
-    from agentdescent.sandbox import SandboxPool
+    from agentdescent.loop.evolution import Task
+    from agentdescent.artifacts.filetree import canonical
+    from agentdescent.actors.runners import TEST_FAILURE_MARKER, code_runner
+    from agentdescent.runtime.sandbox import SandboxPool
 
     pool = SandboxPool(ContainerProvider(IMAGE, engine=engine), max_sandboxes=1)
     run = code_runner(["python", "main.py"], test_cmd=["python", "check.py"],
@@ -580,10 +580,10 @@ def test_candidate_code_is_judged_by_real_tests_inside_a_container():
     import os
     import tempfile
 
-    from agentdescent.evolution import Task
-    from agentdescent.filetree import canonical, load_tree
-    from agentdescent.runners import TEST_FAILURE_MARKER, code_runner
-    from agentdescent.sandbox import SandboxPool
+    from agentdescent.loop.evolution import Task
+    from agentdescent.artifacts.filetree import canonical, load_tree
+    from agentdescent.actors.runners import TEST_FAILURE_MARKER, code_runner
+    from agentdescent.runtime.sandbox import SandboxPool
 
     source = tempfile.mkdtemp(dir=os.path.expanduser("~"))
     workspaces = tempfile.mkdtemp(dir=os.path.expanduser("~"))

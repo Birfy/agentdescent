@@ -8,7 +8,7 @@ good rules are learned, and harmful rules are rejected on held-out reward.
 from difflib import SequenceMatcher
 from typing import Optional
 
-from agentdescent.evolution import (
+from agentdescent.loop.evolution import (
     Agent,
     LLMAgent,
     Task,
@@ -99,7 +99,7 @@ def test_rule_id_dedupes_identical_text():
 # -- pluggable aggregator ----------------------------------------------------
 
 def test_custom_aggregator_factory_plugs_in():
-    from agentdescent.aggregator import Aggregator, AggregatorProtocol
+    from agentdescent.merge.aggregator import Aggregator, AggregatorProtocol
 
     calls = {"steps": 0}
 
@@ -121,7 +121,7 @@ def test_custom_aggregator_factory_plugs_in():
 
 def test_result_save_load_round_trip(tmp_path):
     """The artifact is the point of a run -- it must be persistable directly."""
-    from agentdescent.evolution import AppendRules, EvolutionResult, Task, evolve
+    from agentdescent.loop.evolution import AppendRules, EvolutionResult, Task, evolve
 
     class _Agent:
         def solve(self, rendered, task):
@@ -151,7 +151,7 @@ def test_task_is_hashable_and_keyed_by_id():
     `set(tasks)` and `{task: ...}` raised TypeError, which is surprising for a
     frozen dataclass and blocks the obvious ways of tracking tasks.
     """
-    from agentdescent.evolution import Task
+    from agentdescent.loop.evolution import Task
 
     a = Task(id="a", prompt="p", meta={"x": 1})
     b = Task(id="a", prompt="p", meta={"y": 2})    # same id, different meta

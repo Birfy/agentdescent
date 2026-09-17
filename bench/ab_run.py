@@ -3,7 +3,7 @@
     python -m bench.ab_run --dataset hotpotqa --rule advantage \
         --budget-rollouts 96 --seeds 0,1,2 --provider claude --model GLM-5.2 --yes
 
-`agentdescent/advantage.py` implements three rules taken from PPO and GRPO, and
+`agentdescent/merge/advantage.py` implements three rules taken from PPO and GRPO, and
 every one of them is off by default because *an analogy without an A/B is
 decoration*. This script is the A/B: identical workload, identical budget,
 identical seeds, one `Policies` field different.
@@ -37,14 +37,14 @@ import threading
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from agentdescent import Usage
-from agentdescent.advantage import (
+from agentdescent.merge.advantage import (
     AdaptiveTrustRegion, AdvantageAcceptance, AdvantageConflict,
     StableDistanceAcceptance,
 )
-from agentdescent.aggregator import AggregatorConfig
-from agentdescent.defaults import DefaultAcceptance, DefaultConflict
-from agentdescent.fusion import reflective_merge
-from agentdescent.policies import Policies
+from agentdescent.merge.aggregator import AggregatorConfig
+from agentdescent.merge.defaults import DefaultAcceptance, DefaultConflict
+from agentdescent.merge.fusion import reflective_merge
+from agentdescent.core.policies import Policies
 from examples._common import completion_for, confirm
 
 from .baselines_run import _finer, _fmt, _hotpotqa
@@ -249,7 +249,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         `result.usage.calls` the running total across every concurrently
         executing arm, so the per-arm call column was the sum of whatever else
         happened to be in flight -- and a cost comparison read straight off it.
-        `agentdescent.baselines` gets this right by giving every arm a fresh
+        `agentdescent.observe.baselines` gets this right by giving every arm a fresh
         meter; this did not.
 
         The dataset is deterministic given the seed and cached on disk, so
@@ -275,7 +275,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         arm_kwargs, watcher = _arm(args.rule, on, completion)
         kwargs.update(arm_kwargs)
         kwargs.setdefault("rounds", 10_000)
-        from agentdescent.evolution import evolve
+        from agentdescent.loop.evolution import evolve
 
         try:
             result = evolve(

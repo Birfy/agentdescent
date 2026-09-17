@@ -21,7 +21,7 @@ kind: ERA's flat-PUCT tree is `EraTree` + `FlatPuct` behind an
 from*.
 
 So "the policy" a tree search is plugged in through is literally
-`agentdescent.selection.SelectionPolicy`, and it used to be hard-wired:
+`agentdescent.schedule.selection.SelectionPolicy`, and it used to be hard-wired:
 `EraTree.__post_init__` built `FlatPuct(c_puct, prior_exponent)` with no way to
 hand it anything else. That is the seam this example opens:
 
@@ -36,7 +36,7 @@ ships.
 
 ## The API: `meta_evolve()`
 
-The outer loop is a library call, [`agentdescent.meta`](../../docs/meta-evolution.md),
+The outer loop is a library call, [`agentdescent.loop.meta`](../../docs/meta-evolution.md),
 and this example is one instantiation of it:
 
 ```python

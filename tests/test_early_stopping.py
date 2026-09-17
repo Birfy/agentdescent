@@ -8,7 +8,7 @@ That is real money on an LLM backend.
 
 import pytest
 
-from agentdescent.evolution import AppendRules, Task, evolve
+from agentdescent.loop.evolution import AppendRules, Task, evolve
 
 
 def _run(**kw):

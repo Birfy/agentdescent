@@ -50,14 +50,14 @@ import threading
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Tuple
 
-from agentdescent.agents import Usage
-from agentdescent.aggregator import AggregatorProtocol, MergeReport
-from agentdescent.dataloader import Dataset, hf_rows, split_dataset
-from agentdescent.evolvable import Diff, EvidenceCard
-from agentdescent.evolution import EvolvingArtifact, Task, evolve, rule_id
-from agentdescent.governance import classify
-from agentdescent.ledger import CASConflict, Ledger
-from agentdescent.staleness import get_policy
+from agentdescent.actors.agents import Usage
+from agentdescent.merge.aggregator import AggregatorProtocol, MergeReport
+from agentdescent.actors.dataloader import Dataset, hf_rows, split_dataset
+from agentdescent.core.evolvable import Diff, EvidenceCard
+from agentdescent.loop.evolution import EvolvingArtifact, Task, evolve, rule_id
+from agentdescent.merge.governance import classify
+from agentdescent.merge.ledger import CASConflict, Ledger
+from agentdescent.merge.staleness import get_policy
 from examples._common import (add_standard_args, completion_for, confirm,
                               worker_count,
                               budget_kwargs, report_engine)
@@ -339,7 +339,7 @@ def make_propose(ctx: SkillOptContext, complete: Completion):
 class StrictImprovement:
     """SkillOpt's gate at the standard acceptance seam.
 
-    An :class:`~agentdescent.policies.AcceptancePolicy` over genuine
+    An :class:`~agentdescent.core.policies.AcceptancePolicy` over genuine
     ``MergeContext`` records: commit only a candidate whose **full held-out**
     EM strictly beats the current document's. No Beta draw, no annealing --
     SkillOpt's rule is deliberately harsher than the shipped statistical gate,
@@ -348,7 +348,7 @@ class StrictImprovement:
     """
 
     def accept(self, ctx):
-        from agentdescent.policies import AcceptDecision, MergeContext
+        from agentdescent.core.policies import AcceptDecision, MergeContext
         base = MergeContext.rate(ctx.base_counts)
         cand = MergeContext.rate(ctx.cand_counts)
         improved = cand > base
@@ -412,7 +412,7 @@ class StrictGateAggregator(AggregatorProtocol):
             if merged is not None:
                 diffs = [merged]
         for diff in diffs:                                 # pick the best strict improver
-            from agentdescent.policies import MergeContext
+            from agentdescent.core.policies import MergeContext
             candidate = head.apply(diff)
             # `current_em` is the bar: this gate takes strict improvers only, so
             # a candidate that provably cannot reach it is rejected whatever the
@@ -473,7 +473,7 @@ class SkillOptResult:
     rejected: int
     history: List[float]
     #: Carried through from the underlying
-    #: :class:`~agentdescent.evolution.EvolutionResult`: without them a run that
+    #: :class:`~agentdescent.loop.evolution.EvolutionResult`: without them a run that
     #: ended on a backend failure reported its "seed -> best" line exactly like a
     #: converged one, which is what `error` exists to distinguish.
     error: Optional[str] = None
@@ -565,7 +565,7 @@ def load_dataset(n_train: int, n_val: int, seed: int = 0, hard: bool = False,
     train = download_searchqa("train", n_train)
     pool_rows = download_searchqa("validation", n_val)
     if hard and rollout is not None:
-        from agentdescent.dataloader import select_hard
+        from agentdescent.actors.dataloader import select_hard
         scorer = lambda ex: em_score(rollout.answer(SEED_SKILL, ex), ex["answers"])
         before = len(train) + len(pool_rows)
         # `hard_passes` measurements, and an item has to fail all of them. One
@@ -676,7 +676,7 @@ def main(argv=None) -> None:
     # merger explicitly, and so does this one now.
     merge_round = None
     if args.reflective_merge:
-        from agentdescent.fusion import ReflectiveFusion
+        from agentdescent.merge.fusion import ReflectiveFusion
         merge_round = ReflectiveFusion(completion)
         print("NOTE: --reflective-merge scores ONE fused patch per step instead "
               "of one candidate per worker -- which is upstream's shape (a step "

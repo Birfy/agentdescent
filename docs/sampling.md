@@ -4,7 +4,7 @@
     This is the `task_sampler` field of the [Policies bundle](policies.md); where a keyword argument exists it is a shortcut onto that field, and an explicit argument wins over a bundle default.
 
 
-*Module:* [`agentdescent.sampling`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/sampling.py)
+*Module:* [`agentdescent.schedule.sampling`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/schedule/sampling.py)
 · *API:* [`TaskSampler`, `RoundRobin`, `DifficultyWeighted`](api.md#task-sampling)
 
 [Parallelism](parallelism.md) decides which *shard* a worker owns. The sampler

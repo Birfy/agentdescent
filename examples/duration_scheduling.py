@@ -21,9 +21,9 @@ import random
 import tempfile
 import time
 
-from agentdescent.async_runtime import AsyncAgentDescent, AsyncConfig
-from agentdescent.domains.router import make_task_universe
-from agentdescent.scheduler import DurationEstimator, fifo_makespan, lpt_schedule
+from agentdescent.reference.async_runtime import AsyncAgentDescent, AsyncConfig
+from agentdescent.reference.domains.router import make_task_universe
+from agentdescent.schedule.scheduler import DurationEstimator, fifo_makespan, lpt_schedule
 
 
 def heavy_tailed_lengths(n, seed):
@@ -87,7 +87,7 @@ def experiment_stragglers(seed=3):
         return 0.04 if spike else 0.004
 
     universe = make_task_universe(seed=7)
-    from agentdescent.domains.router import router_run
+    from agentdescent.reference.domains.router import router_run
 
     def rollout(rendered, task):        # the domain's work, plus a real wait
         time.sleep(latency())

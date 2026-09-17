@@ -97,7 +97,7 @@ Four plug-ins, and one thing deliberately *not* reused:
 * **`selection.FlatPuct`** — the shipped policy, called by the tree under its own
   lock so the visit reservation and the pick are one atomic step.
 * **`reward_program`** is custom rather than one of
-  [`agentdescent.rewards`](rewards.md): those score a *text answer* against a
+  [`agentdescent.actors.rewards`](rewards.md): those score a *text answer* against a
   gold string, and this scores a vector of predictions against a vector of
   truths. Reaching for `numeric_close` here would have meant scoring the
   candidate's printed output rather than its predictions.

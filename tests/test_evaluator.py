@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from agentdescent import AppendRules, Policies, Task, evolve
-from agentdescent.evaluator import EvaluatorGroup
+from agentdescent.evaluate.evaluator import EvaluatorGroup
 
 
 def _tasks(n=12):

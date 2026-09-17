@@ -88,7 +88,7 @@ framework's core technical problem:
     An analogy without an A/B is decoration, and a `PPOAggregator` that computed
     no importance ratio and had no policy distribution would make the table above
     stop being a map of the code — which is the only thing it is good for. So
-    these live in [`agentdescent.advantage`](api.md), off by default, and a rule
+    these live in [`agentdescent.merge.advantage`](api.md), off by default, and a rule
     that fails its A/B should be **deleted** with the negative result recorded
     here.
 

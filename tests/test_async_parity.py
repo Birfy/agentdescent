@@ -28,10 +28,10 @@ import warnings
 import pytest
 
 from agentdescent import AppendRules, Task, async_evolve
-from agentdescent.async_runtime import AsyncAgentDescent, AsyncConfig
-from agentdescent.aggregator import Aggregator
-from agentdescent.domains.router import make_task_universe, router_run
-from agentdescent.scheduler import DurationEstimator
+from agentdescent.reference.async_runtime import AsyncAgentDescent, AsyncConfig
+from agentdescent.merge.aggregator import Aggregator
+from agentdescent.reference.domains.router import make_task_universe, router_run
+from agentdescent.schedule.scheduler import DurationEstimator
 
 
 def _tasks(n=12):
@@ -157,7 +157,7 @@ def test_both_loops_retire_workers_through_the_same_object():
     from pathlib import Path
 
     src = Path(__file__).resolve().parent.parent / "agentdescent"
-    for module in ("evolution.py", "async_evolve.py"):
+    for module in ("loop/evolution.py", "loop/async_evolve.py"):
         text = (src / module).read_text(encoding="utf-8")
         assert "WorkerHealth" in text, f"{module} does not use the shared rule"
         assert "should_retire" in text, f"{module} does not ask it the question"

@@ -9,8 +9,8 @@ non-daemon, so an overrunning run blocked interpreter exit.
 import threading
 import time
 
-from agentdescent.scheduler import AuditScheduler
-from agentdescent.verifier import ThreeLayerVerifier, VerifierBudget
+from agentdescent.schedule.scheduler import AuditScheduler
+from agentdescent.evaluate.verifier import ThreeLayerVerifier, VerifierBudget
 
 
 class _Art:
@@ -99,9 +99,9 @@ def test_the_barrier_free_threads_are_daemon():
     """
     import inspect
 
-    # `agentdescent.async_evolve` is rebound to the *function* by `__init__`,
+    # `agentdescent.loop.async_evolve` is rebound to the *function* by `__init__`,
     # so reach for it by name rather than through the module attribute.
-    from agentdescent.async_evolve import async_evolve
+    from agentdescent.loop.async_evolve import async_evolve
 
     src = inspect.getsource(async_evolve)
     assert src.count("daemon=True") >= 2, "worker and merger threads must be daemon"
@@ -110,7 +110,7 @@ def test_the_barrier_free_threads_are_daemon():
 def test_l1_serial_gate_admits_exactly_one_under_contention():
     """The gate is documented as a global L1 lock but was a check-then-act on a
     plain dict, so two threads could both believe they hold it."""
-    from agentdescent.governance import L1SerialGate
+    from agentdescent.merge.governance import L1SerialGate
 
     for _ in range(20):
         gate = L1SerialGate()
@@ -130,7 +130,7 @@ def test_l1_serial_gate_admits_exactly_one_under_contention():
 
 def test_resume_queue_is_thread_safe():
     """Async workers push checkpoints concurrently; pop is a check-then-act."""
-    from agentdescent.scheduler import ResumeItem, ResumeQueue
+    from agentdescent.schedule.scheduler import ResumeItem, ResumeQueue
 
     q = ResumeQueue()
 

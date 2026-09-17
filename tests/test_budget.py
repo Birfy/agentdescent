@@ -15,7 +15,7 @@ quietly; the test below pins how far apart those two can be.
 
 import pytest
 
-from agentdescent.evolution import AppendRules, Task, evolve
+from agentdescent.loop.evolution import AppendRules, Task, evolve
 
 
 def _tasks(n=20):

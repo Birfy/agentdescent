@@ -21,9 +21,9 @@ import warnings
 import pytest
 
 from agentdescent import AppendRules, Task
-from agentdescent.aggregator import (
+from agentdescent.merge.aggregator import (
     Aggregator, AggregatorConfig, AggregatorContractError, MergeReport, _Candidate)
-from agentdescent.async_evolve import async_evolve
+from agentdescent.loop.async_evolve import async_evolve
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +79,7 @@ def _run_async(**kw):
 
 def _aggregator(tmp_path, tasks):
     """A real aggregator over a real ledger, so `_decide` can actually commit."""
-    from agentdescent.evolution import _build_engine
+    from agentdescent.loop.evolution import _build_engine
 
     return _build_engine(tasks, _reward, agent=None, run=_make_run(),
                          propose=_propose, strategy=AppendRules(),
@@ -91,7 +91,7 @@ def _aggregator(tmp_path, tasks):
 
 
 def _card(eng, value=KEY):
-    from agentdescent.evolvable import EvidenceCard
+    from agentdescent.core.evolvable import EvidenceCard
 
     snap = eng.ledger.snapshot("dev")
     artifact = snap.get("a")
@@ -319,8 +319,8 @@ def test_an_aggregator_that_overrides_step_is_not_pipelined():
     every line of that override and run a different algorithm while reporting
     the requested one. Caught on a real run: the check was `hasattr` alone.
     """
-    from agentdescent.population import PopulationAggregator
-    from agentdescent.selection import SingleHead
+    from agentdescent.schedule.population import PopulationAggregator
+    from agentdescent.schedule.selection import SingleHead
 
     assert PopulationAggregator.step is not Aggregator.step, (
         "this test is only meaningful while PopulationAggregator overrides step()")

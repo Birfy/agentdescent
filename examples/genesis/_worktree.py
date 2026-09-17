@@ -49,7 +49,7 @@ import subprocess
 import tempfile
 from typing import Dict, List, Mapping, Optional, Sequence
 
-from agentdescent.filetree import materialize
+from agentdescent.artifacts.filetree import materialize
 
 from ._delegation import apply_edits as edited
 

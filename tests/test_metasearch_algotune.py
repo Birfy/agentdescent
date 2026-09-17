@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentdescent.meta import MetaOutcome, PrioritySelection, PRIORITY_SEED
+from agentdescent.loop.meta import MetaOutcome, PrioritySelection, PRIORITY_SEED
 
 from bench import metasearch_algotune as bench
 

@@ -9,7 +9,7 @@ import threading
 import time
 import warnings
 
-from agentdescent.evolution import SingleSlot, Task, evolve
+from agentdescent.loop.evolution import SingleSlot, Task, evolve
 
 TASKS = [Task(id=str(i), prompt=str(i), meta={"gold": str(i)}) for i in range(6)]
 
@@ -24,7 +24,7 @@ def test_an_abandoned_straggler_does_not_hold_the_interpreter_open():
 
     script = textwrap.dedent("""
         import time, warnings
-        from agentdescent.evolution import SingleSlot, Task, evolve
+        from agentdescent.loop.evolution import SingleSlot, Task, evolve
         tasks = [Task(id=str(i), prompt=str(i)) for i in range(6)]
         def run(rendered, task):
             if task.id == "0":
@@ -64,7 +64,7 @@ def test_late_evidence_from_an_abandoned_round_is_judged_stale():
     It must go through the staleness filter like any other late diff, not be
     applied as though it were current.
     """
-    from agentdescent.aggregator import Aggregator
+    from agentdescent.merge.aggregator import Aggregator
 
     seen = {"stale": 0}
     real_filter = Aggregator._staleness_filter

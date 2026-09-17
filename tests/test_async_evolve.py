@@ -1,4 +1,4 @@
-"""Tests for the barrier-free async runtime (agentdescent.async_evolve).
+"""Tests for the barrier-free async runtime (agentdescent.loop.async_evolve).
 
 Deterministic no-network stub agents; assertions avoid brittle timing by checking
 monotonicity (the aggregator never regresses the head) and that the pipeline runs
@@ -9,8 +9,8 @@ import warnings
 
 import pytest
 
-from agentdescent.async_evolve import async_evolve
-from agentdescent.evolution import AppendRules, Task, evolve
+from agentdescent.loop.async_evolve import async_evolve
+from agentdescent.loop.evolution import AppendRules, Task, evolve
 
 
 class _Composer:
@@ -225,8 +225,8 @@ def test_async_staleness_alpha_comes_from_agg_config():
     """
     import inspect
 
-    from agentdescent.aggregator import AggregatorConfig
-    from agentdescent.async_evolve import async_evolve as fn
+    from agentdescent.merge.aggregator import AggregatorConfig
+    from agentdescent.loop.async_evolve import async_evolve as fn
 
     src = inspect.getsource(fn)
     assert "alpha_head" in src and "alpha = 5 if" not in src

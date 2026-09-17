@@ -25,12 +25,12 @@ import tempfile
 
 import pytest
 
-from agentdescent.async_runtime import AsyncAgentDescent, AsyncConfig
-from agentdescent.domains.router import make_task_universe
-from agentdescent.ledger import Ledger
-from agentdescent.orchestrator import AgentDescent, run_fork_baseline
-from agentdescent.scheduler import DurationEstimator, fifo_makespan, lpt_schedule
-from agentdescent.staleness import get_policy
+from agentdescent.reference.async_runtime import AsyncAgentDescent, AsyncConfig
+from agentdescent.reference.domains.router import make_task_universe
+from agentdescent.merge.ledger import Ledger
+from agentdescent.reference.orchestrator import AgentDescent, run_fork_baseline
+from agentdescent.schedule.scheduler import DurationEstimator, fifo_makespan, lpt_schedule
+from agentdescent.merge.staleness import get_policy
 
 
 # -- run_demo: the RQ1 number three doc pages quote ------------------------------
@@ -70,7 +70,7 @@ def test_the_demo_reaches_the_stable_branch():
 
 
 def _rq2_row(alpha):
-    from agentdescent.aggregator import AggregatorConfig
+    from agentdescent.merge.aggregator import AggregatorConfig
 
     universe = make_task_universe(seed=7)
     cfg = AggregatorConfig(alpha_head=alpha, alpha_tail=alpha)
@@ -161,7 +161,7 @@ def test_the_async_runtime_actually_pipelines():
 
 def test_the_parallelism_demo_delivers_and_converges():
     from examples.parallelism import CATEGORIES, category_of, measure
-    from agentdescent.parallel import DataParallel, TensorParallel
+    from agentdescent.schedule.parallel import DataParallel, TensorParallel
 
     dp = measure(DataParallel())
     assert dp["reward"] == 1.0 and dp["violations"] == 0

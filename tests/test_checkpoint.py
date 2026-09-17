@@ -19,8 +19,8 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
-from agentdescent.aggregator import AggregatorProtocol, MergeReport
-from agentdescent.checkpoint import (
+from agentdescent.merge.aggregator import AggregatorProtocol, MergeReport
+from agentdescent.observe.checkpoint import (
     CHECKPOINT_DIR,
     LOCK_FILE,
     SCHEMA_VERSION,
@@ -281,11 +281,11 @@ def test_save_returns_false_when_checkpoint_returns_none(tmp_path):
 
 def test_reference_aggregator_checkpoint_roundtrip():
     """The default Aggregator's Beta posteriors / promotion state survive."""
-    from agentdescent.aggregator import Aggregator
+    from agentdescent.merge.aggregator import Aggregator
 
     agg = Aggregator.__new__(Aggregator)
     # Minimal wiring the two methods touch.
-    from agentdescent.stats import BetaPosterior
+    from agentdescent.merge.stats import BetaPosterior
     agg._posteriors = {"artifact": BetaPosterior(successes=3.0, failures=1.0)}
     agg._promoted_at = {"artifact": 7}
     agg._seen = {"artifact", "other"}
@@ -312,9 +312,9 @@ def test_reference_aggregator_checkpoint_roundtrip():
 
 def test_reference_aggregator_restore_ignores_garbage():
     """Malformed posterior entries are skipped, not raised."""
-    from agentdescent.aggregator import Aggregator
+    from agentdescent.merge.aggregator import Aggregator
     from collections import defaultdict as dd
-    from agentdescent.stats import BetaPosterior
+    from agentdescent.merge.stats import BetaPosterior
 
     agg = Aggregator.__new__(Aggregator)
     agg._posteriors = dd(BetaPosterior)
@@ -341,7 +341,7 @@ def test_reference_aggregator_restore_ignores_garbage():
 def test_resumed_run_restores_default_aggregator_state(tmp_path):
     """End-to-end: run 1 commits evidence into the prior; run 2 on the same
     ledger starts with that prior instead of a fresh one."""
-    from agentdescent.evolution import evolve, Task
+    from agentdescent.loop.evolution import evolve, Task
 
     repo = str(tmp_path / "repo")
     tasks = [Task(id=f"t{i}", prompt=f"task {i}") for i in range(8)]
@@ -371,7 +371,7 @@ def test_resumed_run_restores_default_aggregator_state(tmp_path):
     # therefore over-permissive, one. Asserted on the aggregator the run
     # actually used -- `final_reward` is fixed at 0.5 here and would be
     # satisfied whether or not anything was restored.
-    from agentdescent.aggregator import Aggregator
+    from agentdescent.merge.aggregator import Aggregator
 
     seen = {"before": None}
 
@@ -407,7 +407,7 @@ def test_resumed_run_restores_default_aggregator_state(tmp_path):
 
 def test_evolve_writes_checkpoint_after_each_round(tmp_path):
     """A run with repo_path= writes checkpoints, one per round."""
-    from agentdescent.evolution import evolve, Task
+    from agentdescent.loop.evolution import evolve, Task
 
     tasks = [Task(id=f"t{i}", prompt=f"task {i}") for i in range(8)]
 
@@ -437,7 +437,7 @@ def test_evolve_writes_checkpoint_after_each_round(tmp_path):
 
 def test_resume_restores_aggregator_state(tmp_path):
     """A second evolve() call on the same repo_path restores search state."""
-    from agentdescent.evolution import evolve, Task
+    from agentdescent.loop.evolution import evolve, Task
 
     tasks = [Task(id=f"t{i}", prompt=f"task {i}") for i in range(8)]
 
@@ -479,7 +479,7 @@ def test_early_stop_state_saved_and_restored(tmp_path):
     Without this, a run that had already stalled 4 of its 5 patience rounds
     would, after a restart, spend 5 more rounds re-discovering the stall --
     the exact waste the patience budget exists to bound."""
-    from agentdescent.pipeline import EarlyStop
+    from agentdescent.loop.pipeline import EarlyStop
 
     repo = str(tmp_path)
     agg = CountingAggregator()
@@ -497,7 +497,7 @@ def test_early_stop_state_saved_and_restored(tmp_path):
 
 
 def test_early_stop_restore_returns_false_without_checkpoint(tmp_path):
-    from agentdescent.pipeline import EarlyStop
+    from agentdescent.loop.pipeline import EarlyStop
 
     early = EarlyStop(patience=5)
     assert restore_early_stop(str(tmp_path), early) is False
@@ -506,7 +506,7 @@ def test_early_stop_restore_returns_false_without_checkpoint(tmp_path):
 
 def test_early_stop_restore_ignores_malformed_state(tmp_path):
     """A checkpoint without usable early_stop state leaves the tracker alone."""
-    from agentdescent.pipeline import EarlyStop
+    from agentdescent.loop.pipeline import EarlyStop
 
     d = tmp_path / CHECKPOINT_DIR
     d.mkdir()
@@ -524,8 +524,8 @@ def test_resume_does_not_reburn_patience(tmp_path):
     ledger inherits the stall counter, so its effective patience budget is
     8 rounds, not 10. (Round *numbers* restart on resume — the engine has
     always counted them per-process — but the tracker does not.)"""
-    from agentdescent.evolution import evolve, Task
-    from agentdescent.checkpoint import load_checkpoint
+    from agentdescent.loop.evolution import evolve, Task
+    from agentdescent.observe.checkpoint import load_checkpoint
 
     repo = str(tmp_path / "repo")
     tasks = [Task(id=f"t{i}", prompt=f"task {i}") for i in range(8)]
@@ -553,8 +553,8 @@ def test_async_path_checkpoints_too(tmp_path):
     """The barrier-free runtime shares record_round, so it checkpoints for
     free — and restores the early-stop tracker the same way."""
     import warnings as _w
-    from agentdescent.evolution import evolve, Task
-    from agentdescent.checkpoint import load_checkpoint
+    from agentdescent.loop.evolution import evolve, Task
+    from agentdescent.observe.checkpoint import load_checkpoint
 
     repo = str(tmp_path / "repo")
     tasks = [Task(id=f"t{i}", prompt=f"task {i}") for i in range(8)]
@@ -577,9 +577,9 @@ def test_async_path_checkpoints_too(tmp_path):
 def _make_population_aggregator():
     """A PopulationAggregator wired enough for checkpoint()/restore()."""
     import threading
-    from agentdescent.population import PopulationAggregator
-    from agentdescent.selection import Archive
-    from agentdescent.stats import BetaPosterior
+    from agentdescent.schedule.population import PopulationAggregator
+    from agentdescent.schedule.selection import Archive
+    from agentdescent.merge.stats import BetaPosterior
     from collections import defaultdict
 
     agg = PopulationAggregator.__new__(PopulationAggregator)
@@ -668,10 +668,10 @@ def test_population_run_checkpoints_archive(tmp_path):
     """A run with a selection policy (population layer) checkpoints the
     archive, so a resume continues with the full candidate pool."""
     import warnings as _w
-    from agentdescent.evolution import evolve, Task
-    from agentdescent.selection import Beam
-    from agentdescent.policies import Policies
-    from agentdescent.checkpoint import load_checkpoint
+    from agentdescent.loop.evolution import evolve, Task
+    from agentdescent.schedule.selection import Beam
+    from agentdescent.core.policies import Policies
+    from agentdescent.observe.checkpoint import load_checkpoint
 
     repo = str(tmp_path / "repo")
     tasks = [Task(id=f"t{i}", prompt=f"task {i}") for i in range(8)]
@@ -762,9 +762,9 @@ def test_population_checkpoint_includes_parent_state():
     otherwise the Beta posteriors and promotion counters are lost on resume,
     defeating the whole point of checkpointing the reference aggregator."""
     import threading
-    from agentdescent.population import PopulationAggregator
-    from agentdescent.selection import Archive
-    from agentdescent.stats import BetaPosterior
+    from agentdescent.schedule.population import PopulationAggregator
+    from agentdescent.schedule.selection import Archive
+    from agentdescent.merge.stats import BetaPosterior
     from collections import defaultdict
 
     agg = PopulationAggregator.__new__(PopulationAggregator)
@@ -797,9 +797,9 @@ def test_population_restore_recovers_parent_state():
     """PopulationAggregator.restore() must call super().restore() — otherwise
     the Beta posteriors are left at zero after a resume."""
     import threading
-    from agentdescent.population import PopulationAggregator
-    from agentdescent.selection import Archive
-    from agentdescent.stats import BetaPosterior
+    from agentdescent.schedule.population import PopulationAggregator
+    from agentdescent.schedule.selection import Archive
+    from agentdescent.merge.stats import BetaPosterior
     from collections import defaultdict
 
     agg = PopulationAggregator.__new__(PopulationAggregator)
@@ -841,7 +841,7 @@ def test_population_restore_recovers_parent_state():
 def test_checkpointing_off_by_default(tmp_path):
     """Without checkpointing=True, no checkpoint files are written — a
     throwaway run pays zero IO cost."""
-    from agentdescent.evolution import evolve, Task
+    from agentdescent.loop.evolution import evolve, Task
 
     repo = str(tmp_path / "repo")
     tasks = [Task(id=f"t{i}", prompt=f"task {i}") for i in range(8)]
@@ -866,8 +866,8 @@ def test_checkpointing_off_by_default(tmp_path):
 
 
 def _ledger(repo: str):
-    from agentdescent.evolution import EvolvingArtifact
-    from agentdescent.ledger import Ledger
+    from agentdescent.loop.evolution import EvolvingArtifact
+    from agentdescent.merge.ledger import Ledger
     return Ledger(repo, lambda a: {"state": dict(a.state)},
                   lambda aid, v, s: EvolvingArtifact(aid, s.get("state", {}), v))
 
@@ -915,8 +915,8 @@ def test_checkpoints_survive_the_branch_switch_that_finalize_makes(tmp_path):
     the switch deletes it -- and once the next round has rewritten the tracked
     file, `checkout` refuses outright and takes `snapshot(STABLE)` with it.
     """
-    from agentdescent.evolution import EvolvingArtifact
-    from agentdescent.ledger import Ledger
+    from agentdescent.loop.evolution import EvolvingArtifact
+    from agentdescent.merge.ledger import Ledger
 
     repo = str(tmp_path / "repo")
     led = _ledger_from_an_earlier_version(repo)
@@ -941,8 +941,8 @@ def test_a_held_lock_reads_as_no_checkpoint_rather_than_raising(tmp_path):
     `flock` is held per *open file description*, so a second `open()` conflicts
     even from this process -- no subprocess needed to hold it.
     """
-    import agentdescent.checkpoint as cp
-    from agentdescent.ledger import _acquire_file_lock, _release_file_lock
+    import agentdescent.observe.checkpoint as cp
+    from agentdescent.merge.ledger import _acquire_file_lock, _release_file_lock
 
     repo = str(tmp_path)
     save_checkpoint(repo, round=1, aggregator=CountingAggregator())
@@ -1001,7 +1001,7 @@ def test_round_numbering_continues_after_a_resume(tmp_path):
     Without an offset the resume writes `round_0.json` over the previous run's,
     and reports `round 0` for a search that is several rounds deep.
     """
-    from agentdescent.evolution import evolve, Task
+    from agentdescent.loop.evolution import evolve, Task
 
     repo = str(tmp_path / "repo")
     tasks = [Task(id=f"t{i}", prompt=f"task {i}") for i in range(8)]
@@ -1035,10 +1035,10 @@ def test_finalize_does_not_promote_rendered_artifacts_as_ids(tmp_path):
     rendered candidate, passing a whole artifact where an id belongs.
     Checkpointing then serialised those ids and restored them on resume.
     """
-    from agentdescent.evolution import evolve, Task
-    from agentdescent.policies import Policies
-    from agentdescent.selection import Beam
-    import agentdescent.aggregator as agg_mod
+    from agentdescent.loop.evolution import evolve, Task
+    from agentdescent.core.policies import Policies
+    from agentdescent.schedule.selection import Beam
+    import agentdescent.merge.aggregator as agg_mod
 
     promoted = []
     original = agg_mod.Aggregator._promote

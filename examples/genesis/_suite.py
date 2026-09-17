@@ -33,8 +33,8 @@ from itertools import zip_longest
 from typing import (Callable, Dict, List, Mapping, Optional, Sequence,
                     Tuple)
 
-from agentdescent.evolution import Task
-from agentdescent.filetree import (canonical, match_any, materialize,
+from agentdescent.loop.evolution import Task
+from agentdescent.artifacts.filetree import (canonical, match_any, materialize,
                                    parse_tree)
 
 from ._delegation import Brief, Delegation, Edit

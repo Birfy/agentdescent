@@ -380,7 +380,7 @@ be speedups over.
     Comparing wall-clocks across the left column reports eight times the model
     spend as parallel efficiency, and comparing final quality credits the extra
     spend to parallelism. It is the confound
-    [`agentdescent.baselines`](results.md) was built to remove, and the warning
+    [`agentdescent.observe.baselines`](results.md) was built to remove, and the warning
     on that page — that a speedup table cannot distinguish merging from sampling
     — applies here first.
 

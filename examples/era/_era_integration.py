@@ -41,7 +41,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from agentdescent.dataloader import cache_path
+from agentdescent.actors.dataloader import cache_path
 
 from examples.era._era_integrals import (
     DIFFICULTIES,

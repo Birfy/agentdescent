@@ -49,16 +49,16 @@ import threading
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
-from agentdescent.aggregator import AggregatorProtocol, MergeReport
-from agentdescent.dataloader import (Dataset, fetch_text, hf_rows,
+from agentdescent.merge.aggregator import AggregatorProtocol, MergeReport
+from agentdescent.actors.dataloader import (Dataset, fetch_text, hf_rows,
                                      load_gated_hf, split_dataset)
-from agentdescent.evolvable import Diff, EvidenceCard
-from agentdescent.evolution import EvolvingArtifact, Task, evolve
-from agentdescent.filetree import parse_tree
-from agentdescent.treestrategy import FileTree
-from agentdescent.governance import classify
-from agentdescent.ledger import CASConflict, Ledger
-from agentdescent.staleness import get_policy
+from agentdescent.core.evolvable import Diff, EvidenceCard
+from agentdescent.loop.evolution import EvolvingArtifact, Task, evolve
+from agentdescent.artifacts.filetree import parse_tree
+from agentdescent.artifacts.treestrategy import FileTree
+from agentdescent.merge.governance import classify
+from agentdescent.merge.ledger import CASConflict, Ledger
+from agentdescent.merge.staleness import get_policy
 from examples._common import (add_standard_args, completion_for, confirm,
                               is_openai_compatible, worker_count,
                               budget_kwargs, report_engine)
@@ -264,7 +264,7 @@ class Frontier:
 class FrontierBest:
     """EvoSkill's parent rule at the standard selection seam.
 
-    A :class:`~agentdescent.selection.SelectionPolicy`: pick the frontier's
+    A :class:`~agentdescent.schedule.selection.SelectionPolicy`: pick the frontier's
     best-scoring member (upstream ``strategy="best"``). Local rather than the
     shipped ``Beam(1)`` so the tie-break stays byte-identical to the inline
     ``max`` it replaces (first maximal member wins, in admission order).
@@ -430,7 +430,7 @@ class SkillLibraryTree(FileTree):
     into an agent's workspace and read file by file (`--backend claude-code`)
     instead of being inlined in every prompt.
 
-    Two deliberate departures from stock :class:`~agentdescent.treestrategy.FileTree`:
+    Two deliberate departures from stock :class:`~agentdescent.artifacts.treestrategy.FileTree`:
 
     * ``to_diff`` keeps the repo's ``name :: body`` proposal protocol rather than
       FileTree's ``<EDITS>`` JSON. What is faithful about EvoSkill is the
@@ -564,7 +564,7 @@ class TopKFrontierAggregator(AggregatorProtocol):
 
         # strategy="best" at the standard seam: frontier members become
         # Candidates (version = member index) and FrontierBest picks the parent.
-        from agentdescent.selection import Candidate, SelectionContext
+        from agentdescent.schedule.selection import Candidate, SelectionContext
         rows = [Candidate(artifact_id=self.aid, version=i, state=dict(state),
                           score=score)
                 for i, (state, score) in enumerate(self.ctx.frontier.members)]
@@ -601,11 +601,11 @@ class EvoResult:
     #: actually produced, whether or not it displaced the seed.
     frontier: List[Tuple[Dict[str, str], float]] = field(default_factory=list)
     #: The same library as a file tree (`{path: body}`) -- what
-    #: :func:`agentdescent.filetree.materialize` or
-    #: :meth:`~agentdescent.evolution.EvolutionResult.write_to` install.
+    #: :func:`agentdescent.artifacts.filetree.materialize` or
+    #: :meth:`~agentdescent.loop.evolution.EvolutionResult.write_to` install.
     tree: Dict[str, str] = field(default_factory=dict)
     #: Carried straight through from the underlying
-    #: :class:`~agentdescent.evolution.EvolutionResult`. Dropping them made a run
+    #: :class:`~agentdescent.loop.evolution.EvolutionResult`. Dropping them made a run
     #: that died on a rate limit print the same confident "seed -> best" line as
     #: one that converged, on the longest and most expensive path in the repo.
     error: Optional[str] = None
@@ -622,7 +622,7 @@ def run_evoskill(complete: Completion, docs: Dict[str, str],
                  merge_round=None, verbose: bool = False) -> EvoResult:
     """Drive EvoSkill through `evolve()` (`val` is the held-out frontier metric).
 
-    ``backend`` (an :class:`~agentdescent.backends.AgentBackend`) replaces the passive
+    ``backend`` (an :class:`~agentdescent.actors.backends.AgentBackend`) replaces the passive
     keyword-retriever base agent with a tool-using one (OpenHands / grep-loop) so
     the agent can actually navigate the source documents; ``None`` keeps the
     dependency-free retriever."""
@@ -880,7 +880,7 @@ def main(argv=None) -> None:
     # base agent: passive retriever (default), a local grep/read loop, or OpenHands.
     backend = None
     if args.backend == "openhands":
-        from agentdescent.backends import openhands_backend
+        from agentdescent.actors.backends import openhands_backend
         oh_model = args.model if args.model.startswith("openai/") else f"openai/{args.model}"
         base = ("https://api.deepseek.com" if is_openai_compatible(args)
                 else os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"))
@@ -890,13 +890,13 @@ def main(argv=None) -> None:
         # Same document task, a different tool-using agent -- possible because every
         # backend is a Completion and document_agent stages a workspace for any of
         # them (see docs/agents.md).
-        from agentdescent.agents import claude_code, codex as codex_agent
-        from agentdescent.backends import document_agent
+        from agentdescent.actors.agents import claude_code, codex as codex_agent
+        from agentdescent.actors.backends import document_agent
         cli = claude_code() if args.backend == "claude-code" else codex_agent()
         backend = document_agent(cli)
         print(f"Backend  : {args.backend} CLI agent (workspace-staged document)")
     elif args.backend == "toolloop":
-        from agentdescent.backends import tool_loop_backend
+        from agentdescent.actors.backends import tool_loop_backend
         backend = tool_loop_backend(completion)
         print("Backend  : local grep/read ReAct loop")
 
@@ -908,7 +908,7 @@ def main(argv=None) -> None:
     # so does this one now.
     merge_round = None
     if args.reflective_merge:
-        from agentdescent.fusion import ReflectiveFusion
+        from agentdescent.merge.fusion import ReflectiveFusion
         merge_round = ReflectiveFusion(completion)
         print("NOTE: --reflective-merge offers the frontier ONE fused candidate "
               "per sweep instead of one per worker. update_frontier and the "

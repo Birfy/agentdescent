@@ -10,7 +10,7 @@ import tempfile
 
 import pytest
 
-from agentdescent.filetree import (
+from agentdescent.artifacts.filetree import (
     TreeError,
     TreeSpec,
     canonical,

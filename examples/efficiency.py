@@ -29,9 +29,9 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from agentdescent.async_runtime import AsyncAgentDescent, AsyncConfig
-from agentdescent.domains.router import make_task_universe
-from agentdescent.ledger import Ledger
+from agentdescent.reference.async_runtime import AsyncAgentDescent, AsyncConfig
+from agentdescent.reference.domains.router import make_task_universe
+from agentdescent.merge.ledger import Ledger
 
 
 def constant_latency(seconds: float):
@@ -55,7 +55,7 @@ def _slow_rollout(latency):
     `time.sleep` releases the GIL, which is the whole point: it stands in for the
     network wait an agent rollout actually is, so the overlap being measured here
     is the overlap a real workload gets."""
-    from agentdescent.domains.router import router_run
+    from agentdescent.reference.domains.router import router_run
 
     def rollout(rendered, task):
         time.sleep(latency())
@@ -141,7 +141,7 @@ def experiment_async(universe, n_workers=4, rounds=40):
     # Dispatch shape only: one rendered artifact, one cluster, N concurrent
     # rollouts. Nothing here touches the ledger, which is the point -- the
     # question is what the *barrier* costs, not what a merge costs.
-    from agentdescent.domains.router import RouterStrategy, cluster_tasks
+    from agentdescent.reference.domains.router import RouterStrategy, cluster_tasks
 
     rollout = _slow_rollout(heavy_tailed_latency(0.004, 12.0, 0.15, seed=7))
     rendered = RouterStrategy().render({})
@@ -268,7 +268,7 @@ def _async_result(tasks, run, *, workers=8, eval_conc=8, seconds=6.0, ratio=1):
     import warnings as _w
 
     from agentdescent import AppendRules
-    from agentdescent.async_evolve import async_evolve
+    from agentdescent.loop.async_evolve import async_evolve
 
     with _w.catch_warnings():
         _w.simplefilter("ignore")
@@ -382,7 +382,7 @@ def experiment_gil(model: str, calls: int = 8, threads: int = 8) -> None:
     print(f"{'workload':>34} {'sequential':>11} {'threads':>9} {'speedup':>8}")
 
     if model:
-        from agentdescent.agents import claude
+        from agentdescent.actors.agents import claude
 
         complete = claude(model=model, max_tokens=64, retries=1)
 

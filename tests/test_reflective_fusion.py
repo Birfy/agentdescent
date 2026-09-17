@@ -14,13 +14,13 @@ every failure path falls back to the shipped behaviour.
 
 import pytest
 
-from agentdescent.evolution import (
+from agentdescent.loop.evolution import (
     AppendRules, EvolutionResult, KeyedRules, SingleSlot, Task, evolve,
 )
-from agentdescent.fusion import (
+from agentdescent.merge.fusion import (
     KeepContradictions, ReflectiveFusion, reflective_merge,
 )
-from agentdescent.policies import Policies
+from agentdescent.core.policies import Policies
 
 
 KEYS = ("alpha", "beta", "gamma", "delta")
@@ -144,7 +144,7 @@ def test_the_failure_reason_is_distinguishable_from_never_trying():
 def test_only_the_keys_that_disagree_are_sent_to_the_model():
     """A key every diff agrees on is already handled correctly by the union; a
     model asked to merge values that do not disagree can only make them worse."""
-    from agentdescent.evolvable import Diff
+    from agentdescent.core.evolvable import Diff
 
     a = Diff(diff_id="a", target="x", ops={"same": "v", "differs": "1"})
     b = Diff(diff_id="b", target="x", ops={"same": "v", "differs": "2"})
@@ -157,7 +157,7 @@ def test_only_the_keys_that_disagree_are_sent_to_the_model():
 def test_a_partial_synthesis_is_discarded_whole():
     """Committing some workers' contributions and dropping the rest looks like a
     successful merge and is not one."""
-    from agentdescent.evolvable import Diff
+    from agentdescent.core.evolvable import Diff
 
     calls = {"n": 0}
 
@@ -227,7 +227,7 @@ def test_the_prompt_asks_for_a_union_of_deltas_not_a_rewrite():
     result can be checked, and it needs only what a FusionPolicy actually has --
     the current value and the competing ones, never the evidence cards.
     """
-    from agentdescent.fusion import MERGE_PROMPT
+    from agentdescent.merge.fusion import MERGE_PROMPT
 
     filled = MERGE_PROMPT.format(current="C", proposals="PROPOSAL 1\n---\nP\n---\n")
     assert "UNION" in filled
@@ -238,8 +238,8 @@ def test_the_prompt_asks_for_a_union_of_deltas_not_a_rewrite():
 def test_the_union_is_verified_against_the_thing_it_replaces():
     """`fuse_diffs` on one key is last-writer-wins. This is the contrast the
     whole module exists for, asserted rather than described."""
-    from agentdescent.aggregator import fuse_diffs
-    from agentdescent.evolvable import Diff
+    from agentdescent.merge.aggregator import fuse_diffs
+    from agentdescent.core.evolvable import Diff
 
     a = Diff(diff_id="a", target="p", ops={"instruction": "base. CHECK BOTH."})
     b = Diff(diff_id="b", target="p", ops={"instruction": "base. BE SHORT."})
@@ -265,7 +265,7 @@ def test_scoring_a_tournament_is_order_independent():
     exactly the ones with several candidates in them. Seeded from the artifact
     instead, a candidate scores the same wherever it sits.
     """
-    from agentdescent.verifier import ThreeLayerVerifier
+    from agentdescent.evaluate.verifier import ThreeLayerVerifier
 
     class Art:
         def __init__(self, text): self.text = text
@@ -297,7 +297,7 @@ def test_two_arms_of_an_ab_do_not_see_different_noise():
     0.5016 depending only on its position, a spread wider than one task's worth
     of improvement on the ranking subset.
     """
-    from agentdescent.verifier import ThreeLayerVerifier
+    from agentdescent.evaluate.verifier import ThreeLayerVerifier
 
     class Art:
         id = "x"

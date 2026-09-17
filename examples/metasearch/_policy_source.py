@@ -1,18 +1,18 @@
 """The evolvable surface of a tree search, as this example names it.
 
-Everything here lives in :mod:`agentdescent.meta` now -- the gate, the seed
+Everything here lives in :mod:`agentdescent.loop.meta` now -- the gate, the seed
 rule, the wrapper -- and this module keeps the example's own names for them so
 its tests and README read as one thing:
 
-* :data:`SEED_SOURCE` is :data:`agentdescent.meta.PRIORITY_SEED`;
+* :data:`SEED_SOURCE` is :data:`agentdescent.loop.meta.PRIORITY_SEED`;
 * :func:`compile_priority` is the gate;
-* :class:`EvolvedSelection` is :class:`agentdescent.meta.PrioritySelection`;
-* :func:`SearchPolicySlot` builds the spec, :func:`agentdescent.meta.priority_selection`.
+* :class:`EvolvedSelection` is :class:`agentdescent.loop.meta.PrioritySelection`;
+* :func:`SearchPolicySlot` builds the spec, :func:`agentdescent.loop.meta.priority_selection`.
 """
 
 from __future__ import annotations
 
-from agentdescent.meta import (PRIORITY_SEED, PrioritySelection, SourceSlot,
+from agentdescent.loop.meta import (PRIORITY_SEED, PrioritySelection, SourceSlot,
                                compile_priority, priority_selection)
 
 __all__ = ["ARGS", "FUNCTION", "SEED_SOURCE", "EvolvedSelection",

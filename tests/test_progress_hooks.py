@@ -7,8 +7,8 @@ is not something a library caller can route).
 
 import warnings
 
-from agentdescent.async_evolve import async_evolve
-from agentdescent.evolution import AppendRules, RoundInfo, Task, evolve
+from agentdescent.loop.async_evolve import async_evolve
+from agentdescent.loop.evolution import AppendRules, RoundInfo, Task, evolve
 
 
 class _Agent:
@@ -105,7 +105,7 @@ def test_a_callback_that_raises_on_the_last_round_is_still_reported():
 
 def _contradictory_run(**kw):
     """A workload where workers genuinely disagree about one key."""
-    from agentdescent.evolution import KeyedRules
+    from agentdescent.loop.evolution import KeyedRules
 
     tasks = [Task(id=f"t{i}", prompt=f"q{i}", meta={"gold": str(i % 3)})
              for i in range(16)]
@@ -146,7 +146,7 @@ def test_a_round_reports_what_the_merge_did_not_only_its_category():
 def test_the_new_round_fields_survive_save_and_load(tmp_path):
     """`load` reads history with `RoundInfo(**h)`, so a field `save` forgets is
     silently zero on the way back."""
-    from agentdescent.evolution import EvolutionResult
+    from agentdescent.loop.evolution import EvolutionResult
 
     result = _contradictory_run(refresh_interval=2)
     path = str(tmp_path / "result.json")
@@ -163,7 +163,7 @@ def test_both_loops_derive_the_round_the_same_way():
     be counted one way in one loop and another way in the other."""
     import inspect
 
-    from agentdescent.evolution import _Engine
+    from agentdescent.loop.evolution import _Engine
 
     params = inspect.signature(_Engine.record_round).parameters
     assert "reports" in params

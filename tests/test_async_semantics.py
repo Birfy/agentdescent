@@ -6,10 +6,10 @@ These are the properties that turned out to hold, plus the one semantic mismatch
 that turned out not to.
 """
 
-from agentdescent.aggregator import AggregatorConfig, EvidenceBuffer
-from agentdescent.async_evolve import async_evolve
-from agentdescent.evolution import AppendRules, Task, evolve
-from agentdescent.evolvable import Diff, EvidenceCard
+from agentdescent.merge.aggregator import AggregatorConfig, EvidenceBuffer
+from agentdescent.loop.async_evolve import async_evolve
+from agentdescent.loop.evolution import AppendRules, Task, evolve
+from agentdescent.core.evolvable import Diff, EvidenceCard
 
 
 class _Composer:
@@ -104,9 +104,9 @@ def _counting_run(**kw):
     import warnings
 
     from agentdescent import Policies
-    from agentdescent.aggregator import Aggregator
-    from agentdescent.evolution import EvolvingArtifact
-    from agentdescent.ledger import Ledger
+    from agentdescent.merge.aggregator import Aggregator
+    from agentdescent.loop.evolution import EvolvingArtifact
+    from agentdescent.merge.ledger import Ledger
 
     seen = {"cards": 0, "reads": 0}
 

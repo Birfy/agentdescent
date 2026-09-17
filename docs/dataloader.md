@@ -1,7 +1,7 @@
 # Loading datasets
 
-> **The data layer.** Just as [`agentdescent.agents`](agents.md) is the "talk to a
-> model" layer, `agentdescent.dataloader` is the "load a dataset" layer. It is
+> **The data layer.** Just as [`agentdescent.actors.agents`](agents.md) is the "talk to a
+> model" layer, `agentdescent.actors.dataloader` is the "load a dataset" layer. It is
 > deliberately separate from the evolution engine — *which* benchmark you evolve
 > against has nothing to do with the framework — and every
 > dataset-backed [self-evolution example](self-evolution-examples.md) loads its data
@@ -16,7 +16,7 @@ on-disk caching in every file, that boilerplate lives here — dependency-free
 ## The surface
 
 ```python
-from agentdescent.dataloader import (
+from agentdescent.actors.dataloader import (
     Dataset, split_dataset, dataset_from_splits,          # the train/val/test layer
     hf_rows, hf_feature_names, fetch_text, fetch_bytes, load_gated_hf)   # loaders
 ```
@@ -41,7 +41,7 @@ Every self-evolution example follows the same discipline: **fit on `train`, gate
 a final number on `test`** (fully held out, never seen by the optimizer).
 
 ```python
-from agentdescent.dataloader import split_dataset
+from agentdescent.actors.dataloader import split_dataset
 
 ds = split_dataset(tasks, ratios=(0.5, 0.25, 0.25), seed=0,
                    stratify_key=lambda t: t.meta["target"])   # optional class balance
@@ -62,7 +62,7 @@ splits (e.g. SearchQA's `train` / `validation`), build the `Dataset` with
 ## Examples
 
 ```python
-from agentdescent.dataloader import hf_rows, hf_feature_names, fetch_text, load_gated_hf
+from agentdescent.actors.dataloader import hf_rows, hf_feature_names, fetch_text, load_gated_hf
 
 # Public dataset via the datasets-server (paged + cached), any split/config:
 rows = hf_rows("hotpotqa/hotpot_qa", "validation", config="distractor", limit=200)
@@ -85,7 +85,7 @@ Each example keeps only its **dataset-specific shaping** (turning rows into
 
 ```python
 # examples/gepa/gepa_prompt_evolution.py
-from agentdescent.dataloader import hf_rows
+from agentdescent.actors.dataloader import hf_rows
 
 HOTPOTQA = ("hotpotqa/hotpot_qa", "validation", "distractor")
 
@@ -111,9 +111,9 @@ def download_hotpotqa(limit):
 * **Cache-first.** Every page and file is cached under `~/.cache/agentdescent/`;
   real re-runs are offline after the first fetch. Faithful-port `--dry-run`
   returns before the loader and is offline even with an empty cache.
-* **Not in the engine.** Nothing in `agentdescent.evolution` / `agentdescent.aggregator`
+* **Not in the engine.** Nothing in `agentdescent.loop.evolution` / `agentdescent.merge.aggregator`
   imports this — it is a convenience for examples and experiments, exactly like
-  `agentdescent.agents`.
+  `agentdescent.actors.agents`.
 
 ## Turning a saturated benchmark into one with headroom — `select_hard`
 
@@ -126,7 +126,7 @@ Swapping datasets breaks fidelity to the paper being ported, so the other lever 
 to keep the dataset and drop the items that carry no signal:
 
 ```python
-from agentdescent.dataloader import select_hard
+from agentdescent.actors.dataloader import select_hard
 
 items = select_hard(items, lambda it: score(solve(it), it["answer"]))
 ```

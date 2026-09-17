@@ -5,7 +5,7 @@ tool-integrated rollouts** through a sandboxed calculator (stop-and-go: request
 tool, execute locally, continue with the result); the curriculum reward's
 components surfaced in the update prompt -- uncertainty ``1−2|p̂−0.5|`` and the
 tool-use count, upstream's ``R_unc``/``R_tool``; and frontier targeting via
-:class:`~agentdescent.sampling.DifficultyWeighted`, whose ``4p(1−p)`` weight is
+:class:`~agentdescent.schedule.sampling.DifficultyWeighted`, whose ``4p(1−p)`` weight is
 the same curve as ``1−2|p̂−0.5|``.
 
 Boundaries: verbal policy memory replaces ADPO; one calculator tool replaces a
@@ -19,9 +19,9 @@ import ast
 import threading
 from typing import Dict, Optional, Tuple
 
-from agentdescent.evolution import Task
-from agentdescent.policies import Policies
-from agentdescent.sampling import DifficultyWeighted
+from agentdescent.loop.evolution import Task
+from agentdescent.core.policies import Policies
+from agentdescent.schedule.sampling import DifficultyWeighted
 
 from examples._measure import parse_json_object
 from examples._method_policy import MethodPolicy, ValidatedSlot, clip_text

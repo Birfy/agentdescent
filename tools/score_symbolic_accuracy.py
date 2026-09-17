@@ -55,7 +55,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agentdescent.agents import Usage, with_retries  # noqa: E402
+from agentdescent.actors.agents import Usage, with_retries  # noqa: E402
 from examples._common import completion_for, confirm  # noqa: E402
 
 

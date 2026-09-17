@@ -9,9 +9,9 @@ microports/analogues follow the [MethodPolicy checklist](porting-methodpolicy.md
 - [ ] Build the CLI with `examples._common.add_standard_args`; keep the upstream iteration term (`rounds`, `generations`, `iterations`, or `steps`).
 - [ ] Honour the shared flags through `_common.confirm` (`--yes`), `_common.completion_for` (`--provider`/`--model`) and `_common.worker_count` (`--serial`), and add the module to `PORTS` in `tests/test_example_entrypoints.py`.
 - [ ] Make `--serial` visible in the plan the port prints, not just inside `evolve()` — a port that reports the parallel plan while running one worker is describing a different run from the one it performed.
-- [ ] Load data through `agentdescent.dataloader`, never port-specific HTTP.
+- [ ] Load data through `agentdescent.actors.dataloader`, never port-specific HTTP.
 - [ ] Choose an explicit `Strategy` (`AppendRules`, `KeyedRules`, `SingleSlot`, `FileTree`, or a justified custom strategy).
-- [ ] Prefer an existing scorer from `agentdescent.rewards` when it matches the benchmark.
+- [ ] Prefer an existing scorer from `agentdescent.actors.rewards` when it matches the benchmark.
 - [ ] Make `--dry-run` return before data/model setup: zero network and zero API key.
 - [ ] Add `tests/test_<name>_example.py`; all tests must run offline.
 - [ ] Add `docs/algo-<name>.md` in the shape every other port page has: lead blockquote, the Paper / Upstream code / Example / Domain / Layer / Fidelity table, the algorithm, how it plugs into `evolve()`, the plug-ins it implements, **Measured results — `<domain>`** (or why none exists), **Run it**, and the offline-tests line.

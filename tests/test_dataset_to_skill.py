@@ -9,8 +9,8 @@ that they add up to the same run.
 import pytest
 
 from agentdescent import SingleSlot, evolve, reflector, scorer, tasks_from
-from agentdescent.agents import echo
-from agentdescent.evolution import EvolutionResult, Task
+from agentdescent.actors.agents import echo
+from agentdescent.loop.evolution import EvolutionResult, Task
 
 ROWS = [{"q": f"value {i}", "a": str(i * 100)} for i in range(1, 13)]
 
@@ -95,7 +95,7 @@ def test_unknown_scorer_names_the_alternatives():
 
 def test_the_named_scorers_are_the_reward_module():
     from agentdescent import SCORERS
-    from agentdescent.rewards import contains, exact_match, last_number, numeric_close
+    from agentdescent.actors.rewards import contains, exact_match, last_number, numeric_close
     assert SCORERS == {"last_number": last_number, "exact": exact_match,
                        "contains": contains, "numeric_close": numeric_close}
     assert callable(scorer("exact"))
@@ -113,7 +113,7 @@ def test_last_number_reads_the_gold_the_same_way_as_the_output():
     scorer mismatch. Measured on real GSM8K, this was the difference between a
     reported 0/7 and the true 7/7.
     """
-    from agentdescent.rewards import last_number
+    from agentdescent.actors.rewards import last_number
     gold = "Natalia sold 48+24 = <<48+24=72>>72 clips altogether.\n#### 72"
     task = Task(id="0", prompt="q", meta={"gold": gold})
     assert last_number()(task, "The answer is 72.") == 1.0
@@ -122,19 +122,19 @@ def test_last_number_reads_the_gold_the_same_way_as_the_output():
 
 def test_a_gold_with_no_number_is_a_loud_error_not_a_zero():
     """Scoring every item 0 is indistinguishable from a model that cannot answer."""
-    from agentdescent.rewards import last_number
+    from agentdescent.actors.rewards import last_number
     with pytest.raises(ValueError, match="contains no number"):
         last_number()(Task(id="7", prompt="q", meta={"gold": "Paris"}), "Paris")
 
 
 def test_exact_match_ignores_trailing_punctuation():
     """'Henry J. Kaiser.' vs 'Henry J. Kaiser' is not a reasoning failure."""
-    from agentdescent.rewards import exact_match
+    from agentdescent.actors.rewards import exact_match
     task = Task(id="0", prompt="q", meta={"gold": "Henry J. Kaiser"})
     assert exact_match()(task, "Henry J. Kaiser.") == 1.0
 
 
 def test_a_scorer_without_gold_names_the_fix():
-    from agentdescent.rewards import exact_match
+    from agentdescent.actors.rewards import exact_match
     with pytest.raises(KeyError, match="gold_key"):
         exact_match()(Task(id="3", prompt="q"), "anything")

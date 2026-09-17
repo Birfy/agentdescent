@@ -18,7 +18,7 @@ from __future__ import annotations
 import threading
 from typing import Dict, Optional
 
-from agentdescent.evolution import Task
+from agentdescent.loop.evolution import Task
 
 from examples._measure import parse_json_object
 from examples._method_policy import MethodPolicy, ValidatedSlot, clip_text

@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
-from agentdescent.agents import Usage, claude, openai_compatible
+from agentdescent.actors.agents import Usage, claude, openai_compatible
 
 from examples.openevolve.openevolve_program_evolution import run_agentdescent_openevolve
 

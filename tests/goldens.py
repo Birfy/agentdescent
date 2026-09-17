@@ -17,7 +17,7 @@ that does those things.
 from typing import Any, Dict, List
 
 from agentdescent import AppendRules, SingleSlot, Task, evolve
-from agentdescent.aggregator import Aggregator
+from agentdescent.merge.aggregator import Aggregator
 
 __all__ = ["WORKLOADS", "recording_factory", "run_workload", "trace_of"]
 

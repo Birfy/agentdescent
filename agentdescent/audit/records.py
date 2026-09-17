@@ -71,7 +71,7 @@ class AuditRecord:
     record_id: str
     task_id: str
     #: The artifact that produced ``output``, as
-    #: :meth:`~agentdescent.evolution.EvolvingArtifact._signature` renders it --
+    #: :meth:`~agentdescent.loop.evolution.EvolvingArtifact._signature` renders it --
     #: the same identity the evaluation cache keys on, so a record can be traced
     #: back to the exact state that was measured.
     artifact_signature: str

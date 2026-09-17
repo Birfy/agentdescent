@@ -24,11 +24,11 @@ import warnings
 
 import pytest
 
-import agentdescent.ledger as ledger_mod
-from agentdescent.evolution import (
+import agentdescent.merge.ledger as ledger_mod
+from agentdescent.loop.evolution import (
     AppendRules, SingleSlot, Task, _reap_stale_scratch_repos, evolve,
 )
-from agentdescent.ledger import GitError, Ledger
+from agentdescent.merge.ledger import GitError, Ledger
 
 TASKS = [Task(id=str(i), prompt=str(i), meta={"gold": str(i)}) for i in range(8)]
 

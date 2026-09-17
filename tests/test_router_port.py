@@ -15,7 +15,7 @@ import warnings
 import pytest
 
 from agentdescent import evolve
-from agentdescent.domains.router import (
+from agentdescent.reference.domains.router import (
     RouterStrategy,
     cluster_split_frac,
     cluster_tasks,
@@ -149,7 +149,7 @@ def test_the_ported_domain_learns_the_table():
 def test_merge_still_beats_fork():
     """RQ1, on the ported path: no single fork sees every keyword, so merging
     complementary diffs has to win."""
-    from agentdescent.orchestrator import run_fork_baseline
+    from agentdescent.reference.orchestrator import run_fork_baseline
 
     universe = make_task_universe(seed=7)
     merged = _run_ported(universe).final_reward
@@ -163,7 +163,7 @@ def test_it_reaches_the_same_place_as_the_reference_runtime():
     that both converge on the table."""
     import tempfile
 
-    from agentdescent.orchestrator import AgentDescent
+    from agentdescent.reference.orchestrator import AgentDescent
 
     universe = make_task_universe(seed=7)
     with warnings.catch_warnings():

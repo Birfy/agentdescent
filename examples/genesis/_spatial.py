@@ -1,4 +1,4 @@
-"""The spatial contract as a :class:`~agentdescent.strategies.Strategy`.
+"""The spatial contract as a :class:`~agentdescent.artifacts.strategies.Strategy`.
 
 Genesis's central invariant is one sentence, and both projects wrote it
 independently::
@@ -7,7 +7,7 @@ independently::
         -- genesis, apps/evo_git/lib/evo_git/agents/manager.ex
 
     each worker owns a section, so edits are conflict-free *by construction*
-        -- agentdescent/parallel.py, TensorParallel
+        -- agentdescent/schedule/parallel.py, TensorParallel
 
 The engine's version of it is tensor parallelism, and TP cannot be used here for
 a reason that is structural rather than incidental: its ownership map is built
@@ -36,8 +36,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-from agentdescent.evolvable import Diff, stable_hash
-from agentdescent.filetree import (DEFAULT_MAX_FILE_BYTES, TreeError, canonical,
+from agentdescent.core.evolvable import Diff, stable_hash
+from agentdescent.artifacts.filetree import (DEFAULT_MAX_FILE_BYTES, TreeError, canonical,
                                    match_any, safe_relpath)
 
 from ._world import WorldLog, normalise, owns
@@ -75,7 +75,7 @@ def parse_situated_edits(proposal: str) -> List[Dict[str, Any]]:
     """Parse a reply into ``[{owner, path, content|None}]``.
 
     Lenient about the wrapper and strict about the payload, for
-    :func:`~agentdescent.treestrategy.parse_edits`' reason: a proposer that
+    :func:`~agentdescent.artifacts.treestrategy.parse_edits`' reason: a proposer that
     ignores the protocol is a quality problem the run should absorb and count,
     not a crash. An item with no ``owner`` is attributed to the root, which is
     the only attribution that cannot silently widen anyone's authority.

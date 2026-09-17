@@ -1,20 +1,20 @@
-from agentdescent.aggregator import (
+from agentdescent.merge.aggregator import (
     Aggregator,
     AggregatorConfig,
     diffs_contradict,
     fuse_diffs,
 )
-from agentdescent.domains.router import (
+from agentdescent.reference.domains.router import (
     RouterSkill,
     Task,
     deserialize_router,
     router_eval,
     serialize_router,
 )
-from agentdescent.evolvable import Diff, EvidenceCard
-from agentdescent.ledger import Ledger
-from agentdescent.scheduler import AuditScheduler
-from agentdescent.verifier import ThreeLayerVerifier, VerifierBudget
+from agentdescent.core.evolvable import Diff, EvidenceCard
+from agentdescent.merge.ledger import Ledger
+from agentdescent.schedule.scheduler import AuditScheduler
+from agentdescent.evaluate.verifier import ThreeLayerVerifier, VerifierBudget
 
 
 def _card(target, ops, base_v, tasks, delta, author="w"):
@@ -92,10 +92,10 @@ def test_conflict_resolution_leaves_no_contradictions():
     false and silently skipped building the fused candidate -- losing the
     model-soup benefit the aggregator is built around.
     """
-    from agentdescent.aggregator import Aggregator, diffs_contradict
-    from agentdescent.defaults import DefaultConflict
-    from agentdescent.evolvable import Diff, EvidenceCard
-    from agentdescent.evolution import EvolvingArtifact, KeyedRules
+    from agentdescent.merge.aggregator import Aggregator, diffs_contradict
+    from agentdescent.merge.defaults import DefaultConflict
+    from agentdescent.core.evolvable import Diff, EvidenceCard
+    from agentdescent.loop.evolution import EvolvingArtifact, KeyedRules
 
     art = EvolvingArtifact("a", {}, 1, 0.2, None, KeyedRules(categories=["k1", "k2"]))
 
@@ -125,9 +125,9 @@ def test_conflict_resolution_leaves_no_contradictions():
 
 def test_conflict_resolution_keeps_complementary_cards():
     """Cards touching different keys must both survive -- that is what fusion needs."""
-    from agentdescent.defaults import DefaultConflict
-    from agentdescent.evolvable import Diff, EvidenceCard
-    from agentdescent.evolution import EvolvingArtifact, KeyedRules
+    from agentdescent.merge.defaults import DefaultConflict
+    from agentdescent.core.evolvable import Diff, EvidenceCard
+    from agentdescent.loop.evolution import EvolvingArtifact, KeyedRules
 
     art = EvolvingArtifact("a", {}, 1, 0.2, None, KeyedRules(categories=["k1", "k2"]))
 
@@ -151,12 +151,12 @@ def test_oversized_diffs_are_counted_and_settled(tmp_path):
     They were filtered out before `considered` was computed and never settled, so
     a diff dropped for being too large left no trace anywhere.
     """
-    from agentdescent.aggregator import Aggregator, AggregatorConfig
-    from agentdescent.evolvable import Diff, EvidenceCard
-    from agentdescent.evolution import AppendRules, EvolvingArtifact
-    from agentdescent.ledger import Ledger
-    from agentdescent.scheduler import AuditScheduler
-    from agentdescent.verifier import ThreeLayerVerifier, VerifierBudget
+    from agentdescent.merge.aggregator import Aggregator, AggregatorConfig
+    from agentdescent.core.evolvable import Diff, EvidenceCard
+    from agentdescent.loop.evolution import AppendRules, EvolvingArtifact
+    from agentdescent.merge.ledger import Ledger
+    from agentdescent.schedule.scheduler import AuditScheduler
+    from agentdescent.evaluate.verifier import ThreeLayerVerifier, VerifierBudget
 
     lg = Ledger(str(tmp_path), lambda a: {"state": dict(a.state)},
                 lambda aid, v, s: EvolvingArtifact(aid, s.get("state", {}), v,
@@ -192,7 +192,7 @@ def test_a_rebased_diff_that_no_longer_holds_is_discarded(tmp_path):
     survives the rebase it was supposed to be caught by. This pins the behaviour
     the annotation described away.
     """
-    from agentdescent.staleness import get_policy
+    from agentdescent.merge.staleness import get_policy
 
     held = [Task(f"t-kw00-{i}", "acidbase", "kw00") for i in range(8)]
     led, agg = _build(tmp_path, held)

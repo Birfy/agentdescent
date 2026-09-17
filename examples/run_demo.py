@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import tempfile
 
-from agentdescent.domains.router import make_task_universe
-from agentdescent.orchestrator import AgentDescent, run_fork_baseline
+from agentdescent.reference.domains.router import make_task_universe
+from agentdescent.reference.orchestrator import AgentDescent, run_fork_baseline
 
 
 def main() -> None:

@@ -21,7 +21,7 @@ import argparse
 import sys
 from typing import Optional
 
-from agentdescent.agents import Usage, claude, openai_compatible
+from agentdescent.actors.agents import Usage, claude, openai_compatible
 
 
 PROVIDER_CHOICES = ("claude", "openai", "glm")
@@ -142,7 +142,7 @@ def add_standard_args(
         "--reflective-merge",
         action="store_true",
         help=("merge contradicting diffs with a model instead of ranking them on "
-              "the cheap layer (see agentdescent.fusion.reflective_merge)"),
+              "the cheap layer (see agentdescent.merge.fusion.reflective_merge)"),
     )
     parser.add_argument(
         "--eval-cache",
@@ -171,9 +171,9 @@ def merge_kwargs(args: argparse.Namespace, complete) -> dict:
     contradicts, so that ranking runs on every pair, every round, and the merge
     step it feeds then has a single candidate and never merges at all.
 
-    :func:`~agentdescent.fusion.reflective_merge` replaces both halves of that:
-    :class:`~agentdescent.fusion.KeepContradictions` stops the pairwise scoring,
-    and :class:`~agentdescent.fusion.ReflectiveFusion` asks a model for the
+    :func:`~agentdescent.merge.fusion.reflective_merge` replaces both halves of that:
+    :class:`~agentdescent.merge.fusion.KeepContradictions` stops the pairwise scoring,
+    and :class:`~agentdescent.merge.fusion.ReflectiveFusion` asks a model for the
     **union of the deltas** and hands it straight to the acceptance gate. One
     model call in place of a sweep per pair, and the round's proposals survive
     together instead of all but one being dropped.
@@ -186,7 +186,7 @@ def merge_kwargs(args: argparse.Namespace, complete) -> dict:
     if not getattr(args, "reflective_merge", False):
         return {}
     from agentdescent import Policies
-    from agentdescent.fusion import reflective_merge
+    from agentdescent.merge.fusion import reflective_merge
     return {"policies": Policies(**reflective_merge(complete))}
 
 
@@ -235,7 +235,7 @@ def budget_kwargs(args: argparse.Namespace) -> dict:
     performs *eight times* the rollouts of the ``--serial`` arm. Comparing their
     wall-clocks then reports eight times the model spend as parallel efficiency,
     and comparing their final quality credits the extra spend to parallelism.
-    That is the confound :mod:`agentdescent.baselines` exists to remove, and
+    That is the confound :mod:`agentdescent.observe.baselines` exists to remove, and
     ``docs/results.md`` already carries a warning that a speedup table cannot
     distinguish merging from sampling.
 
@@ -289,7 +289,7 @@ def report_engine(result) -> None:
 def eval_cache_kwargs(args: argparse.Namespace) -> dict:
     """``policies=Policies(eval_cache=...)`` for ``--eval-cache``, or nothing.
 
-    The engine has shipped :class:`~agentdescent.evalcache.FileCache` -- "two
+    The engine has shipped :class:`~agentdescent.evaluate.evalcache.FileCache` -- "two
     processes on one machine stop paying twice for the same gate" -- and every
     port used the in-process default, so every gate was re-paid on every run.
 
@@ -310,7 +310,7 @@ def eval_cache_kwargs(args: argparse.Namespace) -> dict:
     if not directory:
         return {}
     from agentdescent import Policies
-    from agentdescent.evalcache import FileCache
+    from agentdescent.evaluate.evalcache import FileCache
     return {"policies": Policies(eval_cache=FileCache(directory))}
 
 

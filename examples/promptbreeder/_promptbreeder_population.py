@@ -32,7 +32,7 @@ import random
 import threading
 from typing import Dict, List, Optional, Tuple
 
-from agentdescent.ledger import Ledger
+from agentdescent.merge.ledger import Ledger
 
 from examples._population import PopulationAggregator
 
@@ -242,7 +242,7 @@ class PromptBreederPopulation(PopulationAggregator):
         target = dict(winner["state"])
         version = self._commit_state(target, "promptbreeder: tournament winner")
         if version is not None:
-            from agentdescent.aggregator import MergeReport
+            from agentdescent.merge.aggregator import MergeReport
             with self._archive_lock:
                 size = len(self._archive)
             reports.append(MergeReport(

@@ -16,7 +16,7 @@ def test_a_subclass_can_declare_its_expensive_layer_independent():
     `oracle_shares_full_set = False` was ignored, its independent expensive
     layer went uncalled, and the gate degraded to the cheap measurement it
     existed to cross-check."""
-    from agentdescent.verifier import ThreeLayerVerifier, shares_eval_counts
+    from agentdescent.evaluate.verifier import ThreeLayerVerifier, shares_eval_counts
 
     class OldName(ThreeLayerVerifier):
         oracle_shares_full_set = False
@@ -34,7 +34,7 @@ def test_a_subclass_can_declare_its_expensive_layer_independent():
 
 
 def test_a_verifier_that_is_not_a_ThreeLayerVerifier_shares_nothing_by_default():
-    from agentdescent.verifier import shares_eval_counts
+    from agentdescent.evaluate.verifier import shares_eval_counts
 
     class Foreign:
         pass

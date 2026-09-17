@@ -45,7 +45,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from agentdescent.evolution import Task
+from agentdescent.loop.evolution import Task
 
 from examples._method_policy import MethodPolicy, WindowedMemory, read_fields
 from examples._method_runner import standard_main

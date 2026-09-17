@@ -86,7 +86,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from agentdescent.dataloader import cache_path, fetch_text
+from agentdescent.actors.dataloader import cache_path, fetch_text
 
 from examples.era._algotune_tasks import UPSTREAM_COMMIT, derive_seed_program
 from examples.era._era_support import (

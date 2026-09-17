@@ -27,9 +27,9 @@ import time
 
 import pytest
 
-from agentdescent.evolution import Task
-from agentdescent.filetree import canonical
-from agentdescent.runners import TEST_FAILURE_MARKER, code_runner
+from agentdescent.loop.evolution import Task
+from agentdescent.artifacts.filetree import canonical
+from agentdescent.actors.runners import TEST_FAILURE_MARKER, code_runner
 
 
 def _alive(pid: int) -> bool:
@@ -103,9 +103,9 @@ def test_a_timed_out_gate_leaves_no_grandchildren(tmp_path):
 # The pool: bounded, released on every path, observable
 # ---------------------------------------------------------------------------
 
-from agentdescent.policies import SandboxSpec                       # noqa: E402
-from agentdescent.metrics import Meter                              # noqa: E402
-from agentdescent.sandbox import (                                  # noqa: E402
+from agentdescent.core.policies import SandboxSpec                       # noqa: E402
+from agentdescent.observe.metrics import Meter                              # noqa: E402
+from agentdescent.runtime.sandbox import (                                  # noqa: E402
     LEASE_FILE, SandboxLeak, SandboxPool, WorkspaceProvider,
 )
 
@@ -392,9 +392,9 @@ def test_a_workspace_with_no_lease_falls_back_to_age(tmp_path):
 
 def test_a_runner_returns_its_workspace_even_when_the_agent_raises():
     """The failure path has to unwind through the pool like the success path."""
-    from agentdescent.agents import AgentError
-    from agentdescent.runners import tree_runner
-    from agentdescent.sandbox import SandboxPool, WorkspaceProvider
+    from agentdescent.actors.agents import AgentError
+    from agentdescent.actors.runners import tree_runner
+    from agentdescent.runtime.sandbox import SandboxPool, WorkspaceProvider
 
     class Exploding:
         def __call__(self, prompt): raise AgentError("nope")
@@ -412,8 +412,8 @@ def test_a_runner_returns_its_workspace_even_when_the_agent_raises():
 def test_a_shared_pool_puts_two_runners_under_one_ceiling():
     """Two runners with their own pools have a ceiling of the sum; that is the
     situation `max_concurrency` and `eval_concurrency` are in today."""
-    from agentdescent.runners import code_runner
-    from agentdescent.sandbox import SandboxPool, WorkspaceProvider
+    from agentdescent.actors.runners import code_runner
+    from agentdescent.runtime.sandbox import SandboxPool, WorkspaceProvider
 
     pool = SandboxPool(WorkspaceProvider(), max_sandboxes=2)
     peak, live, lock = [0], [0], threading.Lock()
@@ -458,7 +458,7 @@ def test_workspace_root_is_on_both_public_runners(tmp_path):
 
 
 def test_a_runner_puts_its_workspace_where_it_was_told(tmp_path):
-    from agentdescent.runners import code_runner
+    from agentdescent.actors.runners import code_runner
 
     run = code_runner([sys.executable, "-c",
                        "import os;print(os.getcwd())"],

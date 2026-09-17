@@ -17,7 +17,7 @@ import random
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
-from agentdescent.evolution import Task
+from agentdescent.loop.evolution import Task
 
 from ._measure import canonical_json, parse_json_object
 from ._money_domain import parse_integer_answer, score_answer

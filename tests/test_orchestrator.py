@@ -1,5 +1,5 @@
-from agentdescent.domains.router import make_task_universe
-from agentdescent.orchestrator import AgentDescent, run_fork_baseline
+from agentdescent.reference.domains.router import make_task_universe
+from agentdescent.reference.orchestrator import AgentDescent, run_fork_baseline
 
 
 def test_loop_improves_accuracy(tmp_path):

@@ -16,8 +16,8 @@
 > 以及复核时发现并修掉的三个真问题。要*怎么用*，看
 > [演化一个目录（skill / agent / 代码）](directory-evolution.md)。
 >
-> 落地的模块：`agentdescent/filetree.py`（§3.1）、`agentdescent/treestrategy.py`（§3.2/§3.3）、
-> `agentdescent/runners.py`（§3.4）、`agentdescent/skilldir.py`（§3.7），
+> 落地的模块：`agentdescent/artifacts/filetree.py`（§3.1）、`agentdescent/artifacts/treestrategy.py`（§3.2/§3.3）、
+> `agentdescent/actors/runners.py`（§3.4）、`agentdescent/skilldir.py`（§3.7），
 > 加上 `evolution.py` 里的两处改动（§3.6 的删除语义、`EvolutionResult.write_to`）。
 > **P6（EvoSkill 迁移，§5.2）也已完成** —— 见下方 5.2 的结论。
 > 未做（当时）：`SectionedFileTree`、Docker 沙箱、ADAS 真执行。其中 Docker 沙箱后续已以 `ContainerProvider`/`SandboxPool` 落地（见 [sandboxes](sandboxes.md)）（§5.3）。
@@ -30,7 +30,7 @@
 |---|---|---|
 | 演化「一段文本 skill」（system prompt / 指令 / playbook） | ✅ 已支持 | `SingleSlot` / `AppendRules` / `KeyedRules` + `evolve_skill()` |
 | 用**真实 agent**（Claude Code / Codex / OpenHands）跑 rollout | ✅ 已支持 | `cli_agent(["claude","-p"])`、`claude_code()`、`codex()`、`openhands()`，全部是 `Completion` |
-| 把材料**落到磁盘**让 agent 用工具去读 | ⚠️ 有先例但只覆盖单文件 | `WorkspaceAgent.in_workspace(path)` + `document_agent()`（[backends.py:102](https://github.com/Birfy/agentdescent/blob/main/agentdescent/backends.py#L102)）只写一个 `document.txt` |
+| 把材料**落到磁盘**让 agent 用工具去读 | ⚠️ 有先例但只覆盖单文件 | `WorkspaceAgent.in_workspace(path)` + `document_agent()`（[backends.py:102](https://github.com/Birfy/agentdescent/blob/main/agentdescent/actors/backends.py#L102)）只写一个 `document.txt` |
 | 演化一个 **skill 目录**（`SKILL.md` + `references/` + `scripts/`） | ❌ 缺 → ✅ **已实现** | `evolve_skill_dir()`；缺的是「目录 ↔ state」装载/物化与多文件提案协议 |
 | 演化一个 **agent 目录**（`.claude/agents/*.md`、子 agent 定义、harness 配置） | ❌ 缺 → ✅ **已实现** | `evolve_agent_dir()`（L1）+ 路径级冻结 |
 | 演化 **agent 代码本身**（可执行的 Python/TS） | ❌ 缺 → ✅ **已实现** | `evolve_agent_code()`：一次性工作区真执行 + pristine overlay 测试门 |
@@ -51,7 +51,7 @@
 
 ### 1.1 演化的最小契约
 
-`evolve()` 只要求三个可调用对象（[evolution.py:1025](https://github.com/Birfy/agentdescent/blob/main/agentdescent/evolution.py#L1025)）：
+`evolve()` 只要求三个可调用对象（[evolution.py:1025](https://github.com/Birfy/agentdescent/blob/main/agentdescent/loop/evolution.py#L1025)）：
 
 ```python
 run(rendered: str, task: Task) -> str                       # 用当前 artifact 做一次 rollout
@@ -60,12 +60,12 @@ propose(rendered, task, output, reward) -> Optional[str]    # 反思出一个改
 ```
 
 `rendered` 是 `Strategy.render(state)` 的结果，`state` 是**扁平的 `Dict[str, str]`**
-（[evolution.py:228](https://github.com/Birfy/agentdescent/blob/main/agentdescent/evolution.py#L228) `Strategy` 协议）。
+（[evolution.py:228](https://github.com/Birfy/agentdescent/blob/main/agentdescent/loop/evolution.py#L228) `Strategy` 协议）。
 **关键洞察：`state` 的 key 完全可以是相对文件路径，value 是文件内容。**
 引擎从不解释 key 的含义，它只做：
 
-- **冲突检测**：`diffs_contradict` = 同 key 不同 value（[aggregator.py:289](https://github.com/Birfy/agentdescent/blob/main/agentdescent/aggregator.py#L289)）
-- **融合**：`fuse_diffs` = 多个 diff 的 `ops` 字典合并（[aggregator.py:297](https://github.com/Birfy/agentdescent/blob/main/agentdescent/aggregator.py#L297)）
+- **冲突检测**：`diffs_contradict` = 同 key 不同 value（[aggregator.py:289](https://github.com/Birfy/agentdescent/blob/main/agentdescent/merge/aggregator.py#L289)）
+- **融合**：`fuse_diffs` = 多个 diff 的 `ops` 字典合并（[aggregator.py:297](https://github.com/Birfy/agentdescent/blob/main/agentdescent/merge/aggregator.py#L297)）
 - **接受**：held-out 分数 + Beta 后验，事务性提交到 git ledger
 
 也就是说：**两个 worker 改不同文件 → 自动融合；改同一文件 → 判为矛盾，按 held-out 分数择优。**
@@ -82,14 +82,14 @@ class WorkspaceAgent(Protocol):            # agents.py:113
 ```
 
 `cli_agent(["claude","-p"]).in_workspace("/tmp/w")` 会以 `cwd=/tmp/w` 起子进程
-（[agents.py:147](https://github.com/Birfy/agentdescent/blob/main/agentdescent/agents.py#L147)）。`document_agent()` 已经演示了完整套路：
+（[agents.py:147](https://github.com/Birfy/agentdescent/blob/main/agentdescent/actors/agents.py#L147)）。`document_agent()` 已经演示了完整套路：
 `mkdtemp` → 写文件 → `in_workspace(dir)(prompt)`。我们要做的就是把「写一个文件」
 换成「物化整棵目录树」。
 
 ### 1.3 治理层已经为「改 harness」准备好了
 
 - `blast_radius <= 0.30` → L2 快层（skill）；`> 0.30` → L1 慢层（harness/agent 代码），
-  每次合并强制走 oracle（[governance.py:46](https://github.com/Birfy/agentdescent/blob/main/agentdescent/governance.py#L46)）。
+  每次合并强制走 oracle（[governance.py:46](https://github.com/Birfy/agentdescent/blob/main/agentdescent/merge/governance.py#L46)）。
 - `FROZEN_IDS` = L0 只读（oracle / 安全约束）——**但它是 artifact 级的 id 列表，不是路径级**。
 
 ### 1.4 已有的两个「演化 agent」示例，以及它们的诚实边界
@@ -110,14 +110,14 @@ class WorkspaceAgent(Protocol):            # agents.py:113
 | G1 | 无「目录 → state」装载器与「state → 工作区」物化器 | 无法喂入/产出目录 |
 | G2 | `run` 只拿到一个字符串，没有工作区生命周期 | 真实 agent 无法「用」这个 skill 目录 |
 | G3 | 提案是单个字符串，无多文件编辑协议 | 反思模型没法说「改这三个文件」 |
-| G4 | **`apply()` 只做 `state.update(ops)`，无法删除 key**（[evolution.py:464](https://github.com/Birfy/agentdescent/blob/main/agentdescent/evolution.py#L464)） | 无法删除/重命名文件 |
+| G4 | **`apply()` 只做 `state.update(ops)`，无法删除 key**（[evolution.py:464](https://github.com/Birfy/agentdescent/blob/main/agentdescent/loop/evolution.py#L464)） | 无法删除/重命名文件 |
 | G5 | 无路径级冻结 | agent 可以改自己的测试/评分器，指标自我作弊 |
 | G6 | 无候选代码的执行沙箱与测试门 | 演化代码不安全、不可信 |
-| G7 | `_signature()` = `render()` 作为评估缓存 key（[evolution.py:470](https://github.com/Birfy/agentdescent/blob/main/agentdescent/evolution.py#L470)） | `render` 若不是状态的**无损**序列化，不同目录会共用缓存分数 |
-| G8 | 信任域按「op 个数 ≤ 6、单 value ≤ 32k 字符」计（[aggregator.py:86](https://github.com/Birfy/agentdescent/blob/main/agentdescent/aggregator.py#L86)） | 对文件树含义变成「一次最多改 6 个文件、单文件 32k」——需显式设定而非默认 |
+| G7 | `_signature()` = `render()` 作为评估缓存 key（[evolution.py:470](https://github.com/Birfy/agentdescent/blob/main/agentdescent/loop/evolution.py#L470)） | `render` 若不是状态的**无损**序列化，不同目录会共用缓存分数 |
+| G8 | 信任域按「op 个数 ≤ 6、单 value ≤ 32k 字符」计（[aggregator.py:86](https://github.com/Birfy/agentdescent/blob/main/agentdescent/merge/aggregator.py#L86)） | 对文件树含义变成「一次最多改 6 个文件、单文件 32k」——需显式设定而非默认 |
 | G9 | `run`/`propose` 会被多线程并发调用（`max_concurrency` worker 线程 + `eval_concurrency=8` 评估线程） | 工作区必须**每次调用独立**，不能复用固定路径 |
 | G10 | 无「装回用户目录」的输出路径 | 结果只能是 JSON |
-| G11 | ledger 把整个 state 存成 `artifacts/<id>.json`（[ledger.py:211](https://github.com/Birfy/agentdescent/blob/main/agentdescent/ledger.py#L211)） | 大目录/二进制文件会撑爆 commit；需要大小上限与 ignore 规则 |
+| G11 | ledger 把整个 state 存成 `artifacts/<id>.json`（[ledger.py:211](https://github.com/Birfy/agentdescent/blob/main/agentdescent/merge/ledger.py#L211)） | 大目录/二进制文件会撑爆 commit；需要大小上限与 ignore 规则 |
 
 ---
 
@@ -147,7 +147,7 @@ class WorkspaceAgent(Protocol):            # agents.py:113
    result.write_to("~/.claude/skills/pdf-audit")   （新增）
 ```
 
-### 3.1 新模块一：`agentdescent/filetree.py` — 目录 ↔ state
+### 3.1 新模块一：`agentdescent/artifacts/filetree.py` — 目录 ↔ state
 
 ```python
 @dataclass(frozen=True)
@@ -185,7 +185,7 @@ def canonical(state: Mapping[str, str]) -> str:
   `openai_compatible` 的空 content 归一化）也是「绝不静默丢数据」。
 - `materialize` 的路径校验是**安全边界**：state 里的 key 来自模型提案，必须假定敌意。
 
-### 3.2 新模块二：`agentdescent/treestrategy.py` — `FileTree` Strategy
+### 3.2 新模块二：`agentdescent/artifacts/treestrategy.py` — `FileTree` Strategy
 
 ```python
 @dataclass
@@ -241,7 +241,7 @@ class FileTree:
 - 配套一个 `tree_reflector(complete, spec)`：把当前树 + 失败轨迹 + reward
   渲染进模板，要求只输出上述块。
 
-### 3.4 新模块三：`agentdescent/runners.py` — 让真实 agent「用」这棵树
+### 3.4 新模块三：`agentdescent/actors/runners.py` — 让真实 agent「用」这棵树
 
 ```python
 LAYOUTS = {
@@ -266,7 +266,7 @@ def tree_runner(agent: WorkspaceAgent, *, layout: str, name: str,
 ```
 
 **为什么必须一次一个工作区**：`evolve(max_concurrency=N)` 用线程池跑 worker，
-`score()` 另开 `eval_concurrency=8` 个线程评估（[evolution.py:500](https://github.com/Birfy/agentdescent/blob/main/agentdescent/evolution.py#L500)）。
+`score()` 另开 `eval_concurrency=8` 个线程评估（[evolution.py:500](https://github.com/Birfy/agentdescent/blob/main/agentdescent/loop/evolution.py#L500)）。
 共用固定目录会让两个候选互相覆盖，产生**看起来正常但完全错误的分数**。
 
 **agent 代码演化的额外一层**：`code_runner(...)` 在物化后先跑
@@ -335,7 +335,7 @@ layout=..., frozen=[...])`。现行写法把同样的组装摆在明面上：
 
 ```python
 from agentdescent import FileTree, evolve, load_tree, tree_reflector, tree_runner
-from agentdescent.governance import SKILL_BLAST_RADIUS
+from agentdescent.merge.governance import SKILL_BLAST_RADIUS
 
 path = "~/.claude/skills/pdf-audit"                      # 用户目录
 tree = load_tree(path)
@@ -380,18 +380,18 @@ result.write_to(path, backup=True)   # 装回，先备份
 
 1. **审计门是免费的。** `full_eval`（0.6 前叫 `oracle_eval`）和 `eval_counts` 调同一个 `eval_fn`、同一个
    held-out 集，而 `_EvalCache` 按 `(render(), task.id)` 记忆化
-   （[evolution.py:531](https://github.com/Birfy/agentdescent/blob/main/agentdescent/evolution.py#L531)），所以 L1 的强制审计只消耗
+   （[evolution.py:531](https://github.com/Birfy/agentdescent/blob/main/agentdescent/loop/evolution.py#L531)），所以 L1 的强制审计只消耗
    `oracle_budget` 计数器，不产生任何额外 agent 调用。**演化 agent 目录/代码
    （L1）并不比演化 skill（L2）贵。**
 2. **默认配置是最贵的配置。** `cheap_eval_tasks=None` 时廉价层被钉死成全量 held-out
-   （[evolution.py:996](https://github.com/Birfy/agentdescent/blob/main/agentdescent/evolution.py#L996) 的注释已经点明「eval_fn RUNS THE
+   （[evolution.py:996](https://github.com/Birfy/agentdescent/blob/main/agentdescent/loop/evolution.py#L996) 的注释已经点明「eval_fn RUNS THE
    AGENT」这个场景），排序阶段于是变成成本主项；`self_verify=True` 又给每个提案加一次。
    目录演化的入口函数应把 `cheap_eval_tasks=4`、`self_verify=False` 设为**默认值**，
    而不是留给调用者去发现。
 
 **超时**：靠 `cli_agent(timeout=...)`（`subprocess.run` 会真正杀掉进程），不要靠
 `round_timeout` —— 后者只放弃等待，线程和子进程还在跑
-（[evolution.py:1466](https://github.com/Birfy/agentdescent/blob/main/agentdescent/evolution.py#L1466) 的注释即此意）。
+（[evolution.py:1466](https://github.com/Birfy/agentdescent/blob/main/agentdescent/loop/evolution.py#L1466) 的注释即此意）。
 
 ### 3.9 评估噪声：缓存把单样本变成了真值
 
@@ -401,7 +401,7 @@ result.write_to(path, backup=True)   # 装回，先备份
 
 1. `temperature=0`（provider 支持时），把随机性压到最低；
 2. `reward` 内部做 k 次多数表决（成本 ×k，但只作用在你真正在意的门上）；
-3. 加大 held-out —— 引擎在 `< 4` 时已经会告警（[evolution.py:935](https://github.com/Birfy/agentdescent/blob/main/agentdescent/evolution.py#L935)），
+3. 加大 held-out —— 引擎在 `< 4` 时已经会告警（[evolution.py:935](https://github.com/Birfy/agentdescent/blob/main/agentdescent/loop/evolution.py#L935)），
    但对随机 agent，4 个任务远远不够。
 
 这不是可以「以后再说」的实现细节：它决定了报出来的 `final_reward` 是否可信。
@@ -413,11 +413,11 @@ result.write_to(path, backup=True)   # 装回，先备份
 - **数据并行**（默认）：每个 worker 拿一份任务分片，各自提案。
 - **张量并行**：`FileTree.keys()` 返回所有可编辑文件路径 → `TensorParallel(n_sections=4)`
   给每个 worker 一个**互斥的文件子集**，越界提案被计为 `section-violation`
-  （[evolution.py:588](https://github.com/Birfy/agentdescent/blob/main/agentdescent/evolution.py#L588) `_resolve_sections` 已经会校验这个配对）。
+  （[evolution.py:588](https://github.com/Birfy/agentdescent/blob/main/agentdescent/loop/evolution.py#L588) `_resolve_sections` 已经会校验这个配对）。
   对「一个 skill 目录里 SKILL.md / references / scripts 各由一个 worker 负责」是天然匹配。
 
   **但 TP 下无法新建文件。** 违规判定是 `section_map.get(k) != unit.section`
-  （[evolution.py:1436](https://github.com/Birfy/agentdescent/blob/main/agentdescent/evolution.py#L1436)），而 `section_map` 由
+  （[evolution.py:1436](https://github.com/Birfy/agentdescent/blob/main/agentdescent/loop/evolution.py#L1436)），而 `section_map` 由
   `strategy.keys()` 在**首轮之前**一次算定；一个新路径的 `section_map.get(...)` 是
   `None`，必然 `!= section`，于是每个新建文件的提案都被计为 `section-violation`。
   三个选项：(a) TP 只用于「精修已有文件」阶段，新建文件走 DataParallel；
@@ -463,7 +463,7 @@ skill 目录，只是活在内存里、靠 `render_skills()` 拼进 prompt。迁
 
 **迁移的实质收益不在代码整洁，而在能力**：EvoSkill 的 OfficeQA 路径已经在用
 `document_agent(claude_code())`，也就是已经有一个真实工作区了
-（[backends.py:104](https://github.com/Birfy/agentdescent/blob/main/agentdescent/backends.py#L104)）。把 skill 树一并物化进去之后，
+（[backends.py:104](https://github.com/Birfy/agentdescent/blob/main/agentdescent/actors/backends.py#L104)）。把 skill 树一并物化进去之后，
 agent 可以**按需读取**它需要的那个 skill 文件，而不是把整个 skill 库塞进 prompt。
 这才是「skill 目录」相对于「prompt 拼接」的实质差别（渐进披露），也是当前实现拿不到的东西。
 
@@ -578,7 +578,7 @@ P5 是风险最高的一段，建议在 P3 的真实数据上先看清楚反思�
 | **临时工作区泄漏**：引擎只回收自己的 scratch git repo，不管 runner 的工作区 | `try/finally` 删除 + 仿 `_reap_stale_scratch_repos` 写一个按前缀+age 的回收器；`keep_failed=True` 时只保留失败的 |
 | **`claude -p` 非交互权限**：默认会因工具授权卡住或拒绝 | `claude_code(extra_args=["--permission-mode", "acceptEdits", "--allowedTools", ...])`；先跑一次冒烟确认不会挂 |
 | **实验效度**：skill 可能根本没被加载，测到的是「agent 会不会去找它」 | prompt 模板显式指向 skill 路径；跑一组「空 skill 目录」对照，确认分数确实有差 |
-| ledger 膨胀（每个版本存整棵树的 JSON，[ledger.py:211](https://github.com/Birfy/agentdescent/blob/main/agentdescent/ledger.py#L211)） | `TreeSpec` 的 `max_total_bytes`；git 自身会 delta 压缩；必要时改存内容哈希 + blob |
+| ledger 膨胀（每个版本存整棵树的 JSON，[ledger.py:211](https://github.com/Birfy/agentdescent/blob/main/agentdescent/merge/ledger.py#L211)） | `TreeSpec` 的 `max_total_bytes`；git 自身会 delta 压缩；必要时改存内容哈希 + blob |
 | **过拟合 held-out**：目录级 artifact 表达能力强，容易记住答案 | 保留 `held_out_frac`，并在示例里额外留一个从不参与任何门禁的 test 集（EvoSkill/ADAS 的 50/25/25 划分已是仓库惯例） |
 
 **待你确认的四个决定**

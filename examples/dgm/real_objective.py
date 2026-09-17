@@ -43,9 +43,9 @@ import warnings
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple
 
-from agentdescent.filetree import parse_tree
-from agentdescent.selection import Archive
-from agentdescent.treestrategy import FileTree as _FileTree
+from agentdescent.artifacts.filetree import parse_tree
+from agentdescent.schedule.selection import Archive
+from agentdescent.artifacts.treestrategy import FileTree as _FileTree
 
 TASKS_DIR = pathlib.Path(__file__).resolve().parent / "tasks"
 
@@ -368,9 +368,9 @@ def run_dgm_real(llm: Callable[[str], str], *, cases: Optional[List[TaskCase]] =
     """
     import random as _random
 
-    from agentdescent.evolution import Task, evolve
-    from agentdescent.staleness import get_policy
-    from agentdescent.treestrategy import FileTree
+    from agentdescent.loop.evolution import Task, evolve
+    from agentdescent.merge.staleness import get_policy
+    from agentdescent.artifacts.treestrategy import FileTree
 
     from examples.dgm.dgm_self_improve import DGMContext
 
@@ -515,7 +515,7 @@ class SourceArchiveAggregator:
         """
         if self._seeded:
             return
-        from agentdescent.ledger import Ledger
+        from agentdescent.merge.ledger import Ledger
         head = self.ledger.snapshot(Ledger.DEV).get(self.aid)
         seed = SourceAgent(dict(head.state), parent=None, generation=0)
         seed.score = self._staged(seed.files)
@@ -537,10 +537,10 @@ class SourceArchiveAggregator:
             self.cards.append(card)
 
     def step(self):
-        from agentdescent.aggregator import MergeReport
-        from agentdescent.evolvable import Diff
-        from agentdescent.ledger import CASConflict, Ledger
-        from agentdescent.selection import Candidate, SelectionContext
+        from agentdescent.merge.aggregator import MergeReport
+        from agentdescent.core.evolvable import Diff
+        from agentdescent.merge.ledger import CASConflict, Ledger
+        from agentdescent.schedule.selection import Candidate, SelectionContext
 
         snap = self.ledger.snapshot(Ledger.DEV)
         head = snap.get(self.aid)

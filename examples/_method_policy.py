@@ -5,7 +5,7 @@ frozen datasets, pure ``solve``/``propose``/``reward`` functions, and the engine
 decision-plane seams its mechanism plugs into (``engine=Policies(...)``). The
 definition never sees the recorder, phase strings, modes, budgets, or
 thresholds -- :mod:`examples._method_runner` owns all of that, for the same
-reason ``agentdescent/policies.py`` gives for the engine: the algorithm is not
+reason ``agentdescent/core/policies.py`` gives for the engine: the algorithm is not
 allowed to know about the execution plane.
 
 Validation lives in exactly one place: the strategy's ``to_diff``. ``propose``
@@ -14,7 +14,7 @@ share of the candidate budget, increments ``invalid_proposals``, and produces no
 diff. No fallback substitution happens anywhere.
 
 The shared strategies here all hold **plain-text values per key**, which is what
-makes :class:`~agentdescent.fusion.ReflectiveFusion` safe to install on top:
+makes :class:`~agentdescent.merge.fusion.ReflectiveFusion` safe to install on top:
 disjoint keys union without any model call, and contested keys are merged as
 text. Strategies whose values are code or strict JSON opt out via
 ``MethodPolicy(reflective=False)``.
@@ -27,10 +27,10 @@ import threading
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from agentdescent.evolution import Task
-from agentdescent.evolvable import Diff
-from agentdescent.policies import Policies
-from agentdescent.strategies import SingleSlot, rule_id
+from agentdescent.loop.evolution import Task
+from agentdescent.core.evolvable import Diff
+from agentdescent.core.policies import Policies
+from agentdescent.artifacts.strategies import SingleSlot, rule_id
 
 from ._measure import PhasedLLM
 
@@ -122,7 +122,7 @@ class FieldSlots:
     parses non-empty and differs from the current state becomes one op. Because
     each field is a separate key holding plain text, two workers editing
     different fields **union-merge** without a model call, and edits to the same
-    field are text that :class:`~agentdescent.fusion.ReflectiveFusion` can
+    field are text that :class:`~agentdescent.merge.fusion.ReflectiveFusion` can
     synthesise -- no ranking evaluation either way.
     """
 
@@ -176,7 +176,7 @@ class WindowedMemory:
     entries -- the paper's Ω=1-3 sliding bound.
 
     ``validator`` rejects entries that are the wrong *shape* for a memory, and
-    the runner also hands it to :class:`~agentdescent.fusion.ReflectiveFusion`
+    the runner also hands it to :class:`~agentdescent.merge.fusion.ReflectiveFusion`
     so a synthesised merge has to clear the same bar as an entry that arrived on
     its own. It is a shape check and not a quality judgement: deciding whether a
     reflection is *useful* is the held-out gate's job, and a strategy that
@@ -305,7 +305,7 @@ class MethodPolicy:
 
     ``engine`` carries the decision-plane seams the method's distinctive
     mechanism plugs into (selection / task_sampler / acceptance / ...); the
-    runner injects :func:`~agentdescent.fusion.reflective_merge` on top when
+    runner injects :func:`~agentdescent.merge.fusion.reflective_merge` on top when
     ``reflective`` is true. ``self_verify`` asks the engine for its worker
     self-check rollout per proposal (the environment-graded critic analogue).
     """

@@ -46,7 +46,7 @@ runs will be stored. Every line it marks as a problem is something that will
 make a real run fail — but none of them stop step 2.
 
 !!! warning "`command not found: agentdescent`"
-    pip installed it somewhere not on your `PATH`. `python -m agentdescent.cli
+    pip installed it somewhere not on your `PATH`. `python -m agentdescent.shell.cli
     doctor` works regardless, and `python -m site --user-base` tells you which
     `bin/` to add. Hosts start the server as a **subprocess**, so it must be on
     the `PATH` of whatever launches your agent, not just your interactive shell.

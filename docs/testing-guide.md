@@ -48,7 +48,7 @@ unless their content is out of date.
     **`agentdescent` must be on `PATH`** — hosts start it as a *subprocess*, so
     it must be on the PATH of whatever launches your agent, not just your
     interactive shell. The script warns if it isn't. `python3 -m
-    agentdescent.cli` works regardless.
+    agentdescent.shell.cli` works regardless.
 
     **Python 3.10+ for the MCP server.** The `mcp` package requires it while
     AgentDescent supports 3.9. On 3.9 you get the CLI and the skill; the tools

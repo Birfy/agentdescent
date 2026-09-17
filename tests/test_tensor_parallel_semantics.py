@@ -23,9 +23,9 @@ import warnings
 
 import pytest
 
-from agentdescent.aggregator import Aggregator
-from agentdescent.evolution import AppendRules, KeyedRules, SingleSlot, Task, evolve
-from agentdescent.parallel import DataParallel, PipelineParallel, TensorParallel
+from agentdescent.merge.aggregator import Aggregator
+from agentdescent.loop.evolution import AppendRules, KeyedRules, SingleSlot, Task, evolve
+from agentdescent.schedule.parallel import DataParallel, PipelineParallel, TensorParallel
 
 CATS = ["alpha", "beta", "gamma", "delta"]
 

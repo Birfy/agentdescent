@@ -4,7 +4,7 @@ Exercise the ACE playbook representation, grow-and-refine de-dup, BIO entity
 decoding, task shaping, and scoring -- no network or LLM calls.
 """
 
-from agentdescent.evolution import Task
+from agentdescent.loop.evolution import Task
 from examples.ace.ace_context_evolution import (
     ACEPlaybook,
     _entities,

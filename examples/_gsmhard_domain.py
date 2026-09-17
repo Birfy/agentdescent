@@ -62,7 +62,7 @@ import re
 import urllib.request
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from agentdescent.evolution import Task
+from agentdescent.loop.evolution import Task
 
 
 DATASET = "reasoning-machines/gsm-hard"
@@ -169,7 +169,7 @@ def _from_mirror() -> List[dict]:
 
 
 def _cache_file() -> str:
-    from agentdescent.dataloader import cache_path
+    from agentdescent.actors.dataloader import cache_path
 
     return cache_path("gsmhard", FILENAME)
 

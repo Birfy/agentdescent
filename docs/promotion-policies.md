@@ -1,6 +1,6 @@
 # Promotion policies — when dev reaches stable
 
-*Module:* [`agentdescent.defaults`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/defaults.py)
+*Module:* [`agentdescent.merge.defaults`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/merge/defaults.py)
 · *Contract:* `PromotionPolicy.promote(ctx) -> Sequence[Promotion]`
 
 The dual-branch rule: `dev` absorbs candidates, `stable` is what production

@@ -21,7 +21,7 @@ of ownership rather than of behaviour: the default is still one fresh directory
 per call, deleted afterwards.
 
 ```python
-from agentdescent.sandbox import SandboxPool, WorkspaceProvider
+from agentdescent.runtime.sandbox import SandboxPool, WorkspaceProvider
 
 pool = SandboxPool(WorkspaceProvider(), max_sandboxes=8)
 run = code_runner([...], sandbox_pool=pool)     # share it, and the cap is shared
@@ -68,7 +68,7 @@ respect their own limit and together exceed the machine's — the same mistake
 level up.
 
 ```python
-from agentdescent.sandbox_shared import SharedSandboxPool
+from agentdescent.runtime.sandbox_shared import SharedSandboxPool
 
 pool = SharedSandboxPool(root="/var/tmp/agentdescent-pool",
                          capacity=8,      # the machine's ceiling
@@ -120,8 +120,8 @@ not a *path*. `HOME` points inside the workspace, so `~/.aws/credentials` misses
 appropriate for code you would run yourself; it is not a boundary.
 
 ```python
-from agentdescent.sandbox import SandboxPool
-from agentdescent.sandbox_container import ContainerProvider
+from agentdescent.runtime.sandbox import SandboxPool
+from agentdescent.runtime.sandbox_container import ContainerProvider
 
 pool = SandboxPool(ContainerProvider("python:3.11-slim"), max_sandboxes=8)
 run = code_runner(["python", "main.py"], test_cmd=["pytest", "-q"],

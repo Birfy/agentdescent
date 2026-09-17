@@ -3,7 +3,7 @@
     "I plugged a tree search into evolve() to solve a problem. Now I want to
     evolve the search algorithm itself."
 
-The algorithm plugs in through :class:`~agentdescent.policies.Policies` seams and
+The algorithm plugs in through :class:`~agentdescent.core.policies.Policies` seams and
 the ``aggregator_factory`` exit -- ERA's flat-PUCT tree is
 ``EraTree`` + ``FlatPuct`` behind a factory -- and this example turns one of
 those seams into the artifact of an **outer** ``evolve()``:
@@ -52,12 +52,12 @@ import statistics
 import time
 from typing import Callable, Dict, Iterable, List, Optional, Sequence
 
-from agentdescent.agents import Completion, Usage, with_retries
-from agentdescent.evolution import EvolutionResult, Task
-from agentdescent.meta import (MetaOutcome, Problem, auc, cached_completion,
+from agentdescent.actors.agents import Completion, Usage, with_retries
+from agentdescent.loop.evolution import EvolutionResult, Task
+from agentdescent.loop.meta import (MetaOutcome, Problem, auc, cached_completion,
                                meta_evolve, meta_validate, priority_selection,
                                slot_reflector)
-from agentdescent.meta import transfer_ratio as _transfer_ratio
+from agentdescent.loop.meta import transfer_ratio as _transfer_ratio
 
 from examples._common import (add_standard_args, budget_kwargs, completion_for,
                               confirm, worker_count)
@@ -127,11 +127,11 @@ def build_tasks(family: Family, count: int, *, first_seed: int = 0) -> List[Task
 
 
 def landscape_problem(family: Family, budget: int = DEFAULT_INNER_BUDGET) -> Problem:
-    """A landscape family as an inner :class:`~agentdescent.meta.Problem`.
+    """A landscape family as an inner :class:`~agentdescent.loop.meta.Problem`.
 
     ``(selection policy, seed) -> MetaOutcome``: one whole tree search through
     the real ``EraTree`` with the candidate rule choosing parents. The curve is
-    best-so-far after each expansion, so :func:`agentdescent.meta.auc` is the
+    best-so-far after each expansion, so :func:`agentdescent.loop.meta.auc` is the
     mean of it -- how fast the rule found what it found."""
 
     def problem(policy, seed: int) -> MetaOutcome:

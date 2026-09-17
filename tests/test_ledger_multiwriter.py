@@ -18,8 +18,8 @@ import time
 
 import pytest
 
-from agentdescent.evolvable import Contract, Diff, Evolvable
-from agentdescent.ledger import CASConflict, Ledger
+from agentdescent.core.evolvable import Contract, Diff, Evolvable
+from agentdescent.merge.ledger import CASConflict, Ledger
 
 CTX = mp.get_context("spawn")
 

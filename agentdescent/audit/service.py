@@ -8,7 +8,7 @@ resolving caller has a file and nothing else. These functions are what it calls.
 
 They never raise. A tool call that throws gives the model a stack trace and no
 way to act on it, so every failure comes back as ``{"error": ...}`` with a
-sentence a model can relay -- the same convention :mod:`agentdescent.mcp`
+sentence a model can relay -- the same convention :mod:`agentdescent.shell.mcp`
 already uses for run-store errors.
 
 ``version=None`` means "the one with the most records", and the reply always
@@ -146,7 +146,7 @@ def audit_pending(path: str, limit: int = 50, older_than: Optional[float] = None
     from the ranking
     :func:`~agentdescent.audit.queue.drain` last wrote into the store. That
     ranking is the only reason
-    :class:`~agentdescent.scheduler.AuditScheduler`'s queue exists, and it is
+    :class:`~agentdescent.schedule.scheduler.AuditScheduler`'s queue exists, and it is
     read here rather than on the merge path because the person who acts on it is
     in another process, next week, with only this file.
 
@@ -306,7 +306,7 @@ def audit_rescan(path: str, verifier: str, version: Optional[str] = None,
     decision the person operating the server makes, never one a calling model
     can make for them by naming a module.
     """
-    from ..workspec import DEFAULT_ALLOWED_PREFIXES, Ref, RefError
+    from ..core.workspec import DEFAULT_ALLOWED_PREFIXES, Ref, RefError
 
     store, err = _guard(path)
     if err:

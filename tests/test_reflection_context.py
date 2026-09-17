@@ -7,8 +7,8 @@ shown by default; these tests pin the bounds on that.
 """
 import pytest
 
-from agentdescent.agents import echo
-from agentdescent.evolution import LLMAgent, Task, reflector
+from agentdescent.actors.agents import echo
+from agentdescent.loop.evolution import LLMAgent, Task, reflector
 
 
 def _capture(**kw):
@@ -77,7 +77,7 @@ def test_meta_makes_an_unguessable_convention_learnable():
     only ``meta['gold']`` does. A reflector that cannot see meta cannot fix it, so
     this run is the plumbing test the string assertions cannot be.
     """
-    from agentdescent.evolution import SingleSlot, evolve
+    from agentdescent.loop.evolution import SingleSlot, evolve
 
     tasks = [Task(id=str(i), prompt=f"{i} dollars in cents?", meta={"gold": str(i * 100)})
              for i in range(1, 9)]

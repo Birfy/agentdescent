@@ -473,7 +473,7 @@ def test_the_skipped_count_survives_a_reload(tmp_path):
     """It is part of the population frame, so losing it on restart re-weights
     the correction -- silently, and only for runs that were resumed."""
     from agentdescent.audit import AuditedReward, AuditStore
-    from agentdescent.evolution import Task
+    from agentdescent.loop.evolution import Task
 
     path = tmp_path / "audit.jsonl"
     tap = AuditedReward(lambda task, out: 1.0 if out == "hi" else 0.0,

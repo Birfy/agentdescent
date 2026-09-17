@@ -15,9 +15,9 @@ from typing import Any, Optional
 
 import pytest
 
-from agentdescent.agents import Usage
-from agentdescent.budget import CallBudget, budgeted_completion
-from agentdescent.evolution import evolve, Task
+from agentdescent.actors.agents import Usage
+from agentdescent.observe.budget import CallBudget, budgeted_completion
+from agentdescent.loop.evolution import evolve, Task
 
 
 # --- CallBudget.allocate ---
@@ -175,7 +175,7 @@ def test_evolve_with_call_budget_runs():
 
         return complete
 
-    from agentdescent.evolution import LLMAgent
+    from agentdescent.loop.evolution import LLMAgent
 
     agent = LLMAgent(budgeted_completion(factory, budget))
 

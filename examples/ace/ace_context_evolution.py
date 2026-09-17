@@ -51,15 +51,15 @@ import re
 from collections import Counter
 from typing import Dict, List, Optional, Tuple
 
-from agentdescent.agents import Usage
-from agentdescent.dataloader import Dataset, hf_feature_names, hf_rows, split_dataset
-from agentdescent.evolvable import Diff
-from agentdescent.evolution import EvolvingArtifact, LLMAgent, Task, evolve, rule_id
-from agentdescent.governance import classify
-from agentdescent.policies import Policies
-from agentdescent.staleness import get_policy
-from agentdescent.parallel import DataParallel
-from agentdescent.sampling import DifficultyWeighted, RoundRobin
+from agentdescent.actors.agents import Usage
+from agentdescent.actors.dataloader import Dataset, hf_feature_names, hf_rows, split_dataset
+from agentdescent.core.evolvable import Diff
+from agentdescent.loop.evolution import EvolvingArtifact, LLMAgent, Task, evolve, rule_id
+from agentdescent.merge.governance import classify
+from agentdescent.core.policies import Policies
+from agentdescent.merge.staleness import get_policy
+from agentdescent.schedule.parallel import DataParallel
+from agentdescent.schedule.sampling import DifficultyWeighted, RoundRobin
 from examples._common import (add_standard_args, completion_for, confirm,
                               score_tasks, worker_count,
                               budget_kwargs, capped_val, report_engine)
@@ -173,7 +173,7 @@ class GrowAndRefine:
     """
 
     def accept(self, ctx):
-        from agentdescent.policies import AcceptDecision, MergeContext
+        from agentdescent.core.policies import AcceptDecision, MergeContext
         base = MergeContext.rate(ctx.base_counts)
         cand = MergeContext.rate(ctx.cand_counts)
         return AcceptDecision(
@@ -348,13 +348,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="FiNER validation rows to scan for single-entity sentences")
     p.add_argument("--sampler", choices=["round-robin", "difficulty"],
                    default="round-robin",
-                   help="which task a worker rolls out next (agentdescent.sampling)")
+                   help="which task a worker rolls out next (agentdescent.schedule.sampling)")
     p.add_argument("--staleness", default="guarded",
                    choices=["guarded", "reflective", "full"],
                    help=("what to do with a diff proposed against a head the "
                          "merger has since moved: `guarded` rebases inside the "
                          "--async-ratio band and discards beyond it, "
-                         "`reflective` rebases regardless (agentdescent.staleness)"))
+                         "`reflective` rebases regardless (agentdescent.merge.staleness)"))
     p.add_argument("--grow-and-refine", action="store_true",
                    help="upstream's Curator: apply every validated delta rather "
                         "than gating each bullet on held-out reward (see "

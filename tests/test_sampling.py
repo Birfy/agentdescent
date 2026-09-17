@@ -1,12 +1,12 @@
-"""Tests for the task samplers (agentdescent.sampling).
+"""Tests for the task samplers (agentdescent.schedule.sampling).
 
 A rollout is the expensive unit of work, so which task a worker picks matters.
 These check the contract, the difficulty filter (zero-signal tasks get
 down-weighted), and that both samplers drop into `evolve()` unchanged.
 """
 
-from agentdescent.evolution import AppendRules, Task, evolve
-from agentdescent.sampling import DifficultyWeighted, RoundRobin, TaskSampler
+from agentdescent.loop.evolution import AppendRules, Task, evolve
+from agentdescent.schedule.sampling import DifficultyWeighted, RoundRobin, TaskSampler
 
 
 def test_both_satisfy_the_protocol_structurally():
@@ -122,7 +122,7 @@ def test_sampler_learns_from_recorded_outcomes_during_a_run():
 # --- select_hard: turning a saturated benchmark into one with headroom ---------
 
 def test_select_hard_keeps_only_what_the_baseline_fails():
-    from agentdescent.dataloader import select_hard
+    from agentdescent.actors.dataloader import select_hard
     items = list(range(40))
     hard = select_hard(items, lambda i: 1.0 if i % 2 == 0 else 0.0)
     assert hard == [i for i in items if i % 2]
@@ -136,7 +136,7 @@ def test_select_hard_tops_up_rather_than_returning_an_unusable_split():
     """
     import warnings
 
-    from agentdescent.dataloader import select_hard
+    from agentdescent.actors.dataloader import select_hard
 
     items = list(range(40))
     with warnings.catch_warnings(record=True) as w:
@@ -148,7 +148,7 @@ def test_select_hard_tops_up_rather_than_returning_an_unusable_split():
 
 
 def test_select_hard_min_items_can_be_switched_off():
-    from agentdescent.dataloader import select_hard
+    from agentdescent.actors.dataloader import select_hard
     items = list(range(40))
     out = select_hard(items, lambda i: 0.0 if i < 3 else 1.0, min_items=0)
     assert out == [0, 1, 2]
@@ -156,26 +156,26 @@ def test_select_hard_min_items_can_be_switched_off():
 
 def test_select_hard_returns_everything_when_nothing_fails():
     """An empty benchmark is worse than a saturated one -- say so by returning it."""
-    from agentdescent.dataloader import select_hard
+    from agentdescent.actors.dataloader import select_hard
     items = list(range(10))
     assert select_hard(items, lambda i: 1.0) == items
 
 
 def test_select_hard_caps_with_keep():
-    from agentdescent.dataloader import select_hard
+    from agentdescent.actors.dataloader import select_hard
     items = list(range(20))
     assert select_hard(items, lambda i: 0.0, keep=3) == [0, 1, 2]
 
 
 def test_select_hard_handles_an_empty_pool():
-    from agentdescent.dataloader import select_hard
+    from agentdescent.actors.dataloader import select_hard
     assert select_hard([], lambda i: 0.0) == []
 
 
 def test_select_hard_scores_concurrently():
     """It runs a whole baseline pass, so serial scoring would make it unusable."""
     import threading
-    from agentdescent.dataloader import select_hard
+    from agentdescent.actors.dataloader import select_hard
 
     live, peak, lock = [0], [0], threading.Lock()
 

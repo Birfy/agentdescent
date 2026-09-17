@@ -3,9 +3,9 @@
 Evolves a "skill playbook" (accumulated lessons) on a real **BIG-Bench-Hard**
 task with a real **Claude** agent, wiring the whole framework together:
 
-    agentdescent.agents      claude()  -> a Completion               (provider layer)
-    agentdescent.evolution   LLMAgent + evolve() + AppendRules        (the engine + rule)
-    agentdescent.parallel    DataParallel                             (parallelism method)
+    agentdescent.actors.agents      claude()  -> a Completion               (provider layer)
+    agentdescent.loop.evolution   LLMAgent + evolve() + AppendRules        (the engine + rule)
+    agentdescent.schedule.parallel    DataParallel                             (parallelism method)
     governance            blast_radius=0.2  -> L2 skill layer      (governance)
 
 Default task: `salient_translation_error_detection` -- a *single-skill* task
@@ -33,9 +33,9 @@ import urllib.request
 from difflib import SequenceMatcher
 from typing import Dict, List, Optional
 
-from agentdescent.agents import Usage, claude, openai_compatible
-from agentdescent.evolution import AppendRules, LLMAgent, Task, evolve
-from agentdescent.parallel import DataParallel
+from agentdescent.actors.agents import Usage, claude, openai_compatible
+from agentdescent.loop.evolution import AppendRules, LLMAgent, Task, evolve
+from agentdescent.schedule.parallel import DataParallel
 
 BBH_URL = "https://raw.githubusercontent.com/suzgunmirac/BIG-Bench-Hard/main/bbh/{task}.json"
 CACHE_DIR = os.path.expanduser("~/.cache/agentdescent/bbh")
@@ -167,7 +167,7 @@ def main() -> None:
             print("aborted.")
             return
 
-    # provider layer (agentdescent.agents): any prompt->text completion works.
+    # provider layer (agentdescent.actors.agents): any prompt->text completion works.
     usage = Usage()                       # what the run actually costs
     completion = (openai_compatible(model=args.model, usage=usage) if args.provider in ("openai", "glm")
                   else claude(model=args.model, usage=usage))

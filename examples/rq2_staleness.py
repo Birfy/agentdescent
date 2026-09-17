@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import tempfile
 
-from agentdescent.aggregator import AggregatorConfig
-from agentdescent.domains.router import make_task_universe
-from agentdescent.orchestrator import AgentDescent
+from agentdescent.merge.aggregator import AggregatorConfig
+from agentdescent.reference.domains.router import make_task_universe
+from agentdescent.reference.orchestrator import AgentDescent
 
 
 def rounds_to_converge(history, target: float = 0.999) -> str:

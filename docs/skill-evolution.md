@@ -6,9 +6,9 @@ module wired together. It evolves a **skill playbook** (accumulated lessons) on 
 
 | Module | Used for |
 |---|---|
-| [`agentdescent.agents`](agents.md) | `claude(...)` / `openai_compatible(...)` → a `Completion` (provider layer) |
-| [`agentdescent.evolution`](evolution.md) | `LLMAgent` + `evolve()` + `AppendRules` strategy (the engine + rule) |
-| [`agentdescent.parallel`](parallelism.md) | `DataParallel` — the parallelism method |
+| [`agentdescent.actors.agents`](agents.md) | `claude(...)` / `openai_compatible(...)` → a `Completion` (provider layer) |
+| [`agentdescent.loop.evolution`](evolution.md) | `LLMAgent` + `evolve()` + `AppendRules` strategy (the engine + rule) |
+| [`agentdescent.schedule.parallel`](parallelism.md) | `DataParallel` — the parallelism method |
 | governance | `blast_radius=0.2` → the L2 skill layer |
 
 Source:
@@ -63,7 +63,7 @@ examples that converge fully (router merge-vs-fork, etc.); there the agent can
 
 ## Run it
 
-The dataset is fetched through the [`agentdescent.dataloader`](dataloader.md) data
+The dataset is fetched through the [`agentdescent.actors.dataloader`](dataloader.md) data
 layer (cached, dependency-free), so the first `--dry-run` downloads it and every
 later run is offline.
 

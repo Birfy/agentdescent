@@ -4,7 +4,7 @@ import io
 
 import pytest
 
-from agentdescent.agents import claude, echo, from_callable, with_retries
+from agentdescent.actors.agents import claude, echo, from_callable, with_retries
 
 
 def test_echo_returns_prompt_or_transform():
@@ -77,7 +77,7 @@ def test_claude_bounds_a_single_request():
     Measured before the fix: a GEPA run sat 51 minutes on a single round with
     1.07s of CPU and one ESTABLISHED socket.
     """
-    from agentdescent.agents import claude
+    from agentdescent.actors.agents import claude
 
     seen = {}
 
@@ -102,7 +102,7 @@ def test_both_provider_adapters_bound_a_request():
     have to know which one silently has no bound."""
     import inspect
 
-    from agentdescent.agents import claude, openai_compatible
+    from agentdescent.actors.agents import claude, openai_compatible
 
     for fn in (claude, openai_compatible):
         assert "timeout" in inspect.signature(fn).parameters, fn.__name__
@@ -143,7 +143,7 @@ SSE_LINES = [
 
 def test_the_sse_reader_rebuilds_the_reply_and_survives_junk():
     """One malformed frame is a provider quirk, not a reason to lose the answer."""
-    from agentdescent.agents import _read_sse
+    from agentdescent.actors.agents import _read_sse
 
     data = _read_sse(_FakeStream(SSE_LINES))
     assert data["choices"][0]["message"]["content"] == "Hello world"
@@ -160,8 +160,8 @@ def test_streaming_asks_for_usage_and_still_records_it(monkeypatch):
     """
     import json
 
-    from agentdescent.agents import Usage, openai_compatible
-    import agentdescent.agents as agents
+    from agentdescent.actors.agents import Usage, openai_compatible
+    import agentdescent.actors.agents as agents
 
     sent = {}
 
@@ -185,8 +185,8 @@ def test_the_plain_path_is_untouched_by_the_streaming_option(monkeypatch):
     import io
     import json
 
-    from agentdescent.agents import openai_compatible
-    import agentdescent.agents as agents
+    from agentdescent.actors.agents import openai_compatible
+    import agentdescent.actors.agents as agents
 
     sent = {}
 
@@ -217,7 +217,7 @@ def test_a_rate_limit_backs_off_on_its_own_schedule():
     attempt inside two seconds, the engine retired each worker after three
     consecutive failures, and a twenty-expansion run ended with an empty tree.
     """
-    from agentdescent.agents import RateLimited, with_retries
+    from agentdescent.actors.agents import RateLimited, with_retries
 
     slept = []
 
@@ -239,7 +239,7 @@ def test_a_rate_limit_backs_off_on_its_own_schedule():
 
 def test_retry_after_wins_and_is_capped():
     """The provider knows better than the schedule -- up to a point."""
-    from agentdescent.agents import RateLimited, with_retries
+    from agentdescent.actors.agents import RateLimited, with_retries
 
     slept = []
     with pytest.raises(RateLimited):
@@ -260,8 +260,8 @@ def test_a_429_is_raised_as_a_rate_limit_with_its_header_read(monkeypatch):
     """Only the status code separates "slow down" from "you are misconfigured"."""
     import urllib.error
 
-    from agentdescent.agents import RateLimited, openai_compatible
-    import agentdescent.agents as agents
+    from agentdescent.actors.agents import RateLimited, openai_compatible
+    import agentdescent.actors.agents as agents
 
     def fake_urlopen(req, timeout=None):
         raise urllib.error.HTTPError(

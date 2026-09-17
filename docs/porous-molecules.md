@@ -15,7 +15,7 @@ leaves uniform.
 python -m examples.porous.porous_tree_search --dry-run
 python -m examples.porous.porous_tree_search --offline --iterations 24 --workers 4
 
-# any OpenAI-compatible endpoint, through agentdescent.agents.openai_compatible
+# any OpenAI-compatible endpoint, through agentdescent.actors.agents.openai_compatible
 export OPENAI_BASE_URL=...      # e.g. https://ark.cn-beijing.volces.com/api/coding/v1
 export OPENAI_API_KEY=...
 python -m examples.porous.porous_tree_search --provider openai \

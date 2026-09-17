@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from agentdescent.agents import Usage, claude, openai_compatible
+from agentdescent.actors.agents import Usage, claude, openai_compatible
 
 from examples._measure import (MODES, Recorder, compact_events, interval,
                                rotate, usage_dict)
@@ -385,8 +385,8 @@ def _initial_payload(args: argparse.Namespace) -> Dict[str, Any]:
         "started_at": utc_now(),
         "method": {
             "runtime": (
-                "serial/sync use agentdescent.evolution.evolve; async uses "
-                "agentdescent.async_evolve.async_evolve"
+                "serial/sync use agentdescent.loop.evolution.evolve; async uses "
+                "agentdescent.loop.async_evolve.async_evolve"
             ),
             "provider_calls": "live calls; no replay or synthetic latency",
             "mode_order": "rotated by repeat and algorithm index",

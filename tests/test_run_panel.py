@@ -7,7 +7,7 @@ import urllib.request
 
 import pytest
 
-from agentdescent import runstore
+from agentdescent.shell import runstore
 
 from tests.test_evolvespec import _dir_spec  # noqa: F401
 
@@ -102,7 +102,7 @@ def test_no_cors_header_without_an_origin(served):
 
 
 def test_the_cli_exposes_serve():
-    from agentdescent import cli
+    from agentdescent.shell import cli
 
     parser = cli.build_parser()
     choices = set(next(a for a in parser._actions if a.dest == "cmd").choices)

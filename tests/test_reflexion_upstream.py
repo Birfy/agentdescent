@@ -7,7 +7,7 @@ one evicts a lesson drawn from an actual failure.
 """
 from __future__ import annotations
 
-from agentdescent.evolution import Task
+from agentdescent.loop.evolution import Task
 
 from examples.reflexion import reflexion_episodic_memory as rx
 

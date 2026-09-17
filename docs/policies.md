@@ -4,7 +4,7 @@ description: The decision plane of AgentDescent: eight named policy slots coveri
 
 # Choosing policies — the decision plane
 
-*Module:* [`agentdescent.policies`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/policies.py)
+*Module:* [`agentdescent.core.policies`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/core/policies.py)
 
 Every decision `evolve()` makes is an object you can swap, and they all travel
 in one argument. This page is the catalogue; [the guide](policy-guide.md)
@@ -13,10 +13,10 @@ how to prove one ran.
 
 ```python
 from agentdescent import Policies, evolve
-from agentdescent.selection import Beam
-from agentdescent.sampling import DifficultyWeighted
-from agentdescent.advantage import AdvantageAcceptance
-from agentdescent.fusion import reflective_merge
+from agentdescent.schedule.selection import Beam
+from agentdescent.schedule.sampling import DifficultyWeighted
+from agentdescent.merge.advantage import AdvantageAcceptance
+from agentdescent.merge.fusion import reflective_merge
 
 evolve(tasks, reward, agent=agent, policies=Policies(
     selection=Beam(4),

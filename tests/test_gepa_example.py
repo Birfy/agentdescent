@@ -6,7 +6,7 @@ answer normalisation, and scoring -- no network or LLM calls.
 
 import random
 
-from agentdescent.evolution import Task, evolve
+from agentdescent.loop.evolution import Task, evolve
 from examples.gepa.gepa_prompt_evolution import (
     InstructionSlot,
     ParetoAggregator,

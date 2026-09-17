@@ -19,8 +19,8 @@ from typing import List, Optional
 
 import pytest
 
-from agentdescent.agents import Usage
-from agentdescent.evolution import evolve, Task, EvolutionResult
+from agentdescent.actors.agents import Usage
+from agentdescent.loop.evolution import evolve, Task, EvolutionResult
 
 
 def _tasks(n: int = 8) -> List[Task]:
@@ -114,8 +114,8 @@ def test_no_checkpoint_files_without_the_flag(tmp_path):
 def test_cost_efficient_is_opt_in():
     """The default selection is SingleHead; a run without a selection policy
     must not construct or consult CostEfficient."""
-    from agentdescent.policies import Policies
-    from agentdescent.selection import SingleHead, CostEfficient
+    from agentdescent.core.policies import Policies
+    from agentdescent.schedule.selection import SingleHead, CostEfficient
 
     # Default policies use SingleHead; this is a structural check that the new
     # policy is not the default anywhere.
@@ -127,7 +127,7 @@ def test_cost_efficient_is_opt_in():
 def test_governor_inert_without_a_budget():
     """The governor the engine constructs with no max_tokens says nothing and
     changes nothing."""
-    from agentdescent.budget import BudgetGovernor
+    from agentdescent.observe.budget import BudgetGovernor
 
     g = BudgetGovernor(max_tokens=None, stop_on_diminishing=True)
     assert not g.active

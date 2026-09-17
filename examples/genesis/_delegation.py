@@ -1,4 +1,4 @@
-"""Recursive delegation as a :class:`~agentdescent.policies.ProposalPolicy`.
+"""Recursive delegation as a :class:`~agentdescent.core.policies.ProposalPolicy`.
 
 ``(v, p) ⇝ (v, q)`` is the operation the engine has no counterpart for, and the
 reason it fits *inside* a proposal rather than beside it is the paper's own
@@ -38,7 +38,7 @@ import json
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from agentdescent.filetree import parse_tree
+from agentdescent.artifacts.filetree import parse_tree
 
 from ._octopus import three_way
 

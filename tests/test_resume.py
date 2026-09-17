@@ -7,7 +7,7 @@ was undocumented and untested, and it silently discarded `initial_state`.
 
 import warnings
 
-from agentdescent.evolution import AppendRules, Task, evolve
+from agentdescent.loop.evolution import AppendRules, Task, evolve
 
 
 class _Agent:

@@ -6,7 +6,7 @@ phase naming, budgets, mode dispatch, and the merge configuration. A
 
 Merging is configured for **model-merged unions instead of ranking**: batches
 are sized to the worker count and, for text-valued artifacts,
-:func:`agentdescent.fusion.reflective_merge` is installed so contradicting
+:func:`agentdescent.merge.fusion.reflective_merge` is installed so contradicting
 proposals are synthesised by one model call and gated by one held-out
 evaluation -- rather than each candidate paying its own ranking evaluation.
 """
@@ -23,12 +23,12 @@ import time
 from dataclasses import dataclass, replace
 from typing import Callable, Dict, List, Optional, Sequence
 
-from agentdescent.aggregator import AggregatorConfig
-from agentdescent.agents import Usage
-from agentdescent.async_evolve import async_evolve
-from agentdescent.staleness import get_policy
-from agentdescent.evolution import EvolutionResult, Task, evolve
-from agentdescent.fusion import reflective_merge
+from agentdescent.merge.aggregator import AggregatorConfig
+from agentdescent.actors.agents import Usage
+from agentdescent.loop.async_evolve import async_evolve
+from agentdescent.merge.staleness import get_policy
+from agentdescent.loop.evolution import EvolutionResult, Task, evolve
+from agentdescent.merge.fusion import reflective_merge
 
 from ._common import (add_standard_args, completion_for, confirm,
                       is_openai_compatible)
@@ -244,7 +244,7 @@ def run_port(
     missing one never turns the control on.
 
     ``eval_cache`` is a directory. Empty means the in-process default; a path
-    installs :class:`~agentdescent.evalcache.FileCache`, so two processes stop
+    installs :class:`~agentdescent.evaluate.evalcache.FileCache`, so two processes stop
     paying twice for the same gate -- and a rerun returns the first run's
     numbers, which is what you want while sizing a configuration and exactly
     what you do not want when the question is run-to-run variance. Either way
@@ -354,7 +354,7 @@ def run_port(
         # what this runner already hands to both engines, and `_common`'s
         # `eval_cache_kwargs` returns `Policies(eval_cache=...)`, which would
         # have replaced everything the method declared.
-        from agentdescent.evalcache import FileCache
+        from agentdescent.evaluate.evalcache import FileCache
         engine = engine.merged_with(eval_cache=FileCache(eval_cache))
     # `--serial` is the upstream algorithm's own loop, and the published loop
     # scores one task at a time; an explicit flag overrides that, in every mode,
@@ -648,7 +648,7 @@ def build_parser(
     parser.add_argument("--staleness", default="guarded",
                         choices=["guarded", "reflective", "full"],
                         help="what to do with a diff proposed against a head the "
-                             "merger has since moved (agentdescent.staleness)")
+                             "merger has since moved (agentdescent.merge.staleness)")
     parser.add_argument(
         "--temperature", type=float, default=1.0,
         help=("sampling temperature. Every other port in this repository takes "

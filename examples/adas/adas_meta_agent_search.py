@@ -53,15 +53,15 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Tuple
 
-from agentdescent.agents import Usage
-from agentdescent.aggregator import AggregatorProtocol, MergeOutcome, MergeReport
-from agentdescent.dataloader import Dataset, fetch_text, split_dataset
-from agentdescent.evolvable import Diff, EvidenceCard
-from agentdescent.evolution import EvolvingArtifact, Task, evolve, rule_id
-from agentdescent.governance import classify
-from agentdescent.ledger import CASConflict, Ledger
-from agentdescent.selection import sigmoid_novelty_weights
-from agentdescent.staleness import get_policy
+from agentdescent.actors.agents import Usage
+from agentdescent.merge.aggregator import AggregatorProtocol, MergeOutcome, MergeReport
+from agentdescent.actors.dataloader import Dataset, fetch_text, split_dataset
+from agentdescent.core.evolvable import Diff, EvidenceCard
+from agentdescent.loop.evolution import EvolvingArtifact, Task, evolve, rule_id
+from agentdescent.merge.governance import classify
+from agentdescent.merge.ledger import CASConflict, Ledger
+from agentdescent.schedule.selection import sigmoid_novelty_weights
+from agentdescent.merge.staleness import get_policy
 from examples._common import (add_standard_args, completion_for, confirm,
                               is_openai_compatible, worker_count,
                               budget_kwargs, eval_cache_kwargs, report_engine)
@@ -326,7 +326,7 @@ def bootstrap_ci(correct: List[float], n_resamples: int = 2000, seed: int = 0
 #: Darwin Godel Machine weights (``DGM_outer.py:score_child_prop``):
 #: ``p_i proportional to sigmoid(10*(score-0.5)) * 1/(1+children_i)`` -- favour
 #: high performers, discount already-explored parents. Now shipped as
-#: :func:`agentdescent.selection.sigmoid_novelty_weights`, because this file and
+#: :func:`agentdescent.schedule.selection.sigmoid_novelty_weights`, because this file and
 #: `examples/dgm` each carried a byte-identical copy.
 #:
 #: ADAS uses the weights for a different *draw*: `examples/dgm` samples one
@@ -816,7 +816,7 @@ def _weighted_sample_without_replacement(weights: List[float], k: int,
     return idxs
 
 
-#: Two outcomes the shared :class:`~agentdescent.aggregator.MergeOutcome`
+#: Two outcomes the shared :class:`~agentdescent.merge.aggregator.MergeOutcome`
 #: vocabulary has no name for, because they are specific to a keep-all archive.
 #: Both print as `+0/-1` on the driver's line and need opposite responses:
 #: ALREADY_BEST means candidates were scored and none beat the incumbent (look at
@@ -890,7 +890,7 @@ class MetaSearchAggregator(AggregatorProtocol):
     def __init__(self, ledger: Ledger, verifier, ctx: AdasContext,
                  artifact_id: str = "agentic_system", boot_seed: int = 0,
                  selection=None):
-        from agentdescent.selection import Beam
+        from agentdescent.schedule.selection import Beam
         self.ledger = ledger
         self.verifier = verifier
         self.ctx = ctx
@@ -995,7 +995,7 @@ class MetaSearchAggregator(AggregatorProtocol):
                          json.loads(design), mean, ci)
 
         # Best-of-archive at the standard seam (version = archive index).
-        from agentdescent.selection import Candidate, SelectionContext
+        from agentdescent.schedule.selection import Candidate, SelectionContext
         rows = [Candidate(artifact_id=self.aid, version=i,
                           score=a["fitness"])
                 for i, a in enumerate(self.ctx.archive)]
@@ -1156,7 +1156,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--staleness", default="guarded",
                    choices=["guarded", "reflective", "full"],
                    help=("what to do with a design proposed against an archive "
-                         "the merger has since moved (agentdescent.staleness)"))
+                         "the merger has since moved (agentdescent.merge.staleness)"))
     p.add_argument("--workers", type=int, default=2,
                    help="meta-agents proposing per generation. A proposal is only "
                         "requested when the generation's trigger rollout FAILS, so "
@@ -1270,7 +1270,7 @@ def main(argv=None) -> None:
         # A plain, structure-free call is the right baseline here: what ADAS
         # searches over IS structure, so the items worth keeping are the ones a
         # single call cannot already do.
-        from agentdescent.dataloader import select_hard
+        from agentdescent.actors.dataloader import select_hard
 
         cache = _HardCache(args.model, enabled=args.hard_cache)
         verdicts = {}                     # this run's view, cache on or off

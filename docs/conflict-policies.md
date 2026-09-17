@@ -1,7 +1,7 @@
 # Conflict policies — contradicting diffs
 
-*Module:* [`agentdescent.defaults`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/defaults.py),
-[`agentdescent.fusion`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/fusion.py)
+*Module:* [`agentdescent.merge.defaults`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/merge/defaults.py),
+[`agentdescent.merge.fusion`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/merge/fusion.py)
 · *Contract:* `ConflictPolicy.resolve(artifact, cards) -> (survivors, dropped)`
 
 Two diffs contradict when they write the same key with different values.
@@ -22,7 +22,7 @@ Use `reflective_merge(completion)` to install the `KeepContradictions` +
 
 ```python
 from agentdescent import Policies, evolve
-from agentdescent.advantage import AdvantageConflict
+from agentdescent.merge.advantage import AdvantageConflict
 
 evolve(tasks, reward, agent=agent, policies=Policies(
     conflict=AdvantageConflict(margin=0.5)))    # falls back to DefaultConflict

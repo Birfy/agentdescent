@@ -1,7 +1,7 @@
 """The run store and the CLI, end to end and offline.
 
 A run is a directory plus a detached process, so the tests here actually detach:
-`launch` starts `python -m agentdescent.cli run`, the test polls `status.json`
+`launch` starts `python -m agentdescent.shell.cli run`, the test polls `status.json`
 until the child reports, and `cancel` is checked against a deliberately slow
 agent. Everything uses the stub workspace agent from `test_evolvespec.py`.
 """
@@ -14,8 +14,8 @@ import time
 
 import pytest
 
-from agentdescent import cli, runstore
-from agentdescent.runstore import RunStoreError, RunStatus
+from agentdescent.shell import cli, runstore
+from agentdescent.shell.runstore import RunStoreError, RunStatus
 
 from tests.test_evolvespec import _WORDS, _dir_spec  # noqa: F401  (shared fixtures)
 
@@ -316,12 +316,12 @@ def test_doctor_reports_without_failing():
 def test_console_script_entry_point_is_declared():
     with open(os.path.join(ROOT, "pyproject.toml")) as fh:
         cfg = fh.read()
-    assert 'agentdescent = "agentdescent.cli:main"' in cfg
+    assert 'agentdescent = "agentdescent.shell.cli:main"' in cfg
     assert 'mcp = ["mcp' in cfg
 
 
 def test_module_entry_point_runs_as_a_subprocess():
-    proc = subprocess.run([sys.executable, "-m", "agentdescent.cli", "--help"],
+    proc = subprocess.run([sys.executable, "-m", "agentdescent.shell.cli", "--help"],
                           capture_output=True, text=True, cwd=ROOT)
     assert proc.returncode == 0 and "evolve" in proc.stdout
 
@@ -354,8 +354,8 @@ def test_the_rollout_counter_is_not_a_sum_of_sums(tmp_path):
     and 397,530 rollouts -- 630x631, the triangular number. It is one of four
     numbers `status` shows someone deciding whether to cancel.
     """
-    from agentdescent import runstore
-    from agentdescent.demo import build
+    from agentdescent.shell import runstore
+    from agentdescent.shell.demo import build
 
     spec = build(str(tmp_path))          # writes the skill and the cases too
     spec["evolve"] = {"rounds": 6, "n_workers": 2, "seed": 0,

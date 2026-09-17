@@ -5,26 +5,43 @@ Every module, what it is for, and where its design is explained. The
 and *how*, that is *what*.
 
 ```
-                          evolve()  ── the one entry point
-                              │
-   ┌───────────────┬──────────┴──────────┬────────────────────┐
-   │               │                     │                    │
- what evolves   who does the work    where it runs        how it merges
-   │               │                     │                    │
- strategies      agents               executor             aggregator
- filetree        backends             supervisor           defaults
- treestrategy    runners              workspec             ledger
-                 sampling             sandbox              verifier
-                 dataloader           sandbox_container    evaluator
-                 rewards              sandbox_shared       evalcache
-                 parallel             pipeline             staleness
-                 scheduler                                 governance
-
-              policies ── the contracts, across all four
-              metrics · bench ── what a run cost, and comparing runs
+agentdescent/
+├── __init__.py      the public API — every name below is re-exported here
+├── core/            the data model and the contracts everything else shares
+│   └── evolvable · policies · workspec · evolvespec
+├── loop/            the evolution loop itself
+│   └── evolution · async_evolve · meta · pipeline
+├── artifacts/       what evolves, and how a proposal becomes a Diff
+│   └── strategies · treestrategy · filetree
+├── actors/          who does the work
+│   └── agents · backends · runners · dataloader · rewards
+├── schedule/        how the work is spread
+│   └── parallel · sampling · selection · population · scheduler
+├── runtime/         where rollouts run
+│   └── executor · supervisor · sandbox · sandbox_shared · sandbox_container
+├── merge/           how a change is accepted
+│   └── aggregator · defaults · fusion · advantage · staleness · stats
+│       ledger · governance
+├── evaluate/        scoring a candidate
+│   └── verifier · evaluator · evalcache
+├── observe/         what a run cost, and what it is compared against
+│   └── metrics · budget · checkpoint · baselines
+├── shell/           running it from outside Python
+│   └── cli · mcp · runstore · host_sampling · demo
+├── reference/       the domain the published results were measured with
+│   └── orchestrator · async_runtime · domains/
+├── audit/           the sparse-audit package (19 modules)
+└── integrations/    the skill and hooks written into a host
 ```
 
-## The loop
+The folders are this page's own grouping, made real: `core/` is the contracts,
+`loop/` is the engine, and the four planes the architecture page names
+(*what evolves* · *who does the work* · *where it runs* · *how it merges*) are
+`artifacts/` · `actors/` · `runtime/` · `merge/`. An import that crosses a
+boundary it should not now reads wrong at a glance, which a flat directory of
+forty-eight modules could not do.
+
+## The loop — `loop/`
 
 | module | what it is | page |
 |---|---|---|
@@ -34,7 +51,7 @@ and *how*, that is *what*.
 | `async_evolve` | the same loop without the round barrier | [Async](async.md) |
 | `orchestrator`, `async_runtime`, `domains.router` | the reference domain the results were measured with — adapters over the engine above, not a second loop | [Orchestrator](orchestrator.md) |
 
-## What evolves
+## What evolves — `artifacts/`
 
 | module | what it is | page |
 |---|---|---|
@@ -42,7 +59,7 @@ and *how*, that is *what*.
 | `filetree` | a directory ↔ artifact state, path safety, `TreeSpec` | [Directory evolution](directory-evolution.md) |
 | `treestrategy` | `FileTree`, the `<EDITS>` proposal protocol, `tree_reflector` | [Directory evolution](directory-evolution.md) |
 
-## Who does the work
+## Who does the work — `actors/`
 
 | module | what it is | page |
 |---|---|---|
@@ -52,7 +69,7 @@ and *how*, that is *what*.
 | `dataloader` | datasets, splits, cached fetches | [Data layer](dataloader.md) |
 | `rewards` | the three scorers everyone writes, with the details right | [Rewards](rewards.md) |
 
-## How the work is spread
+## How the work is spread — `schedule/`
 
 | module | what it is | page |
 |---|---|---|
@@ -62,7 +79,7 @@ and *how*, that is *what*.
 | `scheduler` | duration-aware dispatch, stragglers, the audit queue | [Scheduling](duration-scheduling.md) |
 | `pipeline` | the retirement, early-stop and backpressure rules both runtimes share | [Async](async.md) |
 
-## Where it runs
+## Where it runs — `runtime/`
 
 | module | what it is | page |
 |---|---|---|
@@ -73,7 +90,7 @@ and *how*, that is *what*.
 | `sandbox_shared` | one ceiling across processes, counted from the lease directory | [Sandboxes](sandboxes.md#one-ceiling-across-processes) |
 | `sandbox_container` | the provider that makes a sandbox an actual boundary (needs docker/podman) | [Sandboxes](sandboxes.md#isolation-strength-three-levels) |
 
-## How a change is accepted
+## How a change is accepted — `merge/ · evaluate/`
 
 | module | what it is | page |
 |---|---|---|
@@ -89,7 +106,7 @@ and *how*, that is *what*.
 | `ledger` | the git-backed, compare-and-swap artifact store | [Ledger](ledger.md) |
 | `governance` | L0 frozen / L1 slow / L2 fast, by blast radius | [Governance](governance.md) |
 
-## Across all of it
+## Across all of it — `core/ · observe/`
 
 | module | what it is | page |
 |---|---|---|

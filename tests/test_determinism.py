@@ -10,7 +10,7 @@ reproducible hashes through `stable_hash` instead.
 import subprocess
 import sys
 
-from agentdescent.evolvable import stable_hash
+from agentdescent.core.evolvable import stable_hash
 
 
 def _in_fresh_process(snippet: str) -> str:
@@ -21,7 +21,7 @@ def _in_fresh_process(snippet: str) -> str:
 
 
 def test_stable_hash_is_deterministic_across_processes():
-    snippet = ("from agentdescent.evolvable import stable_hash;"
+    snippet = ("from agentdescent.core.evolvable import stable_hash;"
                "print(stable_hash('alpha'), stable_hash(('w1', 7)))")
     results = {_in_fresh_process(snippet) for _ in range(3)}
     assert len(results) == 1, f"stable_hash varied across processes: {results}"
@@ -34,7 +34,7 @@ def test_builtin_hash_would_have_varied():
 
 
 def test_section_assignment_is_stable_across_processes():
-    snippet = ("from agentdescent.parallel import section_of;"
+    snippet = ("from agentdescent.schedule.parallel import section_of;"
                "print([section_of(k, 4) for k in ('alpha','beta','gamma','delta')])")
     results = {_in_fresh_process(snippet) for _ in range(3)}
     assert len(results) == 1, f"TP section assignment varied: {results}"

@@ -4,7 +4,7 @@
 failed to beat the baseline" from "they never reached it" -- and those need
 opposite fixes.
 """
-from agentdescent.evolution import SingleSlot, Task, evolve
+from agentdescent.loop.evolution import SingleSlot, Task, evolve
 
 TASKS = [Task(id=str(i), prompt="p", meta={"gold": "g"}) for i in range(6)]
 
@@ -39,7 +39,7 @@ def test_categories_are_countable_across_rounds():
 
 def test_outcomes_survive_save_and_load():
     import os, tempfile
-    from agentdescent.evolution import EvolutionResult
+    from agentdescent.loop.evolution import EvolutionResult
     res = _run(n_workers=2, max_concurrency=2)
     path = tempfile.mktemp(suffix=".json")
     try:

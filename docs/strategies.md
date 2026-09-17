@@ -4,8 +4,8 @@ description: Strategies decide what evolves and how a proposal becomes a diff. T
 
 # Strategies — what evolves, and how a proposal becomes a diff
 
-*Modules:* [`agentdescent.strategies`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/strategies.py)
-(text) · [`agentdescent.treestrategy`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/treestrategy.py)
+*Modules:* [`agentdescent.artifacts.strategies`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/artifacts/strategies.py)
+(text) · [`agentdescent.artifacts.treestrategy`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/artifacts/treestrategy.py)
 (a directory) — one module per strategy family, none of them inside the engine
 · *API:* [`Strategy`, `SingleSlot`, `AppendRules`, `KeyedRules`](api.md#the-loop), [`FileTree`](api.md#the-file-tree-strategy)
 

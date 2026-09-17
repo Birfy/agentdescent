@@ -143,7 +143,7 @@ def test_evaluate_agent_preserves_order():
 def test_hard_mode_keeps_items_a_single_call_gets_wrong():
     """`--hard` exists because MGSM is ~95% solved by one call, so the search has
     no gradient. The filter is `select_hard` over a structure-free baseline."""
-    from agentdescent.dataloader import select_hard
+    from agentdescent.actors.dataloader import select_hard
 
     pool = [(f"q{i}", str(i)) for i in range(40)]
     # a "baseline" that only gets the even ones right
@@ -238,7 +238,7 @@ def test_search_reports_the_best_seed_for_comparison():
 def test_merge_reports_name_the_outcome():
     """`committed_version is None` is the driver's whole tally, so an archive whose
     best design simply did not change was reported identically to a rejection."""
-    from agentdescent.evolution import Task, evolve
+    from agentdescent.loop.evolution import Task, evolve
 
     from examples.adas.adas_meta_agent_search import (AdasContext, AgentDesignStrategy,
                                                  MetaSearchAggregator, make_propose)

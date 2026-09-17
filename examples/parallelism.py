@@ -2,7 +2,7 @@
 
 The parallelism *method* -- how a round of work is partitioned across workers --
 is pluggable. Pick one of the paradigms, or implement the
-:class:`~agentdescent.parallel.ParallelStrategy` protocol yourself.
+:class:`~agentdescent.schedule.parallel.ParallelStrategy` protocol yourself.
 
     python -m examples.parallelism
 
@@ -24,9 +24,9 @@ own -- see the last section.
 
 from __future__ import annotations
 
-from agentdescent.aggregator import Aggregator
-from agentdescent.evolution import KeyedRules, Task, evolve
-from agentdescent.parallel import (
+from agentdescent.merge.aggregator import Aggregator
+from agentdescent.loop.evolution import KeyedRules, Task, evolve
+from agentdescent.schedule.parallel import (
     DataParallel,
     PipelineChain,
     TensorParallel,

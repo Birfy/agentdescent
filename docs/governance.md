@@ -1,6 +1,6 @@
 # Governance — L0 frozen, L1 slow, L2 fast
 
-*Module:* [`agentdescent.governance`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/governance.py)
+*Module:* [`agentdescent.merge.governance`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/merge/governance.py)
 · *API:* [`Layer`, `classify`, `assert_mutable`, `FROZEN_IDS`, …](api.md#governance)
 
 Not everything an agent can change should change at the same speed. A phrasing

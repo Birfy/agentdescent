@@ -1,4 +1,4 @@
-"""Offline tests for the agentdescent.dataloader data layer.
+"""Offline tests for the agentdescent.actors.dataloader data layer.
 
 The URL/paging helpers are pure; the HTTP fetch is monkeypatched so hf_rows /
 fetch_text are exercised without a network.
@@ -168,8 +168,8 @@ def test_val_frac_round_trips_through_evolve():
     Float truncation (13.9999 -> 13) silently moved one train item into held-out
     for many dataset sizes, so the two splits disagreed.
     """
-    from agentdescent.dataloader import split_dataset
-    from agentdescent.evolution import Task, _build_engine
+    from agentdescent.actors.dataloader import split_dataset
+    from agentdescent.loop.evolution import Task, _build_engine
 
     for n in (29, 87, 100, 149, 200):
         rows = [{"i": i} for i in range(n)]

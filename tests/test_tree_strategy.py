@@ -7,9 +7,9 @@ in paths rather than in artifact ids.
 
 import pytest
 
-from agentdescent.evolution import EvolvingArtifact, Task
-from agentdescent.filetree import canonical
-from agentdescent.treestrategy import FileTree, parse_edits, tree_reflector
+from agentdescent.loop.evolution import EvolvingArtifact, Task
+from agentdescent.artifacts.filetree import canonical
+from agentdescent.artifacts.treestrategy import FileTree, parse_edits, tree_reflector
 
 
 def _tree(**files):
@@ -56,7 +56,7 @@ def test_parse_edits_understands_deletion():
 
 
 def test_edit_protocol_formats_without_leaking_braces():
-    from agentdescent.treestrategy import EDIT_PROTOCOL
+    from agentdescent.artifacts.treestrategy import EDIT_PROTOCOL
 
     text = EDIT_PROTOCOL.format(max_files=2, editable="**", frozen="tests/**")
     assert '"rationale"' in text and "{max_files}" not in text

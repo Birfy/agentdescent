@@ -227,7 +227,7 @@ def test_an_unset_flag_stays_unset_rather_than_becoming_a_default(monkeypatch):
 
 def _spy_run(monkeypatch, *, mode, **kwargs):
     """One real offline `run_port`, with the engine entry point wiretapped."""
-    from agentdescent.agents import Usage, metered
+    from agentdescent.actors.agents import Usage, metered
     from examples._measure import Recorder
     from examples.promptbreeder import promptbreeder_genetic_prompts as pb
 
@@ -300,7 +300,7 @@ def test_eval_cache_installs_a_file_cache_on_the_methods_own_bundle(
     """Merged onto the bundle rather than built as a fresh `Policies`: the
     method's declared selection/acceptance fields travel in that same bundle,
     and `_common.eval_cache_kwargs` would have replaced them."""
-    from agentdescent.evalcache import FileCache
+    from agentdescent.evaluate.evalcache import FileCache
 
     seen, result = _spy_run(monkeypatch, mode="sync_parallel",
                             eval_cache=str(tmp_path))

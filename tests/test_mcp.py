@@ -6,9 +6,9 @@ import time
 
 import pytest
 
-from agentdescent import runstore
-from agentdescent.mcp import TOOL_DESCRIPTIONS, Tools, build_server
-from agentdescent.cli import NESTED_ENV
+from agentdescent.shell import runstore
+from agentdescent.shell.mcp import TOOL_DESCRIPTIONS, Tools, build_server
+from agentdescent.shell.cli import NESTED_ENV
 
 from tests.test_evolvespec import _dir_spec  # noqa: F401
 
@@ -163,7 +163,7 @@ def test_the_server_reports_its_version(monkeypatch):
 
 def test_serve_without_the_sdk_says_how_to_get_it(monkeypatch):
     import builtins
-    import agentdescent.mcp as m
+    import agentdescent.shell.mcp as m
 
     real = builtins.__import__
 

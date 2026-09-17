@@ -1036,7 +1036,7 @@ def test_the_loop_gives_up_and_lets_the_failure_become_a_node():
 
 
 def _task():
-    from agentdescent.evolution import Task
+    from agentdescent.loop.evolution import Task
     return Task(id="shard-0", prompt="p", meta={"shard": 0})
 
 
@@ -1104,7 +1104,7 @@ def test_the_model_prior_aims_the_exploration_term_rather_than_widening_it():
     separation large enough to matter: rated 8 against a mean of 5.5 a node gets
     2.12x the term, rated 2 it gets 0.13x.
     """
-    from agentdescent.selection import Candidate, FlatPuct
+    from agentdescent.schedule.selection import Candidate, FlatPuct
 
     rows = [Candidate(artifact_id="a", version=i, score=float(-i), prior=prior)
             for i, prior in enumerate([5.5] * 20 + [8.0, 2.0])]
@@ -1126,7 +1126,7 @@ def test_an_unrated_candidate_is_not_barred_from_selection():
     is never explored, which is worse than the uniform prior it replaced. On
     polynomial_real 5 of 30 replies carried no rating.
     """
-    from agentdescent.selection import Candidate, FlatPuct
+    from agentdescent.schedule.selection import Candidate, FlatPuct
 
     rows = [Candidate(artifact_id="a", version=0, score=1.0, prior=8.0),
             Candidate(artifact_id="a", version=1, score=1.0, prior=2.0),

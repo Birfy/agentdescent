@@ -27,10 +27,10 @@ import warnings
 
 import pytest
 
-from agentdescent.aggregator import Aggregator
-from agentdescent.evolution import AppendRules, Task, evolve
-from agentdescent.scheduler import AuditScheduler
-from agentdescent.verifier import (ThreeLayerVerifier, VerifierBudget,
+from agentdescent.merge.aggregator import Aggregator
+from agentdescent.loop.evolution import AppendRules, Task, evolve
+from agentdescent.schedule.scheduler import AuditScheduler
+from agentdescent.evaluate.verifier import (ThreeLayerVerifier, VerifierBudget,
                                    full_eval_of, shares_eval_counts)
 
 TASKS = [Task(id=str(i), prompt=f"q{i}", meta={"gold": "y"}) for i in range(20)]
@@ -131,10 +131,10 @@ def test_the_audit_gate_never_vetoes_on_the_cheap_sub_sample():
     both sides at 0.5. Two sections of the verifier page promise sub-sampling can
     never decide a commit.
     """
-    from agentdescent.aggregator import Aggregator, AggregatorConfig
-    from agentdescent.evolvable import Diff
-    from agentdescent.ledger import Ledger
-    from agentdescent.stats import BetaPosterior
+    from agentdescent.merge.aggregator import Aggregator, AggregatorConfig
+    from agentdescent.core.evolvable import Diff
+    from agentdescent.merge.ledger import Ledger
+    from agentdescent.merge.stats import BetaPosterior
 
     held_out = list(range(10))
 
@@ -323,7 +323,7 @@ def test_a_pre_rename_verifier_still_drives_a_whole_run_through_the_audit_gate()
     `oracle_shares_full_set = False` the gate cannot reuse the acceptance
     measurement either, so the old method is genuinely called.
     """
-    from agentdescent.policies import Policies
+    from agentdescent.core.policies import Policies
 
     class Legacy:
         """The four methods `VerifierProtocol` asked for before 0.6."""

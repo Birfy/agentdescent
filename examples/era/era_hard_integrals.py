@@ -44,9 +44,9 @@ import argparse
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
-from agentdescent.agents import Usage
-from agentdescent.evolution import EvolvingArtifact
-from agentdescent.governance import classify
+from agentdescent.actors.agents import Usage
+from agentdescent.loop.evolution import EvolvingArtifact
+from agentdescent.merge.governance import classify
 
 from examples._common import (
     add_standard_args,

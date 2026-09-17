@@ -19,9 +19,9 @@ import random
 
 import pytest
 
-from agentdescent.advantage import AdaptiveTrustRegion, GroupAdvantage, TrustRegion
-from agentdescent.evolvable import EvidenceCard
-from agentdescent.policies import AcceptDecision, MergeContext
+from agentdescent.merge.advantage import AdaptiveTrustRegion, GroupAdvantage, TrustRegion
+from agentdescent.core.evolvable import EvidenceCard
+from agentdescent.core.policies import AcceptDecision, MergeContext
 from bench.ab_run import _MIN_GROUP, _arm, _Fired, _fired_counts, main
 
 

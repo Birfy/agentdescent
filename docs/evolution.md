@@ -94,7 +94,7 @@ nothing else in the call changes.
 !!! tip "Where do `tasks` come from?"
     The `tasks` and `reward` are yours to define. To pull them from a public
     benchmark without writing HuggingFace paging/caching boilerplate, use the
-    [`agentdescent.dataloader`](dataloader.md) data layer (`hf_rows`, `fetch_text`,
+    [`agentdescent.actors.dataloader`](dataloader.md) data layer (`hf_rows`, `fetch_text`,
     `load_gated_hf`) — it is how every
     [self-evolution example](self-evolution-examples.md) loads its dataset.
 
@@ -156,7 +156,7 @@ and [execution](execution.md).
 
 ```python
 from agentdescent import Policies, Beam, DifficultyWeighted, AdvantageAcceptance
-from agentdescent.fusion import reflective_merge
+from agentdescent.merge.fusion import reflective_merge
 
 evolve(tasks, reward, agent=agent, policies=Policies(
     selection=Beam(4),
@@ -206,7 +206,7 @@ The building blocks in detail:
 ## 1. The actor — `agent=` (or `run=` + `propose=`)
 
 *What:* the thing that runs a task against the current artifact and, on a
-failure, proposes an improvement. *Module:* [`agentdescent.agents`](agents.md)
+failure, proposes an improvement. *Module:* [`agentdescent.actors.agents`](agents.md)
 provides the provider-agnostic **completion** (`prompt -> text`); `LLMAgent`
 adapts a completion into the two-method actor.
 
@@ -313,7 +313,7 @@ The eleven MethodPolicy ports ride four shared strategies — `ValidatedSlot`,
 ## 3. The parallelism method — `parallel=`
 
 *What:* how each round's tasks are partitioned across the `n_workers`. *Module:*
-[`agentdescent.parallel`](parallelism.md).
+[`agentdescent.schedule.parallel`](parallelism.md).
 
 ```python
 from agentdescent import DataParallel, TensorParallel
@@ -334,7 +334,7 @@ sees tasks it may act on. Out-of-section proposals are rejected and counted as
 
 `PipelineParallel` is **not** an `evolve()` mode — it needs one artifact per stage
 and `evolve()` evolves one, so passing it raises. Its stage ordering and blame
-attribution live in `agentdescent.parallel.PipelineChain`.
+attribution live in `agentdescent.schedule.parallel.PipelineChain`.
 
 Or your own — implement `plan(n_workers, round_index, keys) -> [WorkUnit]`:
 
@@ -358,7 +358,7 @@ Details + the DP/TP/PP semantics: [Customizable parallelism](parallelism.md).
 
 *What:* which task a worker rolls out next, from the shard
 [`parallel=`](parallelism.md) gave it. *Module:*
-[`agentdescent.sampling`](sampling.md).
+[`agentdescent.schedule.sampling`](sampling.md).
 
 A rollout is the expensive unit of work. Spending it on a task the agent already
 solves teaches the system nothing — no failure, no proposal, no diff — and the
@@ -655,7 +655,7 @@ limit, credit exhaustion) — progress isn't lost.
     up to one round: a round is dispatched or it is not, and stopping halfway
     would leave a half-merged round. Never compare on the budget you asked for.
     Compare on `result.rollouts` and `result.usage.calls`, which is what
-    [`agentdescent.baselines`](results.md) does — it refuses to call two arms
+    [`agentdescent.observe.baselines`](results.md) does — it refuses to call two arms
     equal-budget when their measured spends differ.
 
 !!! note "Three failure categories, not two"

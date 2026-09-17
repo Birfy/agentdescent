@@ -1,6 +1,6 @@
 # Backends — a tool-using agent over a document
 
-*Module:* [`agentdescent.backends`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/backends.py)
+*Module:* [`agentdescent.actors.backends`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/actors/backends.py)
 · *API:* [`AgentBackend`, `document_agent`, `openhands`, `tool_loop_backend`, …](api.md#document-backends)
 
 [`Completion`](agents.md) is `prompt -> text`, and that is enough for a task
@@ -20,8 +20,8 @@ on `Completion`, not a competitor to it.
 ## `document_agent` — adapt whatever agent you have
 
 ```python
-from agentdescent.agents import claude, claude_code
-from agentdescent.backends import document_agent, openhands
+from agentdescent.actors.agents import claude, claude_code
+from agentdescent.actors.backends import document_agent, openhands
 
 document_agent(openhands(model="openai/deepseek-v4-flash"))   # real tool agent
 document_agent(claude_code())                                  # same task, other agent
@@ -68,7 +68,7 @@ skill library reaches the agent as files.
 ### `openhands` — a real OpenHands agent
 
 ```python
-from agentdescent.backends import openhands, openhands_backend
+from agentdescent.actors.backends import openhands, openhands_backend
 
 agent = openhands(model="openai/deepseek-v4-pro", base_url="https://api.deepseek.com")
 backend = openhands_backend(model="openai/deepseek-v4-pro")   # == document_agent(openhands(...))
@@ -85,7 +85,7 @@ completion does — including [`tree_runner`](directory-evolution.md).
 ### `tool_loop_backend` — the dependency-free stand-in
 
 ```python
-from agentdescent.backends import tool_loop_backend
+from agentdescent.actors.backends import tool_loop_backend
 
 backend = tool_loop_backend(openai_compatible(model="glm-4.6"), max_steps=5)
 ```

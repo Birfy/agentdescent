@@ -9,8 +9,8 @@ the docstrings honest as the signatures change.
 import inspect
 import re
 
-from agentdescent.async_evolve import async_evolve
-from agentdescent.evolution import evolve
+from agentdescent.loop.async_evolve import async_evolve
+from agentdescent.loop.evolution import evolve
 
 
 def _documented_parameters(fn):
@@ -80,7 +80,7 @@ def test_public_entry_points_have_docstrings():
 
 def test_result_documents_the_error_contract():
     """`error` is the field that distinguishes a died run from a converged one."""
-    from agentdescent.evolution import EvolutionResult
+    from agentdescent.loop.evolution import EvolutionResult
 
     src = inspect.getsource(EvolutionResult)
     assert "error" in src and "clean run" in src
@@ -95,7 +95,7 @@ def test_docstring_constructor_examples_use_real_arguments():
     import dataclasses
     import re
 
-    import agentdescent.evolution as ev
+    import agentdescent.loop.evolution as ev
 
     bad = []
     for name in dir(ev):

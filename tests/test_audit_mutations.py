@@ -28,9 +28,9 @@ import pytest
 from agentdescent.audit.calibrator import Rectification, population_resid_sd
 from agentdescent.audit.drift import DEFAULT_L, DriftMonitor, EWMA
 from agentdescent.audit.gate import RectifiedAcceptance, discount_for
-from agentdescent.defaults import DefaultAcceptance
-from agentdescent.policies import MergeContext
-from agentdescent.stats import BetaPosterior
+from agentdescent.merge.defaults import DefaultAcceptance
+from agentdescent.core.policies import MergeContext
+from agentdescent.merge.stats import BetaPosterior
 
 
 class _S:

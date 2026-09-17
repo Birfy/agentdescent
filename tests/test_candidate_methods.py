@@ -10,9 +10,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentdescent.agents import Usage, metered
-from agentdescent.evolution import Task
-from agentdescent.fusion import KeepContradictions, ReflectiveFusion
+from agentdescent.actors.agents import Usage, metered
+from agentdescent.loop.evolution import Task
+from agentdescent.merge.fusion import KeepContradictions, ReflectiveFusion
 
 from bench.candidate_methods import (ALGORITHMS,
                                      PROPOSAL_CALLS_PER_CANDIDATE, main)
@@ -646,7 +646,7 @@ def test_population_aggregator_feeds_selection_a_real_archive():
     """
     from dataclasses import replace as _replace
 
-    from agentdescent.policies import Policies as _Policies
+    from agentdescent.core.policies import Policies as _Policies
     from examples.aflow.aflow_workflow_search import SoftMixed
 
     class RecordingSelection(SoftMixed):

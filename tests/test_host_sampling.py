@@ -19,7 +19,7 @@ import urllib.request
 
 import pytest
 
-from agentdescent.host_sampling import (
+from agentdescent.shell.host_sampling import (
     SAMPLING_TOKEN_ENV,
     SAMPLING_URL_ENV,
     SamplingBridge,
@@ -143,8 +143,8 @@ def test_the_cli_route_is_what_makes_this_usable_at_all():
     The names are the ones each host really sends at `initialize`, captured from
     a logging shim in front of the server.
     """
-    from agentdescent.host_sampling import HOST_CLI_ENV, host_cli_for_client
-    from agentdescent.mcp import Tools
+    from agentdescent.shell.host_sampling import HOST_CLI_ENV, host_cli_for_client
+    from agentdescent.shell.mcp import Tools
 
     assert host_cli_for_client("claude-code") == "claude_code"
     assert host_cli_for_client("opencode") == "opencode"
@@ -159,8 +159,8 @@ def test_the_cli_route_is_what_makes_this_usable_at_all():
 
 def test_host_model_falls_back_to_the_hosts_cli(monkeypatch):
     """With no bridge but a host CLI named, the reflection goes through it."""
-    import agentdescent.agents as agents
-    from agentdescent.host_sampling import HOST_CLI_ENV
+    import agentdescent.actors.agents as agents
+    from agentdescent.shell.host_sampling import HOST_CLI_ENV
 
     monkeypatch.delenv(SAMPLING_URL_ENV, raising=False)
     monkeypatch.setenv(HOST_CLI_ENV, "claude_code")
@@ -179,8 +179,8 @@ def test_host_model_falls_back_to_the_hosts_cli(monkeypatch):
 
 def test_a_dead_bridge_falls_back_rather_than_failing_the_run(monkeypatch):
     """The session closing is the expected end of a bridge, not of the run."""
-    import agentdescent.agents as agents
-    from agentdescent.host_sampling import HOST_CLI_ENV
+    import agentdescent.actors.agents as agents
+    from agentdescent.shell.host_sampling import HOST_CLI_ENV
 
     monkeypatch.setenv(SAMPLING_URL_ENV, "http://127.0.0.1:9/sample")
     monkeypatch.setenv(SAMPLING_TOKEN_ENV, "irrelevant")
@@ -215,7 +215,7 @@ sys.path.insert(0, %(root)r)
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.types import CreateMessageResult, TextContent
-from agentdescent import demo
+from agentdescent.shell import demo
 
 CALLS = []
 
@@ -231,7 +231,7 @@ async def main():
     spec = demo.build(root)
     spec["reflect"] = {"ref": "host_model"}
     params = StdioServerParameters(
-        command=sys.executable, args=["-m", "agentdescent.cli", "--store", store, "mcp"],
+        command=sys.executable, args=["-m", "agentdescent.shell.cli", "--store", store, "mcp"],
         env={**os.environ, "PYTHONPATH": %(root)r})
     async with stdio_client(params) as (r, w):
         async with ClientSession(r, w, sampling_callback=sampling_callback) as s:
@@ -277,7 +277,7 @@ def test_a_detached_run_really_reflects_on_the_hosts_model():
 def test_start_says_when_the_host_cannot_lend_its_model():
     """Without this the run just proposes nothing, which reads as "it learned
     nothing" rather than "it could not ask"."""
-    from agentdescent.mcp import Tools
+    from agentdescent.shell.mcp import Tools
 
     t = Tools()
     assert t.host_model_env() == {}
@@ -295,9 +295,9 @@ def test_a_host_model_spec_is_warned_about_outside_a_host(monkeypatch, tmp_path)
     reward 0.0. Every proposal raised and the run reported only silence -- which
     reads as "it learned nothing" rather than "it had nothing to ask".
     """
-    from agentdescent.cli import _unusable_refs
-    from agentdescent.evolvespec import EvolveSpec
-    from agentdescent.host_sampling import HOST_CLI_ENV, SAMPLING_URL_ENV
+    from agentdescent.shell.cli import _unusable_refs
+    from agentdescent.core.evolvespec import EvolveSpec
+    from agentdescent.shell.host_sampling import HOST_CLI_ENV, SAMPLING_URL_ENV
 
     cases = tmp_path / "cases.jsonl"
     cases.write_text('{"prompt": "q", "gold": "a"}\n', encoding="utf-8")

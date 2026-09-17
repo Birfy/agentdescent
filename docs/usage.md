@@ -67,7 +67,7 @@ offline in seconds; `--agent claude-code` swaps in the real CLI agent, and
 
 Nineteen ports of the latest self-evolution algorithms (see
 [the catalog](self-evolution-examples.md)). Twelve load a real benchmark through
-the [`agentdescent.dataloader`](dataloader.md) data layer; the other six run
+the [`agentdescent.actors.dataloader`](dataloader.md) data layer; the other six run
 bundled deterministic domains. The eleven [`MethodPolicy`](policies.md) ports
 share a runner and are measured together in the
 [runtime matrix](matrix-overview.md) (`python -m bench.candidate_methods`).
@@ -179,7 +179,7 @@ them to reproduce the experiments, not to evolve your own artifact.
 
 ```python
 import tempfile
-from agentdescent.domains.router import make_task_universe
+from agentdescent.reference.domains.router import make_task_universe
 from agentdescent import AgentDescent
 
 universe = make_task_universe(seed=7)
@@ -192,7 +192,7 @@ with tempfile.TemporaryDirectory() as repo:
 ```python
 import tempfile
 from agentdescent import AsyncAgentDescent, AsyncConfig
-from agentdescent.domains.router import make_task_universe
+from agentdescent.reference.domains.router import make_task_universe
 from agentdescent import get_policy
 
 universe = make_task_universe(seed=7)
@@ -273,7 +273,7 @@ registration, not hard-coded.** To evolve something new, provide four things.
 
 ### 4.1 An `Evolvable`
 
-Implement the protocol from `agentdescent/evolvable.py`
+Implement the protocol from `agentdescent/core/evolvable.py`
 ([reference: `RouterSkill`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/domains/router.py)):
 
 ```python

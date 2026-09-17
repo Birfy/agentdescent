@@ -21,9 +21,9 @@ from agentdescent.audit.calibrator import (STALE_INFLATION, Rectification,
 from agentdescent.audit.gate import (MIN_KAPPA, Adjustment, RectifiedAcceptance,
                                      VerifierWatch, discount_for,
                                      rectified_counts)
-from agentdescent.defaults import DefaultAcceptance
-from agentdescent.policies import AcceptDecision, MergeContext
-from agentdescent.stats import BetaPosterior
+from agentdescent.merge.defaults import DefaultAcceptance
+from agentdescent.core.policies import AcceptDecision, MergeContext
+from agentdescent.merge.stats import BetaPosterior
 
 # the real Phase 0 numbers, so the tests fail if the arithmetic drifts away from
 # what was actually measured
@@ -533,7 +533,7 @@ def test_a_glob_catches_the_keys_the_verifier_reads():
 
 
 def test_a_governance_layer_can_be_watched_wholesale():
-    from agentdescent.governance import Layer
+    from agentdescent.merge.governance import Layer
 
     cal = _Cal()
     watch = VerifierWatch(cal, layers=[Layer.L1_SLOW])

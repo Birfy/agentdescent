@@ -1,7 +1,7 @@
 # The reference orchestrator and the reference domain
 
-*Modules:* [`agentdescent.orchestrator`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/orchestrator.py)
-· [`agentdescent.domains.router`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/domains/router.py)
+*Modules:* [`agentdescent.reference.orchestrator`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/reference/orchestrator.py)
+· [`agentdescent.reference.domains.router`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/domains/router.py)
 · *API:* [`AgentDescent`, `RoundStat`, `run_fork_baseline`](api.md#the-reference-orchestrator)
 
 [`evolve()`](evolution.md) is the entry point you build on. `AgentDescent` is the
@@ -38,7 +38,7 @@ That is exactly the structure needed to show that merging concurrent diffs beats
 forking them, and it runs in milliseconds.
 
 ```python
-from agentdescent.domains.router import make_task_universe, RouterSkill, router_eval
+from agentdescent.reference.domains.router import make_task_universe, RouterSkill, router_eval
 ```
 
 `RouterSkill` is a hand-written [`Evolvable`](data-model.md) — the worked example
@@ -47,14 +47,14 @@ to copy when your artifact is not a flat `{key: value}` dict.
 !!! note "`RouterTask` is not `Task`"
     The domain's own task type is `RouterTask(text, label, keyword)`. It is
     aliased to `Task` inside that module for backwards compatibility, which is a
-    genuine collision with [`agentdescent.evolution.Task`](evolution.md) —
+    genuine collision with [`agentdescent.loop.evolution.Task`](evolution.md) —
     disjoint fields, no relationship. Prefer `RouterTask` in new code.
 
 ## `AgentDescent` — the merge-based loop
 
 ```python
 from agentdescent import AgentDescent
-from agentdescent.domains.router import make_task_universe
+from agentdescent.reference.domains.router import make_task_universe
 
 system = AgentDescent(repo_path, make_task_universe(seed=7),
                       n_workers=6, noise=0.15, refresh_interval=2, seed=0)
@@ -110,7 +110,7 @@ table, turn the failures into a diff of up to `max_ops` keyword fixes, attach an
 engine takes:
 
 ```python
-from agentdescent.domains.router import (
+from agentdescent.reference.domains.router import (
     RouterStrategy, cluster_tasks, router_propose, router_reward, router_run)
 
 train, held = cluster_tasks(universe, n_clusters=6)

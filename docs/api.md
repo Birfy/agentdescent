@@ -19,7 +19,7 @@ way it is; this page is the *what*.
 
 ## The loop
 
-`evolve()`, the artifact, the actor, and what a run returns. &nbsp;·&nbsp; `agentdescent.evolution` &nbsp;·&nbsp; [guide](evolution.md)
+`evolve()`, the artifact, the actor, and what a run returns. &nbsp;·&nbsp; `agentdescent.loop.evolution` &nbsp;·&nbsp; [guide](evolution.md)
 
 ### `Agent`
 
@@ -330,7 +330,7 @@ tasks_from(
 
 ## Meta-evolution
 
-Evolve a decision slot of `evolve()` itself, and validate it elsewhere. &nbsp;·&nbsp; `agentdescent.meta` &nbsp;·&nbsp; [guide](meta-evolution.md)
+Evolve a decision slot of `evolve()` itself, and validate it elsewhere. &nbsp;·&nbsp; `agentdescent.loop.meta` &nbsp;·&nbsp; [guide](meta-evolution.md)
 
 ### `MetaOutcome(...)`
 
@@ -553,7 +553,7 @@ transfer_ratio(
 
 ## Agents and models
 
-Any `prompt -> text` is a completion; a `WorkspaceAgent` also has a directory. &nbsp;·&nbsp; `agentdescent.agents` &nbsp;·&nbsp; [guide](agents.md)
+Any `prompt -> text` is a completion; a `WorkspaceAgent` also has a directory. &nbsp;·&nbsp; `agentdescent.actors.agents` &nbsp;·&nbsp; [guide](agents.md)
 
 ### `AgentError`
 
@@ -743,7 +743,7 @@ worker_env(
 
 ## Directories as state
 
-Load a directory into state, materialise it back, serialise it losslessly. &nbsp;·&nbsp; `agentdescent.filetree` &nbsp;·&nbsp; [guide](directory-evolution.md)
+Load a directory into state, materialise it back, serialise it losslessly. &nbsp;·&nbsp; `agentdescent.artifacts.filetree` &nbsp;·&nbsp; [guide](directory-evolution.md)
 
 ### `TreeError`
 
@@ -801,7 +801,7 @@ A human/LLM-readable listing (paths + sizes), for prompts and logs.
 
 ## The file-tree strategy
 
-One state key per file, plus the multi-file proposal protocol. &nbsp;·&nbsp; `agentdescent.treestrategy` &nbsp;·&nbsp; [guide](directory-evolution.md)
+One state key per file, plus the multi-file proposal protocol. &nbsp;·&nbsp; `agentdescent.artifacts.treestrategy` &nbsp;·&nbsp; [guide](directory-evolution.md)
 
 ### `FileTree(...)`
 
@@ -848,7 +848,7 @@ tree_reflector(
 
 ## Runners
 
-Give a real agent the candidate directory, one workspace per rollout. &nbsp;·&nbsp; `agentdescent.runners` &nbsp;·&nbsp; [guide](directory-evolution.md)
+Give a real agent the candidate directory, one workspace per rollout. &nbsp;·&nbsp; `agentdescent.actors.runners` &nbsp;·&nbsp; [guide](directory-evolution.md)
 
 ### `PluginHost(...)`
 
@@ -932,7 +932,7 @@ tree_runner(
 
 ## The data model
 
-What a unit of evolution is, and what a gradient looks like here. &nbsp;·&nbsp; `agentdescent.evolvable` &nbsp;·&nbsp; [guide](data-model.md)
+What a unit of evolution is, and what a gradient looks like here. &nbsp;·&nbsp; `agentdescent.core.evolvable` &nbsp;·&nbsp; [guide](data-model.md)
 
 ### `Contract(...)`
 
@@ -1010,7 +1010,7 @@ Per-diff staleness `eta` (design doc, section 4.2).
 
 ## The aggregator (the optimizer)
 
-Staleness filter, conflict resolution, fusion, acceptance, commit. &nbsp;·&nbsp; `agentdescent.aggregator` &nbsp;·&nbsp; [guide](aggregator.md)
+Staleness filter, conflict resolution, fusion, acceptance, commit. &nbsp;·&nbsp; `agentdescent.merge.aggregator` &nbsp;·&nbsp; [guide](aggregator.md)
 
 ### `Aggregator(...)`
 
@@ -1127,7 +1127,7 @@ Merge complementary (non-contradicting) diffs into one candidate.
 
 ## The ledger
 
-The git-backed, compare-and-swap artifact store. &nbsp;·&nbsp; `agentdescent.ledger` &nbsp;·&nbsp; [guide](ledger.md)
+The git-backed, compare-and-swap artifact store. &nbsp;·&nbsp; `agentdescent.merge.ledger` &nbsp;·&nbsp; [guide](ledger.md)
 
 ### `CASConflict`
 
@@ -1171,7 +1171,7 @@ An immutable view of one branch at one point in time.
 
 ## The verifier
 
-Rule / learned / oracle, and the budget that bounds the expensive one. &nbsp;·&nbsp; `agentdescent.verifier` &nbsp;·&nbsp; [guide](verifier.md)
+Rule / learned / oracle, and the budget that bounds the expensive one. &nbsp;·&nbsp; `agentdescent.evaluate.verifier` &nbsp;·&nbsp; [guide](verifier.md)
 
 ### `ThreeLayerVerifier(...)`
 
@@ -2473,7 +2473,7 @@ A stable id for the verifier `fn`, so a correction can be bound to it.
 
 ## Governance
 
-L0 frozen / L1 slow / L2 fast, assigned by blast radius. &nbsp;·&nbsp; `agentdescent.governance` &nbsp;·&nbsp; [guide](governance.md)
+L0 frozen / L1 slow / L2 fast, assigned by blast radius. &nbsp;·&nbsp; `agentdescent.merge.governance` &nbsp;·&nbsp; [guide](governance.md)
 
 ### `GovernanceError`
 
@@ -2503,7 +2503,7 @@ Assign an artifact to a governance layer.
 
 ## Staleness policies
 
-What to do with a diff proposed against a version that has moved. &nbsp;·&nbsp; `agentdescent.staleness` &nbsp;·&nbsp; [guide](staleness.md)
+What to do with a diff proposed against a version that has moved. &nbsp;·&nbsp; `agentdescent.merge.staleness` &nbsp;·&nbsp; [guide](staleness.md)
 
 ### `FullStaleness()`
 
@@ -2535,7 +2535,7 @@ What the aggregator should do with a (possibly stale) evidence card.
 
 ## Parallelism methods
 
-How a round's work is split across workers: DP / TP / PP. &nbsp;·&nbsp; `agentdescent.parallel` &nbsp;·&nbsp; [guide](parallelism.md)
+How a round's work is split across workers: DP / TP / PP. &nbsp;·&nbsp; `agentdescent.schedule.parallel` &nbsp;·&nbsp; [guide](parallelism.md)
 
 ### `ClusterParallel(...)`
 
@@ -2637,7 +2637,7 @@ Split a task list into `n_shards` disjoint shards, round-robin.
 
 ## Task sampling
 
-Which task a worker rolls out next. &nbsp;·&nbsp; `agentdescent.sampling` &nbsp;·&nbsp; [guide](sampling.md)
+Which task a worker rolls out next. &nbsp;·&nbsp; `agentdescent.schedule.sampling` &nbsp;·&nbsp; [guide](sampling.md)
 
 ### `DifficultyWeighted(...)`
 
@@ -2672,7 +2672,7 @@ Chooses the next task id for a worker, and learns from the outcome.
 
 ## Candidate selection
 
-Which candidate the next batch of workers starts from. &nbsp;·&nbsp; `agentdescent.selection` &nbsp;·&nbsp; [guide](selection.md)
+Which candidate the next batch of workers starts from. &nbsp;·&nbsp; `agentdescent.schedule.selection` &nbsp;·&nbsp; [guide](selection.md)
 
 ### `Archive(...)`
 
@@ -2759,7 +2759,7 @@ Candidates no other candidate beats on every task and betters on one.
 
 ## The population layer
 
-What makes a selection policy take effect on a one-branch ledger. &nbsp;·&nbsp; `agentdescent.population` &nbsp;·&nbsp; [guide](selection.md)
+What makes a selection policy take effect on a one-branch ledger. &nbsp;·&nbsp; `agentdescent.schedule.population` &nbsp;·&nbsp; [guide](selection.md)
 
 ### `PopulationAggregator(...)`
 
@@ -2811,7 +2811,7 @@ population_factory(
 
 ## Model-assisted fusion
 
-Combine competing values for the same key, when a dict update cannot. &nbsp;·&nbsp; `agentdescent.fusion` &nbsp;·&nbsp; [guide](aggregator.md)
+Combine competing values for the same key, when a dict update cannot. &nbsp;·&nbsp; `agentdescent.merge.fusion` &nbsp;·&nbsp; [guide](aggregator.md)
 
 ### `KeepContradictions()`
 
@@ -2845,7 +2845,7 @@ The two policies model-merging needs, as `Policies` keyword arguments.
 
 ## Borrowed RL decision rules
 
-Group-relative advantage, an adaptive trust region, distance from stable. &nbsp;·&nbsp; `agentdescent.advantage` &nbsp;·&nbsp; [guide](concepts.md)
+Group-relative advantage, an adaptive trust region, distance from stable. &nbsp;·&nbsp; `agentdescent.merge.advantage` &nbsp;·&nbsp; [guide](concepts.md)
 
 ### `AdaptiveTrustRegion(...)`
 
@@ -2901,7 +2901,7 @@ Fraction of keys on which two artifact states differ, in `[0, 1]`.
 
 ## Scheduling and audits
 
-Duration-aware dispatch, straggler handling, and the oracle audit queue. &nbsp;·&nbsp; `agentdescent.scheduler` &nbsp;·&nbsp; [guide](duration-scheduling.md)
+Duration-aware dispatch, straggler handling, and the oracle audit queue. &nbsp;·&nbsp; `agentdescent.schedule.scheduler` &nbsp;·&nbsp; [guide](duration-scheduling.md)
 
 ### `AuditScheduler(max_queued: int = 4096, collect: bool = False) -> None`
 
@@ -2967,7 +2967,7 @@ Longest-Processing-Time-first assignment of items to workers.
 
 ## The data layer
 
-Datasets, splits, and cached fetches from HuggingFace or raw URLs. &nbsp;·&nbsp; `agentdescent.dataloader` &nbsp;·&nbsp; [guide](dataloader.md)
+Datasets, splits, and cached fetches from HuggingFace or raw URLs. &nbsp;·&nbsp; `agentdescent.actors.dataloader` &nbsp;·&nbsp; [guide](dataloader.md)
 
 ### `Dataset(...)`
 
@@ -3006,7 +3006,7 @@ split_dataset(
 
 ## An evolve() call as data
 
-The JSON spec a host agent writes and the CLI / MCP server run. &nbsp;·&nbsp; `agentdescent.evolvespec` &nbsp;·&nbsp; [guide](plugins.md)
+The JSON spec a host agent writes and the CLI / MCP server run. &nbsp;·&nbsp; `agentdescent.core.evolvespec` &nbsp;·&nbsp; [guide](plugins.md)
 
 ### `EvolveSpec(...)`
 
@@ -3079,7 +3079,7 @@ Compose and run. `hooks` are `compose`'s keyword arguments.
 
 ## Barrier-free evolution
 
-`evolve()` without the round barrier. &nbsp;·&nbsp; `agentdescent.async_evolve` &nbsp;·&nbsp; [guide](async.md)
+`evolve()` without the round barrier. &nbsp;·&nbsp; `agentdescent.loop.async_evolve` &nbsp;·&nbsp; [guide](async.md)
 
 ### `async_evolve(...)`
 
@@ -3194,7 +3194,7 @@ async_evolve(
 
 ## The async orchestrator
 
-The reference barrier-free runtime and its statistics. &nbsp;·&nbsp; `agentdescent.async_runtime` &nbsp;·&nbsp; [guide](async.md)
+The reference barrier-free runtime and its statistics. &nbsp;·&nbsp; `agentdescent.reference.async_runtime` &nbsp;·&nbsp; [guide](async.md)
 
 ### `AsyncAgentDescent(...)`
 
@@ -3263,7 +3263,7 @@ AsyncStats(
 
 ## The reference orchestrator
 
-The round loop the research results were measured with. &nbsp;·&nbsp; `agentdescent.orchestrator` &nbsp;·&nbsp; [guide](orchestrator.md)
+The round loop the research results were measured with. &nbsp;·&nbsp; `agentdescent.reference.orchestrator` &nbsp;·&nbsp; [guide](orchestrator.md)
 
 ### `AgentDescent(...)`
 
@@ -3318,7 +3318,7 @@ run_fork_baseline(
 
 ## Document backends
 
-A tool-using agent over a document that is too big for a prompt. &nbsp;·&nbsp; `agentdescent.backends` &nbsp;·&nbsp; [guide](backends.md)
+A tool-using agent over a document that is too big for a prompt. &nbsp;·&nbsp; `agentdescent.actors.backends` &nbsp;·&nbsp; [guide](backends.md)
 
 ### `AgentBackend`
 
@@ -3377,7 +3377,7 @@ A dependency-free `grep`/`read` ReAct loop over the document.
 
 ## Ready-made scorers
 
-The reward functions everyone writes, with the details right. &nbsp;·&nbsp; `agentdescent.rewards` &nbsp;·&nbsp; [guide](rewards.md)
+The reward functions everyone writes, with the details right. &nbsp;·&nbsp; `agentdescent.actors.rewards` &nbsp;·&nbsp; [guide](rewards.md)
 
 ### `GraderError`
 
@@ -3420,7 +3420,7 @@ Resolve `score` -- a name from `SCORERS` or a `(task, output) -> float` callable
 
 ## Equal-budget baselines
 
-merge-of-N against best-of-N fork and serial, on one rollout budget. &nbsp;·&nbsp; `agentdescent.baselines` &nbsp;·&nbsp; [guide](results.md)
+merge-of-N against best-of-N fork and serial, on one rollout budget. &nbsp;·&nbsp; `agentdescent.observe.baselines` &nbsp;·&nbsp; [guide](results.md)
 
 ### `ArmResult(...)`
 
@@ -3812,7 +3812,7 @@ The default: a bounded pool of threads in this process.
 
 ### `VerifierProtocol`
 
-Four methods, from `grep 'self\.verifier\.' agentdescent/aggregator.py`.
+Four methods, from `grep 'self\.verifier\.' agentdescent/merge/aggregator.py`.
 
 ### `VersionVector`
 

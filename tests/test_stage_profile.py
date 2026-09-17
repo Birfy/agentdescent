@@ -26,9 +26,9 @@ import time
 import pytest
 
 from agentdescent import AppendRules, Task, evolve
-from agentdescent.async_evolve import async_evolve
-from agentdescent.evolution import EvolutionResult
-from agentdescent.metrics import Meter
+from agentdescent.loop.async_evolve import async_evolve
+from agentdescent.loop.evolution import EvolutionResult
+from agentdescent.observe.metrics import Meter
 
 
 # ---------------------------------------------------------------------------

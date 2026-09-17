@@ -1,6 +1,6 @@
 # The ledger — the versioned artifact store
 
-*Module:* [`agentdescent.ledger`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/ledger.py)
+*Module:* [`agentdescent.merge.ledger`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/merge/ledger.py)
 · *API:* [`Ledger`, `Snapshot`, `CASConflict`, …](api.md#the-ledger)
 
 The ledger is the parameter server: the one place an artifact's current value

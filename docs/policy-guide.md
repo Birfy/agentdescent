@@ -91,8 +91,8 @@ to write:
 
 ```python
 from agentdescent import Policies, evolve
-from agentdescent.selection import Beam
-from agentdescent.sampling import DifficultyWeighted
+from agentdescent.schedule.selection import Beam
+from agentdescent.schedule.sampling import DifficultyWeighted
 
 evolve(tasks, reward, agent=agent,
        policies=Policies(selection=Beam(4), task_sampler=DifficultyWeighted()))
@@ -107,7 +107,7 @@ The shipped wrappers (`AdvantageAcceptance`, `StableDistanceAcceptance`,
 install hooks (§5), so they need nothing from you:
 
 ```python
-from agentdescent.advantage import AdvantageAcceptance, AdvantageConflict
+from agentdescent.merge.advantage import AdvantageAcceptance, AdvantageConflict
 
 evolve(tasks, reward, agent=agent, policies=Policies(
     acceptance=AdvantageAcceptance(strength=1.0),   # shipped gate + a prior shift
@@ -117,7 +117,7 @@ evolve(tasks, reward, agent=agent, policies=Policies(
 
 Writing your own wrapper is the same shape: hold `inner`, add the term,
 defer for everything else, and forward `bind` / `configure` (copy the
-five-line pattern from `agentdescent.advantage`).
+five-line pattern from `agentdescent.merge.advantage`).
 
 **Replace it.** When the decision *rule* is different — a strict-improvement
 gate, a curriculum sampler, a tree-search selection — write an object with
@@ -135,7 +135,7 @@ own admission rule — none of the three fits, and the
 ## 4. Writing a policy: the contract for each slot
 
 Everything below is what the engine actually calls; the module docstring of
-`agentdescent/policies.py` explains why the contracts were written from the
+`agentdescent/core/policies.py` explains why the contracts were written from the
 call sites rather than the docs. Each entry names the method, what it may
 rely on, and the one thing that goes wrong most.
 
@@ -189,7 +189,7 @@ never the whole round. To *score* a tie you need the verifier's `cheap_eval`
 
 Given the kept diffs, return the one diff that goes to the gate, the artifact
 with it applied, and whether it is a union. `fuse_diffs` in
-`agentdescent.aggregator` builds a union for you; contradictions must be gone
+`agentdescent.merge.aggregator` builds a union for you; contradictions must be gone
 by now or the union is ill-defined. Optionally keep a `trials` list of
 `FusionTrial`s and the engine carries it onto `result.fusion_trials` — leave
 it out and `fusion_stats()` reports "not instrumented" rather than "never
@@ -238,7 +238,7 @@ Neither is required; a policy with neither is left alone. A wrapper forwards
 both to its `inner`. A shipped default that is *driven by hand* without ever
 being installed raises `PolicyUnboundError` naming the missing piece; in a
 test, `install_policy(policy, verifier, config)` from
-`agentdescent.aggregator` does what the aggregator would.
+`agentdescent.merge.aggregator` does what the aggregator would.
 
 Two consequences worth stating. Values you pass explicitly are never
 overwritten — `DefaultAcceptance(base_delta=0.3)` keeps `0.3` and takes the
@@ -255,7 +255,7 @@ runnable as written — no credentials, one second:
 
 ```python
 from agentdescent import AppendRules, Policies, Task, evolve
-from agentdescent.policies import AcceptDecision
+from agentdescent.core.policies import AcceptDecision
 
 tasks = [Task(id=f"t{i}", prompt="q", meta={"gold": f"t{i}"}) for i in range(8)]
 reward = lambda task, output: 1.0 if output == task.meta["gold"] else 0.0

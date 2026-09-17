@@ -63,7 +63,7 @@ agentdescent demo --dir /tmp/ad-demo
 
 It writes a skill whose `references/rules.md` names the wrong column, twelve
 CSVs with known totals, and a spec pointing at
-`agentdescent.demo:offline_agent` — a subprocess that reads the skill off disk,
+`agentdescent.shell.demo:offline_agent` — a subprocess that reads the skill off disk,
 so staging, the workspace, the ledger, the merge and the held-out gate all run
 for real. Only the model is replaced.
 
@@ -81,8 +81,8 @@ agentdescent apply <run_id> --dry-run
 
 `apply` without `--dry-run` writes it back and leaves a backup at
 `csv-total.bak-0`. To rehearse *your own* spec against the same free pair, point
-its `agent` and `reflect` at `agentdescent.demo:offline_agent` and
-`{"ref": "agentdescent.demo:offline_reflector", "call": false}` — both are
+its `agent` and `reflect` at `agentdescent.shell.demo:offline_agent` and
+`{"ref": "agentdescent.shell.demo:offline_reflector", "call": false}` — both are
 public and inside the ref allowlist.
 
 ## 4. Each host

@@ -6,8 +6,8 @@ model-merged); the Challenger's uncertainty signal from **repeated solver
 samples** -- two solver attempts per generated task give an agreement rate, and
 ``min(p̂, 1−p̂)`` (upstream's reward, maximal at 50%) is surfaced in the
 Challenger update; **GRPO's group-relative shape** at the engine's acceptance
-seam via :class:`~agentdescent.advantage.AdvantageAcceptance`; and frontier
-targeting via :class:`~agentdescent.sampling.DifficultyWeighted`, whose
+seam via :class:`~agentdescent.merge.advantage.AdvantageAcceptance`; and frontier
+targeting via :class:`~agentdescent.schedule.sampling.DifficultyWeighted`, whose
 ``4p(1−p)`` weight shares its peak and zeros with ``min(p̂,1−p̂)`` exactly.
 
 Boundaries: verbal role memories replace two GRPO-trained checkpoints; no
@@ -18,10 +18,10 @@ from __future__ import annotations
 
 from typing import Optional
 
-from agentdescent.advantage import AdvantageAcceptance
-from agentdescent.evolution import Task
-from agentdescent.policies import Policies
-from agentdescent.sampling import DifficultyWeighted
+from agentdescent.merge.advantage import AdvantageAcceptance
+from agentdescent.loop.evolution import Task
+from agentdescent.core.policies import Policies
+from agentdescent.schedule.sampling import DifficultyWeighted
 
 from examples._measure import canonical_json, parse_json_object
 from examples._method_policy import (FieldSlots, MethodPolicy, clip_text,

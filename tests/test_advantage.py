@@ -13,13 +13,13 @@ rather than quietly editing the score it was judged on.
 
 import pytest
 
-from agentdescent.advantage import (
+from agentdescent.merge.advantage import (
     AdaptiveTrustRegion, AdvantageAcceptance, AdvantageConflict, GroupAdvantage,
     StableDistanceAcceptance, TrustRegion, state_distance,
 )
-from agentdescent.aggregator import AggregatorConfig
-from agentdescent.evolution import AppendRules, Task, evolve
-from agentdescent.policies import AcceptDecision, MergeContext, Policies
+from agentdescent.merge.aggregator import AggregatorConfig
+from agentdescent.loop.evolution import AppendRules, Task, evolve
+from agentdescent.core.policies import AcceptDecision, MergeContext, Policies
 
 
 # -- 1. group-relative advantage --------------------------------------------
@@ -119,10 +119,10 @@ def _advantages_seen(**kw):
     class Watching:
         def resolve(self, artifact, cards):
             seen.extend(getattr(c, "advantage", "missing") for c in cards)
-            from agentdescent.defaults import DefaultConflict
+            from agentdescent.merge.defaults import DefaultConflict
             return DefaultConflict(self.verifier).resolve(artifact, cards)
 
-    from agentdescent.aggregator import Aggregator
+    from agentdescent.merge.aggregator import Aggregator
 
     def factory(ledger, verifier, audit, config, policy):
         agg = Aggregator(ledger, verifier, audit, config, staleness_policy=policy)
@@ -283,7 +283,7 @@ def test_it_stops_at_its_bounds():
 def test_the_aggregator_honours_an_adaptive_region_rather_than_the_constants():
     """A region that moved while the size check read `config` would be recorded
     as adapting and change nothing."""
-    from agentdescent.aggregator import Aggregator
+    from agentdescent.merge.aggregator import Aggregator
 
     policy = AdaptiveTrustRegion(initial=TrustRegion(ops=1, chars=10))
     config = AggregatorConfig(trust_region_ops=99, trust_region_chars=10 ** 6,
@@ -299,7 +299,7 @@ def test_a_run_with_an_adaptive_region_still_finishes():
 
 
 def test_no_policy_leaves_the_constants_in_charge():
-    from agentdescent.aggregator import Aggregator
+    from agentdescent.merge.aggregator import Aggregator
 
     config = AggregatorConfig(trust_region_ops=7, trust_region_chars=11)
     region = Aggregator._trust_region(type("A", (), {"config": config})())
@@ -366,10 +366,10 @@ def test_the_aggregator_measures_the_distance_it_hands_to_the_policy():
     class Watching:
         def accept(self, ctx):
             seen.append(ctx.stable_distance)
-            from agentdescent.defaults import DefaultAcceptance
+            from agentdescent.merge.defaults import DefaultAcceptance
             return DefaultAcceptance(0.5, 64, 4000).accept(ctx)
 
-    from agentdescent.aggregator import Aggregator
+    from agentdescent.merge.aggregator import Aggregator
 
     def factory(ledger, verifier, audit, config, policy):
         agg = Aggregator(ledger, verifier, audit, config, staleness_policy=policy)
@@ -394,7 +394,7 @@ def test_advantage_conflict_defers_when_it_has_nothing_to_add():
             calls.append(cards)
             return list(cards)[:1], 1
 
-    from agentdescent.evolvable import Diff
+    from agentdescent.core.evolvable import Diff
 
     def card(advantage, value):
         c = type("C", (), {})()
@@ -413,7 +413,7 @@ def test_advantage_conflict_keeps_the_higher_advantage_side():
         def resolve(self, artifact, cards):
             raise AssertionError("should not be consulted for a clear margin")
 
-    from agentdescent.evolvable import Diff
+    from agentdescent.core.evolvable import Diff
 
     def card(advantage, value):
         c = type("C", (), {})()
@@ -430,7 +430,7 @@ def test_advantage_conflict_keeps_the_higher_advantage_side():
 def test_an_inner_rule_that_keeps_both_does_not_spin():
     """A wrapped rule is user code. One that returns a contradicting pair intact
     would otherwise be asked the same question forever."""
-    from agentdescent.evolvable import Diff
+    from agentdescent.core.evolvable import Diff
 
     class KeepsBoth:
         def resolve(self, artifact, cards):

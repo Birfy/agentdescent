@@ -48,14 +48,14 @@ import re
 import string
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
-from agentdescent.agents import Usage
-from agentdescent.aggregator import AggregatorProtocol, MergeReport
-from agentdescent.dataloader import Dataset, hf_rows, split_dataset
-from agentdescent.evolvable import Diff, EvidenceCard
-from agentdescent.evolution import EvolvingArtifact, LLMAgent, Task, evolve, rule_id
-from agentdescent.governance import classify
-from agentdescent.ledger import CASConflict, Ledger
-from agentdescent.selection import ParetoFrontier, pareto_win_frequency
+from agentdescent.actors.agents import Usage
+from agentdescent.merge.aggregator import AggregatorProtocol, MergeReport
+from agentdescent.actors.dataloader import Dataset, hf_rows, split_dataset
+from agentdescent.core.evolvable import Diff, EvidenceCard
+from agentdescent.loop.evolution import EvolvingArtifact, LLMAgent, Task, evolve, rule_id
+from agentdescent.merge.governance import classify
+from agentdescent.merge.ledger import CASConflict, Ledger
+from agentdescent.schedule.selection import ParetoFrontier, pareto_win_frequency
 from examples._common import (add_standard_args, completion_for, confirm,
                               score_tasks, worker_count,
                               budget_kwargs, capped_val, report_engine)
@@ -124,7 +124,7 @@ def gepa_agent(complete) -> LLMAgent:
 
 
 #: Algorithm 2 steps 1-4, now shipped as
-#: :func:`agentdescent.selection.pareto_win_frequency`. Kept under this name
+#: :func:`agentdescent.schedule.selection.pareto_win_frequency`. Kept under this name
 #: because it is what the paper's step numbering calls it and what this port's
 #: tests reach for; the implementation moved so that a *run* can name the rule
 #: it used (``ParetoFrontier(mode='win_frequency')``) instead of a reader
@@ -137,7 +137,7 @@ def pareto_select(scores: List[List[float]], rng: random.Random) -> int:
 
     The index form, for the tests and for anyone reading the algorithm rather
     than driving the engine. The engine drives
-    :class:`~agentdescent.selection.ParetoFrontier` with ``mode='win_frequency'``,
+    :class:`~agentdescent.schedule.selection.ParetoFrontier` with ``mode='win_frequency'``,
     which is this function over `Candidate` rows and draws from the same rng in
     the same order -- `tests/test_port_selection_equivalence.py` steps the two
     in lockstep rather than comparing their distributions.
@@ -179,7 +179,7 @@ class ParetoAggregator(AggregatorProtocol):
                  selection: Optional["ParetoFrontier"] = None):
         self.ledger = ledger
         self.eval_concurrency = eval_concurrency
-        #: Optional :class:`~agentdescent.policies.FusionPolicy`. When set, the
+        #: Optional :class:`~agentdescent.core.policies.FusionPolicy`. When set, the
         #: round's surviving diffs are combined into **one** candidate before
         #: admission, so the pool grows by one per round instead of one per
         #: worker.
@@ -359,7 +359,7 @@ class ParetoAggregator(AggregatorProtocol):
 
         # Algorithm 2 at the standard seam: candidates carry their per-instance
         # rows in Candidate.per_task; version carries the pool index.
-        from agentdescent.selection import Candidate, SelectionContext
+        from agentdescent.schedule.selection import Candidate, SelectionContext
         task_ids = [t.id for t in self.verifier.held_out]
         rows = [Candidate(artifact_id=self.artifact_id, version=i,
                           state=dict(state),
@@ -557,7 +557,7 @@ def main(argv=None) -> None:
     # rewrite and drops the rest.
     merge_round = None
     if args.reflective_merge:
-        from agentdescent.fusion import ReflectiveFusion
+        from agentdescent.merge.fusion import ReflectiveFusion
         merge_round = ReflectiveFusion(completion)
         print("NOTE: --reflective-merge admits ONE merged candidate per round "
               "instead of one per worker. Pareto selection is unchanged; what "
