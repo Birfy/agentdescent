@@ -357,6 +357,55 @@ and it reports: {output}
 way round -- and the tests that already pass have to keep passing."""
 
 
+#: What an executor is shown when the suite is **blind**: the requirement, the name of
+#: the assertion that is failing, and what it reported -- and not one line of its source.
+#:
+#: Upstream the agents write the tests. They have file and shell tools, they write
+#: `test/*.exs`, and "tests are the definition of done" (`agents/manager.ex`); the
+#: external suites Genesis validates against -- c-testsuite, LLVM, Csmith -- are the
+#: experimenter's measurement, applied afterwards. This port had it backwards: a human
+#: wrote every test and then pasted its **source** into the prompt, which is the
+#: strongest hint there is. An agent handed the assertion is not implementing a
+#: specification, it is writing to an assertion.
+#:
+#: So in blind mode the acceptance suite never enters the repository, the prompt is the
+#: requirement it came from, and the tests *in* the repository are the agents' own.
+#: The evidence an episode is given, and what it is *for*.
+#:
+#: The failing assertion belongs to the whole repository, and every episode in the
+#: rollout is handed the same one -- including a leaf five levels down that owns none
+#: of the code it names. The old wording said only "write your own test that reproduces
+#: this and make both pass", which reads as an instruction whatever node you are at,
+#: and a node may only write under itself. So a leaf at `src/brain/olfactory`, told to
+#: reproduce ``No module named '_cli'``, built `src/brain/olfactory/_cli.py`: a local
+#: imitation of a root-level entry point, which cannot fix a root-level import.
+#:
+#: Measured across the runs on one machine: **eight** distinct `_cli.py` paths, one per
+#: node, 79 writes between them, and only the one at the repository root could ever have
+#: mattered. `src/brain/olfactory/_cli.py` alone was written 21 times.
+#:
+#: The fix is to say what the evidence is rather than only what to do with it. The
+#: request channel the brief already describes -- "say so in your final message and the
+#: agent responsible for that path will be asked" -- is the right answer when the fix
+#: is somebody else's, and it was being drowned out by a sentence that sounded like a
+#: task.
+BLIND_FAILURE = """An acceptance assertion is failing. You cannot read it -- the \
+acceptance suite is not in this repository and never will be. What you get is the \
+requirement it was written from, its name, and what it reported:
+
+{prompt}
+
+and it reports: {output}
+
+This is the **repository's** evidence, not necessarily yours: every agent in this \
+rollout is shown the same failure, and the code that has to change may be nobody's but \
+the root's. Judge it against what you own. If the fix belongs under your path, write \
+your own test that reproduces it, put it beside the code it covers, and make both pass \
+-- a test you write is the only test you can read. If it belongs somewhere else, say \
+which path and why in your final message and leave it alone: a local imitation of a \
+file that has to exist elsewhere fixes nothing and is work the parent has to undo."""
+
+
 def llm_manager(complete) -> Callable[[Brief], Sequence[Delegation]]:
     """Ask a model where to situate children. A bad reply means "handle it here"."""
 
@@ -765,6 +814,18 @@ class TestSuite:
     baselines: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
     #: Seconds one test may take.
     timeout: float = 60.0
+    #: **Blind mode.** Acceptance tests that drive the search but are not in the
+    #: repository: the agents are told the requirement and the assertion's verdict,
+    #: never its source, and write their own tests. See :data:`BLIND_FAILURE`.
+    hidden: Mapping[str, str] = field(default_factory=dict)
+    #: ``test file stem -> the requirement that file was written from``. What a blind
+    #: prompt is built out of, in place of the source.
+    requirements: Mapping[str, str] = field(default_factory=dict)
+
+    @property
+    def blind(self) -> bool:
+        """Is the acceptance suite outside the repository entirely?"""
+        return bool(self.hidden)
 
     def initial_files(self) -> Dict[str, str]:
         return dict(self.given)
@@ -828,6 +889,7 @@ class TestSuite:
         for path, content in self.given.items():
             if match_any(path, self.frozen):
                 state[path] = content
+        state.update(self.hidden)
         state.update(self.audit)
         plan = [(t.meta["file"], t.meta["func"]) for t in self.build_tasks()
                 if not t.meta.get("suite") and (audit or not t.meta.get("audit"))]
@@ -849,6 +911,8 @@ class TestSuite:
         Parsed rather than imported, so discovery works against a repository with
         no implementation in it -- which is every repository this port starts from.
         """
+        if self.blind:
+            return _discover_tests(self.hidden)
         return _discover_tests({path: body for path, body in self.given.items()
                                 if match_any(path, self.tests)})
 
@@ -898,8 +962,113 @@ class TestSuite:
     def _task(self, entry: Tuple[str, str, str], *, audit: bool = False) -> Task:
         path, func, source = entry
         stem = path.rsplit("/", 1)[-1].removeprefix("test_").removesuffix(".py")
+        if self.blind:
+            source = self._requirement(stem, func)
         return Task(id=f"{'audit:' if audit else ''}{stem}::{func}", prompt=source,
                     meta={"file": path, "func": func, "kind": stem, "audit": audit})
+
+    def _requirement(self, stem: str, func: str) -> str:
+        """A blind prompt: the requirement the assertion came from, and its name.
+
+        The name carries real information and that is deliberate -- an assertion called
+        `test_the_code_is_sparse_at_every_concentration` is a requirement written as a
+        sentence. What it does not carry is the threshold, the tolerance, or the inputs,
+        which is exactly the part an agent would otherwise write to instead of to the
+        specification.
+        """
+        sentence = func.removeprefix("test_").replace("_", " ")
+        heading = self.requirements.get(stem, "")
+        return (f"{heading}\n\n" if heading else "") + f"ACCEPTANCE: {sentence}."
+
+    @staticmethod
+    def _implementation_files(state, under: str = "") -> List[str]:
+        """Python the agents wrote that is neither a test nor a package marker."""
+        return [path for path in state
+                if path.endswith(".py")
+                and not path.rsplit("/", 1)[-1].startswith("test_")
+                and "__init__" not in path
+                and (not under or path == under or path.startswith(under + "/"))]
+
+    def own_test_failures(self, state, under: str = "",
+                          *, require_tests: bool = False) -> List[str]:
+        """The tests **the agents wrote**, run in one interpreter. `mix test`, theirs.
+
+        Everything in `state` is the agents' own work by construction: the acceptance
+        suite lives in `hidden` and `audit` and is merged into a scratch copy only while
+        one evaluation runs, never into the artifact. So any `test_*` function here was
+        written by an agent, and this is the suite upstream's manager actually runs --
+        "tests are the definition of done".
+
+        `under` restricts it to one node's subtree, which is what a parent reviewing one
+        child's work wants.
+
+        `require_tests` closes the hole that an empty suite is a passing suite. With no
+        test files at all the loop below has nothing to fail on and returns `[]`, which
+        reads as "everything passes" -- so a root agent that wrote sixteen
+        implementation files and zero tests could call `complete_task` and be believed.
+        That is exactly backwards from the rule the same class enforces on every child
+        in :meth:`own_review`: code with no test is not finished. Pass this wherever the
+        answer gates something (the completion precondition, the closing report) and
+        leave it off where the question really is "did anything the agents wrote break",
+        such as a parent reviewing a child that legitimately returned no code yet.
+        """
+        owned = {path: body for path, body in state.items()
+                 if path.endswith(".py")
+                 and path.rsplit("/", 1)[-1].startswith("test_")
+                 and (not under or path == under or path.startswith(under + "/"))}
+        if not owned:
+            if require_tests and self._implementation_files(state, under):
+                return ["no test file anywhere in the repository; "
+                        "tests are the definition of done"]
+            return []
+        try:
+            plan = [(path, func) for path, func, _ in _discover_tests(owned)]
+        except SyntaxError as exc:                      # a half-written test file
+            return [f"{exc.filename}: {type(exc).__name__}: {exc.msg}"]
+        if not plan:
+            return []
+        return run_suite(dict(state), plan, timeout=max(60.0, self.timeout * 4))
+
+    def own_review(self, *, require_tests: bool = True):
+        """A :data:`~examples.genesis._delegation.Review`: run the child's own tests.
+
+        Two refusals, and both are things a frozen acceptance suite cannot say.
+
+        A child whose own tests **fail** has not finished, whatever the acceptance suite
+        thinks -- it may be failing on code the acceptance suite does not reach yet. And
+        a child that wrote an implementation file and **no test for it** has not
+        finished either: upstream every node is accountable for its own subtree and
+        tests are the definition of done, so a node with untested code is a node whose
+        parent has nothing to run.
+        """
+
+        def review(parent, returned):
+            candidate = dict(parent.state)
+            for edit in returned:
+                if edit.content is None:
+                    candidate.pop(edit.path, None)
+                else:
+                    candidate[edit.path] = edit.content
+            path = parent.world.path
+            failures = self.own_test_failures(candidate, path)
+            if failures:
+                return ("rework", "your own tests fail: " + "; ".join(failures[:3]))
+            if require_tests:
+                wrote = [e.path for e in returned
+                         if e.content is not None and e.path.endswith(".py")
+                         and not e.path.rsplit("/", 1)[-1].startswith("test_")
+                         and "__init__" not in e.path]
+                tested = any(p.endswith(".py")
+                             and p.rsplit("/", 1)[-1].startswith("test_")
+                             and (not path or p == path or p.startswith(path + "/"))
+                             for p in candidate)
+                if wrote and not tested:
+                    return ("rework", f"{wrote[0]} has no test anywhere under "
+                                      f"{path or './'}; tests are the definition of done")
+            return None
+
+        return review
+
 
     def make_runner(self) -> Callable[[str, Task], str]:
         """``run(rendered, task)`` -- one test against one candidate repository."""
@@ -913,7 +1082,8 @@ class TestSuite:
                 if match_any(path, self.frozen):
                     state[path] = content
             # Into the scratch copy the subprocess sees, never into the artifact:
-            # the audit tests exist only for the length of one evaluation.
+            # the acceptance tests exist only for the length of one evaluation.
+            state.update(self.hidden)
             state.update(self.audit)
             if task.meta.get("suite"):
                 plan = [(t.meta["file"], t.meta["func"]) for t in self.build_tasks()

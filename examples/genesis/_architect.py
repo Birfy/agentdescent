@@ -32,11 +32,16 @@ from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 from ._world import (CONTEXT_FILE, LocalWorld, ROUTING_HEADING,
                      STANDARD_SECTIONS, looks_like_file, normalise,
-                     parse_routing, shadowed_by_module)
+                     parse_routes, parse_routing, shadowed_by_module)
 
-__all__ = ["ARCHITECT_PROMPT", "ArchitectPhase", "harness_record"]
+__all__ = ["ARCHITECT_PROMPT", "ARCHITECT_RULES", "REFINE_PROMPT", "ArchitectPhase",
+           "harness_record", "misaligned"]
 
-ARCHITECT_PROMPT = """You are an architect agent in a recursive software world, \
+#: The design rules, without a delivery instruction. Both paths use these: the
+#: completion architect appends "reply with JSON", the session architect appends
+#: "write the file". Splitting them is what keeps the two from drifting -- the
+#: rules here are the ones every measured tree in this port came out of.
+ARCHITECT_RULES = """You are an architect agent in a recursive software world, \
 situated at the repository path `{path}`. You design; you do not implement.
 
 {context}
@@ -95,11 +100,87 @@ splitting, and a directory holding one short function is a signal it did not. A 
 a node whose files one agent can write in one turn; anything larger has children, and \
 anything smaller belongs in its parent's API Surface as a file.
 
+**Before you open a child, say how big it is.** Each entry carries `files`: how many \
+source files you expect that directory to hold, counting everything below it. Then:
+
+- **A child of two files or fewer is not a directory.** It is two files in *this* \
+node's API Surface. Do not open it; list the files here instead.
+- **If this whole node is three files or fewer, return no children at all.** Write \
+them here and be a leaf.
+
+Count honestly. The counterweight above is not advice -- a tree whose nodes are mostly \
+routers is a tree where almost nothing is built: measured on this port, an architect \
+that ignored it produced 600 nodes for one simulator, three quarters of them pure \
+routing, at depth 8. Upstream's 123-hour C compiler run -- 750 files and 249 000 lines \
+-- has **26** nodes and bottomed out at depth 5.
+
+Count honestly."""
+
+
+#: The completion path's delivery: one JSON object carrying record and children.
+ARCHITECT_PROMPT = ARCHITECT_RULES + """
+
 Reply with ONE JSON object and nothing else:
 {{"record": "<the whole CONTEXT.md, markdown>",
-  "children": [{{"path": "{path_prefix}<name>", "objective": "<one sentence>"}}]}}
+  "children": [{{"path": "{path_prefix}<name>", "objective": "<one sentence>",
+                "files": <how many source files, counting everything below>}}]}}
 
 An empty `children` list means this node is a leaf and its files are written here."""
+
+
+REFINE_PROMPT = """You are an architect agent, returning to a node you designed. \
+It has code in it now, and the record no longer describes what is there.
+
+{context}
+
+THE OBJECTIVE
+{objective}
+
+WHAT DRIFTED
+{reason}
+
+Rewrite this node's `CONTEXT.md` so it describes the directory **as it actually is**. \
+Keep the four sections and their order -- `## Intent`, `## API Surface`, \
+`## Constraints`, `## Routing Table`. Name the files that are here and what each one \
+really exposes; route only to child directories that exist. Carry over anything under \
+`## Known Issues` that is still true.
+
+You are revising a record, not redesigning the node: do not invent children, do not \
+rename files, and do not describe work you would rather someone had done. If the code \
+went somewhere the old record did not anticipate, the record is what is wrong.
+
+Reply with ONE JSON object and nothing else:
+{{"record": "<the whole CONTEXT.md, markdown>"}}"""
+
+
+def misaligned(record: str, state: Mapping[str, str], path: str) -> str:
+    """Why this node's record no longer describes its directory, or `""`.
+
+    Upstream's archive shows 26 `CONTEXT.md` creations and **62 later accepted
+    updates affecting 19 files**: a record is maintained, not written once. This port
+    wrote them on exactly two occasions, and the cost showed -- a `--mode a` run sat at
+    0.938 because the tree it inherited described a layout the work had already left
+    behind, and nothing in the mechanism could say so.
+
+    Two drifts, both cheap to see and both actionable: a routing table that promises a
+    child directory nobody ever created, and a file sitting at the node that the record
+    never mentions. Either one sends the next agent to read a map of somewhere else.
+    """
+    prefix = f"{path}/" if path else ""
+    here = sorted(key for key in state
+                  if key.startswith(prefix) and "/" not in key[len(prefix):]
+                  and key.endswith(".py") and not key.endswith("__init__.py"))
+    reasons = []
+    for child in parse_routing(record):
+        child = normalise(child)
+        if not any(key == child or key.startswith(child + "/") for key in state):
+            reasons.append(f"the routing table sends work to `{child}/`, "
+                           f"which does not exist")
+    undocumented = [key for key in here if key.rsplit("/", 1)[-1] not in record]
+    if undocumented:
+        reasons.append("the API Surface does not mention "
+                       + ", ".join(f"`{k}`" for k in undocumented[:4]))
+    return "; ".join(reasons[:3])
 
 
 #: The repository root in a formation run, and the one record phase 1 does not write.
@@ -154,12 +235,37 @@ class ArchitectPhase:
     """
 
     def __init__(self, complete, *, contracts: Sequence[str] = (),
-                 max_depth: int = 3, max_nodes: int = 12, root_path: str = ""):
+                 max_depth: int = 3, max_nodes: int = 12, root_path: str = "",
+                 resume: bool = False, workers: int = 1, on_node=None,
+                 session=None):
         self._complete = complete
+        #: An :class:`~examples.genesis._architect_session.ArchitectSession`, or None.
+        #: Given one, a node is designed by an agent session that *writes* its record
+        #: with a file tool -- upstream's shape (`agents/architect.ex` is
+        #: `use EvoGit.Agent`, `agent_type :read_write`, and `CONTEXT.md` is written
+        #: with `context_write`) -- instead of a completion returning JSON. The phase
+        #: drives the levels either way; only how one node is produced changes.
+        self._session = session
         self._contracts = tuple(contracts)
         self._max_depth = max_depth
         self._max_nodes = max_nodes
         self._root = normalise(root_path)
+        #: Keep a record an earlier phase 1 already wrote instead of re-asking.
+        #: Off by default and deliberately: at `root_path=""` the record already in
+        #: `given` is the *harness* record, which is generated rather than designed,
+        #: and skipping the root because of it would leave the tree with no design at
+        #: all. The runner turns it on only for `--continue-from`, where a record that
+        #: is there really is an earlier phase 1's work.
+        self._resume = resume
+        #: How many siblings to design at once. Serial by default so a
+        #: run that did not ask for concurrency does not get it.
+        self._workers = max(1, int(workers))
+        #: Called with `(path, routes, designed_so_far)` as each node lands. Phase 1
+        #: printed nothing until the whole phase finished, which on the fly domain was
+        #: 82 minutes of silence -- and once the architect went through the SDK rather
+        #: than the CLI there was no session log to read either, so "how far in is it"
+        #: had no answer at all.
+        self._on_node = on_node
         #: Nodes it designed, and the deepest it went.
         self.nodes: List[str] = []
         self.depth = 0
@@ -168,14 +274,84 @@ class ArchitectPhase:
         self.unparsed = 0
         #: Nodes still queued when the budget ran out.
         self.truncated = 0
+        #: Records rewritten after the code moved on -- upstream's 62 updates.
+        self.revised = 0
+        #: Nodes an earlier phase 1 already designed and this one kept.
+        self.reused = 0
+        #: Children refused for being named after one of their ancestors.
+        self.repeated = 0
+        #: Children refused because the architect itself expected them to
+        #: hold two files or fewer.
+        self.too_small = 0
 
     def design(self, given: Mapping[str, str], objective: str) -> Dict[str, str]:
-        """``given`` plus one ``CONTEXT.md`` per node the architect decided on."""
+        """``given`` plus one ``CONTEXT.md`` per node the architect decided on.
+
+        Breadth first, and **one level at a time**: every node at a depth is asked
+        concurrently, then the answers are applied in order. Siblings are independent
+        by construction -- each inherits the chain down to its own parent, which was
+        designed a level ago -- so nothing in a level can depend on anything else in
+        it. Upstream an Architect *spawns* sub-architects, which is the same statement
+        about independence; running them one after another was this port's choice and
+        it cost the fly domain 32 minutes for 71 nodes.
+
+        The asks read a **snapshot** rather than the live state, so a sibling can never
+        see another sibling's record even if it finishes first, and the tree does not
+        depend on which call returns when.
+        """
         state = dict(given)
-        queue: List[Tuple[str, str, int]] = [(self._root, objective, 0)]
-        while queue and len(self.nodes) < self._max_nodes:
-            path, node_objective, depth = queue.pop(0)
-            record, children = self._ask(state, path, node_objective, depth)
+        level: List[Tuple[str, str, int]] = [(self._root, objective, 0)]
+        while level and len(self.nodes) < self._max_nodes:
+            room = self._max_nodes - len(self.nodes)
+            batch, level = level[:room], level[room:]
+
+            # Resume is settled before anything is dispatched: a node an earlier phase 1
+            # already designed must not cost a call, and deciding that after the ask
+            # spends exactly the call it exists to save.
+            kept: List[Tuple[str, str, int]] = []
+            todo: List[Tuple[str, str, int]] = []
+            for path, node_objective, depth in batch:
+                key = f"{path}/{CONTEXT_FILE}" if path else CONTEXT_FILE
+                if self._resume and state.get(key):
+                    self.reused += 1
+                    self.nodes.append(path)
+                    self.depth = max(self.depth, depth)
+                    if depth + 1 <= self._max_depth:
+                        # The routing line's right-hand side is the objective this
+                        # node's architect handed that child. Passing `node_objective`
+                        # down instead sends a leaf the whole project: measured, an
+                        # architect asked to design `.../cell_types/mushroom_body` while
+                        # carrying the root objective came back with `brain, learning,
+                        # environment, simulation`, having redesigned the library from
+                        # the top at depth five.
+                        kept += [(normalise(child), handles or node_objective, depth + 1)
+                                 for child, handles in parse_routes(state[key])]
+                else:
+                    todo.append((path, node_objective, depth))
+            batch = todo
+            snapshot = dict(state)
+            if not batch:
+                replies = []
+            elif self._workers > 1 and len(batch) > 1:
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(max_workers=self._workers) as pool:
+                    replies = list(pool.map(
+                        lambda item: self._ask(snapshot, item[0], item[1], item[2]),
+                        batch))
+            else:
+                replies = [self._ask(snapshot, path, node_objective, depth)
+                           for path, node_objective, depth in batch]
+            level = kept + self._apply(state, batch, replies) + level
+        if level:
+            self.truncated = len(level)
+        return state
+
+    def _apply(self, state: Dict[str, str], batch: Sequence[Tuple[str, str, int]],
+               replies: Sequence[Tuple[Optional[str], List[Dict[str, str]]]],
+               ) -> List[Tuple[str, str, int]]:
+        """Fold one level's answers into the tree, in order, and return the next level."""
+        queue: List[Tuple[str, str, int]] = []
+        for (path, node_objective, depth), (record, children) in zip(batch, replies):
             if record is None:
                 continue
             key = f"{path}/{CONTEXT_FILE}" if path else CONTEXT_FILE
@@ -206,6 +382,20 @@ class ArchitectPhase:
                     # file there is refused to every proposal.
                     self.refused += 1
                     continue
+                if 0 < int(child.get("files") or 0) <= 2:
+                    # A directory the architect itself expects to hold one or two files
+                    # is two files in this node's API Surface. Refusing it here is the
+                    # only place the counterweight to "decompose MORE aggressively" can
+                    # be enforced rather than merely stated.
+                    self.too_small += 1
+                    continue
+                if repeats_an_ancestor(child["path"]):
+                    # "decompose MORE aggressively" has a counterweight and upstream
+                    # states both: shared capability belongs at the lowest common
+                    # ancestor, so a node named after one of its own ancestors is that
+                    # rule broken in the one way a tree can show.
+                    self.repeated += 1
+                    continue
                 if normalise(child["path"]) == path:
                     # A node routes to its *children*. One architect wrote
                     # `potentials -> potentials`, which is a manager delegating to
@@ -219,20 +409,50 @@ class ArchitectPhase:
                     continue
                 accepted.append(child)
                 queue.append((normalise(child["path"]), child["objective"], depth + 1))
-            if len(accepted) != len(children):
-                # A table that advertises a node the contract refuses is a trap for the
-                # next manager to read it: it would delegate there and be refused in
-                # turn. The record keeps only what was accepted.
-                state[key] = _only_routing(record, [c["path"] for c in accepted])
-        if queue:
-            self.truncated = len(queue)
-        return state
+            # Always, not only when something was refused: the table has to agree with
+            # the children in both directions. See `_fix_routing` for the subtree that
+            # went missing because it only ever agreed in one.
+            state[key] = _fix_routing(record, accepted)
+            if self._on_node is not None:
+                self._on_node(path, len(accepted), len(self.nodes))
+        return queue
+
+    def refine(self, state: Mapping[str, str], path: str, objective: str,
+               reason: str) -> Optional[str]:
+        """Re-spawn an architect on one node that has drifted, and return its record.
+
+        Upstream's architect does not stop at design. It works "architecture & design ->
+        implementation delegation -> **review & accountability**", runs the build,
+        reviews the implementation, and re-spawns refinement architects where a node
+        misaligns (`agents/architect.ex`). This port stopped after the design, so a
+        record written before any code existed stayed the map for ever.
+        """
+        world = LocalWorld(version=0, path=path, readonly=self._contracts)
+        try:
+            reply = self._complete(REFINE_PROMPT.format(
+                objective=objective, reason=reason,
+                context=world.situate(state, contracts=self._contracts))) or ""
+        except Exception:  # noqa: BLE001 - one dead call costs one revision
+            self.unparsed += 1
+            return None
+        record, _ = _parse(reply, f"{path}/" if path else "")
+        if record is None:
+            self.unparsed += 1
+            return None
+        self.revised += 1
+        return record
 
     def summary(self) -> str:
         return (f"designed {len(self.nodes)} nodes, deepest {self.depth}"
+                + (f" ({self.reused} kept from an earlier phase 1)"
+                   if self.reused else "")
                 + (f", {self.refused} outside their subtree" if self.refused else "")
                 + (f", {self.mistaken_nodes} file paths refused as nodes"
                    if self.mistaken_nodes else "")
+                + (f", {self.repeated} repeated an ancestor's name"
+                   if self.repeated else "")
+                + (f", {self.too_small} too small to be a directory"
+                   if self.too_small else "")
                 + (f", {self.truncated} left undesigned at the node budget"
                    if self.truncated else "")
                 + (f", {self.unparsed} replies unusable" if self.unparsed else ""))
@@ -243,10 +463,23 @@ class ArchitectPhase:
              depth: int) -> Tuple[Optional[str], List[Dict[str, str]]]:
         world = LocalWorld(version=0, path=path, readonly=self._contracts)
         prefix = f"{path}/" if path else ""
+        situated = world.situate(state, contracts=self._contracts)
+        if self._session is not None:
+            rules = ARCHITECT_RULES.format(path=path or "./", path_prefix=prefix,
+                                           objective=objective, context=situated)
+            try:
+                record, children = self._session(state, path, rules)
+            except Exception:  # noqa: BLE001 - one dead session costs one node
+                record, children = None, []
+            if record is None:
+                # A session that wrote no record and a reply that did not parse are
+                # the same event to the tree: a node nobody designed.
+                self.unparsed += 1
+            return record, children
         try:
             reply = self._complete(ARCHITECT_PROMPT.format(
                 path=path or "./", path_prefix=prefix, objective=objective,
-                context=world.situate(state, contracts=self._contracts))) or ""
+                context=situated)) or ""
         except Exception:  # noqa: BLE001 - one dead call costs one node
             self.unparsed += 1
             return None, []
@@ -287,9 +520,14 @@ def _parse(reply: str, prefix: str) -> Tuple[Optional[str], List[Dict[str, str]]
             # counts it instead.
             if prefix and "/" not in child:
                 child = prefix + child
+            try:
+                files = int(item.get("files"))
+            except (TypeError, ValueError):
+                files = 0                      # not declared; the guard lets it pass
             children.append({"path": child,
                              "objective": str(item.get("objective", "")).strip()
-                             or f"implement {child}"})
+                             or f"implement {child}",
+                             "files": files})
     # The record is the map the run delegates by, so a child the architect named and
     # did not route to would be unreachable. Add the entry it forgot.
     if children and ROUTING_HEADING.lower() not in record.lower():
@@ -299,24 +537,71 @@ def _parse(reply: str, prefix: str) -> Tuple[Optional[str], List[Dict[str, str]]
     return record, children
 
 
-def _only_routing(record: str, keep: Sequence[str]) -> str:
-    """``record`` with every routing-table line that names a path outside ``keep`` gone."""
-    kept = {normalise(p) for p in keep}
-    out, in_table = [], False
+def _fix_routing(record: str, keep: Sequence[Mapping[str, str]]) -> str:
+    """Make the routing table say exactly which children this node opened.
+
+    Upstream: "the Routing Table is your primary delegation tool ... they are the map
+    that makes recursive delegation work". A record whose table disagrees with the
+    children the architect just opened is a broken map, and the phase repairs it rather
+    than passing it on -- in both directions.
+
+    **Dropping** an entry the contract refused was always necessary: a table that
+    advertises a node nobody may write is a trap for the next manager, which would
+    delegate there and be refused in turn.
+
+    **Adding** a child the table forgot turned out to matter more. One architect
+    answered with five children and a `## Routing Table` section holding its API
+    Surface instead -- `` `__init__.py` — Exports get_regions(...) ``, then two
+    sentences about FlyWire. The children were queued and designed that run, so nothing
+    looked wrong. Then the budget ran out, and a later phase 1 resuming from records
+    rebuilt its queue from the **table**, found no routes in it, and dropped an entire
+    subtree of the brain -- five regions, silently, because the record and the reply had
+    disagreed and only the reply was ever right.
+    """
+    kept = [(normalise(c["path"]), (c.get("objective") or "").strip()) for c in keep]
+    names = {path for path, _ in kept}
+    out, in_table, seen, done = [], False, set(), False
+
+    def table_lines():
+        return [f"- `./{path}/` -> {objective or 'this subtree'}"
+                for path, objective in kept if path not in seen]
+
     for line in record.splitlines():
         if line.strip().lower().startswith(ROUTING_HEADING.lower()):
-            in_table = True
+            in_table, done = True, True
             out.append(line)
             continue
         if in_table:
             if line.startswith("## "):
+                out.extend(table_lines())
                 in_table = False
             elif line.strip().startswith("-"):
                 named = parse_routing(ROUTING_HEADING + "\n" + line)
-                if named and normalise(named[0]) not in kept:
+                if not named or normalise(named[0]) not in names:
                     continue
+                seen.add(normalise(named[0]))
         out.append(line)
+    if in_table:
+        out.extend(table_lines())
+    elif not done and kept:
+        # No routing section at all, and children to route to.
+        out += ["", ROUTING_HEADING] + table_lines()
     return "\n".join(out).rstrip("\n") + "\n"
+
+
+def repeats_an_ancestor(path: str) -> str:
+    """The ancestor a node's own name repeats, or `""`.
+
+    `.../receptor/types/catalog/types` is a node named after its own great-grandparent,
+    and so is `.../mushroom_body/.../mushroom_body`. Upstream states the counterweight
+    to "decompose MORE aggressively" in the same breath -- single responsibility, and
+    **shared capability belongs at the lowest common ancestor** -- and a directory named
+    after something already above it is that rule broken in the one way a tree can show:
+    whatever is really in there belongs to the ancestor, or the ancestor's name was
+    wrong. Either way two places now claim it and no later agent can tell which.
+    """
+    parts = [p for p in normalise(path).split("/") if p]
+    return parts[-1] if len(parts) > 1 and parts[-1] in parts[:-1] else ""
 
 
 def missing_sections(record: str) -> List[str]:

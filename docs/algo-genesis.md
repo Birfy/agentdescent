@@ -501,7 +501,20 @@ manager *"Own `src/__init__.py`"*. It delegated every time instead.
 Upstream's Architect works in three phases — *architecture & design →
 implementation delegation → **review & accountability*** — and is "ACCOUNTABLE for
 all code in its node path" (`agents/architect.ex:23`). This port stopped after the
-second. A manager now gets one turn at its own node **after** its children return,
+second, twice over: a manager never wrote its own node, and an architect never came
+back to a node it had designed.
+
+The second of those is now `--refine` (on by default, `--no-refine` turns it off).
+After a node's episode, its record is checked against what is actually in the
+directory — a routing table promising a child nobody created, an `## API Surface`
+that never mentions a file sitting right there — and where it has drifted, an
+architect is re-spawned **on that one node** to rewrite the record against the code
+as it is. It fires on leaves too, and leaves need it most: a leaf is where the code
+lands, so its API Surface is the first thing to go stale. This is where upstream's
+**62 later accepted `CONTEXT.md` updates** come from, against this port's previous
+two occasions — and a `--mode a` run sat at 0.938 for 30 003 rollouts reading a map
+of a layout the work had already left behind, with nothing in the mechanism able to
+say so. A manager now gets one turn at its own node **after** its children return,
 seeing the tree as they left it, restricted to files directly at the node because a
 manager free to rewrite its children's work would make the decomposition
 decorative (`--no-accountability` turns it back into a pure router). `situate()`
@@ -652,6 +665,36 @@ The contract does not move. Three fences, none of which replaces the others:
 It signs in with the local `claude` CLI's credentials rather than the `--model`
 endpoint, which is why it is opt-in and why the run header says so.
 
+**What the worktree does not bound: `--sandbox`.** The worktree bounds what *survives*,
+not what can be *seen*. A session with a shell reads whatever the process can read, and
+in one run four of twelve episodes ran `find /` and opened a previous run's output from
+`/tmp` — one of them read the very `_cli.py` that answered the acceptance failure it had
+been handed to reproduce. The blind property was a line in a prompt.
+
+The engine already owns the fix. `agentdescent/sandbox_container.py` is titled "A
+sandbox that is actually a boundary", and `--sandbox` (on by default where an engine
+answers) runs every agent session inside it. `examples/genesis/_sandbox.py` subclasses
+its `ContainerProvider` and adds the mounts an *agent* session needs and a candidate's
+test run does not: the `claude` binary's own install, the proxy's CA bundle, and a
+per-session CLI state directory so the transcript outlives the container. Nothing else
+of the host. Asked from inside, on this machine:
+
+```
+ls /home/user/agentdescent          No such file or directory
+find / -name 'algo-genesis.md'      (nothing)
+ls /tmp | wc -l                     0
+ls /work                            CONTEXT.md md.py spec src tests
+touch /etc/x                        Read-only file system
+grep CapEff /proc/self/status       CapEff: 0000000000000000
+```
+
+Two honest limits. **The network is on** — `SandboxSpec.network="inherit"`, because a
+session's whole job is to reach a model endpoint — so this is a boundary against
+contamination, which is the failure that happened, and not against hostile code, which
+could still send what it read. And **when no engine answers** the run says so once and
+falls back to a plain directory rather than pretending; the brief's "do not read outside
+this checkout" rule is what is left, and a rule is not a wall.
+
 Exercised once against a real session rather than only the stand-in binary the tests
 drive. One leaf episode at `src/frontend` on `minilang`, twelve turns: it wrote
 `lexer.py` and the package marker, nothing else, and the tokens it emits are
@@ -665,6 +708,346 @@ It also declined to write that line itself, which is the more interesting half: 
 for the entry point as well, a session situated at `src/frontend` wrote only its own
 node and said so, so the port's request channel never even had to fire (`requests=0`).
 The contract held inside the session rather than at the boundary.
+
+### What actually ends an episode
+
+A formation run on the `fly` domain reported `sessions=52 failed=43` — 83% of
+implementation episodes judged failed — while the review rejected only three and the
+spatial contract dropped nothing. The CLI writes a transcript per session, so the
+answer was on disk rather than in the counters, and it is not what the counters
+suggested:
+
+| | sessions | |
+|---|---:|---|
+| ran into the wall (≥ 860 s of a 900 s limit) | **27** | 25 of them killed mid-tool-call |
+| the endpoint dropped the stream first | 17 | 26 s to 830 s, also mid-tool |
+| ended on a text turn, having finished | 8 | |
+| reached the 128-turn child budget | **0** | the busiest made 97 |
+
+Three things follow, and each was a defect rather than a tuning problem.
+
+**The wall is the binding constraint, not the turn budget.** Upstream's 2 048/128 turns
+are this port's numbers too and they are fine; what ends an episode here is wall-clock.
+So it is `--session-timeout`, its own flag, printed in the run header beside the turn
+budget — and *not* `--timeout`, which `examples/_common` documents as "seconds for one
+model call" and defaults to 120 s. A session is a loop of many calls; sharing one number
+between the two means either the call timeout is absurdly long or the session wall is
+absurdly short.
+
+**The executor was the one role running on defaults.** The architect, the manager, the
+reviewer and the extractor were all constructed from the run's session settings; the
+executor was constructed from three arguments of its own, so `--timeout 600` and
+`--thinking-tokens 2048` reached every role except the one that writes the code. It ran
+that whole domain at a 900 s wall nobody had chosen, with no reasoning cap while every
+other role had one.
+
+**A session that hits the wall is interrupted, not refuted.** The port reads the
+worktree, not the exit status, so the work it did before the wall comes back and is
+judged like any other — which is the right behaviour and was already the behaviour. What
+the wall costs is the *report*: there is no JSON after a `SIGKILL`, so `num_turns` is
+never read, and the run that reported `turns=309` had 2 607 assistant turns in its
+transcripts. Timeouts are now counted separately (`failed=43 timeout=27`) because the
+two failures have different fixes.
+
+One more thing the transcripts showed: `subprocess.run(timeout=)` signals the CLI and
+nothing else. A session is told to run the suite, a suite run starts servers, and one of
+them was still listening two hours later with its working directory already deleted.
+Sessions now lead their own process group and the group is killed on the way out —
+after the wall, and after a clean finish too.
+
+### A signed-in run cannot use the container sandbox at all
+
+Worse than the prompt size, and found the same way. A key is a string in the
+environment, and it crosses into a container with it — that is how `CONTAINER_ENV`
+works and why a keyed run is isolated and authenticated at once. A **sign-in** is not a
+string: the CLI reaches the endpoint through the host's session ingress, which the
+container does not have.
+
+So every containerised session answered `Not logged in · Please run /login`. The run's
+own summary, for four episodes of four:
+
+```
+Phase 1  : architect designed 0 nodes, deepest 0, 1 replies unusable
+claude code : sessions=4 failed=4 timeout=0 turns=4 edits=0 requests=0
+architect   : sessions=1 failed=1 timeout=0 turns=1 strays=0
+```
+
+A whole run for a condition that was knowable before the first episode started. The
+sandbox now says so up front, beside the two reasons it already gave — no container
+engine, and a toolchain that cannot be mounted — and degrades to a plain directory with
+the reason printed rather than failing an episode at a time.
+
+That leaves three arrangements, and the first is the one to prefer:
+
+| | container sandbox | context per turn | where the credential is |
+|---|---|---:|---|
+| **an API key** | yes | **4 868** (`--bare`) | an environment variable, inside the container |
+| signed in, `--sandbox off` | no | 8 042 | on the host, which the session shares anyway |
+| signed in, container | — | — | cannot authenticate |
+
+The middle row is worth reading carefully, because it looks safer than it is: a session
+running without the sandbox is on the host as the host's user, so it reaches everything
+the sign-in reaches regardless. The isolation is what was lost, not the exposure.
+
+### A signed-in run pays for thirty-seven tools it cannot reach
+
+`--bare` is what removes the inherited schemas, and it cannot be used by a run that is
+**signed in** rather than keyed: it sets `CLAUDE_CODE_SIMPLE=1`, and that same switch
+makes the CLI refuse to read OAuth. Measured, with a valid sign-in and no key:
+`duration_api_ms: 0` and an authentication error. The two cannot be separated.
+
+So a signed-in run got the full prompt, and the full prompt is mostly tool schemas.
+Asked to list what it has, such a session names **forty-two** tools — `Artifact`,
+`ArtifactComments`, `ArtifactData`, `CronCreate`, `CronDelete`, `CronList`,
+`DesignSync`, `PushNotification`, `ShowOnboardingRolePicker`, `Workflow`, `SendUserFile`
+and the rest — when the run asked for four. `--allowedTools` is an auto-approve list: it
+says what may be *called*, and every other schema is sent anyway.
+
+What decides which schemas exist is which tools are **defined**, and `--agents` defines
+its own. Measured on one endpoint with the same one-line prompt:
+
+| | context per turn | |
+|---|---:|---|
+| signed in, `--allowedTools Read,Edit,Glob,Grep` | **24 550** | 1.00× |
+| signed in, `--agents` declaring five tools | **6 522** | 0.27× |
+| signed in, the port's own executor command | **8 042** | 0.33× |
+| keyed, `--bare` | 4 868 | 0.20× |
+
+The executor's number is higher than the bare probe because it declares three more
+tools — `Write`, `TodoWrite` and `Bash`, the last being the only way a session can run
+the suite it is judged by. The 3 174 that `--bare` still saves is the system prompt
+itself, which `--agents` cannot touch: eight sections, and small beside the schemas.
+
+`lean_agent_flags` returns nothing when `--bare` is already in play, so the two
+mechanisms never both run — a key still takes the better path, and the declaration is
+what a sign-in gets instead.
+
+### One rollout is the whole repository, and a cap of four was cutting it to four
+
+`RecursiveDelegation.propose` descends the **entire** Context Tree: the root delegates,
+every leaf writes, the parents fold what came back, and one proposal carries all of it.
+So a rollout is not "pick a node and implement it" — it is a complete draft of the
+repository, judged and merged as one accepted event, which is what `w = (v, p)` means.
+
+Two bounds stood between that draft and the accepted version, and only the tighter one
+ever applied. `SpatialContract.max_files_per_diff` is the one raised to 64 above;
+`RecursiveDelegation.max_edits`, in `_bound`, sits **upstream** of it and was **4** — a
+trust region sized for a single completion proposing a file or two. Measured on an
+8-node `fly` tree, host sign-in, Haiku:
+
+| | |
+|---|---:|
+| implementation files the sessions wrote | **153** |
+| files each sweep committed | **4** |
+| Python files in the accepted state after three rollouts | **6** |
+| `CONTEXT.md` records in it | 9 |
+
+`src/training` wrote 26 files, `src/brain/circuits` 24, `src/arena` 22, `src/frontend`
+21, `src/backend` 17 — and the version grew by four a round. Raising the other cap had
+changed nothing, because this one always cut first.
+
+They are one number now — and so is a third one behind them, which took another run to
+find; see *Five gates* below. What `_bound` does *within* the bound was not a defect and is
+worth stating, since it looks like one: a node-creating `record` is trimmed **last**
+(nothing else in the accepted version says the node exists, and the source file it
+would be dropped for is re-proposable next round), `work` next, routine `context`
+upkeep first.
+
+### The cap that discards the episode rather than the surplus
+
+A third thing the transcripts showed, found by counting rather than reading. The spatial
+contract caps a proposal at `max_files_per_diff`, and the cap rejects the **diff**, not
+the files over the line — so an episode one file past it contributes nothing at all.
+Counting distinct paths written per session across 309 productive sessions on this
+machine:
+
+| files written in one episode | sessions | at a cap of 6 |
+|---|---:|---|
+| 1–6 | 274 | kept |
+| 7–12 | 32 | **lost whole** |
+| 13–23 | 3 | **lost whole** |
+
+**11% of the episodes that did work contributed none of it**, the largest of them
+carrying 23 files, and nothing in the run said so: the two violation counters are about
+*authority* — an agent wrote outside its subtree, or mistook a file for a node — and
+neither moves for this. A run that lost an eighth of its work and a run whose agents had
+nothing to say printed the same header.
+
+Both halves were wrong, and they are separate fixes.
+
+The drop is now **counted** — `discarded_diffs=N (M files)` in the world summary —
+because a silent loss is the thing this port keeps finding.
+
+And the cap is no longer a trust region, because it was never doing that job here. The
+trust region is the node's **subtree**, enforced edit by edit by the spatial contract:
+twelve files under `src/brain/olfactory/` are not more dangerous than six, and the
+parent's verdict and the frozen suite judge both the same way. A file count on top of
+that is a third bound that only ever fires on legitimate work. So for a session executor
+it is set where only pathology reaches it — a loop that dumps a tree — and nowhere near
+a node's build:
+
+| cap | episodes lost whole, of 309 |
+|---:|---:|
+| 6 | 35 (11.3%) |
+| 12 | 3 (1.0%) |
+| **24** | **0** |
+| 64 | 0 |
+
+24 is where it stops binding; **64** is the number, three times the largest legitimate
+episode. A single completion asked for whole files keeps the tight 6 — that executor
+proposes one or two files, and six there really is a runaway.
+
+### Five gates, and the habit of raising one at a time
+
+Both fixes above were right and neither was enough, because both were found the same
+way: follow the path a proposal takes until something rejects it, raise that, re-run.
+Three runs in a row died that way. The last of them — one rollout, thirteen sessions,
+680 turns, forty minutes, with the two caps above already raised — merged this:
+
+```
+sweep   0  reward=0.000  files=9  committed=0  rejected=1  rollouts=1  40m  [oversized=1]
+world : accepted=5 rejected=4 rework=4 depth=4  discarded_diffs=0  truncated_edits=0
+wrote 9 files  (nine CONTEXT.md records, not one line of implementation)
+```
+
+`discarded_diffs=0` and `truncated_edits=0`: the port's own two bounds passed the
+proposal through cleanly. It was rejected behind them, by a **third** cap, in the engine.
+
+A proposal crosses five bounds between the session that writes a file and the state that
+keeps it. Listing them all was the fix; each of them had been the answer once:
+
+| | where | field | was | now |
+|---|---|---|---:|---:|
+| 1 | `RecursiveDelegation._bound` | `max_edits` | 4 | the cap |
+| 2 | `SpatialContract.to_diff` | `max_files_per_diff` | 6 | the cap |
+| 3 | `SpatialContract.to_diff` | `max_file_bytes` | 28 000 | unchanged |
+| 4 | `Aggregator._apply_trust_region` | `trust_region_ops` | **6** | the cap |
+| 5 | `Aggregator._apply_trust_region` | `trust_region_chars` | 32 000 | ≥ #3 |
+
+4 and 5 are the **engine's** defaults, and this port had never passed an `agg_config`
+at all — so they were invisible from the example, sized for the rule tables the engine
+was built on, and applied unchanged to a proposal carrying an eight-node repository.
+Six ops. The measurement that settles it: across that rollout the largest single file
+any session wrote was **12 813 chars**, well inside both character bounds, so only the
+*op count* was ever binding.
+
+They are one number now, `engine_bounds(strategy)`, and the shape is deliberate: the
+port's cap decides, because it is the one that counts what it drops
+(`discarded_diffs`) and the one whose value is argued for from measurement. The engine's
+two are placed where they cannot bind first — ops at the same cap, chars no tighter than
+the per-file bound that already filtered every op, so a file over #3 is dropped on its
+own instead of returning as a whole diff lost to #5.
+
+One trap on the way, worth writing down because it is silent in the other direction:
+`evolve()` does not fall back to `AggregatorConfig()` when it is passed nothing. It
+builds `AggregatorConfig(batch_trigger=2, max_wait_rounds=1)` — and a config passed in
+replaces that object whole. A run that only wanted a wider trust region would have
+doubled its batch trigger and tripled its wait on the way past. Both arms were measured
+and both arrive at (2, 1); the port carries them across, and a test reads them back out
+of a real `evolve()` rather than repeating the literals, so the day the engine picks
+different ones the port is told rather than drifting.
+
+The habit is the finding, not the constant. Following one path to the first rejection
+finds *a* cap; it cannot tell you it was the only one. Enumerating every gate on the
+path costs one reading of the merge routine and would have saved three runs.
+
+### One rollout was an hour, and four workers spent it on the same tree
+
+A rollout here is `RecursiveDelegation.propose`: a walk of the whole Context Tree with
+one Claude Code session per node. It was a `for` loop, so the walk was serial — and on
+the `fly` tree (8 nodes, deepest 2) a session takes five to fifteen minutes, which makes
+a rollout about an hour. `py-spy` on a live run, 75 minutes in:
+
+```
+Thread-1: _episode → _episode → _episode → _episode
+Thread-2: _accountability_pass → _episode → _episode → _episode
+Thread-3: _accountability_pass → _episode → _episode
+```
+
+All four workers still inside their **first** `propose()`. The accepted state held three
+files. That looked like an acceptance problem and was not one: the parent gate accepts a
+tie, the reviewer said ACCEPT in four of the five reviews that had run, and the staleness
+policy keeps a card whose reward is merely unchanged. Nothing was being rejected. Nothing
+had finished.
+
+Worse, `--workers` is the number of *whole tree walks* in flight, so four workers were
+four independent descents of the same eight nodes — two of them sat on
+`src/brain/navigation` at the same moment, doing the same node's work, of which only one
+result could ever survive.
+
+So siblings run together now, and the knobs say which kind of parallelism you are asking
+for:
+
+| flag | what it multiplies |
+|---|---|
+| `--workers` | whole tree walks at once (keep small; they duplicate each other) |
+| `--node-workers` | siblings one manager runs at once (this is the useful one) |
+| `--max-sessions` | the hard bound on what the endpoint sees; defaults to their product |
+
+The spatial contract is what makes the concurrency safe rather than a merge problem: a
+child may write only under its own subtree, so two siblings cannot touch the same path,
+and each gets its own throwaway worktree branched from the same base. What the parent
+does *with* the results — the octopus fold, the conflict check, the requests it adopts —
+is unchanged and still runs in `delegations` order, so the same results produce the same
+proposal. The bound lives in `run_cli`, not in the thread pools, because sessions are the
+scarce thing and a pool per level would multiply; sessions never nest (a manager's own
+session runs before and after its children's, never during), so one semaphore there
+bounds the whole tree with no way for a parent to deadlock on its own children.
+
+Every counter the port reports is now incremented under a lock. `x += 1` is a read and a
+write with a bytecode boundary between them, and this port's claim is that its numbers
+are measured.
+
+### A session launched from a session is not that session
+
+The transcripts turned up a second thing, and it is the more expensive one. A run
+launched from inside a Claude Code session had every episode inheriting that session's
+*situation*. Measured against the same endpoint with the same one-line prompt:
+
+| | input tokens | latency | transcript |
+|---|---:|---:|---:|
+| inherited | **31 850** | 6.7 s | 224 KB |
+| the run's own `--allowedTools` / `--disallowedTools` | 31 099 | | |
+| `--bare --strict-mcp-config` | **1 317** | 2.4 s | 16 KB |
+
+The middle row is the surprise and the whole mechanism. **Permission flags do not
+shorten the request.** `--allowedTools Read,Write,Edit,Glob,Grep,Bash` says what the
+session may *call*; every other tool's schema is still sent, and the port had been
+passing those flags all along.
+
+What is actually in there, from the transcript's own `prompt_snapshot`: the system
+prompt is 5 720 characters, and the **tool schemas are 178 742** — 26 of them, of which
+`Artifact` alone is 64 168, then `Monitor` at 14 335 and `DesignSync` at 13 255. The
+executor is allowed six tools; `Read` and `Bash` together are 6 887 characters of that
+list. Beside it ride a 13.5 KB skill listing, a 3 KB agent listing, 900 bytes of
+deferred tool names, and the user's email address.
+
+So it is not that the episode was given competing instructions — nobody told it to go
+review a pull request. It is that a CLI launched inside a managed session is handed that
+session's *equipment*, and equipment is priced per turn whether or not it is reachable:
+30 000 tokens before the brief, ~50 turns a session, 52 sessions. That feeds straight
+back into the wall above.
+
+Three things were shared and are now not:
+
+* **Identity.** `CLAUDE_CODE_SESSION_ID` and its siblings are dropped, so each episode
+  is its own session. Inherited, all 52 wrote transcripts named with the *host's*
+  session id, and their `TodoWrite` state — keyed by that id — landed in the host's own
+  task list, two hundred entries of "Implement src/brain package".
+* **State.** `CLAUDE_CONFIG_DIR` points at one directory per run, so transcripts, todos
+  and synced skills stay out of `~/.claude`, which one run had left 685 project
+  directories in. The directory is reported at the end of the run and deliberately not
+  deleted: those transcripts are the only record of what an episode did.
+* **Context.** `--bare --strict-mcp-config`, which drops hooks, LSP, plugin sync, commit
+  attribution, auto-memory, MCP servers and `CLAUDE.md` auto-discovery — the artifact
+  carries `CONTEXT.md` records the brief names, not a `CLAUDE.md`.
+
+Bare mode reads credentials strictly from `ANTHROPIC_API_KEY`, never OAuth and never the
+keychain, so it is used **only when the run brought its own key**. A session billed to
+the local CLI's sign-in makes no API call at all with it — measured, `duration_api_ms:
+0` — which is a worse failure than a long prompt. The three fences are untouched: a bare
+session still honours `.claude/settings.local.json`, checked by asking one to append to
+a denied path and watching it refuse.
 
 ## Synchronous or barrier-free, and which one is upstream's
 
@@ -805,7 +1188,7 @@ run — the one `md` stands in for — from §4.1 and the appendix tables.
 | wall clock | **123.402 h** (666.385 h of agent time) | 0.6 h | no — the domain is a stand-in, by design |
 | archived agent episodes | **1,019** | 237 (from ~42 proposals over 4 000 rollouts) | in kind only |
 | observed delegation depth | **5** (configured max 8, retries 15) | 3 (configured max 4) | in kind — both bottom out below their ceiling |
-| what one episode *is* | a supervised session of **up to 2 048 root turns / 128 child turns**, with file, shell and test tools | **one model call** (plus one for a manager's accountability turn, one for the parent's review) | **no**, and this is the largest single gap |
+| what one episode *is* | a supervised session of **up to 2 048 root turns / 128 child turns**, with file, shell and test tools | **one model call** by default; `--executor claude-code` makes it a Claude Code session at upstream's own two budgets — 2 048 at the root, 128 below | **with `--executor claude-code`**, and a plain completion otherwise |
 | result size | 750 tracked files, **248 989** physical lines | 25 files, ~700 lines | no |
 | model-token cost | **US$44.3760** | not billed by this endpoint; 2.9 M prompt + 0.15 M completion tokens | no |
 | concurrency | max **22** overlapping episodes | 4 workers | in kind |

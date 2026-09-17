@@ -632,6 +632,7 @@ def build_parser(
     """
     parser = argparse.ArgumentParser()
     add_standard_args(parser, model_default="glm-5.2",
+                      max_tokens_default=1024, timeout_default=180.0,
                       async_ratio_default=DEFAULT_ASYNC_RATIO,
                       # `None`, not 8: an explicit flag wins, and without one the
                       # runner keeps one-at-a-time gate scoring in `--serial`.
@@ -657,10 +658,8 @@ def build_parser(
               "prompt that works the arithmetic out scores 1.000 / 0.958 / 0.875 "
               "at 0.0 / 0.7 / 1.0, so it is second-order next to what the prompt "
               "says -- but it is not nothing, and it was not reportable"))
-    parser.add_argument("--max-tokens", type=int, default=1024)
     if extra_args is not None:
         extra_args(parser)
-    parser.add_argument("--timeout", type=float, default=180.0)
     return parser
 
 

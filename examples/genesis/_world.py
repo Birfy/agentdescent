@@ -42,6 +42,7 @@ __all__ = [
     "EpisodeRecord",
     "LocalWorld",
     "ROUTING_HEADING",
+    "is_routing_heading",
     "SKILLS_DIR",
     "TRUNCATED",
     "WorldLog",
@@ -91,8 +92,31 @@ TRUNCATED = "... [Content Truncated] ..."
 _ROUTE_LINE = re.compile(
     r"""^\s*[-*]\s*          # a markdown list item
         `?\s*(?P<path>\.?/?[A-Za-z0-9._\-/]+?)\s*/?`?\s*   # the path, backticks optional
+        (?:\((?P<files>[^)]*)\)\s*)?   # an optional note in brackets, any content
         (?:$|[-=]+>|\u2192|:)  # end of line, '->', an arrow, or a colon
     """, re.VERBOSE)
+
+
+#: A heading that opens the routing section, however it is written.
+#:
+#: The exact string is what this port *asks* for, and an agent writing markdown by
+#: hand does not always give it back: `### Routing Table` under a deeper document,
+#: `## Routing`, `## 4. Routing Table` under a numbered outline. A prefix match on the
+#: canonical heading rejects all three, and a rejected heading is not a formatting
+#: nit -- the routing table is the map delegation runs on, so the node silently
+#: becomes a leaf. Measured: one session architect wrote a complete five-child table
+#: and the tree recorded zero children.
+#:
+#: Matching is deliberately narrow all the same. The text after the hashes, after an
+#: optional `1.` / `1)` ordinal, has to *start* with "routing" -- so "## Routing Table",
+#: "### Routing", "## 4. Routing Table (children)" are the section, and "## Non-routing
+#: notes" or a sentence mentioning routing is not.
+_ROUTING_HEADING_LINE = re.compile(r"^\s*#{1,6}\s*(?:\d+[.)]\s*)?routing\b", re.I)
+
+
+def is_routing_heading(line: str) -> bool:
+    """Does this line open the routing section?"""
+    return bool(_ROUTING_HEADING_LINE.match(line or ""))
 
 
 def parse_routing(body: str) -> List[str]:
@@ -107,7 +131,7 @@ def parse_routing(body: str) -> List[str]:
     for line in lines:
         stripped = line.strip()
         if stripped.startswith("##"):
-            inside = stripped.lower().startswith(ROUTING_HEADING.lower())
+            inside = is_routing_heading(stripped)
             continue
         if not inside:
             continue
@@ -116,6 +140,89 @@ def parse_routing(body: str) -> List[str]:
             path = normalise(match.group("path"))
             if path and path not in out:
                 out.append(path)
+    return out
+
+
+
+def _count(note: Optional[str]) -> int:
+    """The file count out of a routing line's bracketed note, or 0.
+
+    The note is read loosely on purpose. The brief asks for `(12 files)`, and an
+    architect wrote `(~32 files)` -- "about thirty-two", which is a perfectly good
+    thing to say and which an exact `\\d+` refused. Worse, the refusal did not fall
+    back to "no count": the optional group could not match, so the *whole line* failed
+    and the child vanished. One run designed a tree of exactly one node that way, from
+    a record that named six children in plain sight.
+
+    So the bracket now swallows anything and the number is dug out afterwards: a note
+    that carries no number costs its count, never its child.
+    """
+    if not note:
+        return 0
+    digits = re.search(r"\d+", note)
+    return int(digits.group()) if digits else 0
+
+
+def parse_route_sizes(body: str) -> Dict[str, int]:
+    """``{path: how many files the architect said it holds}`` for one record.
+
+    The size is what refuses a child too small to be a directory, and a
+    *session* architect has nowhere to put it but the routing line -- it writes
+    `CONTEXT.md` with a tool and returns no structured reply at all, the way
+    upstream's Architect does (`agents/architect.ex`, `context_write`). A record
+    that omits the count yields nothing here, and the caller's guard reads a
+    missing count as "not declared" rather than as zero.
+    """
+    if not body:
+        return {}
+    out: Dict[str, int] = {}
+    inside = False
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("##"):
+            inside = is_routing_heading(stripped)
+            continue
+        if not inside:
+            continue
+        match = _ROUTE_LINE.match(line)
+        if match and _count(match.group("files")):
+            path = normalise(match.group("path"))
+            if path:
+                out.setdefault(path, _count(match.group("files")))
+    return out
+
+def parse_routes(body: str) -> List[Tuple[str, str]]:
+    """``(path, what it handles)`` for every routing-table entry, in order.
+
+    The right-hand side of a routing line is not decoration: it is the objective the
+    parent is handing that child, written by the architect that opened it. A phase 1
+    resuming from records rather than from replies has nothing else to give a child,
+    and giving it the *parent's* objective instead sends a leaf the whole project --
+    measured: an architect asked to design `.../cell_types/mushroom_body` while
+    carrying the root objective came back with `brain, learning, environment,
+    simulation`, having redesigned the library from the top at depth five.
+    """
+    if not body:
+        return []
+    out: List[Tuple[str, str]] = []
+    seen = set()
+    inside = False
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("##"):
+            inside = is_routing_heading(stripped)
+            continue
+        if not inside:
+            continue
+        match = _ROUTE_LINE.match(line)
+        if match:
+            path = normalise(match.group("path"))
+            if path and path not in seen:
+                seen.add(path)
+                # The regex captures only the path; what the entry *handles* is
+                # whatever follows it on the line.
+                handles = line[match.end():].strip().lstrip("-—>").strip()
+                out.append((path, handles))
     return out
 
 
@@ -568,6 +675,8 @@ class WorldLog:
         self._rework: Dict[str, str] = {}
         self._contract_violations = 0
         self._shape_violations = 0
+        self._discarded_diffs = 0
+        self._discarded_files = 0
         self._counter = 0
 
     # -- episodes ----------------------------------------------------------
@@ -632,6 +741,11 @@ class WorldLog:
         with self._lock:
             self._shape_violations += n
 
+    def note_discarded_diff(self, files: int) -> None:
+        with self._lock:
+            self._discarded_diffs += 1
+            self._discarded_files += files
+
     @property
     def shape_violations(self) -> int:
         """Edits dropped for making the key space stop being a tree.
@@ -642,6 +756,30 @@ class WorldLog:
         """
         with self._lock:
             return self._shape_violations
+
+    @property
+    def discarded_diffs(self) -> int:
+        """Episodes whose work was thrown away whole for being too many files.
+
+        The two violation counters above are about *authority*: an agent wrote
+        somewhere it may not. This one is about *size*, and it is the only drop
+        that costs the run an entire episode rather than one edit -- the cap is on
+        the diff, so a session that wrote nine good files contributes none of them.
+
+        It exists because the drop used to be silent. Counting distinct file paths
+        written across 309 productive sessions on this machine: 11% wrote more than
+        six files and so lost everything, the largest 23 files. A run that lost an
+        eighth of its work and a run whose agents had nothing to say printed the
+        same header. See ``discarded_files`` for what those episodes were carrying.
+        """
+        with self._lock:
+            return self._discarded_diffs
+
+    @property
+    def discarded_files(self) -> int:
+        """How many files the discarded diffs were carrying, summed."""
+        with self._lock:
+            return self._discarded_files
 
     @property
     def contract_violations(self) -> int:
@@ -662,4 +800,7 @@ class WorldLog:
                 f"rejected={verdicts.get('rejected', 0)}  "
                 f"rework={verdicts.get('rework', 0)}  "
                 f"contract_violations={self.contract_violations}  "
-                f"shape_violations={self.shape_violations}")
+                f"shape_violations={self.shape_violations}  "
+                f"discarded_diffs={self.discarded_diffs}"
+                + (f" ({self.discarded_files} files)"
+                   if self._discarded_diffs else ""))

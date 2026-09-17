@@ -9,8 +9,16 @@ verdict is the parent's, and two agents editing one file both survive.
 
 from __future__ import annotations
 
+import ast
+import inspect
+import pathlib
+import subprocess
 import json
+import os
 import posixpath
+import threading
+import time
+from unittest import mock
 
 import pytest
 
@@ -25,6 +33,14 @@ from examples.genesis import _domain as domain
 from examples.genesis import _jqx as jqx
 from examples.genesis import _md as md
 from examples.genesis import _stackvm as stackvm
+
+
+def _no_engine() -> bool:
+    """Is there a container engine answering? Asked once, at collection."""
+    from examples.genesis._sandbox import sandbox_engine
+
+    return sandbox_engine() is None
+from examples.genesis import genesis_recursive_worlds as genesis
 from examples.genesis._delegation import (Brief, Delegation, Edit,
                                           RecursiveDelegation, render_edits)
 from examples.genesis._claude_code import (CLAUDE_CODE_BRIEF,
@@ -40,6 +56,7 @@ from examples.genesis._octopus import OctopusConflict, git_available, three_way
 from examples.genesis._spatial import SpatialContract, parse_situated_edits
 from examples.genesis._worktree import (Rollout, WorktreeLedger,
                                         git_worktrees_available)
+from examples.genesis._suite import TestSuite as SuiteOfTests
 from examples.genesis._suite import cold_start, preflight
 from examples.genesis._world import (CONTEXT_FILE, KNOWN_ISSUES, ROUTING_HEADING,
                                      SKILLS_DIR, TRUNCATED,
@@ -320,6 +337,343 @@ def test_an_edit_outside_the_authors_subtree_is_dropped_and_counted():
     proposal = render_edits([Edit("src/frontend", "src/backend/evaluator.py", "x")], "r")
     assert strategy.to_diff(strategy.initial(), proposal, "w0", 1, "world") is None
     assert log.contract_violations == 1
+
+
+def test_a_signed_in_run_is_told_a_container_cannot_authenticate():
+    """The third way the container sandbox cannot engage, and it used to be silent.
+
+    A key is a string in the environment and crosses into a container with it. A
+    sign-in is not: the CLI reaches the endpoint through the host's session ingress,
+    which the container does not have. Inside one the CLI answers `Not logged in ·
+    Please run /login`, and a run finds out one episode at a time -- measured,
+    `sessions=4 failed=4 edits=0`, a whole run spent on a condition that was knowable
+    before the first episode started. The sandbox says so up front now, the way it
+    already does for a missing engine and an unmountable toolchain.
+    """
+    from examples.genesis._sandbox import SessionSandbox, signed_in_only
+
+    assert not signed_in_only({"ANTHROPIC_API_KEY": "k", "CLAUDE_CODE_REMOTE": "true"})
+    assert not signed_in_only({"ANTHROPIC_AUTH_TOKEN": "k",
+                               "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST": "1"})
+    assert signed_in_only({"CLAUDE_CODE_REMOTE": "true"})
+    assert signed_in_only({"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST": "1"})
+    assert not signed_in_only({}), "no markers at all is not a sign-in"
+
+    # The reason is only reached when the engine and the toolchain are both fine, so
+    # the constructor is exercised for the shape of the check rather than its verdict
+    # on this machine: keyed, the sign-in branch must not be the one that fires.
+    with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "k"}):
+        assert "signed in" not in SessionSandbox().reason
+
+
+def test_a_signed_in_run_declares_its_toolset_instead_of_shipping_forty_two():
+    """`--allowedTools` auto-approves; what decides the schemas is what is *defined*.
+
+    Measured on one endpoint with the same one-line prompt, signed in rather than
+    keyed: 24 550 tokens of context per turn with `--allowedTools Read,Edit,Glob,Grep`,
+    6 522 with a `--agents` entry declaring five tools, 4 868 under `--bare`. Forty-two
+    tools arrive by default -- Artifact, CronCreate, DesignSync, Workflow and the rest
+    -- and none of them is reachable from a worktree. `--bare` is the better answer and
+    is used whenever the run has a key; it sets CLAUDE_CODE_SIMPLE=1, and that same
+    switch makes the CLI refuse to read OAuth, so a signed-in run takes this instead.
+    """
+    from examples.genesis._session import LEAN_AGENT, lean_agent_flags
+    wanted = ["Read", "Edit", "Glob", "Grep", "Bash"]
+
+    # Keyed: `--bare` already removed the schemas, so this adds nothing.
+    assert lean_agent_flags(wanted, ["--bare", "--strict-mcp-config"]) == []
+
+    flags = lean_agent_flags(wanted, [])
+    assert flags[0] == "--agents" and flags[2:] == ["--agent", LEAN_AGENT]
+    spec = json.loads(flags[1])
+    assert list(spec) == [LEAN_AGENT]
+    # Exactly what the role asked for -- a tool left out here is a tool the session
+    # does not have, which is the point, and one added is a schema nobody needs.
+    assert spec[LEAN_AGENT]["tools"] == wanted
+    assert lean_agent_flags([], []) == [], "no tools is not an empty agent"
+
+
+def test_every_session_role_declares_its_toolset():
+    """Both command builders, because the saving is per session and there are five."""
+    from examples.genesis._claude_code import ClaudeCodeExecutor
+    from examples.genesis._session import AgentSession
+    for cls in (ClaudeCodeExecutor, AgentSession):
+        src = inspect.getsource(cls._command)
+        assert "lean_agent_flags" in src, (
+            f"{cls.__name__}._command ships every schema to a signed-in run")
+
+
+def test_siblings_run_together_and_are_folded_in_order():
+    """Concurrency where it costs nothing, determinism where it would cost the merge.
+
+    A rollout is a walk of the whole tree with one Claude Code session per node.
+    Serial, on an 8-node tree that was about an hour per rollout -- `py-spy` showed
+    all four workers still inside their first `propose()` after 75 minutes, two of
+    them on the same node doing the same work. The spatial contract is why siblings
+    may overlap: a child writes only under its own subtree, so they cannot collide.
+    The fold must not overlap, so it stays in `delegations` order and the proposal
+    a rollout returns is the same either way.
+    """
+    kids = ["src/a", "src/b", "src/c", "src/d"]
+    lock = threading.Lock()
+
+    def _run(node_workers):
+        live, widest = [], [0]
+
+        def executor(b):
+            with lock:
+                live.append(b.world.path)
+                widest[0] = max(widest[0], len(live))
+            time.sleep(0.05)
+            with lock:
+                live.remove(b.world.path)
+            return [Edit(b.world.path, f"{b.world.path}/e.py", "x = 1\n")]
+
+        policy = RecursiveDelegation(
+            manager=lambda b: ([Delegation(k, "build it") for k in kids]
+                               if b.world.path == "src" else []),
+            executor=executor, log=WorldLog(), max_depth=3, root_path="src",
+            max_edits=16, accountability=False, node_workers=node_workers)
+        proposals = policy.propose(_proposal_ctx({"src/CONTEXT.md": _TABLE},
+                                                 Task(id="t", prompt="x")))
+        paths = [e["path"] for e in parse_situated_edits(proposals[0])]
+        return widest[0], [p for p in paths if p.endswith("e.py")]
+
+    widest_serial, folded_serial = _run(1)
+    assert widest_serial == 1, "serial mode ran siblings at the same time"
+    assert len(folded_serial) == len(kids), folded_serial
+
+    widest_parallel, folded_parallel = _run(4)
+    assert widest_parallel > 1, "siblings still ran one at a time"
+    # Completion order is whatever the pool hands back; the fold is not.
+    assert folded_parallel == folded_serial
+
+
+def test_the_run_bounds_what_the_endpoint_sees():
+    """`--workers` x `--node-workers` is what reaches the API, so it is what the run
+    has to bound. Sessions never nest -- a manager's own session runs before and after
+    its children's, never during -- so one semaphore in `run_cli` bounds the whole tree
+    with no way for a parent to deadlock waiting on its own children."""
+    tree = ast.parse(inspect.getsource(genesis.main))
+    assert [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name) and n.func.id == "set_session_limit"], \
+        "the run never bounds concurrent sessions"
+    from examples.genesis import _session
+    try:
+        _session.set_session_limit(2)
+        held, widest, lock = [], [0], threading.Lock()
+
+        def _one():
+            with _session._slot():
+                with lock:
+                    held.append(1)
+                    widest[0] = max(widest[0], len(held))
+                time.sleep(0.05)
+                with lock:
+                    held.pop()
+        threads = [threading.Thread(target=_one) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert widest[0] == 2, f"the bound let {widest[0]} through"
+    finally:
+        _session.set_session_limit(0)
+
+
+def test_the_growth_phase_reports_progress_rather_than_going_silent():
+    """`evolve` takes an on_round hook and the run has to use it.
+
+    Without it the run printed one line at the start of the growth phase and the
+    next line hours later, at the end. Asking "is anything being accepted" then
+    meant reading CLI transcripts and looking inside live containers -- and what a
+    live worktree holds is the base state *plus* the session's own writes, so two
+    readings out of three were wrong. `RoundInfo.reasons` is the field that
+    separates "the gate refused my work" from "my work never reached the gate".
+    """
+    tree = ast.parse(inspect.getsource(genesis.main))
+    hook = [n for n in ast.walk(tree)
+            if isinstance(n, ast.keyword) and n.arg == "on_round"]
+    assert hook, "the growth phase no longer reports progress"
+    name = hook[0].value
+    assert isinstance(name, ast.Name), "on_round should be a named local, not a lambda"
+    body = [n for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == name.id]
+    assert body, f"{name.id} is passed as on_round but not defined in main()"
+    printed = ast.dump(body[0])
+    for field in ("committed", "rejected", "reasons", "held_out_reward"):
+        assert field in printed, f"the progress line never reports {field}"
+
+
+def test_every_cap_on_a_proposals_path_is_the_same_number():
+    """A rollout walks the WHOLE tree, and five caps stood between it and the state.
+
+    `SpatialContract.max_files_per_diff` is the one this port raised to 64 for a
+    session executor. `RecursiveDelegation.max_edits` sits upstream of it, in
+    `_bound`, and was 4 -- a trust region sized for a single completion proposing a
+    file or two, applied to a proposal carrying every leaf's work. Behind both sits
+    the engine's own `trust_region_ops`, which defaults to 6 and which this port
+    never passed at all. The tightest one is the only one that ever applies, so
+    raising any single one of them changed nothing.
+
+    Measured on an 8-node `fly` tree: with the first two raised and the third still
+    at its default, one rollout ran thirteen sessions and 680 turns and merged
+    `committed=0 rejected=1 [oversized=1]` -- nine `CONTEXT.md` records and not one
+    line of implementation.
+    """
+    tree = ast.parse(inspect.getsource(genesis.main))
+    names = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.keyword):
+            continue
+        if node.arg in ("max_files_per_diff", "max_edits"):
+            assert isinstance(node.value, ast.Name), (
+                f"{node.arg} is not the shared cap; a literal here can drift below "
+                "the other and silently rule")
+            names.add(node.value.id)
+    assert names, "neither cap is set from a named value"
+    assert len(names) == 1, f"the two caps read different names: {sorted(names)}"
+
+    # ...and the engine's two are derived from the strategy that carries that cap,
+    # rather than left at defaults nobody passes.
+    cfg = genesis.engine_bounds(_strategy(max_files_per_diff=64))
+    assert cfg.trust_region_ops == 64, (
+        "the engine's op cap does not follow the port's -- a proposal the port "
+        "allowed is rejected `oversized` behind it")
+    assert cfg.trust_region_chars >= _strategy().max_file_bytes, (
+        "a file the port lets through whole is over the engine's per-op cap, so "
+        "one oversized file loses the entire episode instead of just itself")
+
+
+def test_a_diff_at_the_full_cap_clears_the_engines_trust_region():
+    """The end-to-end version of the above: the port's cap is the only gate.
+
+    This is the test fly26 did not have. It builds a proposal exactly at the cap,
+    puts it through the real `to_diff`, and asks the engine's real trust-region
+    predicate about the result -- which is the pair that disagreed.
+    """
+    from agentdescent.aggregator import Aggregator
+
+    cap = 12
+    strategy = _strategy(max_files_per_diff=cap)
+    edits = [Edit("src", f"src/mod{n}.py", "x" * 4_000) for n in range(cap)]
+    diff = strategy.to_diff(strategy.initial(), render_edits(edits, "r"), "w0", 1, "world")
+    assert diff is not None and diff.size() == cap, "the port dropped it first"
+
+    region = Aggregator._trust_region(
+        type("A", (), {"config": genesis.engine_bounds(strategy)})())
+    assert diff.size() <= region.ops, (
+        f"{diff.size()} ops against a region of {region.ops}: the engine rejects "
+        "a proposal the port was built to allow")
+    assert all(len(v) <= region.chars for v in diff.ops.values())
+
+
+def test_the_run_keeps_the_batching_evolve_would_have_chosen():
+    """Passing `agg_config=` replaces the config `evolve()` builds, in full.
+
+    That config is not `AggregatorConfig()` -- it is `AggregatorConfig(batch_trigger=2,
+    max_wait_rounds=1)`, built inside `evolve()` and unreachable from here. So a run
+    that passes its own config to widen the trust region silently doubles its batch
+    trigger and triples its wait unless it carries those two across. This reads the
+    numbers out of a real `evolve()` rather than repeating the literals, so the day
+    the engine picks different ones the port is told instead of drifting.
+    """
+    import agentdescent.aggregator as aggregator
+
+    seen = []
+    original = aggregator.Aggregator.__init__
+
+    def spy(self, ledger, verifier, audit, config, *args, **kwargs):
+        seen.append(config)
+        return original(self, ledger, verifier, audit, config, *args, **kwargs)
+
+    tasks = [Task(id=f"t{n}", prompt="p") for n in range(10)]
+    with mock.patch.object(aggregator.Aggregator, "__init__", spy):
+        evolve(tasks, lambda state, task: 0.0, run=lambda state, task: "a",
+               propose=lambda rendered, task, output, reward: None,
+               rounds=1, n_workers=1, seed=0)
+    assert seen, "no aggregator was built, so nothing was measured"
+
+    chosen = seen[0]
+    ours = genesis.engine_bounds(_strategy())
+    for field in ("batch_trigger", "max_wait_rounds"):
+        assert getattr(ours, field) == getattr(chosen, field), (
+            f"{field} is {getattr(ours, field)} here and {getattr(chosen, field)} "
+            "in a run that passes no config -- passing one changed more than the "
+            "trust region")
+
+
+def test_the_whole_tree_survives_a_rollout_when_the_cap_allows_it():
+    """`_bound` keeps a node-creating record, then work, and sheds upkeep first."""
+    policy = RecursiveDelegation(manager=lambda b: [], executor=lambda b: [],
+                                 log=WorldLog(), max_edits=4)
+    edits = [Edit("src/a", "src/a/impl.py", "x", kind="work"),
+             Edit("src/a", "src/a/test_impl.py", "x", kind="work"),
+             Edit("src/b", "src/b/impl.py", "x", kind="work"),
+             Edit("src/b", "src/b/test_impl.py", "x", kind="work"),
+             Edit("src/new", "src/new/CONTEXT.md", "#", kind="record"),
+             Edit("src/a", "src/a/CONTEXT.md", "#", kind="context")]
+    kept = {e.path: e.kind for e in policy._bound(edits)}
+    assert policy.truncated == 2
+    # The record that brings a node into existence is the one thing a later round
+    # cannot re-propose, so it is trimmed last; routine upkeep goes first.
+    assert "src/new/CONTEXT.md" in kept
+    assert "src/a/CONTEXT.md" not in kept
+    assert sum(1 for k in kept.values() if k == "work") == 3
+
+    # Room for all of it, and all of it comes back -- the shape a whole-tree
+    # rollout needs, and what the run's own cap now allows.
+    roomy = RecursiveDelegation(manager=lambda b: [], executor=lambda b: [],
+                                log=WorldLog(), max_edits=64)
+    assert len(roomy._bound(edits)) == len(edits)
+    assert roomy.truncated == 0
+
+
+def test_a_diff_over_the_file_cap_loses_the_whole_episode_and_says_so():
+    """The cap discards the proposal, not the surplus -- so it has to be counted.
+
+    The two violation counters are about authority and cost one edit each. This one
+    is about size and costs the episode: a session that wrote nine files, ran the
+    suite and got it green contributes none of the nine. Measured across 309
+    productive sessions on this machine, 11% wrote more than six files.
+    """
+    log = WorldLog()
+    strategy = _strategy(log=log, max_files_per_diff=2)
+    edits = [Edit("src", f"src/m{i}.py", "x") for i in range(3)]
+    assert strategy.to_diff(strategy.initial(), render_edits(edits, "r"),
+                            "w0", 1, "world") is None
+    assert log.discarded_diffs == 1 and log.discarded_files == 3
+    # Authority was never in question, so neither violation counter moves.
+    assert log.contract_violations == 0 and log.shape_violations == 0
+    assert "discarded_diffs=1 (3 files)" in log.summary()
+    # And under the cap the same edits go through, which is what makes the count
+    # a measure of the cap rather than of the work.
+    assert strategy.to_diff(strategy.initial(), render_edits(edits[:2], "r"),
+                            "w0", 1, "world") is not None
+    assert log.discarded_diffs == 1
+
+
+def test_the_session_executor_gets_a_cap_no_real_episode_reaches():
+    """A runaway guard, not a trust region -- the subtree is the trust region.
+
+    The cap throws away the diff rather than the surplus, so any number it binds at
+    is a number of episodes lost whole. Across 309 productive sessions on this
+    machine the largest legitimate episode carried 23 files; 24 is where the cap
+    stops binding at all. It has to sit above that, not at the size of a node build.
+    """
+    caps = []
+    for node in ast.walk(ast.parse(inspect.getsource(genesis.main))):
+        # The cap is one named value now, shared with `max_edits` -- see
+        # `test_the_proposal_cap_is_one_number_not_two` for why two drifted apart.
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.IfExp):
+            continue
+        if not any(isinstance(t, ast.Name) and "cap" in t.id for t in node.targets):
+            continue
+        caps = [n.value for n in (node.value.body, node.value.orelse)]
+    assert caps, "the cap no longer depends on which executor is running"
+    assert all(isinstance(c, int) for c in caps), caps
+    # 24 is the measured ceiling of legitimate work; below it the cap eats episodes.
+    assert max(caps) > 24 > min(caps), caps
 
 
 def test_a_frozen_path_is_refused_even_to_the_root():
@@ -1336,7 +1690,8 @@ def test_a_child_the_architect_named_is_always_routed_to():
     record, children = parse_architect_reply(
         json.dumps({"record": "# src\n\n## Intent\nthings\n",
                     "children": [{"path": "core", "objective": "geometry"}]}), "src/")
-    assert children == [{"path": "src/core", "objective": "geometry"}]
+    # `files` rides along undeclared, which the size guard reads as "no claim made".
+    assert children == [{"path": "src/core", "objective": "geometry", "files": 0}]
     assert parse_routing(record) == ["src/core"]
 
 
@@ -1425,13 +1780,388 @@ def test_every_domain_briefs_its_agents_with_an_objective_not_a_catalogue_line()
         objective = objective_for(domain)
         assert objective is not DOMAIN_BLURB[domain]
         assert objective != DOMAIN_BLURB[domain]
-        # Where the deliverable goes, and what has to be reachable from there.
-        assert "`src/`" in objective and "`src/__init__.py`" in objective
+        # Where the deliverable goes. That much is the contract in every domain --
+        # the run that this test exists for lost `src/` out of a routing table.
+        assert "`src/`" in objective
         assert len(objective) > len(DOMAIN_BLURB[domain])
+        # And what has to be reachable from there, stated however that domain states
+        # it: four domains name `src/__init__.py` and its entry points, and `fly`
+        # names the four functions its frozen driver imports, because there the
+        # public surface is whatever the driver reaches and nothing else.
+        assert "`src/__init__.py`" in objective or "`fly.py`" in objective
 
     # ... and the one thing it does not say is how to decompose below that root.
     for word in ("geometry", "potentials", "forces", "integrate", "observe"):
         assert f"src/{word}" not in md.OBJECTIVE
+
+
+# ---------------------------------------------------------------------------
+# Blind mode: the agents write the tests, and cannot read the acceptance suite
+# ---------------------------------------------------------------------------
+
+_ACCEPTANCE = {"acceptance/test_sparse.py": (
+    "TOLERANCE = 0.15\n\n\n"
+    "def test_the_code_is_sparse_at_every_concentration():\n"
+    "    assert 0.04 < 0.05 < TOLERANCE\n")}
+
+
+def _blind_suite(**kw):
+    return SuiteOfTests(name="blind", given={"spec/CONTEXT.md": "# spec\n"},
+                     frozen=("spec/**",), hidden=_ACCEPTANCE,
+                     requirements={"sparse": "SPEC 1.3 -- the mushroom body code."},
+                     **kw)
+
+
+def test_a_blind_suite_never_puts_its_tests_in_the_repository():
+    """Upstream the agents write the tests; the external suite is the experimenter's.
+
+    This port had it backwards -- a human wrote every assertion and then pasted its
+    **source** into the prompt, which is the strongest hint there is. An agent handed
+    the assertion is not implementing a specification, it is writing to an assertion.
+    """
+    suite = _blind_suite()
+    assert suite.blind
+    assert not any(path.startswith("acceptance/") for path in suite.initial_files())
+    assert not any("test_" in path for path in suite.initial_files())
+
+
+def test_a_blind_prompt_carries_the_requirement_and_not_the_assertion():
+    suite = _blind_suite()
+    task = [t for t in suite.build_tasks() if not t.meta.get("suite")][0]
+    assert "SPEC 1.3" in task.prompt
+    # The name is a requirement written as a sentence, and that much is deliberate.
+    assert "the code is sparse at every concentration" in task.prompt
+    # The threshold, the tolerance and the inputs are not.
+    assert "TOLERANCE" not in task.prompt and "0.15" not in task.prompt
+    assert "assert" not in task.prompt
+
+
+def test_a_sighted_suite_still_shows_its_source():
+    """The default is unchanged: `md` and the others still hand over the test."""
+    task = [t for t in md.build_tasks() if not t.meta.get("suite")][0]
+    assert "def test_" in task.prompt and "assert" in task.prompt
+
+
+def test_the_parent_runs_the_tests_the_child_wrote():
+    """`mix test`, theirs. A child whose own tests fail has not finished.
+
+    Everything in the artifact is the agents' own work by construction -- the
+    acceptance suite is merged into a scratch copy only while one evaluation runs --
+    so every `test_*` found here was written by an agent.
+    """
+    suite = _blind_suite()
+    good = {"src/a/kc.py": "X = 1\n", "src/a/test_kc.py": "def test_x():\n    assert 1\n"}
+    bad = {"src/a/kc.py": "X = 1\n",
+           "src/a/test_kc.py": "def test_x():\n    assert 0, 'nope'\n"}
+    assert suite.own_test_failures(good) == []
+    assert "nope" in suite.own_test_failures(bad)[0]
+    # Scoped to one node's subtree, which is what a parent reviewing one child wants.
+    assert suite.own_test_failures(bad, "src/b") == []
+    assert suite.own_test_failures(bad, "src/a") != []
+
+
+def test_a_node_that_wrote_code_and_no_test_is_sent_back():
+    """Upstream every node is accountable for its own subtree, and tests are done.
+
+    A node with untested code is a node whose parent has nothing to run.
+    """
+    suite = _blind_suite()
+    review = suite.own_review()
+
+    class _Parent:
+        def __init__(self, state, path):
+            self.state, self.world = state, LocalWorld(version=0, path=path)
+
+    untested = [Edit("src/a", "src/a/kc.py", "X = 1\n")]
+    verdict = review(_Parent({CONTEXT_FILE: "# root\n"}, "src/a"), untested)
+    assert verdict is not None and verdict[0] == "rework"
+    assert "no test" in verdict[1]
+
+    tested = untested + [Edit("src/a", "src/a/test_kc.py", "def test_x():\n    assert 1\n")]
+    assert review(_Parent({CONTEXT_FILE: "# root\n"}, "src/a"), tested) is None
+
+    failing = [Edit("src/a", "src/a/test_kc.py", "def test_x():\n    assert 0\n")]
+    verdict = review(_Parent({CONTEXT_FILE: "# root\n"}, "src/a"), failing)
+    assert verdict is not None and verdict[0] == "rework"
+    assert "your own tests fail" in verdict[1]
+
+
+def test_the_run_reports_how_many_model_calls_were_in_flight_at_once():
+    """`usage.seconds / wallclock` looks like it answers this and does not.
+
+    `seconds` spans the whole process, including the phases that run before
+    `evolve()` does; the `wallclock` a stage profile reports covers only the stage. The
+    md run's ratio came out at 8.2 with four workers, which is not a measurement of
+    anything. This counts the thing directly.
+    """
+    import threading
+
+    from examples._common import ConcurrencyGauge
+
+    gauge = ConcurrencyGauge()
+    assert gauge.peak == 0
+    inside = threading.Barrier(3, timeout=10)
+
+    def slow(prompt):
+        inside.wait()
+        return prompt
+
+    wrapped = gauge.wrap(slow)
+    threads = [threading.Thread(target=wrapped, args=("x",)) for _ in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert gauge.peak == 3
+    # And it comes back down, so a later quiet phase does not inflate the peak.
+    gauge.wrap(lambda p: p)("x")
+    assert gauge.peak == 3
+
+
+def test_a_root_session_gets_a_bigger_turn_budget_than_a_child():
+    """Upstream's own two numbers: up to 2,048 model-tool turns at the root, 128 below.
+
+    A root agent is running the whole objective and a child one node of it, so a single
+    ceiling for both either starves the root or hands every leaf a session it has no
+    use for. The port had one number, 24, for both.
+    """
+    from examples.genesis._claude_code import ClaudeCodeExecutor
+
+    executor = ClaudeCodeExecutor()
+    assert executor.ROOT_TURNS == 2048 and executor.CHILD_TURNS == 128
+    assert executor._root_turns == 2048 and executor._max_turns == 128
+    root = executor._command("x", executor._root_turns)
+    child = executor._command("x", executor._max_turns)
+    assert root[root.index("--max-turns") + 1] == "2048"
+    assert child[child.index("--max-turns") + 1] == "128"
+    # One number given explicitly still means one number, for a cheap run.
+    pinned = ClaudeCodeExecutor(max_turns=12)
+    assert pinned._root_turns == 12 and pinned._max_turns == 12
+
+
+def test_a_record_is_maintained_rather_than_written_once():
+    """Upstream: 26 `CONTEXT.md` creations and **62 later accepted updates**.
+
+    This port wrote them on exactly two occasions, and a `--mode a` run sat at 0.938
+    reading a map of a layout the work had already left behind -- nothing in the
+    mechanism could say the record was stale. Upstream's architect does not stop at
+    design: it reviews the implementation and re-spawns refinement architects where a
+    node misaligns (`agents/architect.ex`).
+    """
+    from examples.genesis._architect import misaligned
+
+    record = ("## Intent\nx\n\n## API Surface\n`kc.py` does things.\n\n"
+              "## Routing Table\n- `./src/a/gone/` -> nothing is here\n")
+    drift = misaligned(record, {"src/a/kc.py": "x", "src/a/extra.py": "y"}, "src/a")
+    assert "does not exist" in drift            # a route to a directory nobody made
+    assert "extra.py" in drift                  # a file the record never mentions
+    assert misaligned(record, {"src/a/kc.py": "x", "src/a/gone/y.py": "z"},
+                      "src/a") == ""
+
+    # And the hook produces a record edit rather than a verdict, because a verdict
+    # cannot fix a map.
+    revisions = []
+
+    def refine(path, state):
+        revisions.append(path)
+        return "## Intent\nrewritten\n"
+
+    policy = RecursiveDelegation(manager=lambda b: [], executor=lambda b: [],
+                                 log=WorldLog(), refine=refine)
+    state = {CONTEXT_FILE: "# root\n"}
+    proposals = policy.propose(_proposal_ctx(state, Task(id="t", prompt="x")))
+    assert revisions == [""]
+    assert policy.records_revised == 1
+    # A leaf that delegated nothing still gets its record refreshed -- a leaf is where
+    # the code lands, so its API Surface is the one that goes stale first.
+    assert any(CONTEXT_FILE in payload and "rewritten" in payload
+               for payload in proposals)
+
+
+def test_the_routing_table_is_made_to_agree_with_the_children_it_opened():
+    """Upstream: the routing table "is your primary delegation tool ... the map that
+    makes recursive delegation work". A record whose table disagrees with the children
+    the architect just opened is a broken map, and it has to be repaired in *both*
+    directions.
+
+    Dropping a refused entry was always necessary -- a table advertising a node nobody
+    may write is a trap for the next manager. Adding a forgotten one turned out to
+    matter more. An architect answered with five children and a `## Routing Table`
+    holding its API Surface instead: `` `__init__.py` — Exports get_regions(...) ``,
+    then two sentences about FlyWire. Nothing looked wrong that run, because the
+    children were queued from the *reply*. Then the budget ran out, a later phase 1
+    resumed from records, rebuilt its queue from the **table**, found no routes, and
+    dropped five brain regions in silence.
+    """
+    from examples.genesis._architect import _fix_routing
+
+    api_surface_in_the_wrong_section = (
+        "## Intent\nx\n\n## Routing Table\n"
+        "- `__init__.py` — Exports `get_regions(...)`\n"
+        "- All regional organization grounded in FlyWire\n")
+    fixed = _fix_routing(api_surface_in_the_wrong_section,
+                         [{"path": "src/r/antennal_lobe", "objective": "the AL"},
+                          {"path": "src/r/mushroom_body", "objective": "the MB"}])
+    assert parse_routing(fixed) == ["src/r/antennal_lobe", "src/r/mushroom_body"]
+    assert "get_regions" not in fixed
+
+    # A refused child still goes, and one the table already lists is not duplicated.
+    listed = ("## Routing Table\n- `./src/r/keep/` -> stays\n"
+              "- `./src/r/gone/` -> refused\n")
+    fixed = _fix_routing(listed, [{"path": "src/r/keep", "objective": "stays"}])
+    assert parse_routing(fixed) == ["src/r/keep"]
+    assert fixed.count("src/r/keep") == 1
+
+    # And a record with no routing section at all gets one.
+    fixed = _fix_routing("## Intent\nx\n", [{"path": "a/b", "objective": "o"}])
+    assert parse_routing(fixed) == ["a/b"]
+
+
+def test_a_child_the_architect_calls_two_files_is_not_a_directory():
+    """The counterweight to "decompose MORE aggressively", enforced rather than stated.
+
+    Upstream says both in the same breath -- decompose harder when the objective feels
+    large, *and* single responsibility, shared capability at the lowest common ancestor,
+    a directory holding one short function is a directory that did not want splitting.
+    The first is a command; the second needs judgement, and a model given both executes
+    the first. Measured on the fly domain: 600 nodes for one simulator, three quarters
+    of them pure routing, at depth 8. Upstream's 123-hour C compiler run -- 750 files,
+    249 000 lines -- has **26** nodes and bottomed out at depth 5.
+
+    So a child now declares how many files it expects to hold, and one that says two or
+    fewer is refused: it is two files in this node's API Surface.
+    """
+    reply = {"record": "# node\n",
+             "children": [{"path": "big", "objective": "a lot", "files": 9},
+                          {"path": "tiny", "objective": "a function", "files": 1},
+                          {"path": "pair", "objective": "two things", "files": 2},
+                          {"path": "silent", "objective": "undeclared"}]}
+    phase = ArchitectPhase(lambda prompt: json.dumps(reply)
+                           if "`./`" in prompt or "path `./`" in prompt
+                           else json.dumps({"record": "# leaf\n", "children": []}),
+                           max_depth=2, max_nodes=10)
+    tree = phase.design({CONTEXT_FILE: "# root\n"}, "o")
+    assert phase.too_small == 2
+    assert "big/" + CONTEXT_FILE in tree
+    assert "tiny/" + CONTEXT_FILE not in tree and "pair/" + CONTEXT_FILE not in tree
+    # An undeclared count is not a refusal -- the guard reads what is there and does
+    # not invent a number the architect never gave.
+    assert "silent/" + CONTEXT_FILE in tree
+    # And the refused ones are not left advertised in the routing table either.
+    assert parse_routing(tree[CONTEXT_FILE]) == ["big", "silent"]
+
+    prompt = ARCHITECT_PROMPT.format(path="", path_prefix="", objective="o", context="c")
+    assert '"files"' in prompt
+    assert "three files or fewer, return no children" in prompt
+
+
+def test_a_node_may_not_be_named_after_one_of_its_own_ancestors():
+    """"Decompose MORE aggressively" has a counterweight and upstream states both.
+
+    Single responsibility, and **shared capability belongs at the lowest common
+    ancestor**. A directory named after something already above it is that rule broken
+    in the one way a tree can show: whatever is really in there belongs to the ancestor,
+    or the ancestor's name was wrong, and either way two places claim it. Measured: an
+    architect produced `.../receptor/types/catalog/types` and `.../catalog/demographics`
+    beside an existing `.../receptor/population/demographics`.
+    """
+    from examples.genesis._architect import repeats_an_ancestor
+
+    assert repeats_an_ancestor("a/types/catalog/types") == "types"
+    assert repeats_an_ancestor("src/brain/mushroom_body/x/mushroom_body") == "mushroom_body"
+    assert repeats_an_ancestor("src/brain/circuits/cell_types") == ""
+    assert repeats_an_ancestor("src") == ""
+
+    phase = ArchitectPhase(_scripted_architect({
+        "src/a": {"record": "# a\n", "children": [{"path": "src/a/a", "objective": "no"},
+                                                  {"path": "src/a/b", "objective": "yes"}]}}),
+        max_depth=2, root_path="src/a")
+    tree = phase.design({CONTEXT_FILE: "# root\n"}, "o")
+    assert phase.repeated == 1
+    assert "src/a/b/" + CONTEXT_FILE in tree
+    assert "src/a/a/" + CONTEXT_FILE not in tree
+    # and the refused one is not left advertised in the table either
+    assert parse_routing(tree["src/a/" + CONTEXT_FILE]) == ["src/a/b"]
+
+
+def test_phase_one_designs_a_level_at_a_time_and_siblings_cannot_see_each_other():
+    """Upstream an Architect *spawns* sub-architects, which is a statement about
+    independence: every node at a depth inherits the chain down to its own parent,
+    designed a level ago, so nothing in a level can depend on anything else in it.
+    Running them one after another was this port's choice, and it cost the fly domain
+    32 minutes for 71 nodes.
+
+    The asks read a snapshot rather than the live tree, so a sibling can never see
+    another sibling's record even if it finishes first and the result does not depend
+    on which call returns when.
+    """
+    import threading
+
+    seen, together, lock = [], [], threading.Lock()
+    live = [0]
+    plan = {"": {"record": "# root\n", "children": [{"path": "a", "objective": "A"},
+                                                    {"path": "b", "objective": "B"},
+                                                    {"path": "c", "objective": "C"}]}}
+
+    def complete(prompt):
+        with lock:
+            live[0] += 1
+            together.append(live[0])
+            seen.append(prompt)
+        time.sleep(0.05)
+        with lock:
+            live[0] -= 1
+        for path, reply in plan.items():
+            if f"repository path `{path or './'}`" in prompt:
+                return json.dumps(reply)
+        return json.dumps({"record": "# leaf\n", "children": []})
+
+    phase = ArchitectPhase(complete, max_depth=2, max_nodes=10, workers=3)
+    phase.design({}, "o")
+    assert len(phase.nodes) == 4                       # root and three children
+    assert max(together) >= 2, "the three siblings were designed one after another"
+    # No sibling saw another's record: each child's prompt carries the root's chain
+    # and nothing from `a`, `b` or `c`.
+    children = [p for p in seen if "repository path `./`" not in p]
+    assert len(children) == 3
+    for prompt in children:
+        assert sum(prompt.count(f"`{n}/") for n in "abc") <= 1
+
+
+def test_a_resumed_phase_one_hands_each_child_its_own_objective():
+    """The routing line's right-hand side is the objective, not decoration.
+
+    A phase 1 continuing from records rather than from replies has nothing else to
+    give a child. Handing down the *parent's* objective instead sends a leaf the whole
+    project: an architect asked to design `.../cell_types/mushroom_body` while carrying
+    the root objective came back with `brain, learning, environment, simulation`,
+    having redesigned the library from the top at depth five.
+    """
+    from examples.genesis._world import parse_routes
+
+    record = ("## Routing Table\n"
+              "- `./src/brain/` -> the connectome-grounded neural model\n"
+              "- `./src/arena/` -> arena physics and odour fields\n")
+    assert parse_routes(record) == [("src/brain", "the connectome-grounded neural model"),
+                                    ("src/arena", "arena physics and odour fields")]
+    # And the paths still come back exactly as `parse_routing` reports them.
+    assert [p for p, _ in parse_routes(record)] == parse_routing(record)
+
+    asked = []
+
+    def complete(prompt):
+        asked.append(prompt.split("THE OBJECTIVE\n", 1)[1].splitlines()[0])
+        return json.dumps({"record": "# leaf\n", "children": []})
+
+    given = {CONTEXT_FILE: "# root\n",
+             "src/" + CONTEXT_FILE: "# src\n" + record}
+    phase = ArchitectPhase(complete, max_depth=3, max_nodes=10, root_path="src",
+                           resume=True)
+    phase.design(given, "build the whole product")
+    assert phase.reused == 1                       # `src` kept, no call spent
+    assert asked == ["the connectome-grounded neural model",
+                     "arena physics and odour fields"]
+    assert "build the whole product" not in asked
 
 
 def test_a_node_may_not_shadow_a_sibling_module():
@@ -1678,7 +2408,7 @@ def test_the_session_is_fenced_before_the_contract_ever_sees_it(tmp_path):
     """Three fences, and this is the first two: the frozen globs are denied by name in
     the session's own settings, and the network tools are off."""
     executor = ClaudeCodeExecutor(frozen=md.FROZEN, binary="claude")
-    command = executor._command("do the thing")
+    command = executor._command("do the thing", executor.CHILD_TURNS)
     assert "--disallowedTools" in command
     assert "WebFetch,WebSearch,Task" in command
     assert "--permission-mode" in command and "acceptEdits" in command
@@ -1716,6 +2446,575 @@ def test_a_session_that_dies_costs_its_episode_and_nothing_else(tmp_path):
                            objective="o", context="", state=dict(md.initial_files()),
                            task=md.build_tasks()[0], output="FAIL", reward=0.0, depth=1))
     assert edits == [] and executor.failed == 1
+
+
+#: A session that does some work and then never finishes. The wall, not the turn
+#: budget, is what ends an episode in practice: of 52 executor sessions in one fly
+#: run, 27 ran into the wall and the busiest reached 97 of its 128 turns.
+SLOW = '''
+import os, sys, time
+if "--version" in sys.argv:
+    print("0.0.0 (fake)"); raise SystemExit(0)
+os.makedirs("src/core", exist_ok=True)
+open("src/core/vectors.py", "w").write("def minimum_image(a, b, box):\\n    return b\\n")
+time.sleep(120)
+'''
+
+
+def test_a_session_that_runs_out_of_wall_keeps_what_it_wrote(tmp_path):
+    """The wall is an interruption, not a verdict.
+
+    A session killed at the wall wrote what it wrote, and the port reads the worktree
+    rather than the exit status, so the work comes back. What the wall costs is the
+    report -- there is no JSON after a SIGKILL -- which is why the turn counter read
+    309 for a run whose transcripts held 2 607 assistant turns, and why the timeout
+    is counted apart from every other way a session can fail.
+    """
+    executor = ClaudeCodeExecutor(frozen=md.FROZEN, timeout=3.0,
+                                  binary=_fake_claude(tmp_path, SLOW))
+    edits = executor(Brief(world=LocalWorld(version=1, path="src/core",
+                                            readonly=md.FROZEN),
+                           objective="o", context="", state=dict(md.initial_files()),
+                           task=md.build_tasks()[0], output="FAIL", reward=0.0, depth=2))
+    assert [e.path for e in edits] == ["src/core/vectors.py"]
+    assert executor.failed == 1 and executor.timeouts == 1
+    assert executor.turns == 0          # no report to read: the count is not the truth
+
+
+#: A session that starts a server the way the brief tells it to run the suite, and
+#: then hangs. `subprocess.run(timeout=)` signals only the CLI, so one run left a
+#: `python3 _cli.py serve` listening with its working directory already deleted.
+LEAKY = '''
+import os, subprocess, sys, time
+if "--version" in sys.argv:
+    print("0.0.0 (fake)"); raise SystemExit(0)
+subprocess.Popen([sys.executable, "-c",
+                  "import os, sys, time\\n"
+                  "open(sys.argv[1], 'w').write(str(os.getpid()))\\n"
+                  "time.sleep(120)", "MARKER"])
+while not os.path.exists("MARKER") or not open("MARKER").read().strip():
+    time.sleep(0.05)
+time.sleep(120)
+'''
+
+
+def test_a_session_does_not_outlive_the_episode_that_started_it(tmp_path):
+    """The group is killed, not the process.
+
+    An executor has a shell because it has to run the suite it is judged by, and a
+    suite run starts servers. The session leads its own process group and the group
+    goes when the session does -- otherwise the thing the session started is still
+    holding a port when the next 43 episodes come round.
+    """
+    marker = tmp_path / "grandchild.pid"
+    binary = _fake_claude(tmp_path, LEAKY.replace("MARKER", str(marker)))
+    executor = ClaudeCodeExecutor(frozen=md.FROZEN, timeout=5.0, binary=binary)
+    executor(Brief(world=LocalWorld(version=1, path="src", readonly=md.FROZEN),
+                   objective="o", context="", state=dict(md.initial_files()),
+                   task=md.build_tasks()[0], output="FAIL", reward=0.0, depth=1))
+    assert executor.timeouts == 1
+    pid = int(marker.read_text().strip())
+    for _ in range(100):                       # the signal is delivered, not instant
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            break
+        time.sleep(0.05)
+    else:
+        os.kill(pid, 9)
+        raise AssertionError(f"the session's grandchild {pid} outlived the episode")
+
+
+#: Reports back whatever reasoning cap reached the CLI, which is how the run's own
+#: number is checked rather than the one the class would have defaulted to.
+ECHO_THINKING = '''
+import json, os, sys
+if "--version" in sys.argv:
+    print("0.0.0 (fake)"); raise SystemExit(0)
+open("thinking.txt", "w").write(os.environ.get("MAX_THINKING_TOKENS", "(unset)"))
+print(json.dumps({"is_error": False, "num_turns": 2}))
+'''
+
+
+def test_the_executor_gets_the_same_session_settings_as_every_other_role(tmp_path):
+    """The role that does the work is not the role that runs on defaults.
+
+    The architect, the manager, the reviewer and the extractor were all built from the
+    run's session settings; the executor was built from three of its own arguments and
+    inherited neither the wall nor the reasoning cap. It ran a whole fly domain at a
+    900 s default nobody had chosen while `--timeout 600` and `--thinking-tokens 2048`
+    applied to every other role -- so the numbers have to reach it too.
+    """
+    executor = ClaudeCodeExecutor(frozen=md.FROZEN, timeout=17.0, thinking_tokens=2048,
+                                  binary=_fake_claude(tmp_path, ECHO_THINKING))
+    edits = executor(Brief(world=LocalWorld(version=1, path="src", readonly=md.FROZEN),
+                           objective="o", context="", state=dict(md.initial_files()),
+                           task=md.build_tasks()[0], output="FAIL", reward=0.0, depth=1))
+    assert executor._timeout == 17.0
+    assert {e.path: e.content for e in edits}["thinking.txt"] == "2048"
+
+
+def test_the_session_wall_is_not_the_model_call_timeout():
+    """Two different numbers, and sharing one was how the executor lost both.
+
+    `--timeout` is the timeout on one model call -- `examples/_common` says so in its
+    own help, and this port defaults it to 120 s. A session is a loop of many calls,
+    so a 120 s "timeout" would kill every one of them before it read a file.
+    """
+    args = genesis.build_parser().parse_args([])
+    assert args.timeout == 120.0                       # one model call
+    assert args.session_timeout == ClaudeCodeExecutor.TIMEOUT
+    assert args.session_timeout > args.timeout
+
+
+def test_the_session_decisions_are_made_before_the_roles_that_read_them():
+    """`--mode a` builds the extractor, and it is the first role built.
+
+    Both the session settings and the "is there a CLI at all" fallback were written
+    below it, so a `--mode a --agent-sessions` run raised `NameError: use_sessions`
+    where it looked like it would fall back to a completion. Order is the fix, and
+    order is what this checks.
+    """
+    tree = ast.parse(inspect.getsource(genesis.main))
+    defined = {}
+    mode_a = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "_session_kwargs":
+            defined["_session_kwargs"] = node.lineno
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) \
+                and node.id == "use_sessions":
+            defined.setdefault("use_sessions", node.lineno)
+        if isinstance(node, ast.Compare) and isinstance(node.left, ast.Attribute) \
+                and node.left.attr == "mode" \
+                and any(getattr(c, "value", None) == "a" for c in node.comparators):
+            mode_a.append(node.lineno)
+    assert set(defined) == {"_session_kwargs", "use_sessions"}
+    extractor = max(mode_a)                     # the branch that builds the extractor
+    assert defined["_session_kwargs"] < extractor
+    assert defined["use_sessions"] < extractor
+
+
+#: An architect that starts implementing. The record is the job; the module beside
+#: it is the failure mode, and it costs nothing here because the workspace is a copy.
+BUSY_ARCHITECT = '''
+import json, os, sys
+if "--version" in sys.argv:
+    print("0.0.0 (fake)"); raise SystemExit(0)
+os.makedirs("src", exist_ok=True)
+open("src/CONTEXT.md", "w").write("# src\\n\\n## Routing Table\\n- `./core/` (2 files) -> cores\\n")
+open("src/eager.py", "w").write("# an architect that could not help itself\\n")
+print(json.dumps({"is_error": False, "num_turns": 4}))
+'''
+
+
+def test_a_design_session_that_writes_code_is_counted_not_believed(tmp_path):
+    """`strays=0` has to mean nothing strayed.
+
+    The counter was reported on every phase-1 line and incremented nowhere, by a
+    helper that walked the workspace with a module its file never imported -- so it
+    said zero whatever the architect did. The session owns the workspace and deletes
+    it, so the count is taken there, before it is gone.
+    """
+    from examples.genesis._architect_session import ArchitectSession
+
+    designer = ArchitectSession(binary=_fake_claude(tmp_path, BUSY_ARCHITECT))
+    record, children = designer({}, "src", "design it")
+    assert record and [c["path"] for c in children] == ["src/core"]
+    assert designer.strays == 1                       # src/eager.py, and not the record
+    assert "strays=1" in designer.summary()
+
+
+#: Reports back the session's own situation: what it was invoked with, and where the
+#: CLI was told to keep its state.
+ECHO_ENV = '''
+import json, os, sys
+if "--version" in sys.argv:
+    print("0.0.0 (fake)"); raise SystemExit(0)
+open("argv.txt", "w").write("\\n".join(sys.argv))
+open("home.txt", "w").write(os.environ.get("CLAUDE_CONFIG_DIR", "(unset)"))
+open("ident.txt", "w").write(",".join(k for k in HOST if os.environ.get(k)))
+print(json.dumps({"is_error": False, "num_turns": 1}))
+'''
+
+
+def test_a_session_does_not_inherit_the_host_s_identity_or_its_state(tmp_path,
+                                                                    monkeypatch):
+    """A session launched from a session is not that session.
+
+    Inherited, the identity variables make every episode in a run *be* the host: one
+    fly run's 52 episodes each wrote a transcript named with the host's session id, and
+    their TodoWrite state -- keyed by that id -- landed in the host's own task list.
+    `CLAUDE_CONFIG_DIR` then moves transcripts, todos and synced skills out of
+    `~/.claude`, which one run had left 685 project directories in.
+    """
+    from examples.genesis._session import (HOST_SESSION_VARS, session_env,
+                                           session_home)
+
+    for name in HOST_SESSION_VARS:
+        monkeypatch.setenv(name, "the-host")
+    env = session_env()
+    assert not [k for k in HOST_SESSION_VARS if k in env]
+    assert env["CLAUDE_CONFIG_DIR"] == session_home()
+    assert not session_home().startswith(os.path.expanduser("~/.claude"))
+
+    script = ECHO_ENV.replace("HOST", repr(list(HOST_SESSION_VARS)))
+    executor = ClaudeCodeExecutor(frozen=md.FROZEN,
+                                  binary=_fake_claude(tmp_path, script))
+    edits = executor(Brief(world=LocalWorld(version=1, path="src", readonly=md.FROZEN),
+                           objective="o", context="", state=dict(md.initial_files()),
+                           task=md.build_tasks()[0], output="FAIL", reward=0.0, depth=1))
+    wrote = {e.path: e.content for e in edits}
+    assert wrote["ident.txt"] == ""                    # none of them reached the session
+    assert wrote["home.txt"] == session_home()
+
+
+def test_a_session_with_its_own_key_is_not_given_the_host_s_whole_situation(tmp_path,
+                                                                           monkeypatch):
+    """31 850 input tokens plain against 1 317 bare, same endpoint, same prompt.
+
+    A CLI launched from inside a Claude Code session inherits that session's MCP
+    servers, skills, agent list, the user's email and a system prompt about reviewing
+    pull requests -- a 24x prefix on every turn of every episode, none of it about the
+    objective. `--bare` drops it, and reads credentials strictly from
+    `ANTHROPIC_API_KEY`, which is why it is used only when the run brought one: a
+    session billed to the local CLI's own sign-in makes no API call at all with it.
+    """
+    from examples.genesis._session import isolation_flags
+
+    assert isolation_flags({}) == []
+    assert isolation_flags({"ANTHROPIC_AUTH_TOKEN": "t"}) == []    # OAuth-shaped: no
+    assert isolation_flags({"ANTHROPIC_API_KEY": "k"}) == ["--bare",
+                                                           "--strict-mcp-config"]
+
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://example.invalid/anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    script = ECHO_ENV.replace("HOST", "[]")
+    executor = ClaudeCodeExecutor(frozen=md.FROZEN,
+                                  binary=_fake_claude(tmp_path, script))
+    edits = executor(Brief(world=LocalWorld(version=1, path="src", readonly=md.FROZEN),
+                           objective="o", context="", state=dict(md.initial_files()),
+                           task=md.build_tasks()[0], output="FAIL", reward=0.0, depth=1))
+    argv = {e.path: e.content for e in edits}["argv.txt"].splitlines()
+    assert "--bare" in argv and "--strict-mcp-config" in argv
+    # the fences are not what bare drops: the deny list is still on the command line
+    assert "--disallowedTools" in argv
+
+
+def test_bare_mode_is_asked_only_for_the_tools_it_carries():
+    """`--bare` does not expose `Write`, and no flag brings it back.
+
+    Measured against the real CLI: a bare session given `--tools Read,Write,Glob,Grep`
+    answers "I only have a file Read tool available". An executor in one run spent a
+    turn discovering it -- `No such tool available: Write. Write is disabled for this
+    session` -- and then wrote every file through `cat > f << EOF` instead, while the
+    same code without `--bare` had made 1,910 successful `Write` calls. `Edit` is there
+    and creates a file that does not exist, which is how all seven phase-1 records in
+    that run were written by sessions with no shell at all.
+    """
+    from examples.genesis._session import READ_WRITE_TOOLS, available_tools
+
+    bare = ["--bare", "--strict-mcp-config"]
+    assert available_tools(READ_WRITE_TOOLS, []) == list(READ_WRITE_TOOLS)
+    kept = available_tools(READ_WRITE_TOOLS, bare)
+    assert "Write" not in kept and "Edit" in kept
+    # a role whose only job is to write one file keeps a way to write it
+    assert "Edit" in available_tools(("Read", "Glob", "Grep", "Write"), bare)
+
+    executor = ClaudeCodeExecutor(frozen=md.FROZEN, binary="claude")
+    command = executor._command("do it", 8, {"ANTHROPIC_API_KEY": "k"})
+    allowed = command[command.index("--allowedTools") + 1].split(",")
+    assert "--bare" in command and "Write" not in allowed and "Edit" in allowed
+    plain = executor._command("do it", 8, {})
+    assert "--bare" not in plain
+    assert "Write" in plain[plain.index("--allowedTools") + 1].split(",")
+
+
+def test_the_brief_keeps_the_session_inside_the_checkout():
+    """The blind property is a rule, not a wall, and the rule has to be stated.
+
+    Four of twelve episodes in one run ran `find /` and read a previous run's output
+    from `/tmp`; one opened the very `_cli.py` that answered the acceptance failure it
+    had been handed to reproduce. A shell can read whatever the process can, so the
+    worktree bounds what survives and not what is seen.
+    """
+    brief = CLAUDE_CODE_BRIEF.format(path="src", objective="o", frozen="REQUIREMENTS.md",
+                                     failure="")
+    assert "Do not read outside it" in brief
+    assert "find /" in brief
+    assert "not this repository's state" in brief
+
+
+# ---------------------------------------------------------------------------
+# The boundary: what a session can see, rather than what its work becomes
+# ---------------------------------------------------------------------------
+
+def test_the_sandbox_passes_named_variables_and_rewrites_only_the_agent():
+    """Two things the exec has to get right, and both were got wrong first.
+
+    The binary under the mount is the *resolved* one -- `claude` is a symlink out of a
+    node install here, and exec'ing the link's own path inside the container is
+    `stat: no such file or directory`. And only the agent's own argv[0] is rewritten: a
+    shell probe through the same workspace is not the agent, and rewriting it turns
+    `sh -c 'ls /'` into "Please run /login".
+    """
+    from examples.genesis._sandbox import CONTAINER_HOME, Workspace
+
+    space = Workspace("/host/ws", prefix=["docker", "exec", "-w", "/work", "cid"],
+                      env={"HOME": CONTAINER_HOME}, binary="/opt/pkg/bin/claude",
+                      binary_names=("claude", "/usr/bin/claude"))
+    got = space.command(["claude", "-p", "hi"],
+                        {"ANTHROPIC_API_KEY": "k", "CLAUDE_CODE_SESSION_ID": "host"})
+    assert got[-3:] == ["/opt/pkg/bin/claude", "-p", "hi"]
+    assert got[:4] == ["docker", "exec", "-w", "/work"]
+    assert got[got.index("--env") + 1] == "ANTHROPIC_API_KEY=k"
+    assert f"HOME={CONTAINER_HOME}" in got
+    # the host's session identity is not on the list, so it cannot arrive by accident
+    assert not any("CLAUDE_CODE_SESSION_ID" in part for part in got)
+    # a command that is not the agent goes in untouched
+    assert space.command(["sh", "-c", "ls /"], {})[-3:] == ["sh", "-c", "ls /"]
+
+
+def test_a_shared_toolchain_directory_is_not_mounted():
+    """`/usr/bin/claude` would mean mounting the host's system directories.
+
+    The mount exists to put the agent inside a container that has no agent in it. A
+    binary that lives somewhere shared has no install directory of its own, and taking
+    its parent would hand the session exactly what the boundary is for.
+    """
+    from examples.genesis import _sandbox
+
+    calls = {}
+
+    def fake_which(name):
+        return calls.get(name)
+
+    old = _sandbox.shutil.which
+    _sandbox.shutil.which = fake_which
+    try:
+        calls["claude"] = "/opt/claude-code/bin/claude"
+        assert _sandbox.toolchain_root("claude") == "/opt/claude-code"
+        calls["claude"] = "/usr/bin/claude"
+        assert _sandbox.toolchain_root("claude") is None
+        calls["claude"] = None
+        assert _sandbox.toolchain_root("claude") is None
+    finally:
+        _sandbox.shutil.which = old
+
+
+def test_without_an_engine_the_run_says_so_rather_than_pretending(tmp_path):
+    """A fallback that claimed to isolate would be worse than none.
+
+    `LocalSandbox` is what the port did before this module existed, kept as a class so
+    both paths have one shape -- and so the run reports which one it got.
+    """
+    from examples.genesis._sandbox import LocalSandbox
+
+    local = LocalSandbox(str(tmp_path))
+    assert not local.available
+    space = local.open("x-")
+    try:
+        assert space.path.startswith(str(tmp_path))
+        assert space.command(["claude", "-p", "hi"], {}) == ["claude", "-p", "hi"]
+    finally:
+        space.close()
+    assert "can read this machine" in local.summary()
+
+
+@pytest.mark.skipif(_no_engine(), reason="needs a container engine")
+def test_a_sandboxed_session_cannot_read_the_machine_it_runs_on(tmp_path):
+    """The claim, checked against a real engine rather than against the flags.
+
+    Four of twelve episodes in one run read a previous run's output off `/tmp`, and one
+    of them opened the answer to the acceptance failure it had been handed. This is the
+    same filesystem, asked the same questions, from inside.
+    """
+    from examples.genesis._sandbox import SessionSandbox
+
+    sandbox = SessionSandbox(home=str(tmp_path))
+    if not sandbox.available:                       # engine went away between checks
+        pytest.skip(sandbox.reason)
+    space = sandbox.open("test-")
+    try:
+        (pathlib.Path(space.path) / "mine.txt").write_text("the work\n")
+
+        def run(script):
+            out = subprocess.run(space.command(["sh", "-c", script], {}),
+                                 capture_output=True, text=True, timeout=90)
+            return (out.stdout or out.stderr).strip()
+
+        assert "No such file" in run("ls /home/user/agentdescent")
+        assert run("find / -name 'algo-genesis.md' 2>/dev/null; echo END") == "END"
+        assert run("ls /tmp | wc -l") == "0"
+        assert "mine.txt" in run("ls /work")
+        assert "Read-only file system" in run("touch /etc/x 2>&1 | head -1")
+        assert run("grep CapEff /proc/self/status").endswith("0000000000000000")
+    finally:
+        space.close()
+
+
+def test_every_session_role_takes_the_run_s_own_settings():
+    """One kwarg set, five roles, and the driver hands it to all of them.
+
+    It hands them `_session_kwargs()` -- model, wall, reasoning cap, sandbox -- and a
+    role whose signature is spelled out rather than `**kwargs` silently falls out of
+    that contract. Adding the sandbox did exactly that to the architect, and the run
+    died at phase 1 with `unexpected keyword argument 'sandbox'` *after* printing its
+    whole header, which reads like a working run for as long as it takes to scroll.
+    """
+    from examples.genesis._architect_session import ArchitectSession
+    from examples.genesis._roles import ExtractSession, ManagerSession, ReviewSession
+    from examples.genesis._sandbox import LocalSandbox
+
+    kwargs = dict(model="m", timeout=123.0, thinking_tokens=64,
+                  sandbox=LocalSandbox())
+    roles = [ArchitectSession(frozen=md.FROZEN, **kwargs),
+             ManagerSession(Delegation, frozen=md.FROZEN, **kwargs),
+             ReviewSession(contracts=md.CONTRACTS, frozen=md.FROZEN, **kwargs),
+             ExtractSession(frozen=md.FROZEN, **kwargs)]
+    for role in roles:
+        assert role.session._timeout == 123.0
+        assert role.session._thinking_tokens == 64
+        assert role.session.sandbox is kwargs["sandbox"]
+
+    executor = ClaudeCodeExecutor(frozen=md.FROZEN, **kwargs)
+    assert executor._timeout == 123.0 and executor._thinking_tokens == 64
+    assert executor.sandbox is kwargs["sandbox"]
+
+
+#: A session that does what the brief tells it to: writes a module, writes a test, and
+#: runs the suite -- which leaves a `.pytest_cache` behind.
+TIDY = '''
+import json, os, sys
+if "--version" in sys.argv:
+    print("0.0.0 (fake)"); raise SystemExit(0)
+os.makedirs("src/core", exist_ok=True)
+open("src/core/vectors.py", "w").write("def f():\\n    return 1\\n")
+os.makedirs("src/core/.pytest_cache/v/cache", exist_ok=True)
+open("src/core/.pytest_cache/CACHEDIR.TAG", "w").write("Signature: 8a477f597d28d172\\n")
+open("src/core/.pytest_cache/v/cache/lastfailed", "w").write("{}")
+open(".coverage", "w").write("binary-ish")
+print(json.dumps({"is_error": False, "num_turns": 6}))
+'''
+
+
+def test_what_a_session_made_is_not_what_it_wrote(tmp_path):
+    """Running the suite is the job; the cache it leaves is not the work.
+
+    Without this the directory reaches the accepted version and is materialised into
+    every later workspace. Measured four hours into one run: a manager session at
+    `src/arena` spent seven turns reading `CACHEDIR.TAG`, `README.md` and
+    `v/cache/lastfailed`, then wrote its plan to
+    `src/arena/.pytest_cache/.genesis/plan.md` -- which the caller does not read back,
+    so the episode cost a session and returned nothing. One workspace had nested the
+    directory twice.
+    """
+    executor = ClaudeCodeExecutor(frozen=md.FROZEN, binary=_fake_claude(tmp_path, TIDY))
+    edits = executor(Brief(world=LocalWorld(version=1, path="src/core",
+                                            readonly=md.FROZEN),
+                           objective="o", context="", state=dict(md.initial_files()),
+                           task=md.build_tasks()[0], output="FAIL", reward=0.0, depth=2))
+    assert [e.path for e in edits] == ["src/core/vectors.py"]
+
+    # ...and the same for a role session, which reports what it touched
+    from examples.genesis._session import AgentSession
+
+    session = AgentSession(binary=_fake_claude(tmp_path, TIDY))
+    session.run({}, "do it", read=[".genesis/plan.md"])
+    assert session.changed == ["src/core/vectors.py"]
+
+
+def test_a_tool_s_own_directory_is_never_a_node():
+    """The second fence on the same failure, and it earned its place.
+
+    `_session.ARTIFACT_DIRS` keeps `.pytest_cache` out of the accepted version, which
+    is where the problem starts. It is not where it ends: in one run the directory got
+    in anyway and the managers delegated *into* it 21 times, nesting three deep at
+    `src/brain/central_complex/.pytest_cache/.pytest_cache/.pytest_cache`. Every one of
+    those was an episode, a container and a session spent on a cache.
+
+    A node is a source directory. A dot directory is never one, and neither is
+    `node_modules` -- so the delegation refuses both and counts them where it already
+    counts a path read as a node when it is not one.
+    """
+    delegation = RecursiveDelegation(manager=lambda brief: [], executor=lambda brief: [],
+                                     log=WorldLog(), max_depth=3,
+                                     contracts=md.CONTRACTS)
+    world = LocalWorld(version=1, path="src", readonly=md.FROZEN)
+    state = dict(md.initial_files())
+
+    for bad in ("src/.pytest_cache", "src/.pytest_cache/v/cache",
+                "src/core/.mypy_cache", "src/node_modules", "src/.venv",
+                "src/core/.pytest_cache/.pytest_cache"):
+        assert not delegation._is_node(world, Delegation(bad, "o"), state), bad
+    assert delegation.mistaken_nodes == 6
+
+    # ...and a real directory beside them still opens
+    assert delegation._is_node(world, Delegation("src/core", "o"), state)
+    assert delegation.mistaken_nodes == 6
+
+
+def test_a_bracketed_note_costs_its_count_never_its_child():
+    """`(~32 files)` designed a tree of one node.
+
+    The brief asks for `(12 files)` and the pattern read `\\d+`, so "about
+    thirty-two" -- a perfectly reasonable thing for an architect to write -- did not
+    match. And because the count sat in an *optional group* that still had to match
+    where it appeared, failing it failed the whole line: the child did not lose its
+    size, it vanished. One run's phase 1 reported `architect designed 1 nodes,
+    deepest 0` from a record that named six children in plain sight, and a one-node
+    tree is a run with no delegation, no parent review and no spatial contract in it
+    at all.
+    """
+    from examples.genesis._world import parse_route_sizes, parse_routes
+
+    def table(note):
+        return f"## Routing Table\n- `./src/brain/` {note} -> the brain\n"
+
+    for note in ("(32 files)", "(~32 files)", "(≈32 files)", "(about 32 files)",
+                 "(32 files, maybe more)", "(several files)", ""):
+        assert parse_routes(table(note)) == [("src/brain", "the brain")], note
+
+    # the count is read where there is one, and simply absent where there is not
+    assert parse_route_sizes(table("(~32 files)")) == {"src/brain": 32}
+    assert parse_route_sizes(table("(several files)")) == {}
+    assert parse_route_sizes(table("")) == {}
+
+    # and the whole record parses the way the run needs it to
+    record = ("# src\n\n## Routing Table\n"
+              "- `./src/neural/` (~9 files) -> the spiking engine\n"
+              "- `./src/brain/` (~32 files) -> the brain\n"
+              "- `./src/body/` (~6 files) -> the body\n")
+    assert [p for p, _ in parse_routes(record)] == ["src/neural", "src/brain", "src/body"]
+
+
+def test_the_failure_evidence_says_whose_it_is():
+    """Every episode is shown the same failing assertion; most of them do not own it.
+
+    The old wording ended "write your own test that reproduces this and make both
+    pass", which reads as an instruction at whatever node you happen to be, and a node
+    may only write under itself. So a leaf at `src/brain/olfactory`, handed the
+    repository's `No module named '_cli'`, built `src/brain/olfactory/_cli.py` -- a
+    local imitation of a root-level entry point, which cannot fix a root-level import.
+    Across the runs on one machine that produced eight distinct `_cli.py` paths, one
+    per node, 79 writes between them, and only the root's could ever have mattered.
+
+    The brief already has the right answer in it -- report the need upward and let the
+    responsible agent handle it -- and it was being drowned out.
+    """
+    from examples.genesis._suite import BLIND_FAILURE
+
+    text = BLIND_FAILURE.format(prompt="req 3", output="FAIL:ModuleNotFoundError")
+    assert "repository's** evidence, not necessarily yours" in text
+    assert "Judge it against what you own" in text
+    assert "say which path and why" in text
+    assert "a local imitation of a file that has to exist elsewhere fixes nothing" in text
+    # the conditional is what makes it a judgement rather than an order
+    assert "If the fix belongs under your path" in text
+
+    # and it still reaches the episode through the executor's brief
+    brief = CLAUDE_CODE_BRIEF.format(path="src/brain", objective="o",
+                                     frozen="REQUIREMENTS.md", failure=text)
+    assert "not necessarily yours" in brief and "Write only under `src/brain`" in brief
 
 
 def test_stackvm_is_deeper_than_minilang_which_is_why_it_exists():
@@ -1774,3 +3073,205 @@ def test_formation_grows_a_working_toolchain_from_the_empty_repository():
     assert result.final_reward > 0.9, result.outcomes()
     assert log.observed_depth() >= 2, "the run never delegated past the first level"
     assert log.contract_violations == 0
+
+
+# -- phase 1's architect as a session -------------------------------------------
+
+def test_a_routing_heading_is_read_at_any_level_or_numbering():
+    """The routing table is the map delegation runs on, so a heading written the way
+    an agent writes markdown -- deeper, numbered, lowercased -- must still open it.
+
+    Measured: a session architect wrote a complete five-child routing table under a
+    heading the exact-prefix match rejected, and the tree recorded the node as a leaf.
+    """
+    from examples.genesis._world import parse_route_sizes, parse_routes
+
+    for heading in ("## Routing Table", "### Routing Table", "## Routing table",
+                    "## Routing", "#### Routing", "## 4. Routing Table",
+                    "## Routing Table (children)"):
+        body = f"{heading}\n\n- `./src/brain/` (3 files) -> the circuits\n"
+        assert parse_routes(body) == [("src/brain", "the circuits")], heading
+        assert parse_route_sizes(body) == {"src/brain": 3}, heading
+    # and a heading that only mentions routing is still not the section
+    assert parse_routes("## Non-routing notes\n\n- `./src/brain/` -> x\n") == []
+
+
+def test_a_routing_line_may_declare_the_child_s_size():
+    """A session architect writes `CONTEXT.md` and returns no structured reply, so the
+    file-count that refuses a child too small to be a directory has to live in the
+    routing line. A record without counts still routes; it just declares nothing.
+    """
+    from examples.genesis._world import parse_route_sizes, parse_routes
+
+    sized = ("## Routing Table\n\n"
+             "- `./src/brain/` (12 files) -> circuits\n"
+             "- `./src/web/` -> the page\n")
+    assert parse_routes(sized) == [("src/brain", "circuits"), ("src/web", "the page")]
+    assert parse_route_sizes(sized) == {"src/brain": 12}
+    assert parse_route_sizes("## Routing Table\n\n- `./src/brain/` -> x\n") == {}
+
+
+def test_the_session_architect_returns_what_the_completion_one_does():
+    """`ArchitectSession` is a drop-in for the completion: same return shape, so the
+    phase's guards -- the file-count threshold, the shadowing refusals -- apply to
+    both. A record the session did not write is `(None, [])`, which the phase counts
+    as an unusable reply, because a node nobody designed is one event either way.
+    """
+    from examples.genesis._architect_session import _children
+
+    record = ("## Routing Table\n\n"
+              "- `./src/brain/` (12 files) -> circuits\n"
+              "- `web/` (4 files) -> the page\n")
+    kids = _children(record, "src/")
+    assert [k["path"] for k in kids] == ["src/brain", "src/web"]
+    assert [k["files"] for k in kids] == [12, 4]
+    assert all(k["objective"] for k in kids)
+
+
+def test_the_design_rules_are_shared_by_both_delivery_paths():
+    """One set of rules, two ways to deliver the record. Duplicating them is how the
+    completion path and the session path would silently grow different trees.
+    """
+    from examples.genesis._architect import ARCHITECT_PROMPT, ARCHITECT_RULES
+
+    assert ARCHITECT_PROMPT.startswith(ARCHITECT_RULES)
+    assert "ONE JSON object" in ARCHITECT_PROMPT
+    assert "ONE JSON object" not in ARCHITECT_RULES
+
+
+def test_a_design_session_is_given_no_shell():
+    """The implementation executor gets Bash because it has to run the suite it is
+    judged by. An architect designs and does not implement, and a shell is how a
+    design session becomes an implementation session by accident.
+    """
+    from examples.genesis._architect_session import ArchitectSession
+
+    command = ArchitectSession(model="m").session._command("hi")
+    allowed = command[command.index("--allowedTools") + 1]
+    assert "Bash" not in allowed
+    assert "Bash" in command[command.index("--disallowedTools") + 1]
+
+
+# -- the manager and the extractor as sessions ----------------------------------
+
+def test_a_manager_plan_is_read_line_by_line():
+    """A plan of five children whose fourth line is malformed delegates four, not
+    none. That is the whole reason the deliverable is lines and not JSON: the failure
+    these sessions exist to remove is "the structured reply did not parse".
+    """
+    from examples.genesis._roles import _plan
+
+    assert _plan("# heading\n"
+                 "- `src/brain` -> build the circuits\n"
+                 "src/world -> arena and odour\n"
+                 "a line with no arrow at all\n"
+                 "* src/web: the page\n") == [
+        ("src/brain", "build the circuits"),
+        ("src/world", "arena and odour"),
+        ("src/web", "the page")]
+    assert _plan("") == []          # an empty plan means "handle it here"
+
+
+def test_a_review_verdict_that_does_not_speak_is_not_a_rejection():
+    """The child did the work; a reviewer that cannot say ACCEPT or REJECT is not
+    evidence against it. Same rule the completion reviewer already held.
+    """
+    from examples.genesis._roles import _verdict
+
+    assert _verdict("ACCEPT\nlooks fine") == ("accept", "looks fine")
+    assert _verdict("**REJECT**\nimport does not resolve") == (
+        "reject", "import does not resolve")
+    assert _verdict("I think it is probably ok") == (None, "")
+    assert _verdict("") == (None, "")
+
+
+def test_a_reviewing_session_is_shown_the_child_s_real_files():
+    """`ReviewSession` runs over the candidate -- the parent's state with the child's
+    edits applied -- so Read and Grep reach the work itself. The completion reviewer
+    saw a diff rendered and truncated at 12 000 characters.
+    """
+    import examples.genesis._roles as roles
+
+    seen = {}
+
+    class _Fake:
+        sessions = failed = turns = 0
+
+        def run(self, state, prompt, *, read):
+            seen["state"] = dict(state)
+            seen["prompt"] = prompt
+            return {read[0]: "ACCEPT\n"}
+
+        def summary(self):
+            return ""
+
+    review = roles.ReviewSession.__new__(roles.ReviewSession)
+    review._contracts = ()
+    review.session = _Fake()
+    review.reviewed = review.rejected = review.unparsed = 0
+
+    class _World:
+        path = "src"
+
+        def situate(self, state, contracts=()):
+            return "(context)"
+
+    class _Parent:
+        world = _World()
+        state = {"src/CONTEXT.md": "# src\n"}
+        objective = "build it"
+
+    class _Edit:
+        kind = "work"
+
+        def __init__(self, path, content):
+            self.path, self.content = path, content
+
+    assert review(_Parent(), [_Edit("src/brain/kc.py", "X = 1\n")]) is None
+    assert seen["state"]["src/brain/kc.py"] == "X = 1\n"
+    assert "src/brain/kc.py" in seen["prompt"]
+
+
+def test_an_extractor_session_replaces_files_in_the_prompt():
+    """Upstream's ContextExtractor reads code with a tool. Without one this port had
+    to put the node's own files in the prompt -- capped at eight files of six thousand
+    characters, and the run before that cap invented an API surface off file names.
+    """
+    import inspect
+
+    from examples.genesis._extract import ExtractPhase
+    from examples.genesis._roles import EXTRACT_BRIEF
+
+    assert "session" in inspect.signature(ExtractPhase.__init__).parameters
+    # the record is a file it writes, not a reply it returns
+    assert "{record}" in EXTRACT_BRIEF
+    # and it is told it may not change the code
+    assert "may not change the code" in EXTRACT_BRIEF
+
+
+def test_a_read_only_role_gets_no_shell_and_keeps_only_what_it_was_asked_for(tmp_path):
+    """The fence that holds is the deny list and the readback, not the allow list.
+
+    `--allowedTools` is an auto-approve list, not a whitelist: measured over one run's
+    role sessions, the manager used `Edit` 41 times and the reviewer 6, and `Edit` was
+    never in either one's allowed tools. `--disallowedTools` *is* a fence -- no role
+    session in that run ran a shell, and none reached the network tools -- and the
+    containment for everything else is :meth:`AgentSession.run`, which returns the paths
+    the caller named and nothing else. `agent/tools.ex` gives `:read` agents the read
+    half plus `context_write`; that is what this comes to here.
+    """
+    from examples.genesis._roles import ExtractSession, ManagerSession
+
+    for role in (ExtractSession(model="m"),
+                 ManagerSession(lambda p, o: (p, o), model="m")):
+        command = role.session._command("hi")
+        denied = command[command.index("--disallowedTools") + 1]
+        assert "Bash" in denied and "WebFetch" in denied and "Task" in denied
+
+    # ...and a session that writes where it was not asked is not believed.
+    from examples.genesis._session import AgentSession
+
+    session = AgentSession(binary=_fake_claude(tmp_path, BUSY_ARCHITECT))
+    got = session.run({}, "design it", read=["src/CONTEXT.md"])
+    assert set(got) == {"src/CONTEXT.md"}          # src/eager.py was written, not read
+    assert session.changed == ["src/eager.py"]     # seen and counted, never returned
