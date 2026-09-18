@@ -39,6 +39,7 @@ EvolutionResult(
     forced_refreshes: int = 0,
     stragglers: int = 0,
     retired_workers: int = 0,
+    audit_drained: int = 0,
     usage: Usage = <factory>,
     wallclock: float = 0.0,
     rollouts: int = 0,
@@ -982,7 +983,8 @@ EvidenceCard(
     trajectory_refs: List[Any] = <factory>,
     advantage: Optional[float] = None,
     cost_tokens: int = 0,
-    cost_wallclock: float = 0.0
+    cost_wallclock: float = 0.0,
+    branch: Optional[str] = None
 ) -> None
 ```
 
@@ -1058,6 +1060,7 @@ AggregatorConfig(
     accept_samples: int = 4000,
     cas_attempts: int = 3,
     cas_backoff: float = 0.05,
+    audit_drain_per_step: int = 0,
     fusion_tournament: bool = False,
     bounded_gate: bool = False
 ) -> None
@@ -1159,6 +1162,8 @@ Ledger(
 | `close() -> None` | Refuse further use of this ledger. Idempotent. |
 | `commit(...)` | Compare-and-swap commit of a single artifact. |
 | `commit_atomic(...)` | Two-phase, all-or-nothing commit of several artifacts. |
+| `fork(name: str, from_branch: str = 'dev') -> str` | Create or reset `name` to hold `from_branch`'s current state. |
+| `live_heads() -> List[str]` | Every live head branch: `dev` first, then the `dev/` forks. |
 | `promote_to_stable(artifact_id: str) -> Optional[int]` | EMA-style confirmation: copy dev's current artifact onto stable. |
 | `register(artifact: Evolvable, branch: str = 'dev') -> None` | Add a brand-new artifact at version 1 on both branches. |
 | `snapshot(branch: str = 'dev') -> Snapshot` | Materialize every artifact on `branch` into live Evolvables. |
