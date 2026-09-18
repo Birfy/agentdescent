@@ -44,7 +44,8 @@ from .policies import Policies
 from .evolution import (
     _publish_stable, _safe_log,
     Agent, EvolutionResult, Propose, Reward, RoundInfo, Run, Strategy, Task,
-    _ASYNC_WIRED_POLICIES, _cost_fields, _fusion_trials, _resolve_policies,
+    _ASYNC_WIRED_POLICIES, _cost_fields, _fusion_trials, _replay_stats,
+    _resolve_policies,
     SOLVED, _build_engine, _checked_proposal, _checked_reward,
 )
 from .aggregator import Aggregator, AggregatorConfig, check_reports
@@ -398,6 +399,10 @@ def async_evolve(
         raise ValueError(f"n_workers must be >= 1, got {n_workers}")
     policy = staleness_policy or get_policy("guarded")
     sampler = task_sampler or RoundRobin()
+    # Wire the settled-evidence consumer: a sampler that implements settle()
+    # receives every discarded card, so a ReplaySampler can learn from the waste.
+    if hasattr(sampler, 'settle'):
+        eng.aggregator.set_settled_consumer(sampler.settle)
     # Staleness tolerance must come from the same config the aggregator uses --
     # hardcoding 5/1 here silently ignored agg_config.alpha_head/alpha_tail, so a
     # tightened tolerance was honoured by the aggregator but not by this gate.
@@ -1188,4 +1193,5 @@ def async_evolve(
         # unbounded backend call after the budget the caller fixed.
         gate_pool.shutdown(wait=False)
     eng.cleanup()          # do not hold a scratch git repo for the whole process
+    result.replay = _replay_stats(sampler)
     return result

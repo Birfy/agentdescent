@@ -769,18 +769,28 @@ _WIRED_POLICIES = ("task_sampler", "selection", "proposal", "conflict", "fusion"
 _ASYNC_WIRED_POLICIES = tuple(p for p in _WIRED_POLICIES if p != "executor")
 
 
-def _propose_via_policy(policy):
+def _propose_via_policy(policy, settled_reader=None):
     """Adapt a `ProposalPolicy` back to the engine's one-proposal contract.
 
     A policy that returns several is refused rather than truncated: the engine
     turns one proposal into one diff per rollout, so quietly keeping the first
     would discard work the policy did and make a k-sampling algorithm look like
-    it ran when only a fraction of it did."""
+    it ran when only a fraction of it did.
+
+    ``settled_reader`` is an optional mutable cell ``[callable]``, set later by
+    the engine after the aggregator is built, that returns the recent settled
+    evidence cards for a task. The reader is None until wired, so the field is
+    empty (``()``) on every path that does not enable the feature.
+    """
     from .policies import ProposalContext
 
     def propose(rendered, task, output, reward):
+        rejected = ()
+        if settled_reader is not None and settled_reader[0] is not None:
+            rejected = settled_reader[0](task, n=3)
         out = list(policy.propose(ProposalContext(
-            rendered=rendered, task=task, output=output, reward=reward)))
+            rendered=rendered, task=task, output=output, reward=reward,
+            rejected=rejected)))
         if len(out) > 1:
             # A caller-contract violation, not a backend failure: raised as one so
             # it travels the channel the engine already has for "this run is
@@ -945,6 +955,22 @@ def _set_budget_remaining(aggregator: Any, governor: BudgetGovernor) -> None:
     if not hasattr(aggregator, "budget_remaining"):
         return
     aggregator.budget_remaining = governor.remaining_fraction()
+
+
+def _replay_stats(sampler) -> Optional[Dict[str, Any]]:
+    """The replay-sampler statistics for :class:`EvolutionResult.replay`.
+
+    ``None`` for any sampler that is not a ``ReplaySampler`` -- the field exists
+    so a run that wired the mechanism reports it, and a run that did not is
+    indistinguishable from one that did but never fired.
+    """
+    if not hasattr(sampler, "settle"):
+        return None
+    return {
+        "settled": sum(sampler.settled_counts().values()),
+        "picks": getattr(sampler, "picks", 0),
+        "replay_affected": getattr(sampler, "replay_affected", 0),
+    }
 
 
 def _cost_fields(meter: Meter) -> Dict[str, Any]:
@@ -1251,6 +1277,12 @@ class EvolutionResult:
     #: `error` stays `None` while throughput quietly drops -- check this to tell a
     #: fast run from a lucky one.
     retired_workers: int = 0
+    #: Replay-sampler statistics, when one was installed. Reports how many cards
+    #: the settled pool pushed to the sampler, how many picks were affected by the
+    #: replay bonus, and how many proposals carried rejection evidence:
+    #: ``{"settled": int, "picks": int, "replay_affected": int}``. ``None`` when no
+    #: ``ReplaySampler`` was wired.
+    replay: Optional[Dict[str, Any]] = None
 
     # -- what the run cost ----------------------------------------------------
     #
@@ -1849,7 +1881,13 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     if run is None or propose is None:
         raise ValueError("provide agent=, or both run= and propose=")
     if policies_bundle is not None and policies_bundle.proposal is not None:
-        propose = _propose_via_policy(policies_bundle.proposal)
+        # A mutable cell filled after the aggregator is built below, so the
+        # propose adapter can read the settled-evidence pool for the task it is
+        # about to propose on. Empty until wired -- see `ProposalContext.rejected`.
+        _settled_reader: List[Optional[Any]] = [None]
+        propose = _propose_via_policy(policies_bundle.proposal, _settled_reader)
+    else:
+        _settled_reader = None
     # Check the actor's signatures once, before any rollout. Otherwise a plain
     # typo (a `propose` missing the reward parameter, say) surfaces as a
     # TypeError inside the round body, where the backend-failure handler turns it
@@ -2112,6 +2150,11 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
 
     aggregator = (aggregator_factory or _default_aggregator)(
         ledger, verifier, AuditScheduler(), cfg, staleness_policy)
+    # Wire the two settled-evidence consumers now that the aggregator exists:
+    # a sampler that implements settle() gets every discarded card, and the
+    # propose adapter reads the recent ones for the task it is about to retry.
+    if _settled_reader is not None and hasattr(aggregator, "recent_settled"):
+        _settled_reader[0] = aggregator.recent_settled
     # A custom factory cannot know about the meter -- its signature predates it
     # and is part of the public surface. Attach it to whatever came back if that
     # object has the slot and left it empty, so an `aggregator_factory` returning
@@ -2764,6 +2807,10 @@ def evolve(
     ledger, aggregator, strategy = eng.ledger, eng.aggregator, eng.strategy
     run, propose, reward = eng.run, eng.propose, eng.reward
     held_out, by_id, train_ids = eng.held_out, eng.by_id, eng.train_ids
+    # Wire the settled-evidence consumer: a sampler that implements settle()
+    # receives every discarded card.
+    if hasattr(sampler, 'settle'):
+        aggregator.set_settled_consumer(sampler.settle)
 
     history: List[RoundInfo] = []
     run_error: Optional[str] = None
@@ -3256,4 +3303,5 @@ def evolve(
                              budget=governor.summary() if governor.active else None,
                              **_cost_fields(eng.meter))
     eng.cleanup()
+    result.replay = _replay_stats(sampler)
     return result

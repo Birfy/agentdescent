@@ -8,6 +8,16 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- **`ReplaySampler` + `ProposalContext.rejected` — make the settled-evidence pool a consumer.** The aggregator's settled pool (stale / oversized / CAS-conflict evidence cards) was diagnostic-only: nothing read it back. Two consumers now close that loop.
+
+  **`ReplaySampler`** (``agentdescent/sampling.py``) is a ``TaskSampler`` that up-weights tasks whose recent proposals were discarded — a signal that is different from pass rate (a task whose proposals keep going stale is not "easy", it is being out-competed by the parallel scheduler). Additive replay bonus, saturating at ``capped_at`` (default 10), scaled by ``temperature`` (default 0.0 = ``DifficultyWeighted`` identically). Wired via ``aggregator.set_settled_consumer(sampler.settle)`` on both the sync and async paths.
+
+  **`ProposalContext.rejected`** — a new field carrying the most recent settled cards for the task being rolled out. The docstring said "'do not re-propose what was just rejected' is inexpressible" — this field makes it expressible.
+
+  **`ReplayAwareProposal`** (``agentdescent/replay.py``) is a ``ProposalPolicy`` wrapper that reads ``ctx.rejected`` and, when non-empty, appends a summary of the rejected diffs (paths, base version, delta) to the context's ``output`` before delegating. A model-based inner policy that renders ``output`` — the shipped ``LLMAgent.propose`` — naturally sees "these were discarded, do not repeat them".
+
+  ``recent_settled`` on both ``Buffer`` and ``Aggregator`` filter the pool by task id. ``Buffer.set_settled_consumer`` pushes cards to the sampler. 11 files, +580/-8. Full suite exit 0.
+
 - **`evolve(max_tokens=...)`: a budget in the unit that maps to the bill.**
   `max_calls` and `max_rollouts` count invocations, and a reasoning model can
   spend 40k tokens on hidden thinking in a single one -- so a 20-round run with

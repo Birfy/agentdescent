@@ -27,6 +27,7 @@ import math
 import threading
 from collections import defaultdict
 
+from .evolvable import EvidenceCard
 from .stats import difficulty_weight
 from typing import Dict, Optional, Protocol, Sequence, Tuple, runtime_checkable
 
@@ -152,3 +153,100 @@ class DifficultyWeighted:
         """Copy of the per-task (passes, trials) counters -- for inspection/tests."""
         with self._lock:
             return dict(self._stats)
+
+
+class ReplaySampler:
+    """A :class:`TaskSampler` that also learns from discarded evidence.
+
+    The engine's aggregator settles the diff it discards -- stale, oversized, or
+    lost to a CAS race -- into a bounded pool (``aggregator.settle``). Nobody reads
+    it back. This sampler subscribes to that pool and up-weights tasks whose recent
+    proposals were thrown away, on the argument that the waste is a signal *of its
+    own*: a task that always passes and a task whose proposals keep going stale are
+    both "not producing accepted diffs", but the first should be down-weighted
+    (nothing to learn) and the second should be up-weighted (the parallel scheduler
+    keeps out-competing it, not because it is easy).
+
+    The base score is :class:`DifficultyWeighted`'s -- the pass-rate signal plus a
+    UCB exploration bonus. The replay bonus is additive and saturating: a task with
+    ``capped_at`` recent settled cards gets the full ``temperature``, so a task
+    cannot dominate the score by being out-competed many times.
+
+    ``temperature=0`` (the default) reproduces the base sampler exactly; without a
+    wired aggregator the counts never increase, so the bonus stays zero. Wire one:
+
+    .. code-block:: python
+
+        sampler = ReplaySampler(temperature=0.3)
+        evolve(tasks, reward, agent=agent, task_sampler=sampler,
+               ...)  # the engine calls aggregator.set_settled_consumer(sampler.settle)
+    """
+
+    name = "replay"
+
+    def __init__(self, temperature: float = 0.0, capped_at: int = 10) -> None:
+        self._base = DifficultyWeighted()
+        self.temperature = temperature
+        self.capped_at = capped_at
+        #: task_id -> number of settled evidence cards the pool handed to this
+        #: sampler, counted since construction.
+        self._settled_count: Dict[str, int] = defaultdict(int)
+        self._lock = threading.Lock()
+        #: Picks made, and picks where the replay bonus changed the winner --
+        #: the observable that tells a run the mechanism fired at all.
+        self.picks = 0
+        self.replay_affected = 0
+
+    def settle(self, card: EvidenceCard) -> None:
+        """Consume one settled evidence card (called by the aggregator's pool).
+
+        ``trajectory_refs`` carries the task objects the diff was rolled out
+        against; a card may name several, and every one of them was implicated in
+        the discard.
+        """
+        for ref in card.trajectory_refs:
+            task_id = getattr(ref, "id", None)
+            if task_id is None:
+                continue
+            with self._lock:
+                self._settled_count[task_id] = self._settled_count[task_id] + 1
+
+    def pick(self, keys: Sequence[str], round_index: int) -> str:
+        if not keys:
+            raise ValueError("task_sampler.pick() got an empty key list")
+        with self._lock:
+            self._base._t += 1
+            total = float(self._base._t)
+
+            def score_of(k: str, with_replay: bool) -> float:
+                passes, trials = self._base._stats[k]
+                signal = self._base._signal(
+                    passes / trials if trials else self._base.prior)
+                bonus = (self._base.c * math.sqrt(
+                    math.log(total + 1.0) / trials) if trials > 0 else float("inf"))
+                out = signal + bonus
+                if with_replay:
+                    out += self.temperature * min(
+                        self.capped_at, self._settled_count.get(k, 0))
+                return out
+
+            base_winner = max(keys, key=lambda k: score_of(k, with_replay=False))
+            winner = max(keys, key=lambda k: score_of(k, with_replay=True))
+            # replay changed the outcome when the winner differs from the base winner
+            if self.temperature > 0 and self._settled_count.get(winner, 0) > 0 \
+                    and winner != base_winner:
+                self.replay_affected += 1
+            self.picks += 1
+            return winner
+
+    def record(self, task_id: str, score: float) -> None:
+        self._base.record(task_id, score)
+
+    def stats(self) -> Dict[str, Tuple[float, float]]:
+        """Copy of the base sampler's per-task (passes, trials) counters."""
+        return self._base.stats()
+
+    def settled_counts(self) -> Dict[str, int]:
+        """Copy of the per-task settled-card counts -- for inspection/tests."""
+        with self._lock:
+            return dict(self._settled_count)
