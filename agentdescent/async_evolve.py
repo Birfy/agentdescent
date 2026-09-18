@@ -1188,4 +1188,5 @@ def async_evolve(
         # unbounded backend call after the budget the caller fixed.
         gate_pool.shutdown(wait=False)
     eng.cleanup()          # do not hold a scratch git repo for the whole process
+    result.audit_drained = getattr(eng.aggregator, "audit_drained", 0)
     return result

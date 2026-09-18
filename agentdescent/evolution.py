@@ -1251,6 +1251,9 @@ class EvolutionResult:
     #: `error` stays `None` while throughput quietly drops -- check this to tell a
     #: fast run from a lucky one.
     retired_workers: int = 0
+    #: How many queued audits the L-value consumer drained and ran against the
+    #: oracle. Zero when ``audit_drain_per_step`` is 0 (the default).
+    audit_drained: int = 0
 
     # -- what the run cost ----------------------------------------------------
     #
@@ -3256,4 +3259,5 @@ def evolve(
                              budget=governor.summary() if governor.active else None,
                              **_cost_fields(eng.meter))
     eng.cleanup()
+    result.audit_drained = getattr(aggregator, "audit_drained", 0)
     return result
