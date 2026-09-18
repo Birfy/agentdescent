@@ -258,6 +258,12 @@ class ProposalContext:
     #: Proposals this worker already made, newest last. Empty unless the policy
     #: asked to be given them.
     history: Sequence[str] = ()
+    #: Evidence cards the aggregator discarded for this task -- stale, oversized,
+    #: or lost to a CAS race -- most recent last. Empty unless the run wires a
+    #: settled-evidence reader. A proposal policy can read these to avoid
+    #: re-proposing what was just thrown away ("do not re-propose what was just
+    #: rejected", which the engine could not express before this field).
+    rejected: Sequence["EvidenceCard"] = ()
 
 
 # ---------------------------------------------------------------------------

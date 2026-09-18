@@ -39,6 +39,7 @@ EvolutionResult(
     forced_refreshes: int = 0,
     stragglers: int = 0,
     retired_workers: int = 0,
+    replay: Optional[Dict[str, Any]] = None,
     usage: Usage = <factory>,
     wallclock: float = 0.0,
     rollouts: int = 0,
@@ -1038,7 +1039,9 @@ Aggregator(
 | `finalize() -> None` | Publish the current dev head to stable at the end of a clean run. |
 | `finish_step(items: List[Union['_Candidate', MergeReport]]) -> List[MergeReport]` | Phase 3: decide the measured candidates, then age and promote. |
 | `measure(items: List[Union['_Candidate', MergeReport]]) -> List[Union['_Candidate', MergeReport]]` | Phase 2 for a batch from `begin_step`. **Off-thread safe.** |
+| `recent_settled(task: Any, n: int = 3) -> List[EvidenceCard]` | The most recent N settled cards whose trajectory_refs mention task. |
 | `restore(state: dict) -> None` | Restore state written by `checkpoint`. |
+| `set_settled_consumer(consumer: Optional[Callable[[EvidenceCard], None]]) -> None` | Subscribe a consumer to the settled-evidence pool. |
 | `step() -> List[MergeReport]` | Fire every artifact bucket that is ready and return per-artifact reports. |
 
 ### `AggregatorConfig(...)`
@@ -1077,6 +1080,8 @@ Cards bucketed by target artifact (design doc, section 4.1).
 
 | method | what it does |
 |---|---|
+| `recent_settled(task: Any, n: int = 3) -> List[EvidenceCard]` | The most recent N settled cards whose `trajectory_refs` mention `task`. |
+| `set_settled_consumer(consumer: Optional[Callable[[EvidenceCard], None]]) -> None` | Subscribe a consumer to every card that is settled. |
 | `settle(cards: List[EvidenceCard]) -> None` | Keep discarded-diff evidence addressable, under a hard bound. |
 
 ### `MergeOutcome`

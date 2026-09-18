@@ -223,3 +223,35 @@ def test_evidence_eval_reads_the_task_objects_on_the_card():
     assert skill.evidence_eval(scored) == 1.0
     assert skill.evidence_eval(unscorable) == 0.0, (
         "ids are not scorable, which is why the field takes task objects")
+
+
+def test_settled_consumer_is_called_for_every_discarded_card(tmp_path):
+    """The optional consumer receives every card the pool settles."""
+    from agentdescent.aggregator import Aggregator, AggregatorConfig
+    from agentdescent.evolvable import Diff, EvidenceCard
+    from agentdescent.evolution import AppendRules, EvolvingArtifact
+    from agentdescent.ledger import Ledger
+    from agentdescent.scheduler import AuditScheduler
+    from agentdescent.verifier import ThreeLayerVerifier, VerifierBudget
+
+    lg = Ledger(str(tmp_path), lambda a: {"state": dict(a.state)},
+                lambda aid, v, s: EvolvingArtifact(aid, s.get("state", {}), v,
+                                                   0.2, None, AppendRules()))
+    lg.register(EvolvingArtifact("a", {}, 1, 0.2, None, AppendRules()))
+    verifier = ThreeLayerVerifier(eval_fn=lambda art, tasks: 0.5, held_out=[1, 2, 3],
+                                  budget=VerifierBudget())
+    agg = Aggregator(lg, verifier, AuditScheduler(),
+                     AggregatorConfig(batch_trigger=1, trust_region_ops=2))
+
+    seen = []
+    agg.set_settled_consumer(lambda card: seen.append(card.diff.diff_id))
+
+    diff = Diff(diff_id="oversized", target="a",
+                ops={f"k{i}": "v" for i in range(10)}, author="w0")
+    agg.ingest(EvidenceCard(diff=diff, base_version={"a": 1}, touched=["a"],
+                            before_after_delta=0.1, trajectory_refs=[]))
+    assert not seen, "consumer should not be called before step()"
+
+    agg.step()
+    assert "oversized" in seen, "consumer should receive the settled card"
+    assert len(seen) == 1, "one oversized card should trigger one consumer call"

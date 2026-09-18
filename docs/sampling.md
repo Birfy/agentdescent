@@ -91,6 +91,56 @@ engine's [`SOLVED`](evolution.md) (0.999) rather than repeating the literal.
     `DifficultyWeighted(pass_threshold=0.8)`, or the two disagree about what a
     pass is.
 
+## `ReplaySampler` — also learn from discarded evidence
+
+The engine's aggregator discards diffs — stale, oversized, or lost to a CAS
+race — and settles their evidence cards into a bounded ring
+(`Aggregator.settle`). Nothing reads that ring back. `ReplaySampler` is the
+consumer: it subscribes to the pool via `aggregator.set_settled_consumer` and
+up-weights tasks whose recent proposals were thrown away.
+
+The argument is that a stale/conflicted waste is a **different signal from a
+failing rollout** — pass rate answers "is this task hard?", while a high
+settled count says "this task is being out-competed by the parallel scheduler,
+not because it is easy." The two signals are orthogonal.
+
+```python
+from agentdescent import ReplaySampler
+
+evolve(tasks, reward, agent=agent, task_sampler=ReplaySampler(temperature=0.3))
+```
+
+The base score is `DifficultyWeighted`'s own UCB over pass rate; the replay
+bonus is additive and saturating:
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `temperature` | 0.0 | Scales the replay bonus. `0.0` = the base sampler identically. |
+| `capped_at` | 10 | A task with more than this many recent settled cards gets the same bonus. |
+
+`temperature=0.0` is the default because the feature is experimental — an A/B
+that fails should be recorded as a negative result, not shipped as a default.
+
+### Wiring
+
+The engine wires the aggregator automatically when it detects a sampler with a
+`settle()` method. A second wire fills `ProposalContext.rejected` with the most
+recent settled card(s) for the task being rolled out, so a proposal policy
+that reads its context can see what was just discarded:
+
+```python
+def propose(ctx: ProposalContext):
+    for card in ctx.rejected:
+        # card.diff.ops contains the paths/code that were rejected
+        # card.base_version is the version they were proposed against
+        ...
+```
+
+Without a wired aggregator the counts never increase, `ctx.rejected` is always
+empty, and the sampler behaves identically to `DifficultyWeighted(temperature=0)`.
+
+## EvolvingArtifact`](api.md#task-sampling)
+
 ## Writing your own
 
 ```python
