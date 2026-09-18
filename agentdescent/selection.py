@@ -121,6 +121,11 @@ class Candidate:
     selected: int = 0
     #: Version this candidate was derived from, for tree-shaped policies.
     parent: Optional[int] = None
+    #: The ledger branch this candidate lives on. ``None`` means ``dev`` (the
+    #: primary head), which is what every single-head policy returns. A
+    #: multi-head policy sets it to a ``head/<slot>`` fork so the engine knows
+    #: which branch to snapshot for this worker.
+    branch: Optional[str] = None
     #: A policy prior -- AlphaZero's ``P(s,a)``, the slot :class:`FlatPuct`
     #: otherwise fills with a uniform ``1/N``. ``None`` means "no opinion" and
     #: falls back to uniform, which is what an unrated candidate must get: zero
