@@ -138,6 +138,14 @@ class AggregatorConfig:
     #: two writers backing off by the same amount collide again on the same
     #: schedule.
     cas_backoff: float = 0.05
+    #: How many highest-priority queued audits the L-value consumer drains per
+    #: merge step. ``0`` (the default) keeps the old behaviour: the audit scheduler
+    #: computes priorities, ``force_oracle`` spends budget on a threshold gate, and
+    #: nothing spends it on the ranking. A positive value pops the heap after each
+    #: ``finish_step`` and runs ``full_eval`` on the candidates, updating trust --
+    #: the out-of-band audit process the design (section 5.3) calls for. The
+    #: scheduler's ``collect`` flag is forced on when this is set.
+    audit_drain_per_step: int = 0
     #: Rank candidates against their fusion on the cheap layer before putting one
     #: forward. **Off**, because the ranking is paid every round while the only
     #: decision it changes from the gate's is recoverable -- see
@@ -504,6 +512,11 @@ class Aggregator:
         #: better than one that counts a fraction of the run.
         self.meter = meter
         self.config = config or AggregatorConfig()
+        # Force the audit scheduler to collect when the L-value consumer is on:
+        # without this, submit() returns the priority without queueing, and
+        # _drain_audit_queue pops an empty heap.
+        if self.config.audit_drain_per_step > 0:
+            self.audit._collect = True
         # The decisions, as objects. Swapping one is the point; the defaults are
         # the code that used to be inline here, moved rather than rewritten.
         cfg = self.config
@@ -525,6 +538,9 @@ class Aggregator:
             install_policy(policy, verifier, cfg)
         self.buffer = EvidenceBuffer()
         self._posteriors: Dict[str, BetaPosterior] = defaultdict(BetaPosterior)
+        #: How many queued audits the L-value consumer drained and ran against
+        #: the oracle. Zero when ``audit_drain_per_step`` is 0 (the default).
+        self.audit_drained = 0
         # dev-branch survival counter for EMA-style promotion.
         # Artifacts this aggregator has seen, so `finalize` knows what to publish.
         # The survival *counter* belongs to the promotion policy; this is only the
@@ -692,6 +708,7 @@ class Aggregator:
             # itself against a number nothing else in the run agrees with.
             self._observe_trust_region(report.category)
         self._age_and_promote(reports)
+        self._drain_audit_queue(self.config.audit_drain_per_step)
         return reports
 
     # -- dual-branch EMA promotion (section 4.5) -----------------------------
@@ -704,6 +721,48 @@ class Aggregator:
         decision and "copy a branch without doing redundant git work" is not."""
         for promotion in self.promotion_policy.observe(reports):
             self._promote(promotion.artifact_id)
+
+    def _drain_audit_queue(self, max_per_step: int = 0) -> int:
+        """Pop the highest-priority queued audits and run them against the oracle.
+
+        This is the L-value consumer the design (section 5.3) calls for and the
+        docstring of :class:`~agentdescent.scheduler.AuditScheduler` says does not
+        exist: ``submit`` computes a priority for every merge, ``force_oracle``
+        spends budget on a threshold gate, and nothing spends it on the *ranking*
+        the priority model produces. This does: it pops the highest-priority items
+        the queue holds, runs ``full_eval`` on each candidate, and updates trust.
+
+        ``max_per_step=0`` (the default) drains nothing, which is the old
+        behaviour exactly -- the queue is built (when ``collect=True``) and never
+        read. A caller sets it through :class:`AggregatorConfig`.
+
+        Returns how many audits it ran. The budget is the verifier's own
+        ``oracle_calls_remaining``; when it is spent the drain stops early."""
+        if max_per_step <= 0 or not getattr(self.audit, "_collect", False):
+            return 0
+        n = 0
+        for _ in range(max_per_step):
+            item = self.audit.pop()
+            if item is None:
+                break
+            payload = item.payload
+            if not isinstance(payload, tuple) or len(payload) != 3:
+                continue
+            artifact_id, base_state, candidate = payload
+            if not hasattr(self.verifier, "budget") or not self.verifier.budget.can_spend():
+                break
+            try:
+                cand_full = self.verifier.full_eval(candidate)
+                base_full = self.verifier.full_eval(base_state)
+            except Exception:  # noqa: BLE001 - a dead oracle is not a failed run
+                continue
+            self.audit.update_trust(
+                artifact_id, (cand_full > base_full) == (
+                    self.verifier.learned_eval(candidate)[0]
+                    > self.verifier.learned_eval(base_state)[0]))
+            n += 1
+        self.audit_drained += n
+        return n
 
     def _promote(self, artifact_id: str) -> None:
         """Copy dev onto stable, skipping the git work when they already agree.
@@ -870,7 +929,7 @@ class Aggregator:
 """
         _, uncertainty = self.verifier.learned_eval(best_state)
         self.audit.submit(best_diff.diff_id, artifact_id, artifact.blast_radius,
-                          uncertainty, payload=best_diff)
+                          uncertainty, payload=(artifact_id, artifact, best_state))
         # Trust is "how often does the cheap layer agree with the full held-out
         # set", and it has to be measurable WITHOUT spending oracle budget --
         # otherwise it is circular. It was: `force_oracle` fires on

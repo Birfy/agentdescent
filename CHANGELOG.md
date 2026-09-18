@@ -8,6 +8,21 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- **`AggregatorConfig.audit_drain_per_step` — the L-value consumer, the audit
+  queue's missing reader.** `AuditScheduler.submit()` computes
+  `priority = blast_radius × uncertainty / trust` for every merge, but with the
+  default `collect=False` nothing queues, and with `collect=True` nothing pops
+  the heap — the audit that actually runs is the inline `force_oracle` threshold
+  gate, which reads trust but not the ranking. `concepts.md` calls this *"the
+  priority queue has no consumer"* and says to treat the ranking as a priority
+  *model*, not work in flight.
+
+  `_drain_audit_queue(max_per_step)` pops the highest-priority queued audits
+  after each `finish_step`, runs `full_eval` on the stored `(base_state,
+  candidate)` pair, and updates trust from the oracle's verdict. The scheduler's
+  `collect` flag is forced on when `audit_drain_per_step > 0`. `EvolutionResult.
+  audit_drained` reports how many ran. Default `0` = the old behaviour exactly.
+
 - **`evolve(max_tokens=...)`: a budget in the unit that maps to the bill.**
   `max_calls` and `max_rollouts` count invocations, and a reasoning model can
   spend 40k tokens on hidden thinking in a single one -- so a 20-round run with

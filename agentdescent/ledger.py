@@ -590,3 +590,63 @@ class Ledger:
                 self.repo_path, "log", f"-{limit}", "--pretty=format:%h %s"
             )
             return out.splitlines() if out else []
+
+    # -- multiple live heads (issue #75) --------------------------------------
+    #
+    # `DEV` is the primary head and the one every existing caller reads. A
+    # multi-head run (a `SelectionPolicy` that returns several starting points)
+    # forks additional branches under `HEAD_PREFIX` so that:
+    #
+    # * a caller reading only `dev` still gets the primary head, and
+    # * `live_heads()` can find the forks without a registry, from git itself.
+    #
+    # `snapshot`, `commit` and `head_version` already accept any branch name, so
+    # nothing else in the ledger changes: the missing piece was only "who creates
+    # the branch" and "how does a reader list them".
+
+    #: The fork namespace. ``head/0``, ``head/1``, ... are live heads beside
+    #: ``dev``. Not ``dev/0``: git cannot have both a branch ``dev`` (a ref file)
+    #: and ``dev/0`` (which needs ``dev`` to be a ref *directory*), so the prefix
+    #: has to be one that does not nest under an existing head's name.
+    HEAD_PREFIX = "head/"
+
+    def fork(self, name: str, from_branch: str = DEV) -> str:
+        """Create or reset ``name`` to hold ``from_branch``'s current state.
+
+        The branch is a *live head*: workers may be started from it, it has its
+        own version vector, and a commit against it does not touch ``dev``. The
+        bug this exists to make impossible is the one ``PopulationAggregator``
+        works around today -- rewriting the single head to point at a selected
+        parent, which serialises the population so no two workers can expand
+        different candidates at once.
+
+        ``name`` must be a live-head name (``head/<slot>``); forking over
+        ``stable`` or another caller's branch is refused rather than silently
+        repointing it."""
+        if not name.startswith(self.HEAD_PREFIX):
+            raise ValueError(
+                f"fork name must start with {self.HEAD_PREFIX!r}, got {name!r}; "
+                "`dev` and `stable` are not forks and resetting them here would "
+                "move a head other callers are reading.")
+        with self._exclusive():
+            self._ensure_open()
+            self._checkout(from_branch)
+            _git(self.repo_path, "branch", "-f", name)
+            # Still on `from_branch`: `git branch -f` creates, it does not switch.
+            # Leaving `_current_branch` correct is what makes the next
+            # `_checkout(name)` fork off the right commit.
+            return name
+
+    def live_heads(self) -> List[str]:
+        """Every live head branch: ``dev`` first, then the ``dev/`` forks.
+
+        Read from git rather than a registry so a resumed process sees the forks
+        a previous process created -- the same reason version bookkeeping lives
+        in the repo and not in memory."""
+        with self._exclusive():
+            self._ensure_open()
+            out = _git(self.repo_path, "branch", "--list",
+                       "--format=%(refname:short)")
+            names = [n.strip() for n in (out or "").splitlines() if n.strip()]
+            forks = sorted(n for n in names if n.startswith(self.HEAD_PREFIX))
+            return [self.DEV] + forks
