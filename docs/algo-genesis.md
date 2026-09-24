@@ -965,13 +965,23 @@ so would a reader of this page without this paragraph.
   propose concurrently against one accepted version and `OctopusConflict` does the
   three-way merge in the parent. The observable consequence is the same — two children
   editing one file both survive — and the measurement of that is in the table above.
-* **Skills are inherited but never extracted.** `LocalWorld.skills()` collects
-  `.agents/skills/` along the node chain and puts the *names* in the brief, which
-  is what `hierarchical_skill_names/2` does upstream and what the paper means by
-  listing "reusable skills" among what an accepted version carries (§3.1). What
-  is missing is the other end: upstream's `SkillExtractor` distils a completed
-  contribution into a new skill, and nothing here does. The domain ships one
-  human-written skill so the inheritance path is live rather than decorative.
+* **Skills are inherited, and now extracted, with `--extract-skills`.** `LocalWorld.skills()`
+  collects `.agents/skills/` along the node chain, which is what
+  `hierarchical_skill_names/2` does upstream and what the paper means by listing
+  "reusable skills" among what an accepted version carries (§3.1). This port had only
+  that half. The other half is upstream's `SkillExtractor` (`agents/skill_extractor.ex`,
+  a `:read_write`, `delegation_level :low` role): it distils a completed contribution
+  into new skills, checks what already exists so it does not duplicate one, places each
+  at the Context Tree node where it is relevant, and is explicitly allowed to find
+  nothing. `SkillExtractor` in `examples/genesis/_skills.py` is that role, run at the
+  **root episode boundary** on the contribution the episode accepted -- upstream fires
+  it after the PR merges, but on this engine a post-merge version is one no later
+  episode of the same run sees, so the loop would still not close. Two things are
+  adapted rather than ported: the model returns the skill's node and body and this
+  side renders `skill_add`'s frontmatter, and the *bodies* travel in the brief once the
+  flag is on. The second one is the whole point -- `skill_read` is a tool, this port's
+  agents have none, and a name line saying "read one before using it" is an instruction
+  nobody can follow, which is why inheritance was inert before.
 * **An episode here is one model call; upstream it is a session.** The paper is
   explicit — "the agent can execute multiple model–tool turns during one supervised
   episode" — and the runs are configured at **2 048 root turns and 128 turns per
@@ -984,10 +994,21 @@ so would a reader of this page without this paragraph.
   rather than another turn. It is the largest single distance between this port and
   the system it ports, and it is a property of the harness rather than of the
   algorithm: `evolve()` proposes with one completion per rollout.
-* **Only two roles are ported.** The released code has ten agent modules; the
-  paper's appendix §1.3 says the model has two — manager and leaf executor — and
-  that "codebase lead / investigator / task scheduler are implementation labels,
-  not additional roles". Porting ten would be porting an implementation.
+* **Only two roles are ported, plus one capability the paper calls a label.** The
+  released code has ten agent modules; the paper's appendix §1.3 says the model has two
+  — manager and leaf executor — and that "codebase lead / investigator / task scheduler
+  are implementation labels, not additional roles". Porting ten would be porting an
+  implementation. The one exception is the **investigator**, and it is ported as a
+  capability rather than a role: `--investigate` lets a manager mark a delegation
+  read-only, and `Investigator` (`examples/genesis/_investigator.py`) reads that node's
+  files and records what it finds under `## Findings` in the node's `CONTEXT.md`. The
+  reason it earns its place is the port's own blind spot — `_MANAGER_PROMPT` carries the
+  `CONTEXT.md` chain and a listing of files but never their contents, because this
+  port's agents have no read tool, so the investigator is the one actor that can read a
+  node's code and leave a note about it for the next agent. It is deliberately **not**
+  the upstream role in full: there is no fan-out to `subagent_investigator`, because
+  fanning out read-only sub-agents is what a manager with read tools of its own is for,
+  and that is the port's session work.
 
 ## Run it
 

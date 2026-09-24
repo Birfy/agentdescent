@@ -42,6 +42,8 @@ from agentdescent.filetree import parse_tree
 
 from ._octopus import three_way
 
+from ._skills import SkillExtractor
+
 from ._world import (CONTEXT_FILE, KNOWN_ISSUES, EpisodeRecord, LocalWorld,
                      WorldLog, directly_at, looks_like_file, normalise, owns,
                      resolve_edit_path, routing_entry, shadowed_by_module,
@@ -52,10 +54,18 @@ __all__ = ["Brief", "Delegation", "Edit", "RecursiveDelegation", "render_edits"]
 
 @dataclass(frozen=True)
 class Delegation:
-    """``(v, p) ⇝ (v, q)``: where a child is situated, and what it is for."""
+    """``(v, p) ⇝ (v, q)``: where a child is situated, and what it is for.
+
+    ``readonly`` marks the delegation as an **investigation** rather than work:
+    upstream's ``subagent_investigator`` is handed a question and answers it, and the
+    only thing it may write is a ``CONTEXT.md``. A manager asks for one by putting
+    ``investigate: true`` on a delegation -- see ``llm_manager`` -- and the answer is
+    persisted at the node so a later agent inherits it.
+    """
 
     path: str
     objective: str
+    readonly: bool = False
 
 
 @dataclass(frozen=True)
@@ -79,7 +89,7 @@ class Edit:
     owner: str
     path: str
     content: Optional[str]
-    kind: str = "work"          # "record" | "work" | "context"
+    kind: str = "work"          # "record" | "work" | "context" | "skill"
 
 
 @dataclass(frozen=True)
@@ -182,6 +192,21 @@ class RecursiveDelegation:
     #: history at all -- not the same thing as the acceptance gate, which sees
     #: only what the whole episode returned. ``None`` runs the scope check alone.
     review: Optional[Review] = None
+    #: Upstream's ``SkillExtractor``, run at the root episode boundary on the
+    #: contribution the episode just accepted -- see :mod:`examples.genesis._skills`.
+    #: ``None`` is the old behaviour: skills are inherited and never written.
+    skills: Optional[SkillExtractor] = None
+    #: How many skill files may ride in one proposal *on top of* :attr:`max_edits`.
+    #: They are a separate bucket because they are not competing with the work: the
+    #: extractor exists so a later agent inherits what this one learned, and a skill
+    #: trimmed to make room for the work it distils is self-defeating. The caller
+    #: must size ``SpatialContract.max_files_per_diff`` to cover both, or the whole
+    #: diff is dropped rather than truncated.
+    max_skill_edits: int = 2
+    #: Upstream's ``Investigator``: a read-only delegation a manager asked for,
+    #: answered at that node and persisted into its ``CONTEXT.md``. ``None`` means
+    #: every delegation is work. See :mod:`examples.genesis._investigator`.
+    investigator: Optional[Callable[["Brief"], Sequence[Edit]]] = None
     #: The version the most recent rollout branched from -- the latest accepted state,
     #: as the engine handed it over. Read by `CompletionJudge`, which has to look at
     #: the codebase to answer upstream's question and is not given the reward.
@@ -221,6 +246,14 @@ class RecursiveDelegation:
     requests_raised: int = 0
     adopted_requests: int = 0
     unmet_requests: int = 0
+    #: Skill files a root episode distilled from its own contribution, and the edits
+    #: dropped from the return because there was no room -- see :meth:`_bound`.
+    skills_written: int = 0
+    #: Read-only investigations run, the finding records they left, and writes an
+    #: investigator offered that were not a ``CONTEXT.md`` at its own node.
+    investigations: int = 0
+    finding_edits: int = 0
+    investigation_refused: int = 0
 
     # -- the ProposalPolicy protocol ---------------------------------------
 
@@ -228,7 +261,11 @@ class RecursiveDelegation:
         state = _state_of(ctx.rendered)
         self.last_state = dict(state)
         root = LocalWorld(version=int(ctx.base_version or 0), path=self.root_path,
-                          readonly=tuple(self.readonly or self.contracts))
+                          readonly=tuple(self.readonly or self.contracts),
+                          # Bodies travel exactly when there is something writing
+                          # them: with the extractor off, a name the agent cannot open
+                          # is what upstream sends, and it costs a run nothing.
+                          skill_bodies=self.skills is not None)
         # The workspace of a transient agent tree: created for this rollout, gone
         # with it. `None` when worktrees are off, and every use of it is guarded.
         rollout = self.rollout_factory() if self.rollout_factory else None
@@ -250,9 +287,19 @@ class RecursiveDelegation:
                                             rollout=rollout)
             rationale = f"rework at {pending[0] or './'}"
         else:
-            edits, unmet, _ = self._episode(root, self._objective(ctx), state, ctx,
+            objective = self._objective(ctx)
+            edits, unmet, _ = self._episode(root, objective, state, ctx,
                                             depth=0, rollout=rollout)
             rationale = f"episode at {root.path or './'}"
+            # Upstream's SkillExtractor, at the root episode boundary: the
+            # contribution this episode accepted is the "completed PR" it distils.
+            # It runs after the episode returns rather than inside it because the
+            # upstream extractor is a **separate agent** -- its writes are its own,
+            # not the manager's -- and because here that also covers a root that had
+            # no children and did the work itself. It is not run for a rework
+            # rollout, which is the same contribution being retried, not a new one.
+            if self.skills is not None:
+                edits = self._distil(root, objective, state, edits, ctx, 0)
         # A need that reached the top of this episode's chain and still fell
         # outside its root's authority. Counted rather than dropped quietly: it
         # means the decomposition put work where nobody could do it.
@@ -353,6 +400,20 @@ class RecursiveDelegation:
         findings: List[Tuple[str, str, str]] = []
         for delegation in delegations:
             child = world.delegate(delegation.path)
+            if delegation.readonly and self.investigator is not None:
+                # Upstream's `subagent_investigator`: handed a question, read-only
+                # over the code, its one write a `CONTEXT.md`. Nothing to judge and
+                # nothing to rework -- the record it leaves is the deliverable.
+                records = self._investigate(child, delegation.objective, state, ctx,
+                                            depth + 1)
+                if records:
+                    self._fold(held, owner_of, records, child, state)
+                    self.finding_edits += len(records)
+                children.append(self.log.record(EpisodeRecord(
+                    agent_id=self.log.next_id("investigator"), role="investigator",
+                    path=child.path, depth=depth + 1, version=child.version,
+                    objective=delegation.objective, n_edits=len(records))))
+                continue
             returned, asked, child_record = self._episode(
                 child, delegation.objective, state, ctx, depth=depth + 1,
                 rollout=rollout, base=child_base)
@@ -431,6 +492,62 @@ class RecursiveDelegation:
         record.commit = self._commit(rollout, record, apply_edits(state, merged), (),
                                      child_base, kept) or record.commit
         return merged, pending, record
+
+    def _distil(self, world: LocalWorld, objective: str, state: Mapping[str, str],
+                merged: Sequence[Edit], ctx, depth: int) -> List[Edit]:
+        """Upstream's ``SkillExtractor`` on this episode's accepted contribution.
+
+        Only the **work** is offered for distillation. A routing entry or a refusal
+        note is bookkeeping *about* the contribution, not the contribution; upstream
+        extracts from the PR diff, and the diff is the work.
+
+        The extractor is handed a brief over the **post-merge** tree, so a skill about
+        what was just written can read what was just written. Its own failure is
+        swallowed: a dead model call must cost a skill, never the contribution the
+        episode already produced.
+        """
+        contributed = [e for e in merged if e.kind == "work" and e.content is not None]
+        if not contributed:
+            return list(merged)
+        post = apply_edits(state, merged)
+        brief = Brief(world=world, objective=objective,
+                      context=world.situate(post, contracts=self.contracts),
+                      state=post, task=ctx.task, output=ctx.output,
+                      reward=ctx.reward, depth=depth)
+        try:
+            written = list(self.skills(brief, contributed) or ())
+        except Exception:  # noqa: BLE001 - extraction must not cost the contribution
+            return list(merged)
+        self.skills_written += len(written)
+        return list(merged) + written
+
+    def _investigate(self, child: LocalWorld, objective: str,
+                     state: Mapping[str, str], ctx, depth: int) -> List[Edit]:
+        """One read-only investigation at ``child``; one record may come back.
+
+        The investigator is shown the node's own files because this port's agents
+        have no read tool -- that is the whole reason the role is worth porting here.
+        A returned edit that is not a ``CONTEXT.md`` at the investigated node is
+        refused and counted: source edits are not an investigation, and a write to an
+        ancestor's record is the ancestor's own business.
+        """
+        brief = Brief(world=child, objective=objective,
+                      context=child.situate(state, contracts=self.contracts),
+                      state=state, task=ctx.task, output=ctx.output,
+                      reward=ctx.reward, depth=depth)
+        try:
+            offered = list(self.investigator(brief) or ())
+        except Exception:  # noqa: BLE001 - a dead investigator is not a failed run
+            return []
+        self.investigations += 1
+        key = f"{child.path}/{CONTEXT_FILE}" if child.path else CONTEXT_FILE
+        out: List[Edit] = []
+        for edit in offered:
+            if normalise(edit.path) == normalise(key):
+                out.append(replace(edit, owner=child.path))
+            else:
+                self.investigation_refused += 1
+        return out
 
     def _accountability_pass(self, world: LocalWorld, objective: str,
                              state: Mapping[str, str], held: Mapping[str, Edit],
@@ -664,17 +781,26 @@ class RecursiveDelegation:
         it loses a source file -- and a record that brings a node into existence
         before either, because nothing else in the accepted version says the node
         exists. See :class:`Edit`.
+
+        Skills are a bucket of their own (:attr:`max_skill_edits`), because they are
+        not bookkeeping for this work and they are not the work: they are what a
+        later agent inherits. Letting them compete with the contribution they were
+        distilled from would let a trimmed episode keep the source file and throw
+        away the lesson, which is the one ordering this mechanism cannot have.
         """
         by_path: Dict[str, Edit] = {}
         for edit in edits:
             by_path[edit.path] = edit
+        skills = [by_path[p] for p in sorted(by_path)
+                  if by_path[p].kind == "skill"][:self.max_skill_edits]
+        rest = {p: e for p, e in by_path.items() if e.kind != "skill"}
         order = {"record": 0, "work": 1}
-        ordered = [by_path[p] for p in
-                   sorted(by_path, key=lambda p: (order.get(by_path[p].kind, 2), p))]
+        ordered = [rest[p] for p in
+                   sorted(rest, key=lambda p: (order.get(rest[p].kind, 2), p))]
         if len(ordered) > self.max_edits:
             self.truncated += len(ordered) - self.max_edits
             ordered = ordered[:self.max_edits]
-        return ordered
+        return ordered + skills
 
     def _objective(self, ctx) -> str:
         return (f"validation case {getattr(ctx.task, 'id', '?')} scored "
@@ -693,7 +819,15 @@ class RecursiveDelegation:
                 f"node_relative_paths={self.resolved_relative} "
                 f"accountability={self.accountability_edits}/"
                 f"{self.accountability_declined} "
-                f"findings_carried={self.accountability_findings}")
+                f"findings_carried={self.accountability_findings}"
+                + ("" if self.skills is None else
+                   f" skills_written={self.skills_written} "
+                   f"skill_extraction=[{self.skills.stats()}]")
+                + ("" if self.investigator is None else
+                   f" investigations={self.investigations} "
+                   f"finding_edits={self.finding_edits}/"
+                   f"{self.investigation_refused} refused "
+                   f"[{self.investigator.stats()}]"))
 
 
 def _with_findings(objective: str, path: str,
