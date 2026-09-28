@@ -960,16 +960,19 @@ def _set_budget_remaining(aggregator: Any, governor: BudgetGovernor) -> None:
 def _replay_stats(sampler) -> Optional[Dict[str, Any]]:
     """The replay-sampler statistics for :class:`EvolutionResult.replay`.
 
-    ``None`` for any sampler that is not a ``ReplaySampler`` -- the field exists
-    so a run that wired the mechanism reports it, and a run that did not is
-    indistinguishable from one that did but never fired.
+    ``None`` for any sampler that is not a :class:`~agentdescent.sampling.
+    ReplaySampler`. Using ``hasattr(sampler, 'settle')`` instead of an
+    isinstance check meant any custom sampler that also exposed a ``settle``
+    method (but not ``settled_counts``) crashed on the result line of
+    :func:`evolve` / :func:`async_evolve`.
     """
-    if not hasattr(sampler, "settle"):
+    from .sampling import ReplaySampler
+    if not isinstance(sampler, ReplaySampler):
         return None
     return {
         "settled": sum(sampler.settled_counts().values()),
-        "picks": getattr(sampler, "picks", 0),
-        "replay_affected": getattr(sampler, "replay_affected", 0),
+        "picks": sampler.picks,
+        "replay_affected": sampler.replay_affected,
     }
 
 

@@ -518,3 +518,36 @@ def test_result_replay_is_none_without_a_replay_sampler():
         agg_config=AggregatorConfig(trust_region_ops=3, batch_trigger=1),
         max_rollouts=12, n_workers=1, max_concurrency=1, seed=1, rounds=3)
     assert result.replay is None
+
+
+# ---------------------------------------------------------------------------
+# Regression: _replay_stats must not crash on a custom sampler with settle()
+# but without settled_counts (PR #193 review)
+# ---------------------------------------------------------------------------
+
+def test_replay_stats_is_none_for_a_custom_sampler_with_settle_only():
+    """A custom TaskSampler that exposes settle() but not settled_counts()
+    must not crash _replay_stats. isinstance check, not hasattr."""
+    from agentdescent.evolution import evolve
+    from agentdescent.strategies import AppendRules
+
+    class CustomWithSettle:
+        """Has settle() but is not a ReplaySampler — must be left alone."""
+        name = "custom"
+        def pick(self, keys, round_index):
+            return keys[round_index % len(keys)]
+        def record(self, task_id, score):
+            pass
+        def settle(self, card):
+            pass
+
+    tasks = [Task(id=f"t{i}", prompt=f"p{i}") for i in range(6)]
+    result = evolve(
+        tasks, lambda t, o: 0.0,
+        run=lambda rd, t: "answer",
+        propose=lambda rd, t, o, r: None,
+        strategy=AppendRules(),
+        task_sampler=CustomWithSettle(),
+        max_rollouts=4, n_workers=1, rounds=2)
+    assert result.replay is None, (
+        f"a non-ReplaySampler with settle() must report None, got {result.replay}")
