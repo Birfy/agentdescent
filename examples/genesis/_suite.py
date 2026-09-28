@@ -290,12 +290,17 @@ You do not write code. Decide whether to delegate to more specific paths inside 
 your own subtree, or to handle this yourself.
 
 Reply with ONE JSON object and nothing else:
-{{"delegations": [{{"path": "<a node inside {path}>", "objective": "<one sentence>"}}]}}
+{{"delegations": [{{"path": "<a node inside {path}>", "objective": "<one sentence>",
+                   "investigate": false}}]}}
 
 Rules:
 - You are ACCOUNTABLE for all code under `{path}`, and delegating does not \
 discharge that. The files AT `{path}` itself are nobody else's to write: after \
 your children return you get one more turn to write them.
+- Set `"investigate": true` when you need **to know something about a child subtree \
+before deciding**, rather than work done in it. A read-only investigator reads the \
+files there and records what it finds in that node's record; it writes no code. Use \
+one delegation per question.
 - A node is a **directory**, never a file. `src/frontend` is a node; \
 `src/frontend/lexer.py` is a file that belongs to the agent situated at \
 `src/frontend`, and delegating to it is refused.
@@ -375,7 +380,8 @@ def llm_manager(complete) -> Callable[[Brief], Sequence[Delegation]]:
         for item in items:
             if isinstance(item, dict) and item.get("path"):
                 out.append(Delegation(normalise(str(item["path"])),
-                                      str(item.get("objective", brief.objective))))
+                                      str(item.get("objective", brief.objective)),
+                                      readonly=bool(item.get("investigate"))))
         return out
 
     return manager

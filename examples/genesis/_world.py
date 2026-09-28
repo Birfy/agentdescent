@@ -344,6 +344,12 @@ class LocalWorld:
     #: the brief, and :meth:`routing` must not send a manager into a directory
     #: where nothing is writable.
     readonly: Sequence[str] = ()
+    #: Hand the agent the inherited skills' **bodies**, not just their names.
+    #: Upstream the names go in the brief and a ``skill_read`` tool fetches a body
+    #: on demand; an agent here has no tool, so the name line is an instruction it
+    #: cannot follow and inheritance is real only when the body travels too. Off by
+    #: default, because a run that never writes a skill should not pay to carry one.
+    skill_bodies: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "path", normalise(self.path))
@@ -360,7 +366,8 @@ class LocalWorld:
             raise ValueError(
                 f"delegation must stay inside the parent's subtree: "
                 f"{self.path or './'} cannot situate a child at {q or './'}")
-        return LocalWorld(version=self.version, path=q, readonly=self.readonly)
+        return LocalWorld(version=self.version, path=q, readonly=self.readonly,
+                          skill_bodies=self.skill_bodies)
 
     def routing(self, state: Mapping[str, str]) -> List[str]:
         """Where this node says work may be delegated to.
@@ -397,10 +404,16 @@ class LocalWorld:
     def skills(self, state: Mapping[str, str]) -> List[str]:
         """Skill files this node inherits, nearest ancestor last.
 
-        Names only reach the brief, not bodies: upstream hands an agent the skill
-        *names* available at its node and lets it read the ones it wants, because
-        pasting every ancestor's skills into every episode is how a context
-        window is spent on things nobody asked for.
+        Names only reach the brief by default, not bodies: upstream hands an agent
+        the skill *names* available at its node and lets it read the ones it wants
+        with ``skill_read``, because pasting every ancestor's skills into every
+        episode is how a context window is spent on things nobody asked for.
+
+        That reasoning holds only where the agent *can* read one, and this port's
+        agents have no tools. So ``skill_bodies`` exists: with it set, the bodies
+        travel with the brief and inheritance stops being a list of names the agent
+        cannot open. It is off by default so that a run which writes no skill pays
+        nothing for the mechanism.
         """
         out: List[str] = []
         for node in self._chain():
@@ -483,8 +496,16 @@ class LocalWorld:
         parts: List[str] = []
         skills = self.skills(state)
         if skills:
-            parts.append("--- skills available here (read one before using it) ---\n"
-                         + "\n".join(f"  {k}" for k in skills))
+            if self.skill_bodies:
+                # A number of skills, not a list of names: no read tool exists here,
+                # so "read one before using it" is an instruction nobody can follow.
+                parts.append(
+                    "--- skills inherited at this node (reusable knowledge -- follow "
+                    "it where it applies) ---\n"
+                    + "\n\n".join(f"# {k}\n{clip(state[k])}" for k in skills))
+            else:
+                parts.append("--- skills available here (read one before using it) ---\n"
+                             + "\n".join(f"  {k}" for k in skills))
         # Split "mine" from "my children's". An agent is bad at noticing an
         # absence inside a long list, and the absence is the actionable part:
         # a node that owns no file yet says so on its own line.
