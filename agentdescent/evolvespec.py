@@ -128,6 +128,7 @@ SHORT_REFS: Dict[str, str] = {
     # task sampling
     "RoundRobin": "agentdescent.sampling:RoundRobin",
     "DifficultyWeighted": "agentdescent.sampling:DifficultyWeighted",
+    "ReplaySampler": "agentdescent.sampling:ReplaySampler",
     # merge-side rules and wrappers (installed by the aggregator via bind/configure)
     "AdvantageAcceptance": "agentdescent.advantage:AdvantageAcceptance",
     "StableDistanceAcceptance": "agentdescent.advantage:StableDistanceAcceptance",
@@ -140,6 +141,7 @@ SHORT_REFS: Dict[str, str] = {
     "ReflectiveFusion": "agentdescent.fusion:ReflectiveFusion",
     # the pair, as one name -- see compose()
     "reflective_merge": "agentdescent.fusion:reflective_merge",
+    "ReplayAwareProposal": "agentdescent.replay:ReplayAwareProposal",
 }
 
 _POLICY_SLOTS = ("selection", "task_sampler", "proposal", "conflict", "fusion",

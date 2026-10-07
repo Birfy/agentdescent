@@ -352,6 +352,10 @@ class EvidenceBuffer:
     def __init__(self) -> None:
         self._buckets: Dict[str, List[EvidenceCard]] = defaultdict(list)
         self._waited: Dict[str, int] = defaultdict(int)
+        #: Optional consumer of settled evidence, wired by the engine when a
+        #: sampler (e.g. :class:`~agentdescent.sampling.ReplaySampler`) wants to
+        #: learn from the pool. ``None`` keeps the old behaviour exactly.
+        self._settled_consumer: Optional[Callable[[EvidenceCard], None]] = None
         # (payload chars, card), oldest first -- see :meth:`settle` for the bound.
         self._settled: Deque[Tuple[int, EvidenceCard]] = deque()
         self._settled_chars = 0
@@ -391,9 +395,10 @@ class EvidenceBuffer:
 
         This is the structural advantage of artifacts over gradients (design
         doc, section 3.3): a stale gradient is simply lost, but a stale diff's
-        evidence survives. Nothing in the library consumes the pool yet -- a
-        fuller system would re-file the cards into the trajectory pool -- so
-        treat it as a **diagnostic ring**, not a queue.
+        evidence survives. Nothing in the library consumes the pool by default
+        -- treat it as a **diagnostic ring**, not a queue -- but an optional
+        consumer (:meth:`set_settled_consumer`) turns the pool into an
+        experience-replay buffer for the task sampler.
 
         It is bounded because it was not, and the unbounded version leaked
         precisely the payloads the trust region exists to reject: a runaway
@@ -407,12 +412,43 @@ class EvidenceBuffer:
                 cost = sum(len(str(v)) for v in card.diff.ops.values())
                 self._settled.append((cost, card))
                 self._settled_chars += cost
+                if self._settled_consumer is not None:
+                    self._settled_consumer(card)
             while self._settled and (
                 len(self._settled) > self.SETTLED_MAX_CARDS
                 or self._settled_chars > self.SETTLED_MAX_CHARS
             ):
                 cost, _ = self._settled.popleft()
                 self._settled_chars -= cost
+
+    def recent_settled(self, task: Any, n: int = 3) -> List[EvidenceCard]:
+        """The most recent N settled cards whose ``trajectory_refs`` mention ``task``.
+
+        Used by the engine to fill ``ProposalContext.rejected`` so a proposal
+        policy can see what was just discarded for this task.
+        """
+        task_id = getattr(task, "id", None)
+        if task_id is None:
+            return []
+        with self._lock:
+            matched: List[EvidenceCard] = []
+            for _, card in reversed(list(self._settled)):
+                if any(getattr(r, "id", None) == task_id
+                       for r in card.trajectory_refs):
+                    matched.append(card)
+                    if len(matched) >= n:
+                        break
+            return matched
+
+    def set_settled_consumer(self, consumer: Optional[Callable[[EvidenceCard], None]]) -> None:
+        """Subscribe a consumer to every card that is settled.
+
+        ``None`` (the default) keeps the old behaviour -- the pool stays a
+        diagnostic ring no one reads. The consumer is called under the buffer
+        lock, so it must not call back into the buffer.
+        """
+        with self._lock:
+            self._settled_consumer = consumer
 
     @property
     def settled(self) -> List[EvidenceCard]:
@@ -609,6 +645,20 @@ class Aggregator:
 
     def ingest(self, card: EvidenceCard) -> None:
         self.buffer.add(card)
+
+    def set_settled_consumer(self, consumer: Optional[Callable[[EvidenceCard], None]]) -> None:
+        """Subscribe a consumer to the settled-evidence pool.
+
+        ``None`` keeps the old behaviour -- a diagnostic ring no one reads.
+        The consumer is called from the merger thread under the buffer lock.
+        """
+        self.buffer.set_settled_consumer(consumer)
+
+    def recent_settled(self, task: Any, n: int = 3) -> List[EvidenceCard]:
+        """The most recent N settled cards whose trajectory_refs mention task.
+
+        See ``Buffer.recent_settled``."""
+        return self.buffer.recent_settled(task, n)
 
     def step(self) -> List[MergeReport]:
         """Fire every artifact bucket that is ready and return per-artifact reports.

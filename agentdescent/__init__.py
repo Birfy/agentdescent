@@ -45,7 +45,8 @@ from .advantage import (
 )
 from .defaults import DefaultConflict, DefaultFusion
 from .fusion import KeepContradictions, ReflectiveFusion, reflective_merge
-from .sampling import DifficultyWeighted, RoundRobin, TaskSampler
+from .sampling import DifficultyWeighted, ReplaySampler, RoundRobin, TaskSampler
+from .replay import ReplayAwareProposal
 from .selection import (
     Archive,
     Beam,
