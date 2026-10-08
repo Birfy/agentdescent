@@ -39,6 +39,7 @@ EvolutionResult(
     forced_refreshes: int = 0,
     stragglers: int = 0,
     retired_workers: int = 0,
+    audit_drained: int = 0,
     replay: Optional[Dict[str, Any]] = None,
     usage: Usage = <factory>,
     wallclock: float = 0.0,
@@ -1061,6 +1062,7 @@ AggregatorConfig(
     accept_samples: int = 4000,
     cas_attempts: int = 3,
     cas_backoff: float = 0.05,
+    audit_drain_per_step: int = 0,
     fusion_tournament: bool = False,
     bounded_gate: bool = False
 ) -> None
@@ -2915,6 +2917,7 @@ Allocates oracle budget by estimated value G-hat (design doc, 5.3).
 | method | what it does |
 |---|---|
 | `force_oracle(blast_radius: float, artifact_id: str) -> bool` | High-impact or low-trust changes are forced through the oracle. |
+| `requeue(item: _AuditItem) -> None` | Put a popped item back with its **original** priority. |
 | `update_trust(artifact_id: str, oracle_agreed: bool) -> None` | Raise trust when cheap eval agreed with the oracle, lower it when not. |
 
 ### `DurationEstimator(...)`
