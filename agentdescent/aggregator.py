@@ -819,7 +819,7 @@ class Aggregator:
                 # for. Only keep trying while the drain has budget to retry.
                 self._requeue(item)
                 if self.meter is not None:
-                    self.meter.add("cas_conflicts")  # reuse existing counter
+                    self.meter.add("audit_drain_oracle_errors")
                 continue
             self.audit.update_trust(
                 artifact_id, (cand_full > base_full) == (

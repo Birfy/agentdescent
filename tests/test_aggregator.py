@@ -442,3 +442,43 @@ def test_audit_drain_transient_failure_requeues(tmp_path):
     n2 = agg._drain_audit_queue(max_per_step=1)
     assert n2 == 1 and len(sched) == 0, "retry succeeds after recovery"
     assert agg.audit_drained == 1
+
+
+def test_audit_drain_oracle_error_counted_with_meter(tmp_path):
+    """A transient oracle failure with a meter attached must increment the
+    registered counter, not raise KeyError (PR #194 review issue 2)."""
+    from agentdescent.aggregator import Aggregator, AggregatorConfig
+    from agentdescent.evolution import AppendRules, EvolvingArtifact
+    from agentdescent.ledger import Ledger
+    from agentdescent.metrics import Meter
+    from agentdescent.scheduler import AuditScheduler
+    from agentdescent.verifier import ThreeLayerVerifier, VerifierBudget
+
+    calls = {"n": 0}
+
+    class Flaky(ThreeLayerVerifier):
+        def full_eval(self, artifact):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("transient endpoint failure")
+            return super().full_eval(artifact)
+
+    lg = Ledger(str(tmp_path), lambda a: {"state": dict(a.state)},
+                lambda aid, v, s: EvolvingArtifact(aid, s.get("state", {}), v,
+                                                   0.2, None, AppendRules()))
+    lg.register(EvolvingArtifact("a", {"k": "b"}, 1, 0.2, None, AppendRules()))
+    v = Flaky(eval_fn=lambda a, t: 0.5, held_out=[1, 2, 3],
+              budget=VerifierBudget(oracle_calls_remaining=100))
+    meter = Meter()
+    sched = AuditScheduler(collect=True)
+    agg = Aggregator(lg, v, sched, AggregatorConfig(audit_drain_per_step=5),
+                     meter=meter)
+    base = lg.snapshot(Ledger.DEV).get("a")
+    cand = EvolvingArtifact("a", {"k": "c"}, 1, 0.2, None, AppendRules())
+    sched.submit("d1", "a", 0.6, 0.5, payload=("a", base, cand))
+
+    n1 = agg._drain_audit_queue(max_per_step=1)
+    assert n1 == 0 and len(sched) == 1, "failure requeues"
+    # The meter must have counted the oracle error, not raised KeyError.
+    assert meter.snapshot().audit_drain_oracle_errors == 1, (
+        f"expected 1 oracle error, got {meter.snapshot().audit_drain_oracle_errors}")
