@@ -72,7 +72,7 @@ def main() -> None:
                             f"MCP server returned an incomplete tool set: {sorted(tools)}"
                         )
                         result = await session.call_tool("doctor", {})
-                        assert not result.isError, f"MCP doctor failed: {result}"
+                        assert not result.is_error, f"MCP doctor failed: {result}"
 
             asyncio.run(check_server())
 
