@@ -84,8 +84,15 @@ held-out reward: 1.000 outcomes: {'committed': 1}
 what it learned: rules.md -> 'COLUMN: amount'
 ```
 
-For the published v0.5.0 installation and its documented source-example
-workflow, see [install and first run](docs/install.md). The library includes
+For the published stable v0.5.0 installation, run:
+
+```bash
+pip install agentdescent
+```
+
+Its documented offline example uses `python -m examples.run_demo`; those
+examples are outside the wheel, so clone the repo and follow
+[install and first run](docs/install.md). The library includes
 [`evolve()`](docs/evolution.md), [`DirectoryStrategy`](docs/directory-evolution.md),
 and all 19 algorithm ports.
 
