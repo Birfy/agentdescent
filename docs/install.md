@@ -121,8 +121,8 @@ instead — same call everywhere else. Full walkthrough:
 [quickstart](quickstart-skill.md).
 
 !!! tip "Inspect a port with `--dry-run`"
-    All nineteen print their configuration and return **with no model call and
-    no API key**. The eight benchmark-faithful ones return before touching data
+    All 20 algorithm ports print their configuration and return **with no model call
+    and no API key**. The eight benchmark-faithful ones return before touching data
     as well; the eleven `MethodPolicy` ports build their policy first, so one on
     a real benchmark downloads and caches its split during a dry run and says so.
 
