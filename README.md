@@ -94,7 +94,7 @@ Its documented offline example uses `python -m examples.run_demo`; those
 examples are outside the wheel, so clone the repo and follow
 [install and first run](docs/install.md). The library includes
 [`evolve()`](docs/evolution.md), [`DirectoryStrategy`](docs/directory-evolution.md),
-and all 19 algorithm ports.
+and its algorithm ports.
 
 ## Quickstart — a dataset to an evolved skill
 
