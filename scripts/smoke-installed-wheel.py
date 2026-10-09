@@ -60,7 +60,8 @@ def main() -> None:
         )
 
         env = os.environ.copy()
-        env.pop("PYTHONPATH", None)
+        for name in ("PYTHONPATH", "PYTHONHOME"):
+            env.pop(name, None)
         env["AGENTDESCENT_HOME"] = str(workdir / "home")
 
         demo = subprocess.run(
