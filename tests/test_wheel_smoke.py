@@ -6,11 +6,22 @@ import os
 from pathlib import Path
 import stat
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture
+def smoke_script():
+    script = ROOT / "scripts" / "smoke-installed-wheel.py"
+    spec = importlib.util.spec_from_file_location("smoke_installed_wheel", script)
+    assert spec and spec.loader
+    smoke = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(smoke)
+    return smoke
 
 
 def test_wheel_smoke_removes_inherited_python_overrides(tmp_path):
@@ -63,16 +74,31 @@ chmod +x "$3/bin/python"
     assert calls[1].endswith("scripts/smoke-installed-wheel.py")
 
 
-def test_wheel_smoke_mcp_protocol_check_times_out():
+def test_wheel_smoke_mcp_protocol_check_times_out(smoke_script):
     """A stuck initialize/list/call sequence cannot hang the CI job."""
-    script = ROOT / "scripts" / "smoke-installed-wheel.py"
-    spec = importlib.util.spec_from_file_location("smoke_installed_wheel", script)
-    assert spec and spec.loader
-    smoke = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(smoke)
-
     async def hang_forever():
         await asyncio.Event().wait()
 
     with pytest.raises(TimeoutError, match="MCP stdio smoke session exceeded"):
-        asyncio.run(smoke.run_mcp_check(hang_forever, timeout=0.01))
+        asyncio.run(smoke_script.run_mcp_check(hang_forever, timeout=0.01))
+
+
+@pytest.mark.parametrize(
+    ("result", "expected"),
+    [
+        (SimpleNamespace(isError=False), False),
+        (SimpleNamespace(isError=True), True),
+        (SimpleNamespace(is_error=False), False),
+        (SimpleNamespace(is_error=True), True),
+    ],
+)
+def test_wheel_smoke_reads_both_supported_mcp_error_field_names(
+    smoke_script, result, expected
+):
+    """MCP v1 uses `isError`; v2 uses `is_error`."""
+    assert smoke_script.mcp_tool_result_is_error(result) is expected
+
+
+def test_wheel_smoke_rejects_unknown_mcp_tool_result_shape(smoke_script):
+    with pytest.raises(AssertionError, match="neither `is_error` nor `isError`"):
+        smoke_script.mcp_tool_result_is_error(SimpleNamespace())

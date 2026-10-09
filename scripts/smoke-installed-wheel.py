@@ -19,6 +19,17 @@ from agentdescent.integrations import hooks_text, install, skill_text
 MCP_SESSION_TIMEOUT_SECONDS = 45
 
 
+def mcp_tool_result_is_error(result) -> bool:
+    """Read the error field exposed by MCP Python SDK v1 and v2."""
+    for name in ("is_error", "isError"):
+        value = getattr(result, name, None)
+        if value is not None:
+            return bool(value)
+    raise AssertionError(
+        "MCP CallToolResult exposes neither `is_error` nor `isError`"
+    )
+
+
 async def run_mcp_check(check_server, *, timeout=MCP_SESSION_TIMEOUT_SECONDS) -> None:
     """Bound the complete MCP initialize/list/call sequence for CI."""
     try:
@@ -104,7 +115,9 @@ def main() -> None:
                             f"MCP server returned an incomplete tool set: {sorted(tools)}"
                         )
                         result = await session.call_tool("doctor", {})
-                        assert not result.is_error, f"MCP doctor failed: {result}"
+                        assert not mcp_tool_result_is_error(result), (
+                            f"MCP doctor failed: {result}"
+                        )
 
             asyncio.run(run_mcp_check(check_server))
 
