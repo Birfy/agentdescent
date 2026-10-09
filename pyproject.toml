@@ -58,6 +58,7 @@ agentdescent = ["integrations/*.md", "integrations/*.json"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-# Put the repo root on sys.path so `import agentdescent` / `import examples`
-# resolve under a bare `pytest` invocation (CI), not just `python -m pytest`.
-pythonpath = ["."]
+# Put both the repo root and tests directory on sys.path. The root resolves
+# package imports; tests keeps legacy top-level test helpers importable after
+# making `tests` an explicit package for subprocess-based refs.
+pythonpath = [".", "tests"]
