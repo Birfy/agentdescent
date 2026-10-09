@@ -180,6 +180,12 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- **Onboarding, published-version guidance and CI support coverage.** Lead with
+  the packaged offline demo on current `main`, distinguish it from the v0.5.0
+  source-example path, name NumPy as a runtime dependency, exercise Python 3.10
+  in CI and strict-build docs on pull requests with read-only build permissions
+  and Pages/OIDC permissions limited to the guarded deploy job.
+
 - **Host setup now stops when the package install fails, before changing host
   configuration.** Isolated installer tests cover checkout and PyPI failures.
   CI and publishing now install the built wheel outside the checkout and smoke

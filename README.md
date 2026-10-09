@@ -63,32 +63,38 @@ The figure is the paper's, rendered from its TikZ source by
 [`tools/gen_architecture_figure.py`](tools/gen_architecture_figure.py) so it
 cannot drift from what the paper shows.
 
-## Install and run something in 30 seconds
+## Try the offline demo from current `main`
+
+The packaged `agentdescent demo` command shown here is on the unreleased
+`main` branch. Install that checkout before running it:
+
+```bash
+git clone --branch main https://github.com/Birfy/agentdescent && cd agentdescent
+pip install -e .
+agentdescent demo
+```
+
+The library supports Python ≥ 3.9 and installs NumPy for its
+prediction-powered audit estimator. The packaged demo runs the offline
+evolution loop without a model API key. On current unreleased `main`, it ends
+with output like:
+
+```
+held-out reward: 1.000 outcomes: {'committed': 1}
+what it learned: rules.md -> 'COLUMN: amount'
+```
+
+For the published stable v0.5.0 installation, run:
 
 ```bash
 pip install agentdescent
 ```
 
-The core engine has **zero required dependencies** and needs only Python ≥ 3.9.
-The examples are research artifacts kept outside the installed package — they
-would otherwise squat the top-level `examples` name — so **clone the repo** to
-run them:
-
-```bash
-git clone https://github.com/Birfy/agentdescent && cd agentdescent
-pip install -e ".[dev]"
-python -m examples.run_demo      # no API key, no network
-```
-
-![A terminal recording of python -m examples.run_demo: the evolution loop runs to
-completion in under half a second, printing a per-round table of held-out
-accuracy and the aggregator's commit, fused, stale and conflict
-counters.](https://raw.githubusercontent.com/Birfy/agentdescent/main/docs/assets/demo.svg)
-
-That is the whole run — no API key, no network, **under half a second**. Three
-rounds commit, then the gate stops accepting because there is nothing left to
-improve; `commit`, `fused`, `stale` and `confl` are the aggregator's own
-counters, and every run prints them.
+Its documented offline example uses `python -m examples.run_demo`; those
+examples are outside the wheel, so clone the repo and follow
+[install and first run](docs/install.md). The library includes
+[`evolve()`](docs/evolution.md), [`DirectoryStrategy`](docs/directory-evolution.md),
+and its algorithm ports.
 
 ## Quickstart — a dataset to an evolved skill
 
@@ -173,6 +179,8 @@ The same engine as a **plugin**. A shared skill teaches the host when to reach
 for it, an MCP server exposes `doctor / plan / start / status / show / apply /
 cancel / resume`, and the CLI mirrors them, so a run started from an agent can
 be inspected from a shell.
+
+From the current `main` checkout:
 
 ```bash
 bash scripts/setup-hosts.sh   # installs it and wires up whichever agent CLIs you have

@@ -120,7 +120,7 @@ pip install agentdescent
     The plugin for DeepSeek Harness, Claude Code and Codex: say "evolve this"
     inside the agent. Also evolves the plugins themselves. New here? Start with
     [the plugin in three commands](plugin-quickstart.md) — `agentdescent demo`
-    runs a whole evolution with no API key.
+    from current `main` runs a whole evolution with no API key.
 
 -   :material-star-four-points: **[The `evolve` method](evolution.md)**
 
@@ -210,18 +210,17 @@ pip install agentdescent
 
 ## 30-second tour
 
-```bash
-pip install -e ".[dev]"
+This demo command is available from the unreleased `main` checkout:
 
-python -m examples.run_demo            # RQ1: merge vs fork (synchronous DP)
-python -m examples.run_async           # FlashEvolve-style async + staleness policies
-python -m examples.skill_dir_evolution # evolve a skill directory a real agent reads
-python -m examples.rq2_staleness       # RQ2: staleness tolerance sweep
-pytest                                 # the suite, no external services
+```bash
+git clone --branch main https://github.com/Birfy/agentdescent && cd agentdescent
+pip install -e .
+agentdescent demo                      # complete offline evolution loop
 ```
 
-Step by step: [install and first run](install.md). Everything runnable, with the
-output each one produces: [run everything](usage.md).
+For the published v0.5.0 install and source-example workflow, see
+[install and first run](install.md). Everything runnable, with the output each
+one produces: [run everything](usage.md).
 
 No LLM or external service is required: the
 [reference domain](orchestrator.md#why-a-synthetic-domain-exists-at-all) is a

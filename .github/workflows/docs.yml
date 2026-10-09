@@ -1,6 +1,6 @@
 name: docs
 
-# Every push to main builds, strict-validates and deploys the MkDocs site.
+# Every PR builds and strict-validates the MkDocs site. Pushes to main also deploy.
 # Deploy used to be manual-only, so that a push could not fail on a repository
 # where Pages was off. Pages is on now, and the guard had outlived it: the site
 # went stale silently, and README links to pages that only existed in the
@@ -8,22 +8,25 @@ name: docs
 # `workflow_dispatch` is kept for re-publishing without a commit.
 
 on:
+  pull_request:
   push:
     branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: pages
+  # PR runs cancel only earlier runs for the same PR. Main/manual Pages runs
+  # keep their existing group and cannot be canceled by a PR validation.
+  group: ${{ github.event_name == 'pull_request' && format('pages-pr-{0}', github.event.pull_request.number) || 'pages' }}
   cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -44,6 +47,9 @@ jobs:
     # validates and stops, because a fork's build must never reach Pages.
     if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

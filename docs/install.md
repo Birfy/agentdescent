@@ -1,44 +1,70 @@
 # Install and first run
 
-## Install
+## Current `main`: packaged offline demo
 
 ```bash
-pip install agentdescent
+git clone --branch main https://github.com/Birfy/agentdescent && cd agentdescent
+pip install -e .
+agentdescent demo
 ```
 
-The core engine has **zero required dependencies** and needs only Python ≥ 3.9.
-That gives you the whole library: [`evolve()`](evolution.md), the
+The library supports Python ≥ 3.9 and current `main` installs NumPy for the
+[`audit.ppi`](api.md) estimator. The packaged CLI demo runs offline and needs no
+model API key:
+
+```bash
+agentdescent demo
+```
+
+On current unreleased `main`, a successful run ends with output like:
+
+```
+held-out reward: 1.000 outcomes: {'committed': 1}
+what it learned: rules.md -> 'COLUMN: amount'
+```
+
+After it finishes, try `agentdescent --help` to see the commands or continue to
+the [quickstart](quickstart-skill.md) to connect a model. The library includes
+[`evolve()`](evolution.md), the
 [aggregator](aggregator.md), the [agent layer](agents.md), the
 [data layer](dataloader.md), [directory evolution](directory-evolution.md).
 
 | extra | adds | for |
 |---|---|---|
-| `pip install -e ".[dev]"` | pytest | running the test suite |
-| `pip install -e ".[docs]"` | MkDocs Material | building this site |
+| `pip install -e ".[dev]"` | pytest | running the test suite in a contributor checkout |
+| `pip install -e ".[docs]"` | MkDocs Material | building the docs from a contributor checkout |
 | `pip install anthropic` | the Claude SDK | [`claude(...)`](agents.md) |
 | `pip install openhands-ai` | OpenHands SDK (Python ≥ 3.12) | [`openhands(...)`](backends.md) |
 
 Nothing else is needed for an OpenAI-compatible endpoint — GLM, DeepSeek, a local
 vLLM server — because [`openai_compatible`](agents.md) speaks HTTP directly.
 
-## The examples need a checkout
+## Published v0.5.0 installation and source examples
 
-They are research artifacts kept **outside** the installed package (they would
-otherwise squat the top-level `examples` name), so every `python -m examples.…`
-command needs a clone:
+Install the stable PyPI package with:
 
 ```bash
-git clone https://github.com/Birfy/agentdescent && cd agentdescent
+pip install agentdescent
+```
+
+The v0.5.0 release's documented offline demo uses research examples kept in the
+source repository, outside the installed wheel. To run that example, clone the
+tagged source and install the contributor tools:
+
+```bash
+git clone --branch v0.5.0 https://github.com/Birfy/agentdescent && cd agentdescent
 pip install -e ".[dev]"
 ```
 
-## First run — no API key
+Then run the source demo (no API key):
 
 ```bash
 python -m examples.run_demo
 ```
 
-Runs the merge-based loop and a fork baseline on the same budget over the
+Examples are research artifacts kept **outside** the installed package (they
+would otherwise squat the top-level `examples` name). This command runs the
+merge-based loop and a fork baseline on the same budget over the
 [reference domain](orchestrator.md), then prints the learning curve and the
 comparison. This is the framework's central claim, reproducible in seconds:
 
@@ -113,7 +139,7 @@ The suite is offline and deterministic — no network, no model API:
 pytest -q
 ```
 
-CI runs it on Python 3.9 / 3.11 / 3.12 for every push and PR.
+CI runs it on Python 3.9, 3.10, 3.11 and 3.12 for every push and PR.
 
 ## Building the docs
 
