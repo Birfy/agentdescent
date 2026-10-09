@@ -11,12 +11,18 @@ The design record — why it is shaped this way and what was considered — is
 
 ## Install
 
+The CLI example below uses current unreleased `main`:
+
 ```bash
-pip install "agentdescent[mcp]"        # the CLI works without [mcp]; the MCP server needs it (and Python >= 3.10)
+git clone --branch main https://github.com/Birfy/agentdescent && cd agentdescent
+pip install -e ".[mcp]"                 # the MCP server needs this extra (and Python >= 3.10)
 agentdescent demo                      # a complete evolution, offline, no key
 agentdescent doctor                    # which agent CLIs, keys and optional pieces are here
 agentdescent install dsh               # or: claude-code, codex, opencode
 ```
+
+For the published v0.5.0 install and documented source-example workflow, see
+[install and first run](install.md#published-v050-installation-and-source-examples).
 
 The MCP SDK requires Python >= 3.10; AgentDescent supports 3.9. On 3.9 the
 extra installs nothing and the tool surface is unavailable — the CLI verbs are

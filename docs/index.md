@@ -210,12 +210,15 @@ pip install agentdescent
 
 ## 30-second tour
 
+This demo command is available from the unreleased `main` checkout:
+
 ```bash
-pip install agentdescent
+git clone --branch main https://github.com/Birfy/agentdescent && cd agentdescent
+pip install -e .
 agentdescent demo                      # complete offline evolution loop
 ```
 
-For contributor setup, source examples and the test suite, see
+For the published v0.5.0 install and source-example workflow, see
 [install and first run](install.md). Everything runnable, with the output each
 one produces: [run everything](usage.md).
 

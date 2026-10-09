@@ -10,19 +10,15 @@ until step 3.
 
 ## 1. Install
 
-```bash
-pip install "agentdescent[mcp]"
-```
-
-Or, if you have a clone:
+These CLI commands use current unreleased `main`; install that checkout first:
 
 ```bash
-git clone https://github.com/Birfy/agentdescent && cd agentdescent
+git clone --branch main https://github.com/Birfy/agentdescent && cd agentdescent
 pip install -e ".[mcp]"
 ```
 
-The plugin ships from **0.5.0**. `pip install agentdescent` on an older pin
-gives you the engine without `demo`, `install` or `mcp`.
+For the published v0.5.0 install and documented source-example path, see
+[Install and first run](install.md#published-v050-installation-and-source-examples).
 
 `[mcp]` is the extra that lets agents talk to AgentDescent. Skip it and the CLI
 still works, but `agentdescent mcp` exits 3 and tells you to add it.

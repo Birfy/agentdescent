@@ -63,10 +63,14 @@ The figure is the paper's, rendered from its TikZ source by
 [`tools/gen_architecture_figure.py`](tools/gen_architecture_figure.py) so it
 cannot drift from what the paper shows.
 
-## Install and run something in 30 seconds
+## Try the offline demo from current `main`
+
+The packaged `agentdescent demo` command shown here is on the unreleased
+`main` branch. Install that checkout before running it:
 
 ```bash
-pip install agentdescent
+git clone --branch main https://github.com/Birfy/agentdescent && cd agentdescent
+pip install -e .
 agentdescent demo
 ```
 
@@ -80,14 +84,10 @@ held-out reward: 1.000 outcomes: {'committed': 1}
 what it learned: rules.md -> 'COLUMN: amount'
 ```
 
-The published v0.5.0 wheel predates this CLI demo. See
-[install and first run](docs/install.md) for its tagged source-example workflow
-and the current `main` contributor setup. The library includes
+For the published v0.5.0 installation and its documented source-example
+workflow, see [install and first run](docs/install.md). The library includes
 [`evolve()`](docs/evolution.md), [`DirectoryStrategy`](docs/directory-evolution.md),
 and all 19 algorithm ports.
-
-The published v0.5.0 source examples are documented in the tagged
-[install guide](docs/install.md#published-v050-and-source-examples).
 
 ## Quickstart — a dataset to an evolved skill
 

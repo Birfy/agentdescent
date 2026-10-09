@@ -19,7 +19,9 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  # PR runs cancel only earlier runs for the same PR. Main/manual Pages runs
+  # keep their existing group and cannot be canceled by a PR validation.
+  group: ${{ github.event_name == 'pull_request' && format('pages-pr-{0}', github.event.pull_request.number) || 'pages' }}
   cancel-in-progress: true
 
 jobs:

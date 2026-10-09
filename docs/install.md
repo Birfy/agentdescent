@@ -1,21 +1,14 @@
 # Install and first run
 
-## Install
+## Current `main`: packaged offline demo
 
 ```bash
-pip install agentdescent
-```
-
-For contributors working from a clone of current `main`, install the checkout
-in editable mode with the test tools before running the packaged demo:
-
-```bash
-git clone https://github.com/Birfy/agentdescent && cd agentdescent
-pip install -e ".[dev]"
+git clone --branch main https://github.com/Birfy/agentdescent && cd agentdescent
+pip install -e .
 agentdescent demo
 ```
 
-The library supports Python ≥ 3.9 and installs NumPy for the
+The library supports Python ≥ 3.9 and current `main` installs NumPy for the
 [`audit.ppi`](api.md) estimator. The packaged CLI demo runs offline and needs no
 model API key:
 
@@ -46,10 +39,17 @@ the [quickstart](quickstart-skill.md) to connect a model. The library includes
 Nothing else is needed for an OpenAI-compatible endpoint — GLM, DeepSeek, a local
 vLLM server — because [`openai_compatible`](agents.md) speaks HTTP directly.
 
-## Published v0.5.0 and source examples
+## Published v0.5.0 installation and source examples
 
-The published v0.5.0 wheel predates the `agentdescent demo` command. To run its
-research examples, clone the tagged source and install the contributor tools:
+Install the stable PyPI package with:
+
+```bash
+pip install agentdescent
+```
+
+The v0.5.0 release's documented offline demo uses research examples kept in the
+source repository, outside the installed wheel. To run that example, clone the
+tagged source and install the contributor tools:
 
 ```bash
 git clone --branch v0.5.0 https://github.com/Birfy/agentdescent && cd agentdescent
