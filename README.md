@@ -67,28 +67,27 @@ cannot drift from what the paper shows.
 
 ```bash
 pip install agentdescent
+agentdescent demo
 ```
 
-The core engine has **zero required dependencies** and needs only Python ≥ 3.9.
-The examples are research artifacts kept outside the installed package — they
-would otherwise squat the top-level `examples` name — so **clone the repo** to
-run them:
+The library supports Python ≥ 3.9 and installs NumPy for its
+prediction-powered audit estimator. The packaged demo runs the offline
+evolution loop without a model API key. On current unreleased `main`, it ends
+with output like:
 
-```bash
-git clone https://github.com/Birfy/agentdescent && cd agentdescent
-pip install -e ".[dev]"
-python -m examples.run_demo      # no API key, no network
+```
+held-out reward: 1.000 outcomes: {'committed': 1}
+what it learned: rules.md -> 'COLUMN: amount'
 ```
 
-![A terminal recording of python -m examples.run_demo: the evolution loop runs to
-completion in under half a second, printing a per-round table of held-out
-accuracy and the aggregator's commit, fused, stale and conflict
-counters.](https://raw.githubusercontent.com/Birfy/agentdescent/main/docs/assets/demo.svg)
+The published v0.5.0 wheel predates this CLI demo. See
+[install and first run](docs/install.md) for its tagged source-example workflow
+and the current `main` contributor setup. The library includes
+[`evolve()`](docs/evolution.md), [`DirectoryStrategy`](docs/directory-evolution.md),
+and all 19 algorithm ports.
 
-That is the whole run — no API key, no network, **under half a second**. Three
-rounds commit, then the gate stops accepting because there is nothing left to
-improve; `commit`, `fused`, `stale` and `confl` are the aggregator's own
-counters, and every run prints them.
+The published v0.5.0 source examples are documented in the tagged
+[install guide](docs/install.md#published-v050-and-source-examples).
 
 ## Quickstart — a dataset to an evolved skill
 

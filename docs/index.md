@@ -211,17 +211,13 @@ pip install agentdescent
 ## 30-second tour
 
 ```bash
-pip install -e ".[dev]"
-
-python -m examples.run_demo            # RQ1: merge vs fork (synchronous DP)
-python -m examples.run_async           # FlashEvolve-style async + staleness policies
-python -m examples.skill_dir_evolution # evolve a skill directory a real agent reads
-python -m examples.rq2_staleness       # RQ2: staleness tolerance sweep
-pytest                                 # the suite, no external services
+pip install agentdescent
+agentdescent demo                      # complete offline evolution loop
 ```
 
-Step by step: [install and first run](install.md). Everything runnable, with the
-output each one produces: [run everything](usage.md).
+For contributor setup, source examples and the test suite, see
+[install and first run](install.md). Everything runnable, with the output each
+one produces: [run everything](usage.md).
 
 No LLM or external service is required: the
 [reference domain](orchestrator.md#why-a-synthetic-domain-exists-at-all) is a

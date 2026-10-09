@@ -1,6 +1,6 @@
 name: docs
 
-# Every push to main builds, strict-validates and deploys the MkDocs site.
+# Every PR builds and strict-validates the MkDocs site. Pushes to main also deploy.
 # Deploy used to be manual-only, so that a push could not fail on a repository
 # where Pages was off. Pages is on now, and the guard had outlived it: the site
 # went stale silently, and README links to pages that only existed in the
@@ -8,6 +8,7 @@ name: docs
 # `workflow_dispatch` is kept for re-publishing without a commit.
 
 on:
+  pull_request:
   push:
     branches: [main]
   workflow_dispatch:
