@@ -5,12 +5,28 @@ from __future__ import annotations
 
 import asyncio
 import importlib.metadata
+import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
+
+from agentdescent.integrations import hooks_text, install, skill_text
+
+
+MCP_SESSION_TIMEOUT_SECONDS = 45
+
+
+async def run_mcp_check(check_server, *, timeout=MCP_SESSION_TIMEOUT_SECONDS) -> None:
+    """Bound the complete MCP initialize/list/call sequence for CI."""
+    try:
+        await asyncio.wait_for(check_server(), timeout=timeout)
+    except asyncio.TimeoutError as exc:
+        raise TimeoutError(
+            f"MCP stdio smoke session exceeded {timeout:g} seconds"
+        ) from exc
 
 
 def main() -> None:
@@ -28,6 +44,21 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory(prefix="agentdescent-wheel-smoke-") as temp:
         workdir = Path(temp)
+        host_home = workdir / "host-home"
+        install("claude-code", home=str(host_home))
+        plugin = host_home / ".agentdescent" / "plugins" / "claude-code"
+        installed_skill = plugin / "skills" / "agentdescent" / "SKILL.md"
+        installed_hooks = plugin / "hooks" / "hooks.json"
+        assert installed_skill.read_text(encoding="utf-8") == skill_text(), (
+            "installed wheel did not provide the shared SKILL.md resource"
+        )
+        assert installed_hooks.read_text(encoding="utf-8") == hooks_text(), (
+            "installed wheel did not provide the hooks.json resource"
+        )
+        assert "SessionStart" in json.loads(hooks_text())["hooks"], (
+            "installed hooks.json resource is not valid host configuration"
+        )
+
         env = os.environ.copy()
         env.pop("PYTHONPATH", None)
         env["AGENTDESCENT_HOME"] = str(workdir / "home")
@@ -74,7 +105,7 @@ def main() -> None:
                         result = await session.call_tool("doctor", {})
                         assert not result.is_error, f"MCP doctor failed: {result}"
 
-            asyncio.run(check_server())
+            asyncio.run(run_mcp_check(check_server))
 
 
 if __name__ == "__main__":

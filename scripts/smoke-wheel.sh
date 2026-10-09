@@ -3,6 +3,10 @@
 # exercise its CLI and, where supported, its MCP stdio protocol.
 set -euo pipefail
 
+# Ambient Python path overrides can make both pip and the smoke checks load
+# modules from outside the venv. Keep the entire wheel gate isolated.
+unset PYTHONPATH PYTHONHOME
+
 if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then
   echo "usage: $0 path/to/agentdescent-*.whl" >&2
   exit 2
