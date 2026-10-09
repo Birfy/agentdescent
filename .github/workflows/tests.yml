@@ -32,3 +32,8 @@ jobs:
       # the CLI alone and those tests skip there, which is the supported shape.
       - run: pip install -e ".[dev,mcp]"
       - run: pytest -q
+      # Source tests above intentionally exercise the checkout. This separate
+      # gate installs the actual wheel into a clean venv and runs outside it.
+      - run: pip install build
+      - run: python -m build --wheel
+      - run: bash scripts/smoke-wheel.sh dist/*.whl

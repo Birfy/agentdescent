@@ -122,10 +122,21 @@ fi
 say "Installing AgentDescent"
 if [ -f "pyproject.toml" ] && grep -q 'name = "agentdescent"' pyproject.toml 2>/dev/null; then
   info "from this checkout (editable)"
-  run "python3 -m pip install -q -e '.[mcp]'"
+  install_command="python3 -m pip install -q -e '.[mcp]'"
 else
   info "from PyPI"
-  run "python3 -m pip install -q 'agentdescent[mcp]'"
+  install_command="python3 -m pip install -q 'agentdescent[mcp]'"
+fi
+if run "$install_command"; then
+  :
+else
+  install_status=$?
+  info ""
+  info "ERROR: AgentDescent could not be installed (pip exited with status $install_status)."
+  info "No host configuration was changed. Read pip's error above, fix the reported"
+  info "dependency, network, Python-version, or permission problem, then re-run:"
+  info "  $install_command"
+  exit 1
 fi
 
 if ! command -v agentdescent >/dev/null 2>&1 && [ "$DRY" = 0 ]; then
