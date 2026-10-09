@@ -120,7 +120,7 @@ pip install agentdescent
     The plugin for DeepSeek Harness, Claude Code and Codex: say "evolve this"
     inside the agent. Also evolves the plugins themselves. New here? Start with
     [the plugin in three commands](plugin-quickstart.md) — `agentdescent demo`
-    runs a whole evolution with no API key.
+    from current `main` runs a whole evolution with no API key.
 
 -   :material-star-four-points: **[The `evolve` method](evolution.md)**
 

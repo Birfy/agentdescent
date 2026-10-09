@@ -47,7 +47,7 @@ make a real run fail — but none of them stop step 2.
     `bin/` to add. Hosts start the server as a **subprocess**, so it must be on
     the `PATH` of whatever launches your agent, not just your interactive shell.
 
-## 2. Run one, offline
+## 2. Current `main`: run the packaged demo offline
 
 ```bash
 agentdescent demo

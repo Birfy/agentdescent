@@ -180,6 +180,8 @@ for it, an MCP server exposes `doctor / plan / start / status / show / apply /
 cancel / resume`, and the CLI mirrors them, so a run started from an agent can
 be inspected from a shell.
 
+From the current `main` checkout:
+
 ```bash
 bash scripts/setup-hosts.sh   # installs it and wires up whichever agent CLIs you have
 agentdescent demo             # a complete evolution, offline, no key, ~10s
