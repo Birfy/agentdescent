@@ -180,6 +180,12 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- **Host setup now stops when the package install fails, before changing host
+  configuration.** Isolated installer tests cover checkout and PyPI failures.
+  CI and publishing now install the built wheel outside the checkout and smoke
+  test its version, bundled skill and hooks resources, temporary host install,
+  offline CLI demo, and MCP stdio behavior with a bounded session timeout.
+
 - **Checkpoints are excluded from the ledger's index on every open, not only
   at genesis.** `Ledger._commit` runs `git add -A`. A committed
   `checkpoints/latest.json` exists on `dev` and not on `stable`, so the promote
