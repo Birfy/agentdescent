@@ -89,8 +89,9 @@ held-out reward: 1.000 outcomes: {'committed': 1}
 what it learned: rules.md -> 'COLUMN: amount'
 ```
 
-Research examples are outside the wheel. For a source checkout and the
-`python -m examples.run_demo` comparison, see [install and first run](docs/install.md).
+Research examples are outside the wheel. To run the
+`python -m examples.run_demo` comparison, clone the repo and follow
+[install and first run](docs/install.md).
 The library includes [`evolve()`](docs/evolution.md),
 [`DirectoryStrategy`](docs/directory-evolution.md), and its algorithm ports.
 
