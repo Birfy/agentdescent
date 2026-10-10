@@ -94,7 +94,8 @@ EvolvingArtifact(
     version: int = 1,
     blast_radius: float = 0.2,
     runtime: Optional['_Runtime'] = None,
-    strategy: Optional[Strategy] = None
+    strategy: Optional[Strategy] = None,
+    contract: Optional[Contract] = None
 ) -> None
 ```
 
@@ -245,7 +246,8 @@ evolve(
     stop_when: Optional[Callable[['RoundInfo'], bool]] = None,
     verbose: bool = False,
     usage: Optional[Usage] = None,
-    policies: Optional['Policies'] = None
+    policies: Optional['Policies'] = None,
+    extra_artifacts: Optional[Dict[str, 'EvolvingArtifact']] = None
 ) -> EvolutionResult
 ```
 
@@ -301,6 +303,7 @@ evolve(
 | `verbose` | `bool` | `False` | Print a line per round. Independent of the `RuntimeWarning` emitted when a run ends early -- that always fires. |
 | `usage` | `Optional[Usage]` | `None` | Share one `Usage` with your model adapters (`claude(usage=u)`, `openai_compatible(usage=u)`) and the result's token counts become real. Without it the run still reports calls, seconds and failures -- `run` is `(rendered, task) -> str`, so an opaque actor has no way to surface tokens, and inventing a number would be worse than reporting zero. |
 | `policies` | `Optional['Policies']` | `None` | Bundle of replaceable pieces (`Policies`). Every field defaults to `None` meaning "current behaviour", so `Policies()` and passing nothing are the same run. The individual keyword arguments -- `task_sampler`, `staleness_policy`, `aggregator_factory` -- are shortcuts onto its fields and keep working; an explicit argument wins over a bundle default rather than being silently ignored. Fields whose implementations have not landed yet raise rather than being accepted and ignored: a caller who passes a custom acceptance rule and sees a finished run would reasonably conclude it ran. New capabilities go here rather than adding another parameter to a function that already has thirty-five. |
+| `extra_artifacts` | `Optional[Dict[str, 'EvolvingArtifact']]` | `None` | Additional artifacts to register alongside the primary (`artifact_id`), as `{aid: EvolvingArtifact}`. The primary is the one the worker loop rolls out and proposes on; each extra is registered in the ledger and the worker proposes against it too, so a proposal can name one of them as a diff target and the aggregator merges it there (the evidence buffer already buckets by `diff.target`). `depends_on` on an extra's `Contract` declares which artifacts it relies on: a contract-breaking change to one re-measures its dependents (their cached scores were taken under the superseded contract) and lands atomically via `Ledger.commit_atomic`. Empty (the default) is the old single-artifact behaviour exactly. |
 
 ### `reflector(...)`
 
@@ -945,7 +948,8 @@ Contract(
     input_schema: str = 'any',
     output_schema: str = 'any',
     side_effects: Tuple[str, ...] = (),
-    major: int = 1
+    major: int = 1,
+    depends_on: Tuple[str, ...] = ()
 ) -> None
 ```
 
@@ -3045,6 +3049,7 @@ EvolveSpec(
     policies: Dict[str, Any] = <factory>,
     agg_config: Dict[str, Any] = <factory>,
     evolve: Dict[str, Any] = <factory>,
+    extra_artifacts: Dict[str, Any] = <factory>,
     allow: Sequence[str] = (),
     version: int = 1
 ) -> None
@@ -3143,7 +3148,8 @@ async_evolve(
     stop_when: Optional[Callable[[RoundInfo], bool]] = None,
     verbose: bool = False,
     usage: Optional[Usage] = None,
-    policies: Optional['Policies'] = None
+    policies: Optional['Policies'] = None,
+    extra_artifacts: Optional[Dict[str, 'EvolvingArtifact']] = None
 ) -> EvolutionResult
 ```
 
@@ -3197,6 +3203,7 @@ async_evolve(
 | `verbose` | `bool` | `False` | Print one line per merger sweep. |
 | `usage` | `Optional[Usage]` | `None` | Share one `Usage` with your model adapters (`claude(usage=u)`, `openai_compatible(usage=u)`) and the result's token counts become real. Without it the run still reports calls, seconds and failures -- `run` is `(rendered, task) -> str`, so an opaque actor has no way to surface tokens, and inventing a number would be worse than reporting zero. |
 | `policies` | `Optional['Policies']` | `None` | Bundle of replaceable pieces (`Policies`). Every field defaults to `None` meaning "current behaviour", so `Policies()` and passing nothing are the same run. The individual keyword arguments -- `task_sampler`, `staleness_policy`, `aggregator_factory` -- are shortcuts onto its fields and keep working; an explicit argument wins over a bundle default rather than being silently ignored. Fields whose implementations have not landed yet raise rather than being accepted and ignored: a caller who passes a custom acceptance rule and sees a finished run would reasonably conclude it ran. New capabilities go here rather than adding another parameter to a function that already has thirty-five. |
+| `extra_artifacts` | `Optional[Dict[str, 'EvolvingArtifact']]` | `None` | Exactly as in `evolve`: additional artifacts to register alongside the primary, as `{aid: EvolvingArtifact}`. The barrier-free worker proposes against each of them too (no parallel strategy, so it is the primary plus every extra), and the aggregator merges their diffs by target. Empty (the default) is the old single-artifact behaviour exactly. |
 
 ---
 
@@ -3680,7 +3687,7 @@ The exception tuple a caller catches to treat any ledger problem as recoverable.
 
 ### `LedgerProtocol`
 
-Seven methods: four the aggregator calls, three more the engine calls.
+Eight methods: four the aggregator calls, four more the engine calls.
 
 ### `LocalWorkspaceSandbox`
 

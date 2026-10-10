@@ -79,12 +79,21 @@ class Contract:
     ``breaking`` marks a semver-major style change; the Ledger refuses diffs
     that declare a dependency on a superseded major (design doc, section 6,
     "contract mechanism").
+
+    ``depends_on`` names the artifact ids whose **contracts** this artifact
+    relies on. It is what turns a single-artifact commit into an atomic
+    adaptation transaction: when one of those artifacts commits a contract-
+    breaking change, this artifact must land (re-registered) in the *same* git
+    commit, via :meth:`~agentdescent.ledger.Ledger.commit_atomic`. Empty means
+    the artifact depends on nothing and a breaking change elsewhere never
+    touches it.
     """
 
     input_schema: str = "any"
     output_schema: str = "any"
     side_effects: Tuple[str, ...] = ()
     major: int = 1
+    depends_on: Tuple[str, ...] = ()
 
     def is_compatible_with(self, other: "Contract") -> bool:
         return self.major == other.major

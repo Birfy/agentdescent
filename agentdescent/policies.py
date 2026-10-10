@@ -350,12 +350,14 @@ class VerifierProtocol(Protocol):
 
 @runtime_checkable
 class LedgerProtocol(Protocol):
-    """Seven methods: four the aggregator calls, three more the engine calls.
+    """Eight methods: four the aggregator calls, four more the engine calls.
 
     Deriving this from the aggregator alone -- ``snapshot``, ``head_version``,
     ``commit``, ``promote_to_stable`` -- yields a contract that type-checks and
     then dies in ``_build_engine``, which calls ``register`` before any merge
     happens, in ``_safe_log`` at the end of every run, and in ``_Engine.cleanup``.
+    ``commit_atomic`` is the aggregator's path for a contract-breaking diff, which
+    must land as a single git commit with its adapters.
 
     ``repo_path`` is an attribute, not a method: the checkpoint module reads it
     to know where to write ``checkpoints/``. Every :class:`~agentdescent.ledger.Ledger`
@@ -375,6 +377,9 @@ class LedgerProtocol(Protocol):
     def head_version(self, branch: str = ...) -> Dict[str, int]: ...
     def commit(self, new_state: "Evolvable", base_version: Dict[str, int],
                branch: str = ..., message: str = ...) -> Tuple[str, int]: ...
+    def commit_atomic(self, new_states: List["Evolvable"],
+                      base_version: Dict[str, int],
+                      branch: str = ..., message: str = ...) -> Tuple[str, Dict[str, int]]: ...
     def promote_to_stable(self, artifact_id: str) -> Optional[int]: ...
     def log(self, branch: str = ..., limit: int = ...) -> List[str]: ...
     def close(self) -> None: ...

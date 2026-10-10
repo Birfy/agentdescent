@@ -219,6 +219,12 @@ class EvolveSpec:
     agg_config: Dict[str, Any] = field(default_factory=dict)
     #: Passed straight to ``evolve()``.
     evolve: Dict[str, Any] = field(default_factory=dict)
+    #: Additional artifacts to evolve alongside the primary, as
+    #: ``{aid: EvolvingArtifact}``. Composed by :func:`compose` into
+    #: ``extra_artifacts=`` for ``evolve()`` -- the worker loop proposes against
+    #: each, and the aggregator merges their diffs by target. Empty (default) is
+    #: a single-artifact run.
+    extra_artifacts: Dict[str, Any] = field(default_factory=dict)
     #: Extra import prefixes a ``module:attribute`` ref may resolve into. The
     #: package's own modules are always allowed; widening this is the moment to
     #: think about who can write the spec.
@@ -907,6 +913,15 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
 
     # -- knobs: kind defaults < spec.evolve < caller overrides ------------------
     knobs: Dict[str, Any] = {**defaults, **spec.evolve, **overrides}
+    # The dedicated field and the pass-through agree; an explicit `spec.evolve`
+    # entry wins, exactly as it would for any other knob.
+    if spec.extra_artifacts:
+        if "extra_artifacts" in knobs:
+            merged = dict(knobs["extra_artifacts"])
+            merged.update(spec.extra_artifacts)
+            knobs["extra_artifacts"] = merged
+        else:
+            knobs["extra_artifacts"] = dict(spec.extra_artifacts)
     held_out = float(knobs.get("held_out_frac", 0.3))
     train = _train_count(len(tasks), held_out)
     knobs.setdefault("n_workers", max(1, min(default_workers, train)))
