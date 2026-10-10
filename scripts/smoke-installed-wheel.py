@@ -13,7 +13,9 @@ import subprocess
 import sys
 import tempfile
 
-from agentdescent.integrations import hooks_text, install, skill_text
+from agentdescent.integrations import (
+    codex_config_block, hooks_text, install, opencode_mcp_entry, skill_text,
+)
 
 
 MCP_SESSION_TIMEOUT_SECONDS = 45
@@ -84,6 +86,19 @@ def main() -> None:
         # PATH, no source checkout, and no ambient Python import overrides.
         host_env = dict(env, PATH=str(workdir / "empty-path"))
         (workdir / "empty-path").mkdir()
+        # Reinstall must repair an untouched launcher pinned by an earlier
+        # install, even when that Python environment no longer exists. Launch
+        # the repaired manifests below to test the real installed CLI, not just
+        # string replacement in the source checkout.
+        obsolete = [str(workdir / "removed-env" / "python"), "-m", "agentdescent.cli"]
+        codex_config = host_home / ".codex" / "config.toml"
+        codex_config.parent.mkdir(parents=True, exist_ok=True)
+        codex_config.write_text(codex_config_block(obsolete), encoding="utf-8")
+        opencode_config = host_home / ".config" / "opencode" / "opencode.jsonc"
+        opencode_config.parent.mkdir(parents=True, exist_ok=True)
+        opencode_config.write_text(json.dumps({
+            "mcp": {"agentdescent": opencode_mcp_entry(obsolete)},
+        }), encoding="utf-8")
         manifests = {}
         for host in ("claude-code", "codex", "dsh", "opencode"):
             configured = subprocess.run(

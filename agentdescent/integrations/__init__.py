@@ -16,7 +16,9 @@ and a test checks it has not drifted.
 from __future__ import annotations
 
 import json
+import ntpath
 import os
+import re
 import shlex
 import sys
 from typing import Callable, Dict, List, Optional
@@ -112,17 +114,18 @@ class _Writer:
         self.lines.append(f"{verb} {path}")
 
     def append_unless(self, path: str, marker: str, block: str, *, what: str,
-                      previous: Optional[str] = None) -> None:
+                      previous: Optional[Callable[[str], Optional[str]]] = None) -> None:
         current = ""
         if os.path.exists(path):
             with open(path, encoding="utf-8") as fh:
                 current = fh.read()
-        if previous and previous in current:
-            tail = current.split(previous, 1)[1].lstrip()
+        old_block = previous(current) if previous else None
+        if old_block and old_block in current:
+            tail = current.split(old_block, 1)[1].lstrip()
             # Old installs appended this block last. Only repair that exact
             # shape; extra fields or nested tables may customize the launcher.
             if not tail:
-                self.write(path, current.replace(previous, block, 1))
+                self.write(path, current.replace(old_block, block, 1))
                 return
         if marker in current:
             self.lines.append(f"kept {path} ({what} already present)")
@@ -361,12 +364,55 @@ def codex_config_block(launcher: Optional[List[str]] = None) -> str:
             f"args = {json.dumps(launcher[1:] + MCP_ARGS)}\n")
 
 
+def _stock_mcp_argv(command: object) -> bool:
+    """Recognize only the complete argv shape emitted by this installer.
+
+    An absolute conventional Python interpreter with the exact module invocation
+    is a pinned stock launcher, even after its environment disappears. Unknown
+    executable names, extra arguments and relative paths remain user-owned.
+    """
+    if command == [MCP_COMMAND, *MCP_ARGS]:
+        return True
+    return (isinstance(command, list) and len(command) == 4
+            and isinstance(command[0], str)
+            and (os.path.isabs(command[0]) or ntpath.isabs(command[0]))
+            and re.fullmatch(r"(?:pythonw?|pypy)(?:[0-9]+(?:\.[0-9]+)*)?(?:\.exe)?",
+                             ntpath.basename(command[0]), re.IGNORECASE) is not None
+            and command[1:] == ["-m", "agentdescent.cli", *MCP_ARGS])
+
+
+def _stock_codex_block(current: str) -> Optional[str]:
+    """Find an untouched installer-owned final block, legacy or pinned.
+
+    Match our marker and exact serialization, not merely a TOML table name.
+    In particular, inline fields and nested env tables must not be overwritten.
+    """
+    marker = "\n# --- agentdescent (written by `agentdescent install codex`) ---\n"
+    if current.count(marker) != 1 or current.count("[mcp_servers.agentdescent]") != 1:
+        return None
+    previous = current[current.index(marker):]
+    lines = previous.rstrip().splitlines()
+    if (len(lines) != 5 or lines[2] != "[mcp_servers.agentdescent]"
+            or not lines[3].startswith("command = ")
+            or not lines[4].startswith("args = ")):
+        return None
+    try:
+        command = json.loads(lines[3][len("command = "):])
+        args = json.loads(lines[4][len("args = "):])
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(args, list) or not _stock_mcp_argv([command, *args]):
+        return None
+    launcher = [command, *args[:-len(MCP_ARGS)]]
+    return previous if previous.rstrip() == codex_config_block(launcher).rstrip() else None
+
+
 def install_codex(home: str, w: _Writer) -> None:
     codex_home = os.environ.get("CODEX_HOME") or os.path.join(home, ".codex")
     w.write(os.path.join(codex_home, "skills", "agentdescent", "SKILL.md"), skill_text())
     w.append_unless(os.path.join(codex_home, "config.toml"), "[mcp_servers.agentdescent]",
                     codex_config_block(w.launcher), what="mcp_servers entry",
-                    previous=codex_config_block())
+                    previous=_stock_codex_block)
     w.note("Codex has no hooks; add `run agentdescent status --brief at the start of a "
            "session` to AGENTS.md if you want in-progress runs surfaced.")
     # Codex reads the same plugin format as Claude Code, and installing the
@@ -414,7 +460,9 @@ def install_opencode(home: str, w: _Writer) -> None:
                    + json.dumps({"agentdescent": opencode_mcp_entry(w.launcher)}))
             return
     existing = (current.get("mcp") or {}).get("agentdescent")
-    if existing and existing != opencode_mcp_entry():
+    stock = (isinstance(existing, dict) and set(existing) == {"type", "command"}
+             and existing["type"] == "local" and _stock_mcp_argv(existing["command"]))
+    if existing and not stock:
         w.lines.append(f"kept {path} (mcp entry already present)")
         return
     merged = dict(current)
