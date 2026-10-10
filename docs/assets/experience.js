@@ -13,12 +13,64 @@
   };
   $$('[data-copy]').forEach((button) => button.addEventListener('click', () => copy(button.dataset.copy, button)));
 
+  const page = $('.experience');
+  const themeButton = $('.theme-toggle');
+  if (page && themeButton) {
+    let theme = 'dark';
+    try { theme = localStorage.getItem('agentdescent-theme') || 'dark'; } catch (_) { /* storage may be unavailable */ }
+    const setTheme = (next) => {
+      page.dataset.theme = next;
+      themeButton.innerHTML = next === 'dark' ? '☀ <span>Light mode</span>' : '☾ <span>Dark mode</span>';
+      themeButton.setAttribute('aria-label', next === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+      try { localStorage.setItem('agentdescent-theme', next); } catch (_) { /* storage may be unavailable */ }
+    };
+    setTheme(theme);
+    themeButton.addEventListener('click', () => setTheme(page.dataset.theme === 'dark' ? 'light' : 'dark'));
+  }
+
   const hosts = {
     claude: {name: 'CLAUDE CODE', label: 'Claude Code', setup: 'agentdescent install claude-code\nclaude --plugin-dir ~/.agentdescent/plugins/claude-code', help: 'Start Claude Code with the plugin directory. In the session, /plugin lists it.'},
     codex: {name: 'CODEX', label: 'Codex', setup: 'codex plugin marketplace add Birfy/agentdescent\ncodex plugin add agentdescent@agentdescent\ncodex mcp list', help: 'The marketplace plugin includes the AgentDescent MCP server. Confirm that codex mcp list shows it.'},
     opencode: {name: 'OPENCODE', label: 'OpenCode', setup: 'agentdescent install opencode\nopencode mcp list', help: 'Restart OpenCode after installation and check that AgentDescent is connected.'},
     dsh: {name: 'DEEPSEEK HARNESS', label: 'DeepSeek Harness', setup: 'agentdescent install dsh\ndsh --profile web --dump-config | grep agentdescent', help: 'Restart DeepSeek Harness and check that its configuration contains AgentDescent.'}
   };
+  const oneClickCommand = 'curl -fsSL https://raw.githubusercontent.com/Birfy/agentdescent/main/scripts/install.sh | bash';
+  const pipCommand = "python3 -m pip install --upgrade 'agentdescent[mcp] @ git+https://github.com/Birfy/agentdescent.git@main'";
+  const hostOpen = {
+    claude: {label:'LAUNCH CLAUDE CODE', command:'claude --plugin-dir ~/.agentdescent/plugins/claude-code', help:'The installer writes a local plugin directory. Launch Claude Code with it.'},
+    codex: {label:'VERIFY CODEX', command:'codex mcp list', help:'Restart Codex, then check that the agentdescent MCP server is enabled.'},
+    opencode: {label:'VERIFY OPENCODE', command:'opencode mcp list', help:'Restart OpenCode, then check that agentdescent is connected.'},
+    dsh: {label:'VERIFY DEEPSEEK HARNESS', command:'dsh --profile web --dump-config | grep agentdescent', help:'Restart DeepSeek Harness, then confirm its config contains agentdescent.'}
+  };
+  let installMode = 'script';
+  let selectedHost = 'claude';
+  const renderHost = () => {
+    const display = installMode === 'script' ? hostOpen[selectedHost] : {
+      label: `CONNECT ${hosts[selectedHost].name}`,
+      command: hosts[selectedHost].setup,
+      help: hosts[selectedHost].help
+    };
+    if ($('#qs3-host-label')) $('#qs3-host-label').textContent = display.label;
+    if ($('#qs3-host-command')) $('#qs3-host-command').textContent = display.command;
+    if ($('#qs3-host-help')) $('#qs3-host-help').textContent = display.help;
+  };
+  $$('.qs3-tabbar button').forEach((button) => button.addEventListener('click', () => {
+    installMode = button.dataset.installMode;
+    $$('.qs3-tabbar button').forEach((item) => { item.classList.toggle('active', item === button); item.setAttribute('aria-selected', String(item === button)); });
+    $('#qs3-install-command').textContent = installMode === 'script' ? oneClickCommand : pipCommand;
+    $('#qs3-install-note').textContent = installMode === 'script'
+      ? 'Installs AgentDescent and connects the agent CLIs already on your PATH.'
+      : 'Installs current main with pip. Use the host setup command in step 02.';
+    renderHost();
+  }));
+  $$('.qs3-host-tabs button').forEach((button) => button.addEventListener('click', () => {
+    selectedHost = button.dataset.host;
+    $$('.qs3-host-tabs button').forEach((item) => { item.classList.toggle('active', item === button); item.setAttribute('aria-selected', String(item === button)); });
+    renderHost();
+  }));
+  $('#qs3-copy-install')?.addEventListener('click', (event) => copy($('#qs3-install-command').textContent, event.currentTarget));
+  $('#qs3-copy-host')?.addEventListener('click', (event) => copy($('#qs3-host-command').textContent, event.currentTarget));
+  $('#qs3-copy-prompt')?.addEventListener('click', (event) => copy($('#qs3-prompt-text').textContent, event.currentTarget));
   $$('.host-tabs button').forEach((button) => button.addEventListener('click', () => {
     $$('.host-tabs button').forEach((item) => { item.classList.toggle('active', item === button); item.setAttribute('aria-selected', String(item === button)); });
     const host = hosts[button.dataset.host];

@@ -2,10 +2,10 @@
 description: Explore AgentDescent, the open-source framework for parallel self-evolving agents. Try an interactive merge simulation and start with an offline demo.
 ---
 
-<div class="experience exp-home">
+<div class="experience exp-home" data-theme="dark">
   <nav class="exp-nav" aria-label="Page navigation">
     <a class="exp-brand" href="./"><span class="brand-mark">A<span>↘</span></span><span>AgentDescent</span></a>
-    <div class="exp-nav-links"><a href="#idea">The idea</a><a href="#lab">Interactive lab</a><a href="#inside">What evolves</a><a href="install/" class="nav-start">Get started <span>↗</span></a></div>
+    <div class="exp-nav-links"><a href="#idea">The idea</a><a href="#lab">Interactive lab</a><a href="#inside">What evolves</a><a href="install/" class="nav-start">Get started <span>↗</span></a><button class="theme-toggle" type="button" aria-label="Switch color theme">◐ <span>Theme</span></button></div>
   </nav>
 
   <section class="exp-hero">
