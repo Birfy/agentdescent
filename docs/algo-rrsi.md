@@ -1,4 +1,4 @@
-# RRSI — regularized harness selection (first increment)
+# RRSI — regularized harness selection (bounded offline increments)
 
 This is an **offline mechanism microport** of the round-selection rule from
 Google Research's *Regularized Recursive Self-Improvement of Agent Harnesses*
@@ -14,7 +14,7 @@ benchmark results.
 - Adapted source: `rrsi/selection.py`; component novelty semantics from
   `rrsi/components.py`.
 
-## What this increment preserves
+## What these increments preserve
 
 `examples/rrsi/selection.py` is a pure function layer for a round whose screened
 candidates were all measured from the same incumbent. It applies the upstream
@@ -23,6 +23,21 @@ cost rule, structural-component novelty, domain guards, and highest-score
 winner selection (stable first candidate on ties). With no admissible candidate
 the caller retains the incumbent. `update_best_score` keeps the historical best
 monotone.
+
+`examples/rrsi/round.py` adds an offline **single-round runner** around that
+selector. A caller supplies proposal, screening and evaluation callbacks. The
+proposal callback receives one read-only snapshot, version and content digest
+of the incumbent; variants naming another version or digest are rejected. The screening callback
+runs before evaluation, and screened-in survivors are evaluated and selected
+together. The callback is only a pre-evaluation seam: this module does not
+implement Google's leakage checks or a model critic. Screen, evaluation and
+proposal errors have explicit outcomes, without fabricated measurements.
+
+Each round returns a JSON-serializable `RoundRecord` containing the base digest,
+input selection parameters, candidate artifact digests, outcomes, measurements,
+decisions and best-score update. This is a record for one round, not a resume
+store or full run history. A typical caller retains the incumbent when
+`RoundResult.winner` is `None`.
 
 The offline regression fixtures reject non-finite, out-of-range `[0, 1]` scores,
 negative/non-finite token costs, non-finite historical bests and arithmetic
@@ -41,26 +56,30 @@ choices around the upstream rule, not upstream parity claims.
 | Missing/zero token estimate | `dC = 0` if either side is falsy | Preserved; this can admit without telemetry |
 | Invalid scores and costs | Not guarded by `selection.py` itself | Rejected before decision arithmetic |
 | Critic-rejected candidate with an evaluation attached | Caller normally supplies no evaluation | Veto is authoritative and measurement omitted from decision |
-| Round candidates | Evaluate from same base, choose admissible argmax | Caller contract documented; this module does not orchestrate evaluation |
+| Round candidates | Evaluate from same base, choose admissible argmax | `run_round` enforces one read-only base snapshot/version, screens before evaluation, and selects among all survivors |
 
-The mechanism is not wired into `evolve()`, `aggregator_factory`, a proposal
-policy, or a resumable run record in this increment. There is no RRSI CLI,
-harness-directory domain, leakage critic, edit-budget schedule, per-edit
-history, trial aggregation, pruning loop, or evaluation/accounting adapter yet.
-AgentDescent's default evolution behavior is unchanged. Real-model and benchmark
-measurements are **unmeasured** here; upstream reported values are not
-AgentDescent results.
+The mechanism is not wired into `evolve()`, `aggregator_factory`, or a proposal
+policy. There is no RRSI CLI, harness-directory domain, implemented leakage
+critic, edit-budget schedule, measured per-edit history, multi-round resume,
+trial aggregation, pruning loop, or production evaluation/accounting adapter
+yet. The caller owns each callback and any durable storage. AgentDescent's
+default evolution behavior is unchanged. Fixtures use deterministic local
+callbacks; real-model and benchmark measurements are **unmeasured** here, and
+upstream reported values are not AgentDescent results.
 
 ## Local verification
 
-Run the deterministic fixture with:
+Run the deterministic fixtures with:
 
 ```bash
-pytest -q tests/test_rrsi_selection.py
+pytest -q tests/test_rrsi_selection.py tests/test_rrsi_round.py
 ```
 
 The golden cases cover the historical floor, both cost branches, domain veto,
 ties, no winner, missing cost telemetry, rejected/missing candidates and invalid
-numeric inputs. Completing the full RRSI integration requires a separate
-increment for pre-evaluation leakage screening, proposal/history state, and the
+numeric inputs. Round fixtures also prove screening precedes evaluation, all
+candidates share a read-only base snapshot, callback errors are recorded, score
+and cost remain paired with the selected candidate, and records round-trip via
+JSON. Completing the full RRSI integration requires separate increments for an
+actual leakage critic, proposal/history state, resume semantics, and the
 `evolve()`/CLI fixture described in issue #221.
