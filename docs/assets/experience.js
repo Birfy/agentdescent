@@ -28,6 +28,22 @@
     themeButton.addEventListener('click', () => setTheme(page.dataset.theme === 'dark' ? 'light' : 'dark'));
   }
 
+  // Keep Material documentation pages in the same color mode as the landing pages.
+  if (!page) {
+    const paletteOptions = $$('input[data-md-color-scheme]');
+    let savedTheme;
+    try { savedTheme = localStorage.getItem('agentdescent-theme-v2'); } catch (_) { /* storage may be unavailable */ }
+    if (savedTheme === 'dark' || savedTheme === 'light') {
+      const scheme = savedTheme === 'dark' ? 'slate' : 'default';
+      const option = paletteOptions.find((input) => input.dataset.mdColorScheme === scheme);
+      if (option) { option.checked = true; document.body.dataset.mdColorScheme = scheme; }
+    }
+    paletteOptions.forEach((input) => input.addEventListener('change', () => {
+      const next = input.dataset.mdColorScheme === 'slate' ? 'dark' : 'light';
+      try { localStorage.setItem('agentdescent-theme-v2', next); } catch (_) { /* storage may be unavailable */ }
+    }));
+  }
+
   const hosts = {
     claude: {name: 'CLAUDE CODE', label: 'Claude Code', setup: 'agentdescent install claude-code\nclaude --plugin-dir ~/.agentdescent/plugins/claude-code', help: 'Start Claude Code with the plugin directory. In the session, /plugin lists it.'},
     codex: {name: 'CODEX', label: 'Codex', setup: 'codex plugin marketplace add Birfy/agentdescent\ncodex plugin add agentdescent@agentdescent\ncodex mcp list', help: 'The marketplace plugin includes the AgentDescent MCP server. Confirm that codex mcp list shows it.'},
