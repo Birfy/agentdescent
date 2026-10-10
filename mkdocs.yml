@@ -24,7 +24,7 @@ plugins:
 
 theme:
   name: material
-  custom_dir: docs/overrides
+  custom_dir: site_overrides
   logo: assets/mark.svg
   font: false
   palette:
