@@ -27,11 +27,13 @@ monotone.
 `examples/rrsi/round.py` adds an offline **single-round runner** around that
 selector. A caller supplies proposal, screening and evaluation callbacks. The
 proposal callback receives one read-only snapshot, version and content digest
-of the incumbent; variants naming another version or digest are rejected. The screening callback
-runs before evaluation, and screened-in survivors are evaluated and selected
-together. The callback is only a pre-evaluation seam: this module does not
-implement Google's leakage checks or a model critic. Screen, evaluation and
-proposal errors have explicit outcomes, without fabricated measurements.
+of the incumbent; variants naming another version or digest are rejected. All
+candidate files and components are snapshotted before any screening or
+evaluation callback runs. The screening callback runs before evaluation, and
+screened-in survivors are evaluated and selected together. The callback is only
+a pre-evaluation seam: this module does not implement Google's leakage checks or
+a model critic. Proposal, screen, evaluation, measurement and guard errors have
+explicit outcomes, without fabricated measurements.
 
 Each round returns a JSON-serializable `RoundRecord` containing the base digest,
 input selection parameters, candidate artifact digests, outcomes, measurements,
