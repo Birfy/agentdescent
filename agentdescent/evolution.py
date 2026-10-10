@@ -1280,6 +1280,9 @@ class EvolutionResult:
     #: `error` stays `None` while throughput quietly drops -- check this to tell a
     #: fast run from a lucky one.
     retired_workers: int = 0
+    #: How many queued audits the L-value consumer drained and ran against the
+    #: oracle. Zero when ``audit_drain_per_step`` is 0 (the default).
+    audit_drained: int = 0
     #: Replay-sampler statistics, when one was installed. Reports how many cards
     #: the settled pool pushed to the sampler, how many picks were affected by the
     #: replay bonus, and how many proposals carried rejection evidence:
@@ -3307,4 +3310,5 @@ def evolve(
                              **_cost_fields(eng.meter))
     eng.cleanup()
     result.replay = _replay_stats(sampler)
+    result.audit_drained = getattr(aggregator, "audit_drained", 0)
     return result

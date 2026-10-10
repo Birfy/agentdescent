@@ -8,6 +8,21 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- **`AggregatorConfig.audit_drain_per_step` — the L-value consumer, the audit
+  queue's missing reader.** `AuditScheduler.submit()` computes
+  `priority = blast_radius × uncertainty / trust` for every merge, but with the
+  default `collect=False` nothing queues, and with `collect=True` nothing pops
+  the heap — the audit that actually runs is the inline `force_oracle` threshold
+  gate, which reads trust but not the ranking. `concepts.md` calls this *"the
+  priority queue has no consumer"* and says to treat the ranking as a priority
+  *model*, not work in flight.
+
+  `_drain_audit_queue(max_per_step)` pops the highest-priority queued audits
+  after each `finish_step`, runs `full_eval` on the stored `(base_state,
+  candidate)` pair, and updates trust from the oracle's verdict. The scheduler's
+  `collect` flag is forced on when `audit_drain_per_step > 0`. `EvolutionResult.
+  audit_drained` reports how many ran. Default `0` = the old behaviour exactly.
+
 - **`ReplaySampler` + `ProposalContext.rejected` — make the settled-evidence pool a consumer.** The aggregator's settled pool (stale / oversized / CAS-conflict evidence cards) was diagnostic-only: nothing read it back. Two consumers now close that loop.
 
   **`ReplaySampler`** (``agentdescent/sampling.py``) is a ``TaskSampler`` that up-weights tasks whose recent proposals were discarded — a signal that is different from pass rate (a task whose proposals keep going stale is not "easy", it is being out-competed by the parallel scheduler). Additive replay bonus, saturating at ``capped_at`` (default 10), scaled by ``temperature`` (default 0.0 = ``DifficultyWeighted`` identically). Wired via ``aggregator.set_settled_consumer(sampler.settle)`` on both the sync and async paths.

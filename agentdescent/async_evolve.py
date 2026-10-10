@@ -1194,4 +1194,5 @@ def async_evolve(
         gate_pool.shutdown(wait=False)
     eng.cleanup()          # do not hold a scratch git repo for the whole process
     result.replay = _replay_stats(sampler)
+    result.audit_drained = getattr(eng.aggregator, "audit_drained", 0)
     return result
