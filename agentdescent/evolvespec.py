@@ -229,6 +229,8 @@ class EvolveSpec:
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> "EvolveSpec":
+        if not isinstance(d, Mapping):
+            raise SpecError("spec must be a JSON object")
         known = {f for f in cls.__dataclass_fields__}
         unknown = sorted(set(d) - known)
         if unknown:
@@ -308,8 +310,16 @@ def load_spec(path: str, *, absolutise: bool = True) -> EvolveSpec:
     Relative paths in it are resolved against the current directory (see
     :meth:`EvolveSpec.absolutise`), because the process that *runs* the spec is
     usually not this one. Pass ``absolutise=False`` to read it verbatim."""
-    with open(os.path.expanduser(path), encoding="utf-8") as fh:
-        spec = EvolveSpec.from_dict(json.load(fh))
+    path = os.path.expanduser(path)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except json.JSONDecodeError as e:
+        raise SpecError(f"spec {path!r}: invalid JSON at line {e.lineno}, "
+                        f"column {e.colno}: {e.msg}") from None
+    except (OSError, UnicodeError) as e:
+        raise SpecError(f"spec {path!r}: cannot read UTF-8 file: {e}") from None
+    spec = EvolveSpec.from_dict(payload)
     return spec.absolutise() if absolutise else spec
 
 
@@ -372,18 +382,31 @@ def _read_rows_file(path: str) -> List[Dict[str, Any]]:
     if not os.path.exists(path):
         raise SpecError(f"data.path {path!r} does not exist")
     ext = os.path.splitext(path)[1].lower()
-    with open(path, encoding="utf-8") as fh:
-        if ext == ".jsonl":
-            return [json.loads(line) for line in fh if line.strip()]
-        if ext == ".json":
-            rows = json.load(fh)
-            if isinstance(rows, Mapping):
-                rows = rows.get("rows") or rows.get("data") or rows.get("tasks")
-            if not isinstance(rows, list):
-                raise SpecError(f"data.path {path!r}: expected a JSON list of rows")
-            return rows
-        if ext in (".csv", ".tsv"):
-            return list(csv.DictReader(fh, delimiter="\t" if ext == ".tsv" else ","))
+    line_number = 0
+    try:
+        with open(path, encoding="utf-8") as fh:
+            if ext == ".jsonl":
+                rows = []
+                for line_number, line in enumerate(fh, 1):
+                    if line.strip():
+                        rows.append(json.loads(line))
+                return rows
+            if ext == ".json":
+                rows = json.load(fh)
+                if isinstance(rows, Mapping):
+                    rows = rows.get("rows") or rows.get("data") or rows.get("tasks")
+                if not isinstance(rows, list):
+                    raise SpecError(f"data.path {path!r}: expected a JSON list of rows")
+                return rows
+            if ext in (".csv", ".tsv"):
+                return list(csv.DictReader(fh, delimiter="\t" if ext == ".tsv" else ","))
+    except json.JSONDecodeError as e:
+        # JSONL is parsed one physical line at a time, including blank lines.
+        line = line_number if ext == ".jsonl" else e.lineno
+        raise SpecError(f"data.path {path!r}: invalid JSON at line {line}, "
+                        f"column {e.colno}: {e.msg}") from None
+    except (OSError, UnicodeError) as e:
+        raise SpecError(f"data.path {path!r}: cannot read UTF-8 file: {e}") from None
     raise SpecError(f"data.path {path!r}: use .json, .jsonl, .csv or .tsv")
 
 
