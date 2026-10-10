@@ -83,6 +83,39 @@ def test_screen_veto_happens_before_expensive_evaluation():
     assert result.record.candidates[1].reason == "static checks passed"
 
 
+def test_all_candidates_are_screened_before_any_evaluation():
+    events = []
+    state = {"allow_b": True}
+
+    def propose(base):
+        return [
+            candidate("a", "A", base_sha256=base.sha256),
+            candidate("b", "B", base_sha256=base.sha256),
+        ]
+
+    def screen(item):
+        events.append("screen:" + item.variant)
+        if item.variant == "b":
+            return ScreeningResult(state["allow_b"], "B screen")
+        return ScreeningResult(True)
+
+    def evaluate(item):
+        events.append("evaluate:" + item.variant)
+        if item.variant == "a":
+            # A's evaluator must not run before B's screening decision.
+            state["allow_b"] = False
+        return Measurement(0.9, 90.0)
+
+    result = invoke(propose, screen, evaluate)
+
+    assert events == ["screen:a", "screen:b", "evaluate:a", "evaluate:b"]
+    assert [item.outcome for item in result.record.candidates] == [
+        "evaluated",
+        "evaluated",
+    ]
+    assert result.record.candidates[1].reason == "B screen"
+
+
 def test_proposal_and_survivors_share_one_immutable_base_snapshot():
     seen_base_ids = []
     calls = []

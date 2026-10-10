@@ -12,7 +12,7 @@ from collections import Counter
 import hashlib
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -406,9 +406,9 @@ def run_round(
             suffix += 1
         synthetic_names[index] = name
         reserved_names.add(name)
-    candidates_for_selection: List[Candidate] = []
     candidate_records: List[CandidateRecord] = []
     candidate_objects: Dict[str, HarnessCandidate] = {}
+    candidates_to_evaluate: List[Optional[HarnessCandidate]] = []
 
     for index, (
         raw,
@@ -428,9 +428,7 @@ def run_round(
                     reason="proposal callback returned a non-HarnessCandidate",
                 )
             )
-            candidates_for_selection.append(
-                Candidate(name, gate_failure="proposal_error")
-            )
+            candidates_to_evaluate.append(None)
             continue
 
         variant = raw.variant
@@ -461,13 +459,9 @@ def run_round(
             variant if isinstance(variant, str) and variant else synthetic_names[index]
         )
 
-        status = "proposed"
-        measurement: Optional[Measurement] = None
         if reason:
             status, detail = "proposal_error", reason
-            candidate_for_selection = Candidate(
-                safe_variant, components=components, gate_failure=detail
-            )
+            candidates_to_evaluate.append(None)
         else:
             candidate_objects[safe_variant] = candidate
             try:
@@ -488,31 +482,8 @@ def run_round(
                 status = "screen_error"
                 detail = "{}: {}".format(type(exc).__name__, str(exc))
 
-            if status == "screened":
-                try:
-                    measured = evaluate(candidate)
-                    if not _valid_measurement(measured):
-                        status = "invalid_measurement"
-                        detail = "evaluator returned an invalid measurement"
-                    else:
-                        status = "evaluated"
-                        # Keep an optional screening note in the durable record.
-                        measurement = measured
-                except Exception as exc:
-                    status = "evaluation_error"
-                    detail = "{}: {}".format(type(exc).__name__, str(exc))
+            candidates_to_evaluate.append(candidate if status == "screened" else None)
 
-            gate_failure = (
-                None if status == "evaluated" else "{}: {}".format(status, detail)
-            )
-            candidate_for_selection = Candidate(
-                safe_variant,
-                components=candidate.components,
-                measurement=measurement,
-                gate_failure=gate_failure,
-            )
-
-        candidates_for_selection.append(candidate_for_selection)
         candidate_records.append(
             CandidateRecord(
                 variant=safe_variant,
@@ -526,7 +497,54 @@ def run_round(
                 components=components,
                 outcome=status,
                 reason=detail,
-                measurement=measurement,
+            )
+        )
+
+    # Finish screening the entire proposal set before invoking any evaluator.
+    # This prevents evaluator side effects for an earlier survivor from
+    # influencing the screening decision for a later candidate.
+    evaluated_records: List[CandidateRecord] = []
+    for candidate_record, candidate in zip(candidate_records, candidates_to_evaluate):
+        if candidate is None:
+            evaluated_records.append(candidate_record)
+            continue
+        try:
+            measured = evaluate(candidate)
+            if not _valid_measurement(measured):
+                candidate_record = replace(
+                    candidate_record,
+                    outcome="invalid_measurement",
+                    reason="evaluator returned an invalid measurement",
+                )
+            else:
+                # Keep an optional screening note in the durable record.
+                candidate_record = replace(
+                    candidate_record,
+                    outcome="evaluated",
+                    measurement=measured,
+                )
+        except Exception as exc:  # captured as a per-candidate round outcome
+            candidate_record = replace(
+                candidate_record,
+                outcome="evaluation_error",
+                reason="{}: {}".format(type(exc).__name__, str(exc)),
+            )
+        evaluated_records.append(candidate_record)
+    candidate_records = evaluated_records
+
+    candidates_for_selection = []
+    for candidate_record in candidate_records:
+        gate_failure = (
+            None
+            if candidate_record.outcome == "evaluated"
+            else "{}: {}".format(candidate_record.outcome, candidate_record.reason)
+        )
+        candidates_for_selection.append(
+            Candidate(
+                candidate_record.variant,
+                components=candidate_record.components,
+                measurement=candidate_record.measurement,
+                gate_failure=gate_failure,
             )
         )
 
