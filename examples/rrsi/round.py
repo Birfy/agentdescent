@@ -346,10 +346,10 @@ def run_round(
     # Copy every proposed artifact before invoking any candidate-specific
     # callback. Callbacks can close over the proposal objects and otherwise
     # mutate a later candidate before its turn in the loop.
-    candidate_inputs: List[Tuple[Any, Optional[str]]] = []
+    candidate_inputs: List[Tuple[Any, Optional[str], Optional[str]]] = []
     for raw in proposed:
         if not isinstance(raw, HarnessCandidate):
-            candidate_inputs.append((raw, None))
+            candidate_inputs.append((raw, None, None))
             continue
         try:
             files = _freeze_files(raw.files)
@@ -360,6 +360,7 @@ def run_round(
                 not isinstance(component, str) for component in candidate_components
             ):
                 raise TypeError("candidate components must be strings")
+            artifact_sha = _digest(files)
             candidate_inputs.append(
                 (
                     HarnessCandidate(
@@ -370,26 +371,52 @@ def run_round(
                         candidate_components,
                     ),
                     None,
+                    artifact_sha,
                 )
             )
         except Exception as exc:
             candidate_inputs.append(
-                (raw, "{}: {}".format(type(exc).__name__, str(exc)))
+                (raw, "{}: {}".format(type(exc).__name__, str(exc)), None)
             )
 
     names = [
         c.variant
-        for c, _snapshot_error in candidate_inputs
+        for c, _candidate_snapshot_error, _candidate_artifact_sha in candidate_inputs
         if isinstance(c, HarnessCandidate) and isinstance(c.variant, str)
     ]
     duplicate_names = {name for name, count in Counter(names).items() if count > 1}
+    reserved_names = set(names)
+    synthetic_names: Dict[int, str] = {}
+    for index, (
+        candidate,
+        _candidate_snapshot_error,
+        _candidate_artifact_sha,
+    ) in enumerate(candidate_inputs):
+        if (
+            isinstance(candidate, HarnessCandidate)
+            and isinstance(candidate.variant, str)
+            and candidate.variant
+        ):
+            continue
+        base_name = "<invalid-{}>".format(index)
+        name = base_name
+        suffix = 1
+        while name in reserved_names:
+            name = "{}-{}".format(base_name, suffix)
+            suffix += 1
+        synthetic_names[index] = name
+        reserved_names.add(name)
     candidates_for_selection: List[Candidate] = []
     candidate_records: List[CandidateRecord] = []
     candidate_objects: Dict[str, HarnessCandidate] = {}
 
-    for index, (raw, snapshot_error) in enumerate(candidate_inputs):
+    for index, (
+        raw,
+        snapshot_error,
+        candidate_artifact_sha,
+    ) in enumerate(candidate_inputs):
         if not isinstance(raw, HarnessCandidate):
-            name = "<invalid-{}>".format(index)
+            name = synthetic_names[index]
             candidate_records.append(
                 CandidateRecord(
                     variant=name,
@@ -422,7 +449,6 @@ def run_round(
 
         if snapshot_error is not None:
             candidate = raw
-            artifact_sha = None
             if not reason:
                 reason = snapshot_error
         else:
@@ -430,12 +456,9 @@ def run_round(
             # screening or evaluation callback ran.
             candidate = raw
             components = raw.components
-            artifact_sha = _digest(raw.files)
 
         safe_variant = (
-            variant
-            if isinstance(variant, str) and variant
-            else "<invalid-{}>".format(index)
+            variant if isinstance(variant, str) and variant else synthetic_names[index]
         )
 
         status = "proposed"
@@ -499,7 +522,7 @@ def run_round(
                 source_base_sha256=(
                     raw.base_sha256 if isinstance(raw.base_sha256, str) else None
                 ),
-                artifact_sha256=artifact_sha,
+                artifact_sha256=candidate_artifact_sha,
                 components=components,
                 outcome=status,
                 reason=detail,

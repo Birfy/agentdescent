@@ -267,11 +267,80 @@ def test_guard_error_does_not_relabel_invalid_proposal_with_colliding_name():
     )
 
     malformed, guarded = result.record.candidates
-    assert malformed.variant == guarded.variant == "<invalid-0>"
+    assert malformed.variant != guarded.variant
     assert malformed.outcome == "proposal_error"
     assert "non-HarnessCandidate" in malformed.reason
     assert guarded.outcome == "guard_error"
     assert guarded.reason == "RuntimeError: guard failure"
+
+
+def test_synthetic_invalid_variant_does_not_collide_with_selected_candidate():
+    def propose(base):
+        return [
+            object(),
+            HarnessCandidate(
+                "<invalid-0>",
+                base.version,
+                base.sha256,
+                {"README.md": "valid artifact"},
+                ("skill",),
+            ),
+        ]
+
+    result = invoke(
+        propose,
+        lambda _item: ScreeningResult(True),
+        lambda _item: Measurement(0.9, 90.0),
+    )
+
+    malformed, valid = result.record.candidates
+    assert malformed.variant != valid.variant
+    assert malformed.outcome == "proposal_error"
+    assert valid.outcome == "evaluated"
+    assert result.record.selected_variant == valid.variant
+    assert (
+        sum(
+            c.variant == result.record.selected_variant
+            for c in result.record.candidates
+        )
+        == 1
+    )
+
+
+def test_unencodable_candidate_digest_isolated_from_valid_sibling():
+    evaluated = []
+
+    def propose(base):
+        return [
+            HarnessCandidate(
+                "bad-surrogate",
+                base.version,
+                base.sha256,
+                {"x": chr(0xD800)},
+                ("skill",),
+            ),
+            HarnessCandidate(
+                "good",
+                base.version,
+                base.sha256,
+                {"x": "valid"},
+                ("skill",),
+            ),
+        ]
+
+    result = invoke(
+        propose,
+        lambda _item: ScreeningResult(True),
+        lambda item: evaluated.append(item.variant) or Measurement(0.9, 90.0),
+    )
+
+    bad, good = result.record.candidates
+    assert bad.outcome == "proposal_error"
+    assert "UnicodeEncodeError" in bad.reason
+    assert bad.measurement is None
+    assert good.outcome == "evaluated"
+    assert evaluated == ["good"]
+    assert result.winner is not None and result.winner.variant == "good"
 
 
 def test_round_record_roundtrips_through_json():
