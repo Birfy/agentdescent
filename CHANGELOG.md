@@ -8,6 +8,9 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- Keep the interactive demo reachable from the documentation navigation drawer
+  on mobile, where the desktop header links are hidden.
+
 - Spec and dataset file failures now report a concise `SpecError` instead of a
   CLI traceback. Invalid JSON names the input file and line/column; JSONL uses
   the physical file line, including blank lines. Missing or unreadable specs,
