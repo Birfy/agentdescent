@@ -79,10 +79,51 @@
   }));
   $('#qs-host-copy')?.addEventListener('click', (event) => copy($('#qs-host-command').textContent, event.currentTarget));
 
+  const recipes = {
+    base: {
+      kicker: 'DEFAULT',
+      title: 'Start with one artifact.',
+      copy: 'The same entry point handles the task, reward, actor and artifact strategy. Unspecified policy slots use their defaults.',
+      code: 'evolve(tasks, reward, agent=agent,\n       strategy=FileTree(files),\n       policies=Policies())',
+      note: 'Illustrative configuration · supply your own tasks, reward, agent and files.'
+    },
+    search: {
+      kicker: 'SELECTION + SAMPLING',
+      title: 'Search a wider frontier.',
+      copy: 'A beam keeps several candidates in play while difficulty-weighted sampling spends more work on useful tasks. The artifact and reward stay the same.',
+      code: 'evolve(tasks, reward, agent=agent,\n       strategy=FileTree(files),\n       policies=Policies(\n           selection=Beam(4),\n           task_sampler=DifficultyWeighted()))',
+      note: 'Change only the decisions this algorithm needs.'
+    },
+    merge: {
+      kicker: 'CONFLICT + FUSION',
+      title: 'Change how diffs combine.',
+      copy: 'Reflective merge installs a paired conflict resolver and fusion policy. Compatible edits can be combined before the acceptance gate.',
+      code: 'evolve(tasks, reward, agent=agent,\n       strategy=FileTree(files),\n       policies=Policies(\n           **reflective_merge(completion)))',
+      note: 'The same loop still handles workers, evaluation and versioning.'
+    },
+    custom: {
+      kicker: 'OPTIMIZER EXIT',
+      title: 'Bring your own algorithm.',
+      copy: 'If your method needs a population, an archive or state that individual policy slots do not keep, supply an aggregator factory.',
+      code: 'evolve(tasks, reward, agent=agent,\n       strategy=my_strategy,\n       aggregator_factory=my_optimizer_factory)',
+      note: 'Use a custom Strategy for your artifact and an optimizer for its search rule.'
+    }
+  };
+  $$('.recipe-options button').forEach((button) => button.addEventListener('click', () => {
+    $$('.recipe-options button').forEach((item) => { item.classList.toggle('active', item === button); item.setAttribute('aria-selected', String(item === button)); });
+    const recipe = recipes[button.dataset.recipe];
+    $('#recipe-kicker').textContent = recipe.kicker;
+    $('#recipe-title').textContent = recipe.title;
+    $('#recipe-copy').textContent = recipe.copy;
+    $('#recipe-code').textContent = recipe.code;
+    $('#recipe-note').textContent = recipe.note;
+  }));
+
   const artifacts = {
-    prompt: {kicker: 'SINGLE SLOT STRATEGY', title: 'Evolve one instruction.', copy: 'Start from a prompt and search for a stronger version against your tasks.', filename: 'prompt.md', preview: 'You are a helpful assistant.\n\n+ Respond with only the requested answer.\n+ Omit extra explanation and restatement.', link: 'quickstart-skill/', linkText: 'Read the prompt quickstart'},
-    skill: {kicker: 'FILE TREE STRATEGY', title: 'Improve a skill folder.', copy: 'Let workers edit the files your coding agent reads, then review the resulting diff.', filename: 'skills/pdf-audit/SKILL.md', preview: '# PDF audit\n\n+ Verify every section before reporting.\n+ Cite the page for each finding.\n\nreferences/rules.md  ·  unchanged', link: 'quickstart-directory/', linkText: 'Read the directory quickstart'},
-    code: {kicker: 'AGENT CODE STRATEGY', title: 'Evolve an agent’s code.', copy: 'Search across files while keeping tests and evaluation boundaries fixed.', filename: 'agent/solver.py', preview: 'def solve(task):\n    context = retrieve(task)\n+   context = rank_evidence(context)\n    return answer(context, task)', link: 'quickstart-agent-code/', linkText: 'Read the code quickstart'}
+    prompt: {kicker: 'SINGLE SLOT STRATEGY', title: 'Evolve one instruction.', copy: 'Replace a single value and compare candidates against the tasks you care about.', filename: 'prompt.md', preview: 'You are a helpful assistant.\n\n+ Respond with only the requested answer.\n+ Omit extra explanation and restatement.', link: 'quickstart-skill/', linkText: 'Read the prompt quickstart'},
+    skill: {kicker: 'FILE TREE STRATEGY', title: 'Grow a skill library.', copy: 'Treat paths in a folder as independent keys. Workers can edit separate files, then the aggregator fuses compatible changes.', filename: 'skills/pdf-audit/SKILL.md', preview: '# PDF audit\n\n+ Verify every section before reporting.\n+ Cite the page for each finding.\n\nreferences/rules.md  ·  unchanged', link: 'quickstart-directory/', linkText: 'Read the directory quickstart'},
+    code: {kicker: 'PROGRAM + HARNESS STRATEGIES', title: 'Change executable behavior.', copy: 'Evolve a program or agent harness while keeping its evaluation tasks and protected files outside the search.', filename: 'agent/solver.py', preview: 'def solve(task):\n    context = retrieve(task)\n+   context = rank_evidence(context)\n    return answer(context, task)', link: 'quickstart-agent-code/', linkText: 'Read the code quickstart'},
+    custom: {kicker: 'YOUR STRATEGY', title: 'Represent your own artifact.', copy: 'Define initial state, rendering and proposal-to-diff conversion. The same engine can then evaluate and merge your representation.', filename: 'my_strategy.py', preview: 'class MyStrategy:\n    def initial(self): ...\n    def render(self, state): ...\n    def to_diff(self, state, proposal, author, base_version, target): ...', link: 'strategies/', linkText: 'Write a custom Strategy'}
   };
   $$('.artifact-picker button').forEach((button) => button.addEventListener('click', () => {
     $$('.artifact-picker button').forEach((item) => { item.classList.toggle('active', item === button); item.setAttribute('aria-selected', String(item === button)); });
