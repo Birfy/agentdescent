@@ -2,7 +2,8 @@
 body:has(.experience) .md-header,body:has(.experience) .md-tabs,body:has(.experience) .md-sidebar,body:has(.experience) .md-footer{display:none}
 body:has(.experience) .md-main__inner{max-width:none;margin:0;padding:0}
 body:has(.experience) .md-content{margin:0!important;max-width:none!important}
-body:has(.experience) .md-content__inner{margin:0;padding:0}
+/* Material keeps sidebar sibling margins even when those sidebars are hidden. */
+body:has(.experience) .md-content__inner{margin:0!important;padding:0}
 body:has(.experience) .md-content__inner:before{display:none}
 body:has(.experience) .md-main{min-height:100vh}
 .experience,.experience *{box-sizing:border-box}
@@ -38,7 +39,7 @@ body:has(.experience) .md-main{min-height:100vh}
 .section-label{display:flex;justify-content:space-between;border-top:1px solid var(--line);padding-top:21px;color:var(--muted)}
 .section-label span{color:#8f9c87}
 .exp-hero{max-width:1320px;min-height:630px;margin:auto;padding:85px 5vw 90px;display:grid;grid-template-columns:minmax(0,1fr) minmax(350px,.75fr);align-items:center;gap:7%}
-.hero-content{position:relative;z-index:1}.eyebrow{display:flex;align-items:center;gap:9px;color:#5d7e26}
+.hero-content{position:relative;z-index:1;min-width:0}.eyebrow{display:flex;align-items:center;gap:9px;color:#5d7e26}
 .experience[data-theme=dark] .eyebrow{color:var(--accent)}
 .md-typeset .experience .exp-hero h1{font-size:clamp(58px,6.5vw,94px);max-width:850px;margin:22px 0 25px;letter-spacing:-.075em}
 .exp-hero p{max-width:570px;color:var(--muted);font-size:17px;line-height:1.65}

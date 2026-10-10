@@ -50,6 +50,7 @@ def check(site, screenshots):
                                 page.locator(".theme-toggle").click()
                             assert page.locator(".experience").get_attribute("data-theme") == theme, label
                             assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth"), label
+                            assert page.locator(".experience").evaluate("e => {const r=e.getBoundingClientRect(); return r.left === 0 && r.right === document.documentElement.clientWidth}"), f"{label}: unwanted outer gutters"
                             menu = page.locator(".exp-mobile-menu")
                             summary = menu.locator("summary")
                             if width > 900:
