@@ -170,8 +170,10 @@ nature of the thing rather than an inconsistency:
   artifact is a decision rule of the optimiser, and there is no file to point at.
 * **`data` holds refs, not rows.** An inner problem is a callable
   `(value, seed) -> MetaOutcome`; no row format can express one. `data.problems`
-  is a `module:attribute` ref to a mapping of them (or a zero-argument builder),
-  inside the spec's import allowlist.
+  is a `module:attribute` ref to a zero-argument builder returning a mapping of them,
+  inside the spec's import allowlist. Pass `--data mypkg.problems:build` to
+  `init` to choose that ref; make the module importable and include its package
+  in the generated spec's `allow` list before planning.
 
 `score` takes `auc` (the default), `final_reward`, `rollouts_to`, or a ref to
 any `MetaOutcome -> float`.

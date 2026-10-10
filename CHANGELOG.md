@@ -180,6 +180,12 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- `agentdescent init selection --kind policy_slot` now finishes successfully and
+  explains how to provide the `data.problems` ref and its import allowlist.
+  It previously wrote the starter spec and then crashed looking for `data.path`,
+  which policy slots do not use. The clean-wheel smoke check now exercises this
+  installed command as well as the offline demo and MCP server.
+
 - **Onboarding, published-version guidance and CI support coverage.** Lead with
   the packaged offline demo on current `main`, distinguish it from the v0.5.0
   source-example path, name NumPy as a runtime dependency, exercise Python 3.10

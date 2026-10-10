@@ -75,6 +75,25 @@ def main() -> None:
             env.pop(name, None)
         env["AGENTDESCENT_HOME"] = str(workdir / "home")
 
+        policy_init = subprocess.run(
+            ["agentdescent", "init", "selection", "--kind", "policy_slot"],
+            cwd=workdir, env=env, text=True, capture_output=True, timeout=30,
+        )
+        assert policy_init.returncode == 0, (
+            f"installed policy-slot init failed ({policy_init.returncode})\n"
+            f"{policy_init.stdout}\n{policy_init.stderr}"
+        )
+        policy_spec = json.loads(
+            (workdir / ".agentdescent" / "selection.evolve.json").read_text(encoding="utf-8")
+        )
+        assert policy_spec["target"] == "selection", policy_spec
+        assert policy_spec["data"] == {"problems": "mypkg.problems:build", "seeds": [0]}, (
+            policy_spec
+        )
+        assert "mypkg.problems:build" in policy_init.stdout, policy_init.stdout
+        assert "allow list" in policy_init.stdout, policy_init.stdout
+        assert "JSON object per line" not in policy_init.stdout, policy_init.stdout
+
         demo = subprocess.run(
             ["agentdescent", "demo"], cwd=workdir, env=env,
             text=True, capture_output=True, timeout=120,
