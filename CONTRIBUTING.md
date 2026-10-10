@@ -9,7 +9,7 @@ are very welcome.
 ```bash
 git clone https://github.com/Birfy/agentdescent
 cd agentdescent
-pip install -e ".[dev]"     # installs NumPy plus the pytest/PyYAML development tools
+pip install -e ".[dev]"     # installs NumPy plus the pytest/PyYAML/Markdown development tools
 ```
 
 Python ≥ 3.9 is required.
