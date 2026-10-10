@@ -347,23 +347,28 @@ def _allocator_context_from(c: "_Candidate", p_improve: Optional[float] = None,
                             stable_distance: float = 0.0):
     """Build an :class:`~agentdescent.allocator.AllocatorContext` from a candidate.
 
-    The context carries the **pre-spend features** the worker decided on --
+    The context carries the **pre-spend features the worker decided on** --
     advantage, diff size, blast radius -- so the model learns from exactly the
     inputs its decisions were made on. Post-outcome signals (``p_improve``,
     ``stable_distance``, the measured delta) are kept on the context for the
     audit trail but never enter :meth:`AllocatorContext.features`.
 
-    **Fused candidates** are attributed to their first card's advantage and the
-    fused diff's size: the fusion is the union of the surviving proposals, and
-    the first is the one the tournament put forward -- the same attribution the
-    acceptance gate uses when it folds `before_after_delta` back into the
-    posterior.
+    **Fused candidates keep their originating pre-spend context.** The size is
+    taken from the first card's *original* diff -- the proposal the worker
+    actually decided on -- not the fused diff's union size. A fusion is the
+    union of several proposals, and its size is a post-merge artefact no worker
+    ever saw; training the spend model on union sizes would teach it values for
+    candidates it never decided about (PR #204 review, finding 2 remainder).
+    The advantage is likewise the first card's, and the blast radius the
+    artifact's -- both exactly what the worker had. So a fused commit's label
+    is attached to the originating proposal's pre-spend vector.
     """
     from .allocator import AllocatorContext
 
     card = c.cards[0] if c.cards else None
     adv = getattr(card, "advantage", None)
-    size = c.diff.size() if c.diff is not None else 0
+    # The worker decided on *this* card's diff, not the merged union.
+    size = card.diff.size() if card is not None and card.diff is not None else 0
     return AllocatorContext(
         before_after_delta=getattr(card, "before_after_delta", None),
         advantage=adv,

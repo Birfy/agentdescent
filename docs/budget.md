@@ -59,6 +59,15 @@ explains the labels without teaching a usable pre-spend predictor; restricting
 both sides to the pre-spend columns keeps the learning loop sound. A logit clip
 and an L2 term keep one extreme candidate from blowing the weights.
 
+**Fused commits keep their originating context.** When the aggregator merges
+several proposals into one candidate and commits it, the observe input is the
+**first surviving proposal's** pre-spend vector — the size the worker actually
+decided on, not the fused union's size. A fusion's union size is a post-merge
+artefact no worker ever saw; attaching the commit label to it would teach the
+model values for candidates it never decided about. The originating proposal is
+`candidate.cards[0].diff`, the same attribution the acceptance gate uses when it
+folds `before_after_delta` back into the posterior.
+
 **Counterfactual exploration.** A candidate the model judged unworthy is
 skipped — except with probability `epsilon`, when it is evaluated anyway. The
 outcome is then *ground truth the model was wrong about*, and it learns from it.
