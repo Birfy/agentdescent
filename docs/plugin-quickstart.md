@@ -10,15 +10,21 @@ until step 3.
 
 ## 1. Install
 
-These CLI commands use current unreleased `main`; install that checkout first:
+These commands target **0.5.1**. Once published, install the package with its
+MCP extra:
 
 ```bash
-git clone --branch main https://github.com/Birfy/agentdescent && cd agentdescent
+pip install "agentdescent[mcp]>=0.5.1"
+```
+
+Before publication, or if you already have a source checkout:
+
+```bash
 pip install -e ".[mcp]"
 ```
 
-For the published v0.5.0 install and documented source-example path, see
-[Install and first run](install.md#published-v050-installation-and-source-examples).
+See [Install and first run](install.md) for the source checkout and
+[source examples](install.md#source-examples).
 
 `[mcp]` is the extra that lets agents talk to AgentDescent. Skip it and the CLI
 still works, but `agentdescent mcp` exits 3 and tells you to add it.
@@ -47,7 +53,7 @@ make a real run fail — but none of them stop step 2.
     `bin/` to add. Hosts start the server as a **subprocess**, so it must be on
     the `PATH` of whatever launches your agent, not just your interactive shell.
 
-## 2. Current `main`: run the packaged demo offline
+## 2. Run the packaged demo offline
 
 ```bash
 agentdescent demo

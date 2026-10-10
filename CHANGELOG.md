@@ -6,8 +6,44 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-10-10
+
+### Release summary
+
+- Agent-first editorial website and plugin quickstart, modular-framework
+  explanations, unified documentation styling, and an illustrative in-browser
+  workflow that makes no model calls or file changes. The optional one-command
+  setup installs current main and connects supported agent CLIs on PATH; it
+  is not a pinned-release installer.
+- Token budgets, cost-aware selection, graceful budget degradation and optional
+  diminishing-returns stopping; checkpointed search state survives a restart.
+- Sparse verifier auditing and calibration, opt-in priority-ordered audit drain,
+  and replay-aware sampling and proposals that can use settled evidence.
+- Policy-slot evolution, the EvoX Genesis port with skill extraction and read-only
+  investigation, and the porous-molecule tree-search example. Research examples
+  remain in the source repository rather than the installed wheel.
+- More reliable first runs: actionable spec/dataset errors, policy-slot scaffolds,
+  fail-fast host installation and a clean installed-wheel CLI/MCP smoke gate.
+
+### Upgrade notes
+
+- Python >= 3.9 remains supported; the MCP extra requires Python >= 3.10.
+  NumPy >= 1.20 is now an installed dependency for prediction-powered auditing.
+- Use `ThreeLayerVerifier.full_eval` and `full_eval_matches_counts`. The old
+  `oracle_eval` and `oracle_shares_full_set` aliases remain available; using
+  `oracle_eval` emits a `DeprecationWarning`. Removal is planned for 0.7.
+- Checkpointing, replay weighting and audit draining remain opt-in. Token-budget
+  enforcement depends on usage reported by the model adapter; it is not a
+  provider-side hard spending limit.
+
+The detailed changes below cover the merged commits since 0.5.0. They do not
+include the open multi-head, multi-artifact, asynchronous trajectory-resume,
+value-directed evaluation or Genesis blind-mode proposals.
+
 ### Fixed
 
+- Interactive demo restarts no longer interleave with an older approval run,
+  and the displayed artifact stays tied to the run that produced it.
 - Keep the interactive demo reachable from the documentation navigation drawer
   on mobile, where the desktop header links are hidden.
 - Prevent Material admonition styles from exposing the mobile menu on desktop
@@ -969,10 +1005,10 @@ All notable changes to AgentDescent are documented here. The format follows
   the scorer is biased. Reading it as ground truth is what let the docs claim the
   loop audits itself against something outside itself, which it does not.
 
-  Both old names still work, once, with a `DeprecationWarning`, and are removed
-  in 0.7. `VerifierProtocol` declares `full_eval`; the engine reads a custom
+  Both old names still work; the `oracle_eval` compatibility path emits a
+  `DeprecationWarning`. Both aliases are scheduled for removal in 0.7. `VerifierProtocol` declares `full_eval`; the engine reads a custom
   verifier through `verifier.full_eval_of` / `verifier.shares_eval_counts`, which
-  accept either spelling -- so a verifier written against the pre-0.6 page keeps
+  accept either spelling -- so a verifier written against the pre-0.5.1 page keeps
   running instead of raising `AttributeError` in the middle of a merge. The
   `oracle_budget` argument, `VerifierBudget.oracle_calls_*` and the
   `oracle-rejected` merge outcome keep their names: they are the public spelling
@@ -4336,7 +4372,9 @@ First public release on PyPI as **`agentdescent`**.
   discrete-space `Aggregator`, staleness policies, DP/TP/PP parallelism, layered
   governance, and the provider-agnostic `agentdescent.agents` completion layer.
 
-[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.4.6...HEAD
+[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/Birfy/agentdescent/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/Birfy/agentdescent/compare/v0.4.6...v0.5.0
 [0.4.6]: https://github.com/Birfy/agentdescent/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/Birfy/agentdescent/compare/v0.4.2...v0.4.5
 [0.4.2]: https://github.com/Birfy/agentdescent/compare/v0.4.1...v0.4.2

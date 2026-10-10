@@ -9,7 +9,7 @@ are very welcome.
 ```bash
 git clone https://github.com/Birfy/agentdescent
 cd agentdescent
-pip install -e ".[dev]"     # core engine has zero runtime deps; [dev] adds pytest
+pip install -e ".[dev]"     # installs NumPy plus the pytest/PyYAML/Markdown development tools
 ```
 
 Python ≥ 3.9 is required.
@@ -38,7 +38,7 @@ The suite is **offline and deterministic** (no network, no model API):
 pytest -q
 ```
 
-CI runs the same suite on Python 3.9 / 3.11 / 3.12 for every push and PR. Please
+CI runs the same suite on Python 3.9 / 3.10 / 3.11 / 3.12 for every push and PR. Please
 add or update tests for any behavior change — the reference domain
 (`agentdescent/domains/router.py`) and the example stubs let you test the full
 parallel/async loop without an API key.
