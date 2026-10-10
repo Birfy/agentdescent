@@ -51,7 +51,7 @@ def _anchors_of(path: pathlib.Path) -> set:
         if isinstance(metadata, dict):
             source = source[frontmatter.end():].lstrip("\n")
     html = markdown.markdown(source, extensions=[
-        "toc", "fenced_code", "attr_list", "md_in_html",
+        "meta", "toc", "fenced_code", "attr_list", "md_in_html",
     ])
     parser = _HTMLAnchors()
     parser.feed(html)
@@ -63,6 +63,16 @@ def test_anchor_guard_ignores_yaml_metadata(tmp_path, end):
     page = tmp_path / "page.md"
     page.write_text(
         '---\ndescription: <div id="fake">metadata</div>\n' + end + '\n## Real\n')
+    assert _anchors_of(page) == {"real"}
+
+
+@pytest.mark.parametrize("metadata", [
+    '---\ndescription: Example: <div id="fake">metadata</div>\n---\n',
+    'description: <div id="fake">metadata</div>\n\n',
+])
+def test_anchor_guard_matches_site_meta_extension(tmp_path, metadata):
+    page = tmp_path / "page.md"
+    page.write_text(metadata + '## Real\n')
     assert _anchors_of(page) == {"real"}
 
 

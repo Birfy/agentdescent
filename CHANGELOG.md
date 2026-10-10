@@ -10,8 +10,11 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Release summary
 
-- Agent-first website and plugin quickstart, with an illustrative in-browser
-  workflow that makes no model calls or file changes.
+- Agent-first editorial website and plugin quickstart, modular-framework
+  explanations, unified documentation styling, and an illustrative in-browser
+  workflow that makes no model calls or file changes. The optional one-command
+  setup installs current main and connects supported agent CLIs on PATH; it
+  is not a pinned-release installer.
 - Token budgets, cost-aware selection, graceful budget degradation and optional
   diminishing-returns stopping; checkpointed search state survives a restart.
 - Sparse verifier auditing and calibration, opt-in priority-ordered audit drain,
