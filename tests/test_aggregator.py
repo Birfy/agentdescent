@@ -482,3 +482,55 @@ def test_audit_drain_oracle_error_counted_with_meter(tmp_path):
     # The meter must have counted the oracle error, not raised KeyError.
     assert meter.snapshot().audit_drain_oracle_errors == 1, (
         f"expected 1 oracle error, got {meter.snapshot().audit_drain_oracle_errors}")
+
+
+def test_audit_drain_requeue_preserves_priority_order(tmp_path):
+    """A requeued audit keeps its original priority ahead of lower-priority
+    items (PR #194 review: the transient-failure test verified the item is
+    requeued, not that its ordering survives the requeue).
+
+    `requeue` pushes the item back with the priority it was popped with; it
+    must *not* recompute it via `submit` (trust may have moved since the item
+    was first submitted). The check is relative order, not the absolute number:
+    the high-priority audit fails once, is requeued, and must still pop before
+    the lower-priority one that was never touched."""
+    from agentdescent.aggregator import Aggregator, AggregatorConfig
+    from agentdescent.evolution import AppendRules, EvolvingArtifact
+    from agentdescent.ledger import Ledger
+    from agentdescent.scheduler import AuditScheduler
+    from agentdescent.verifier import ThreeLayerVerifier, VerifierBudget
+
+    calls = {"n": 0}
+
+    class FlakyHigh(ThreeLayerVerifier):
+        def full_eval(self, artifact):
+            calls["n"] += 1
+            if calls["n"] == 1:          # the high-priority one fails once
+                raise RuntimeError("transient endpoint failure")
+            return super().full_eval(artifact)
+
+    lg = Ledger(str(tmp_path), lambda a: {"state": dict(a.state)},
+                lambda aid, v, s: EvolvingArtifact(aid, s.get("state", {}), v,
+                                                   0.2, None, AppendRules()))
+    lg.register(EvolvingArtifact("a", {"k": "b"}, 1, 0.2, None, AppendRules()))
+    v = FlakyHigh(eval_fn=lambda a, t: 0.5, held_out=[1, 2, 3],
+                  budget=VerifierBudget(oracle_calls_remaining=100))
+    sched = AuditScheduler(collect=True)
+    agg = Aggregator(lg, v, sched, AggregatorConfig(audit_drain_per_step=5))
+    base = lg.snapshot(Ledger.DEV).get("a")
+    cand = EvolvingArtifact("a", {"k": "c"}, 1, 0.2, None, AppendRules())
+    # Higher blast_radius -> higher priority (submit uses blast_radius * ...).
+    sched.submit("high", "a", 0.9, 0.5, payload=("a", base, cand))
+    sched.submit("low", "a", 0.2, 0.5, payload=("a", base, cand))
+
+    # First drain: the high-priority audit fails and is requeued.
+    n1 = agg._drain_audit_queue(max_per_step=1)
+    assert n1 == 0 and len(sched) == 2, "the failing high-priority audit requeues"
+
+    # Second drain must pick the requeued high-priority item (its original
+    # priority survived the requeue) and leave the low-priority one untouched.
+    n2 = agg._drain_audit_queue(max_per_step=1)
+    assert n2 == 1, "the high-priority audit drains after recovery"
+    remaining = sched.pop()
+    assert remaining is not None and remaining.diff_id == "low", (
+        f"the low-priority audit must still be queued, got {remaining!r}")
