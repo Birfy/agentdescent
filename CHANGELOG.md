@@ -44,6 +44,12 @@ value-directed evaluation or Genesis blind-mode proposals.
 
 - Interactive demo restarts no longer interleave with an older approval run,
   and the displayed artifact stays tied to the run that produced it.
+- Keep the interactive demo reachable from the documentation navigation drawer
+  on mobile, where the desktop header links are hidden.
+- Prevent Material admonition styles from exposing the mobile menu on desktop
+  or overriding the editorial disclosures; keep the homepage install command
+  readable without splitting its URL. Add rendered responsive-layout CI checks.
+
 - Machine-local host installs now pin MCP and session hooks to the installing
   Python, so they work when a later agent process lacks the pip scripts directory
   on PATH. Stock legacy and previously pinned Codex/OpenCode entries are repaired
