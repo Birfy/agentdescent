@@ -6,6 +6,7 @@ not validate heading anchors at all, so both halves are checked here.
 """
 import pathlib
 import re
+from html.parser import HTMLParser
 
 DOCS = pathlib.Path(__file__).resolve().parent.parent / "docs"
 
@@ -26,11 +27,21 @@ def _anchor(heading: str) -> str:
 
 
 def _anchors_of(path: pathlib.Path) -> set:
+    source = path.read_text()
+    # Fenced examples are not rendered as HTML, even when they contain tags.
+    source = re.sub(r"(?ms)^```.*?^```\s*$", "", source)
     out = set()
-    for line in path.read_text().splitlines():
+    for line in source.splitlines():
         m = re.match(r"^(#{1,6})\s+(.*)", line)
         if m:
             out.add(_anchor(m.group(2)))
+
+    class IdCollector(HTMLParser):
+        def handle_starttag(self, tag, attrs):
+            out.update(value for name, value in attrs if name == "id" and value)
+
+    parser = IdCollector()
+    parser.feed(source)
     return out
 
 
