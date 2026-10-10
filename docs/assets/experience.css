@@ -13,7 +13,7 @@ body:has(.experience) .md-main{min-height:100vh}
 .experience a{color:inherit;text-decoration:none}
 .experience button,.experience input{font:inherit}
 .experience button{cursor:pointer}
-.experience button:focus-visible,.experience a:focus-visible,.experience input:focus-visible,.experience summary:focus-visible{outline:2px solid #80ac35;outline-offset:3px}
+.experience button:focus-visible,.experience a:focus-visible,.experience input:focus-visible,.experience code[tabindex]:focus-visible,.experience summary:focus-visible{outline:2px solid #80ac35;outline-offset:3px}
 .experience em{font-style:normal;color:#789d35}
 .experience[data-theme=dark] em{color:var(--accent)}
 .exp-nav{height:72px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 max(5vw,calc((100vw - 1320px)/2));gap:20px;background:var(--bg)}
@@ -44,8 +44,9 @@ body:has(.experience) .md-main{min-height:100vh}
 .exp-hero p{max-width:570px;color:var(--muted);font-size:17px;line-height:1.65}
 .hero-ctas{display:flex;flex-wrap:wrap;gap:10px;margin-top:30px}
 .hero-command{display:flex;align-items:center;gap:12px;max-width:570px;margin-top:38px;border:1px solid var(--line);background:var(--paper);padding:11px 12px;border-radius:5px;color:var(--muted)}
-.hero-command>span{font-family:ui-monospace,monospace;color:#76a638}
-.md-typeset .experience .hero-command code{flex:1;background:none;color:var(--ink);font:11px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;word-break:break-all;padding:0}
+.hero-command>span{flex:none;font-family:ui-monospace,monospace;color:#76a638}
+.md-typeset .experience .hero-command code{flex:1;background:none;color:var(--ink);font:11px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;min-width:0;white-space:nowrap;overflow-x:auto;word-break:normal;padding:0}
+.hero-command .exp-copy{flex:none}
 .hero-aside{position:relative;height:450px;display:grid;place-items:center}
 .orbit{position:absolute;border:1px solid var(--line);border-radius:50%}
 .orbit-one{width:170px;height:170px}.orbit-two{width:305px;height:305px}.orbit-three{width:440px;height:440px}
@@ -160,16 +161,17 @@ body:has(.experience) .md-main{min-height:100vh}
 .exp-nav{position:relative;z-index:10}
 .exp-nav-links{margin-left:auto;gap:24px}
 .exp-nav-links .nav-active{color:var(--ink);font-weight:750;border-bottom:2px solid #8aaa4c;padding-bottom:4px}
-.exp-mobile-menu{display:none}
-.exp-mobile-menu summary{list-style:none;cursor:pointer;border:1px solid var(--line);border-radius:4px;padding:7px 10px;color:var(--ink);font-size:12px;font-weight:700}
-.exp-mobile-menu summary::-webkit-details-marker{display:none}
+/* Outrank Material's admonition styles for native details/summary. */
+.md-typeset .experience .exp-mobile-menu{display:none;margin:0;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;color:var(--ink);font-size:inherit;flex:none}
+.md-typeset .experience .exp-mobile-menu summary{margin:0;background:transparent;list-style:none;cursor:pointer;border:1px solid var(--line);border-radius:4px;padding:7px 10px;color:var(--ink);font-size:12px;font-weight:700}
+.md-typeset .experience .exp-mobile-menu summary::before,.md-typeset .experience .exp-mobile-menu summary::after,.exp-mobile-menu summary::-webkit-details-marker{display:none}
 .exp-mobile-menu summary span{margin-left:8px;color:var(--muted)}
 .exp-mobile-menu[open] summary span{display:inline-block;transform:rotate(180deg)}
 .exp-mobile-menu>div{position:absolute;top:calc(100% - 1px);right:5vw;width:min(270px,90vw);display:grid;padding:9px;background:var(--paper);border:1px solid var(--line);border-radius:0 0 5px 5px;box-shadow:0 16px 32px #18221424}
 .exp-mobile-menu a{padding:12px 13px;color:var(--ink);font-size:13px;border-radius:3px}
 .exp-mobile-menu a:hover,.exp-mobile-menu a[aria-current=page]{background:var(--soft)}
 @media(max-width:1100px){.exp-nav-links{gap:15px}.exp-nav-links .nav-github{display:none}}
-@media(max-width:900px){.exp-nav-links{display:none}.exp-mobile-menu{display:block}.theme-toggle{margin-left:auto}}
+@media(max-width:900px){.exp-nav-links{display:none}.md-typeset .experience .exp-mobile-menu{display:block}.theme-toggle{margin-left:auto}}
 .policy-slots{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin-top:21px}
 .policy-slots strong{font:700 10px ui-monospace,monospace;letter-spacing:.06em;color:var(--muted);margin-right:10px}
 .policy-slots span{font:11px ui-monospace,monospace;color:var(--ink);background:var(--soft);border:1px solid var(--line);padding:5px 8px;border-radius:3px}
