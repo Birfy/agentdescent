@@ -1,5 +1,9 @@
 # AgentDescent
 
+**[Website & interactive demo](https://birfy.github.io/agentdescent/)** ·
+[Get started](https://birfy.github.io/agentdescent/install/) ·
+[Documentation](https://birfy.github.io/agentdescent/docs/)
+
 > **Gradient descent — but the parameters are agents.** A parallel, asynchronous
 > framework for self-evolving agents (skills, prompts, harnesses) where **diffs
 > are the gradients** and **the aggregator is the optimizer**.

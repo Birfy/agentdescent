@@ -42,6 +42,8 @@ value-directed evaluation or Genesis blind-mode proposals.
 
 ### Fixed
 
+- Interactive demo restarts no longer interleave with an older approval run,
+  and the displayed artifact stays tied to the run that produced it.
 - Spec and dataset file failures now report a concise `SpecError` instead of a
   CLI traceback. Invalid JSON names the input file and line/column; JSONL uses
   the physical file line, including blank lines. Missing or unreadable specs,
