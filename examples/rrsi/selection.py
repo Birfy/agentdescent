@@ -214,7 +214,12 @@ def select_round(candidates: Sequence[Candidate], incumbent: Measurement,
     decisions: List[Decision] = []
     for candidate in candidates:
         guards: Sequence[str] = ()
-        if guard_fn and not candidate.gate_failure and candidate.measurement is not None:
+        # Guards may perform arithmetic on both measurements. Preserve judge's
+        # invalid-input rejection contract by only calling them after both
+        # values pass the same validation used by judge.
+        if (guard_fn and not candidate.gate_failure
+                and _valid_measurement(incumbent)
+                and _valid_measurement(candidate.measurement)):
             guards = guard_fn(incumbent, candidate.measurement)
         decisions.append(judge(candidate, incumbent, best_score, delta, config,
                                incumbent_counts, guards))

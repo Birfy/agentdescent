@@ -95,6 +95,39 @@ def test_domain_veto_and_winner_ties_are_deterministic():
     assert "safety metric dropped" in decisions[2].reason
 
 
+@pytest.mark.parametrize(
+    "incumbent,candidate_measurement,reason",
+    [
+        (Measurement(math.nan, 100.0), Measurement(0.9, 100.0),
+         "invalid incumbent measurement"),
+        (Measurement(0.7, -1.0), Measurement(0.9, 100.0),
+         "invalid incumbent measurement"),
+        (INCUMBENT, Measurement(math.nan, 100.0),
+         "invalid or missing candidate measurement"),
+        (INCUMBENT, Measurement(0.9, -1.0),
+         "invalid or missing candidate measurement"),
+    ],
+)
+def test_select_round_skips_guard_for_invalid_measurements(
+    incumbent, candidate_measurement, reason
+):
+    called = []
+
+    def guard(_incumbent, _candidate):
+        called.append(True)
+        raise AssertionError("guard must not receive invalid measurements")
+
+    winner, decisions = select_round(
+        [Candidate("invalid", measurement=candidate_measurement)],
+        incumbent, 0.7, 0.05, CFG, {}, guard_fn=guard,
+    )
+
+    assert winner is None
+    assert not called
+    assert not decisions[0].admissible
+    assert decisions[0].reason == reason
+
+
 def test_no_admissible_candidate_and_missing_tokens_match_upstream_zero_rule():
     winner, decisions = select_round([candidate("too costly", .70, 200)],
                                      INCUMBENT, .70, .05, CFG, {})
