@@ -80,7 +80,7 @@ class AggregatorProtocol(Protocol):
 
     def ingest(self, card: EvidenceCard) -> None: ...
 
-    def step(self) -> List["MergeReport"]: ...
+    def step(self, n_workers: int = 1) -> List["MergeReport"]: ...
 
     #: **Checkpointing** (optional, duck-typed — not part of the Protocol
     #: contract). An aggregator that holds search state beyond what the
@@ -330,6 +330,8 @@ class _Candidate:
     survived: int
     discarded: int
     conflicts: int
+    #: The ledger branch this candidate was proposed against.
+    branch: Optional[str] = None
 
     #: Filled by `Aggregator._measure`. `None` until then, which is what makes a
     #: candidate that skipped the phase fail loudly rather than commit on zeros.
@@ -345,11 +347,18 @@ class _Candidate:
 
 
 class EvidenceBuffer:
-    """Cards bucketed by target artifact (design doc, section 4.1).
+    """Cards bucketed by (target artifact, branch) (design doc, section 4.1).
 
     Thread-safe: in the asynchronous runtime many worker threads call
     :meth:`add` concurrently while the aggregator thread calls :meth:`ready` /
-    :meth:`drain`.  All bucket mutations are guarded by an internal lock."""
+    :meth:`drain`.  All bucket mutations are guarded by an internal lock.
+
+    The bucket key is a ``(artifact_id, branch)`` pair, not just ``artifact_id``:
+    a multi-head run has several live branches (``dev``, ``head/0``, ...), and a
+    diff proposed against ``head/1`` must be merged against ``head/1``'s head,
+    not against ``dev``'s. The branch half of the key is the card's
+    :attr:`~agentdescent.evolvable.EvidenceCard.branch`, empty for single-head
+    runs so a caller that only knows artifact ids keeps working."""
 
     #: Cap on the settled pool: at most this many cards, and at most this many
     #: characters of diff payload across them. It is a *diagnostic* ring, so old
@@ -358,8 +367,8 @@ class EvidenceBuffer:
     SETTLED_MAX_CHARS = 2_000_000
 
     def __init__(self) -> None:
-        self._buckets: Dict[str, List[EvidenceCard]] = defaultdict(list)
-        self._waited: Dict[str, int] = defaultdict(int)
+        self._buckets: Dict[Tuple[str, str], List[EvidenceCard]] = defaultdict(list)
+        self._waited: Dict[Tuple[str, str], int] = defaultdict(int)
         #: Optional consumer of settled evidence, wired by the engine when a
         #: sampler (e.g. :class:`~agentdescent.sampling.ReplaySampler`) wants to
         #: learn from the pool. ``None`` keeps the old behaviour exactly.
@@ -369,9 +378,12 @@ class EvidenceBuffer:
         self._settled_chars = 0
         self._lock = threading.Lock()
 
+    def _key(self, card: EvidenceCard) -> Tuple[str, str]:
+        return (card.diff.target, card.branch or "")
+
     def add(self, card: EvidenceCard) -> None:
         with self._lock:
-            self._buckets[card.diff.target].append(card)
+            self._buckets[self._key(card)].append(card)
 
     def tick(self) -> None:
         with self._lock:
@@ -379,20 +391,35 @@ class EvidenceBuffer:
                 self._waited[aid] += 1
 
     def ready(self, config: AggregatorConfig) -> List[str]:
+        """Artifact ids with a ready bucket. Each id is listed once, whatever
+        branches it has: the caller drains all of them and merges per branch."""
         with self._lock:
-            out = []
-            for aid, cards in self._buckets.items():
-                if not cards:
+            ready_aids: List[str] = []
+            for (aid, _), cards in self._buckets.items():
+                if aid in ready_aids or not cards:
                     continue
-                if len(cards) >= config.batch_trigger or self._waited[aid] >= config.max_wait_rounds:
-                    out.append(aid)
-            return out
+                batch = any(len(self._buckets[(a, b)])
+                            >= config.batch_trigger
+                            for a, b in self._buckets if a == aid)
+                waited = any(self._waited[(a, b)]
+                             >= config.max_wait_rounds
+                             for a, b in self._buckets if a == aid)
+                if batch or waited:
+                    ready_aids.append(aid)
+            return ready_aids
 
-    def drain(self, artifact_id: str) -> List[EvidenceCard]:
+    def drain(self, aid: str) -> Dict[str, List[EvidenceCard]]:
+        """Pop every bucket for ``aid``, grouped by branch (``""`` = dev).
+
+        Returns ``{branch: [cards]}`` so the aggregator merges each branch
+        against its own head. Single-head runs have one key (``""``), which
+        is why this call site looks like the old one."""
         with self._lock:
-            cards = self._buckets.pop(artifact_id, [])
-            self._waited.pop(artifact_id, None)
-            return cards
+            grouped: Dict[str, List[EvidenceCard]] = {}
+            for key in [k for k in self._buckets if k[0] == aid]:
+                grouped[key[1]] = self._buckets.pop(key, [])
+                self._waited.pop(key, None)
+            return grouped
 
     def pending(self) -> int:
         with self._lock:
@@ -469,6 +496,14 @@ class EvidenceBuffer:
         """Diff payload currently retained by the settled pool."""
         with self._lock:
             return self._settled_chars
+
+
+def _branch_of(cards: Sequence["EvidenceCard"]) -> Optional[str]:
+    """The common branch across ``cards``, or ``None`` if all carry ``None``."""
+    branches = {c.branch for c in cards if c.branch is not None}
+    if len(branches) == 1:
+        return branches.pop()
+    return None
 
 
 def diffs_conflict(a: Diff, b: Diff) -> bool:
@@ -676,7 +711,14 @@ class Aggregator:
         See ``Buffer.recent_settled``."""
         return self.buffer.recent_settled(task, n)
 
-    def step(self) -> List[MergeReport]:
+    def head_for_worker(self, worker_id: int = 0) -> str:
+        """The ledger branch a worker should snapshot and propose against.
+
+        ``dev`` by default -- every single-head caller. A multi-head aggregator
+        overrides this to distribute workers across population forks."""
+        return Ledger.DEV
+
+    def step(self, n_workers: int = 1) -> List[MergeReport]:
         """Fire every artifact bucket that is ready and return per-artifact reports.
 
         The published contract, unchanged: it measures on the calling thread and
@@ -712,10 +754,18 @@ class Aggregator:
         for aid in self.buffer.ready(self.config):
             if skip_in_flight and aid in self._in_flight:
                 continue
-            prepared = self._prepare(aid)
-            if isinstance(prepared, _Candidate):
-                self._in_flight.add(aid)
-            out.append(prepared)
+            # Drain every branch of this artifact and merge each against its
+            # own head. In a multi-head run a fork's cards must not be judged
+            # against dev's version vector. `_in_flight` stays keyed by the
+            # **artifact id**, not (aid, branch): the pipelined gate's contract
+            # is at most one candidate per artifact in measurement at once, and
+            # that contract predates multi-head -- an artifact id is what its
+            # tests and callers assert on.
+            for branch, cards in self.buffer.drain(aid).items():
+                prepared = self._prepare(aid, branch=branch, cards=cards)
+                if isinstance(prepared, _Candidate):
+                    self._in_flight.add(aid)
+                out.append(prepared)
         return out
 
     def measure(self, items: List[Union["_Candidate", MergeReport]]) -> List[Union["_Candidate", MergeReport]]:
@@ -1077,7 +1127,8 @@ class Aggregator:
                 return True
         return False
 
-    def _commit_with_retry(self, artifact_id, candidate, diff, head):
+    def _commit_with_retry(self, artifact_id, candidate, diff, head,
+                           branch: str = Ledger.DEV):
         """CAS, rebasing onto whatever landed first. ``None`` when it kept losing.
 
         With one writer a conflict cannot happen: every commit goes through a
@@ -1104,7 +1155,7 @@ class Aggregator:
             base_vv = {artifact_id: head.get(artifact_id, 0)}
             try:
                 _, new_version = self.ledger.commit(
-                    candidate, base_vv, branch=Ledger.DEV,
+                    candidate, base_vv, branch=branch,
                     message=f"merge {diff.diff_id} -> {artifact_id}")
                 return new_version
             except CASConflict:
@@ -1150,8 +1201,19 @@ class Aggregator:
         self._measure(prepared)
         return self._decide(prepared)
 
-    def _prepare(self, artifact_id: str) -> "Union[_Candidate, MergeReport]":
+    def _prepare(self, artifact_id: str, branch: str = "", cards=None) -> "Union[_Candidate, MergeReport]":
         """Drain, filter, and choose what to put forward -- no measurement.
+
+        ``branch`` is the ledger branch the cards were proposed against
+        (empty = ``dev``, the single-head default). Each branch is merged
+        against its **own** head: a multi-head run's ``head/1`` workers
+        propose against ``head/1``'s version vector, and their diffs must be
+        judged against that vector, not against ``dev``'s -- otherwise every
+        cross-branch diff looks stale by construction.
+
+        ``cards``, when given, is the drained evidence for this branch (the
+        caller got it from :meth:`EvidenceBuffer.drain`). When omitted, the
+        default single-head path drains ``dev``'s bucket itself.
 
         Returns a finished :class:`MergeReport` for the merges that end here: an
         artifact that is not in the ledger, and a batch with no survivors. Those
@@ -1160,8 +1222,9 @@ class Aggregator:
         skip the expensive phase entirely.
         """
         self._seen.add(artifact_id)
-        cards = self.buffer.drain(artifact_id)
-        snap = self.ledger.snapshot(Ledger.DEV)
+        if cards is None:
+            cards = self.buffer.drain(artifact_id).get(branch or "", [])
+        snap = self.ledger.snapshot(branch or Ledger.DEV)
         artifact = snap.get(artifact_id)
         if artifact is None:
             return MergeReport(artifact_id, None, False, len(cards), 0, 0, 0, 0.0, None,
@@ -1202,7 +1265,8 @@ class Aggregator:
             diff=best_diff, cards=kept_cards, survivor_cards=survivors,
             head=head, fused=fused,
             considered=n_considered, survived=len(survivors),
-            discarded=len(discarded), conflicts=conflicts)
+            discarded=len(discarded), conflicts=conflicts,
+            branch=branch or _branch_of(kept_cards))
 
     def _measure(self, c: "_Candidate") -> "_Candidate":
         """Score the base and the candidate. **Touches no aggregator state.**
