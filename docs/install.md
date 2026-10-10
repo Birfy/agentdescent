@@ -1,14 +1,23 @@
 # Install and first run
 
-## Current `main`: packaged offline demo
+## Packaged offline demo
+
+These instructions target **0.6.0**. Once that version is published:
 
 ```bash
-git clone --branch main https://github.com/Birfy/agentdescent && cd agentdescent
+pip install "agentdescent>=0.6.0"
+agentdescent demo
+```
+
+Before publication, or to work on the source, install your checkout instead:
+
+```bash
+git clone https://github.com/Birfy/agentdescent && cd agentdescent
 pip install -e .
 agentdescent demo
 ```
 
-The library supports Python ≥ 3.9 and current `main` installs NumPy for the
+The library supports Python ≥ 3.9 and installs NumPy for the
 [`audit.ppi`](api.md) estimator. The packaged CLI demo runs offline and needs no
 model API key:
 
@@ -16,7 +25,7 @@ model API key:
 agentdescent demo
 ```
 
-On current unreleased `main`, a successful run ends with output like:
+A successful run ends with output like:
 
 ```
 held-out reward: 1.000 outcomes: {'committed': 1}
@@ -39,22 +48,19 @@ the [quickstart](quickstart-skill.md) to connect a model. The library includes
 Nothing else is needed for an OpenAI-compatible endpoint — GLM, DeepSeek, a local
 vLLM server — because [`openai_compatible`](agents.md) speaks HTTP directly.
 
-## Published v0.5.0 installation and source examples
+## Source examples
 
-Install the stable PyPI package with:
-
-```bash
-pip install agentdescent
-```
-
-The v0.5.0 release's documented offline demo uses research examples kept in the
-source repository, outside the installed wheel. To run that example, clone the
-tagged source and install the contributor tools:
+Research examples are kept in the source repository, outside the installed
+wheel. For the published 0.6.0 examples, clone the matching tag and install the
+contributor tools:
 
 ```bash
-git clone --branch v0.5.0 https://github.com/Birfy/agentdescent && cd agentdescent
+git clone --branch v0.6.0 https://github.com/Birfy/agentdescent && cd agentdescent
 pip install -e ".[dev]"
 ```
+
+The tag is created at publication. Before then, use your release-candidate
+checkout and run `pip install -e ".[dev]"` there.
 
 Then run the source demo (no API key):
 

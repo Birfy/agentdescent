@@ -63,38 +63,36 @@ The figure is the paper's, rendered from its TikZ source by
 [`tools/gen_architecture_figure.py`](tools/gen_architecture_figure.py) so it
 cannot drift from what the paper shows.
 
-## Try the offline demo from current `main`
+## Install and run the offline demo
 
-The packaged `agentdescent demo` command shown here is on the unreleased
-`main` branch. Install that checkout before running it:
+These instructions target **0.6.0**. Once that version is published:
 
 ```bash
-git clone --branch main https://github.com/Birfy/agentdescent && cd agentdescent
+pip install "agentdescent>=0.6.0"
+agentdescent demo
+```
+
+Before publication, or when developing from source, install your checkout:
+
+```bash
+git clone https://github.com/Birfy/agentdescent && cd agentdescent
 pip install -e .
 agentdescent demo
 ```
 
 The library supports Python ≥ 3.9 and installs NumPy for its
 prediction-powered audit estimator. The packaged demo runs the offline
-evolution loop without a model API key. On current unreleased `main`, it ends
-with output like:
+evolution loop without a model API key and ends with output like:
 
 ```
 held-out reward: 1.000 outcomes: {'committed': 1}
 what it learned: rules.md -> 'COLUMN: amount'
 ```
 
-For the published stable v0.5.0 installation, run:
-
-```bash
-pip install agentdescent
-```
-
-Its documented offline example uses `python -m examples.run_demo`; those
-examples are outside the wheel, so clone the repo and follow
-[install and first run](docs/install.md). The library includes
-[`evolve()`](docs/evolution.md), [`DirectoryStrategy`](docs/directory-evolution.md),
-and its algorithm ports.
+Research examples are outside the wheel. For a source checkout and the
+`python -m examples.run_demo` comparison, see [install and first run](docs/install.md).
+The library includes [`evolve()`](docs/evolution.md),
+[`DirectoryStrategy`](docs/directory-evolution.md), and its algorithm ports.
 
 ## Quickstart — a dataset to an evolved skill
 
