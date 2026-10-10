@@ -6,7 +6,7 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.6.0] — 2026-10-10
+## [0.5.1] — 2026-10-10
 
 ### Release summary
 
@@ -989,7 +989,7 @@ value-directed evaluation or Genesis blind-mode proposals.
   Both old names still work; the `oracle_eval` compatibility path emits a
   `DeprecationWarning`. Both aliases are scheduled for removal in 0.7. `VerifierProtocol` declares `full_eval`; the engine reads a custom
   verifier through `verifier.full_eval_of` / `verifier.shares_eval_counts`, which
-  accept either spelling -- so a verifier written against the pre-0.6 page keeps
+  accept either spelling -- so a verifier written against the pre-0.5.1 page keeps
   running instead of raising `AttributeError` in the middle of a merge. The
   `oracle_budget` argument, `VerifierBudget.oracle_calls_*` and the
   `oracle-rejected` merge outcome keep their names: they are the public spelling
@@ -4353,8 +4353,8 @@ First public release on PyPI as **`agentdescent`**.
   discrete-space `Aggregator`, staleness policies, DP/TP/PP parallelism, layered
   governance, and the provider-agnostic `agentdescent.agents` completion layer.
 
-[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.6.0...HEAD
-[0.6.0]: https://github.com/Birfy/agentdescent/compare/v0.5.0...v0.6.0
+[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/Birfy/agentdescent/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Birfy/agentdescent/compare/v0.4.6...v0.5.0
 [0.4.6]: https://github.com/Birfy/agentdescent/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/Birfy/agentdescent/compare/v0.4.2...v0.4.5

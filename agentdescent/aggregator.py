@@ -24,7 +24,7 @@ on the accept path -- the diagrams used to draw it after the commit with a dotte
 "spot-check" arrow, which reads as advisory when it holds a veto.
 
 Note what this stage does *not* do. It re-reads the caller's own scorer over the
-whole held-out set (``full_eval``, called ``oracle_eval`` until 0.6), so it can
+whole held-out set (``full_eval``, called ``oracle_eval`` until 0.5.1), so it can
 catch a verdict that rested on too few tasks and cannot catch one that rested on a
 biased scorer -- the outcome name outlived the rename and overstates the check.
 :mod:`agentdescent.audit` is the second source.
@@ -1055,7 +1055,7 @@ class Aggregator:
             #
             # Read through the two helpers rather than by attribute: a verifier
             # is whatever the caller handed us, including one written against the
-            # pre-0.6 `oracle_eval` / `oracle_shares_full_set` names. Reading the
+            # pre-0.5.1 `oracle_eval` / `oracle_shares_full_set` names. Reading the
             # new name directly would have made an old custom verifier fail here,
             # mid-merge, several minutes into a run.
             if shares_eval_counts(self.verifier):

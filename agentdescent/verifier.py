@@ -13,7 +13,7 @@ The learned layer also exposes an *uncertainty*, which feeds the audit priority
 
 .. note:: **The expensive layer is not a second opinion.**
 
-   ``full_eval`` was called ``oracle_eval`` until 0.6, and the old name claimed
+   ``full_eval`` was called ``oracle_eval`` until 0.5.1, and the old name claimed
    more than the code delivers. Every layer here calls the one ``eval_fn`` the
    caller supplied; they differ in **how many tasks** they score, not in *who is
    scoring*. So the expensive layer bounds the sampling error of a measurement
@@ -123,7 +123,7 @@ class ThreeLayerVerifier:
     #: itself declares over the value it inherited from here.
     full_eval_matches_counts = True
 
-    #: Pre-0.6 name for :attr:`full_eval_matches_counts`. Read through
+    #: Pre-0.5.1 name for :attr:`full_eval_matches_counts`. Read through
     #: :func:`shares_eval_counts`, which prefers the new one, so a custom
     #: verifier that set either keeps working.
     oracle_shares_full_set = True
@@ -219,7 +219,7 @@ class ThreeLayerVerifier:
     def full_eval(self, artifact: Evolvable) -> float:
         """``eval_fn`` on the **whole** held-out set. Consumes audit budget.
 
-        Called ``oracle_eval`` until 0.6, and the rename is a correction rather
+        Called ``oracle_eval`` until 0.5.1, and the rename is a correction rather
         than a tidy-up. The name promised an *independent source of truth* and
         the method delivers the same ``eval_fn`` the cheap layers call, differing
         only in **how many tasks** it looks at -- so it can shrink the variance of
@@ -264,10 +264,10 @@ class ThreeLayerVerifier:
         return self.full_eval(artifact)
 
 
-# -- reading a verifier that may predate the 0.6 rename ----------------------
+# -- reading a verifier that may predate the 0.5.1 rename ----------------------
 #
 # `VerifierProtocol` is structural, so a verifier is whatever a caller hands the
-# engine -- including one written against the pre-0.6 page and carrying only the
+# engine -- including one written against the pre-0.5.1 page and carrying only the
 # old names. These two read either spelling, so the rename costs a warning
 # rather than an `AttributeError` in the middle of somebody's merge.
 
@@ -275,7 +275,7 @@ class ThreeLayerVerifier:
 def full_eval_of(verifier: Any) -> Callable[[Evolvable], float]:
     """The verifier's whole-held-out-set scorer, under whichever name it has.
 
-    Prefers ``full_eval``; falls back to a pre-0.6 ``oracle_eval`` and says so
+    Prefers ``full_eval``; falls back to a pre-0.5.1 ``oracle_eval`` and says so
     once per verifier class, naming the class so the warning points at the file
     that has to change.
     """
@@ -290,7 +290,7 @@ def full_eval_of(verifier: Any) -> Callable[[Evolvable], float]:
             "full_eval")
     warnings.warn(
         f"{type(verifier).__name__} defines oracle_eval but not full_eval. The "
-        "method was renamed in 0.6 -- oracle_eval is read for now and dropped "
+        "method was renamed in 0.5.1 -- oracle_eval is read for now and dropped "
         "in 0.7. Rename it; the behaviour is unchanged.",
         DeprecationWarning, stacklevel=2)
     return legacy
@@ -303,13 +303,13 @@ def shares_eval_counts(verifier: Any) -> bool:
     buying the same sweep twice -- and, more importantly, instead of routing a
     commit decision through a call that degrades to a sub-sample once the budget
     is gone. Reads :attr:`~ThreeLayerVerifier.full_eval_matches_counts`, then the
-    pre-0.6 ``oracle_shares_full_set``.
+    pre-0.5.1 ``oracle_shares_full_set``.
     """
     # A *declaration* beats an inherited default. `ThreeLayerVerifier` sets
     # `full_eval_matches_counts = True` as a statement about how that class is
     # written, and a subclass inherits it -- so the escape hatch the attribute's
     # docstring offers ("simply does not define it") does not exist for a
-    # subclass, and one that set the pre-0.6 `oracle_shares_full_set = False`
+    # subclass, and one that set the pre-0.5.1 `oracle_shares_full_set = False`
     # was ignored. Its independent expensive layer then went uncalled and the
     # gate degraded to the cheap measurement it existed to cross-check, with no
     # warning.

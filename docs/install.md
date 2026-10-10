@@ -2,10 +2,10 @@
 
 ## Packaged offline demo
 
-These instructions target **0.6.0**. Once that version is published:
+These instructions target **0.5.1**. Once that version is published:
 
 ```bash
-pip install "agentdescent>=0.6.0"
+pip install "agentdescent>=0.5.1"
 agentdescent demo
 ```
 
@@ -51,11 +51,11 @@ vLLM server — because [`openai_compatible`](agents.md) speaks HTTP directly.
 ## Source examples
 
 Research examples are kept in the source repository, outside the installed
-wheel. For the published 0.6.0 examples, clone the matching tag and install the
+wheel. For the published 0.5.1 examples, clone the matching tag and install the
 contributor tools:
 
 ```bash
-git clone --branch v0.6.0 https://github.com/Birfy/agentdescent && cd agentdescent
+git clone --branch v0.5.1 https://github.com/Birfy/agentdescent && cd agentdescent
 pip install -e ".[dev]"
 ```
 

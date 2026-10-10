@@ -246,7 +246,7 @@ def test_the_full_set_is_still_what_commits(tmp_path):
     assert round(successes + failures) == len(agg.verifier.held_out)
 
 
-# -- the 0.6 rename: oracle_eval -> full_eval -----------------------------------
+# -- the 0.5.1 rename: oracle_eval -> full_eval -----------------------------------
 #
 # `VerifierProtocol` is structural, so a verifier is whatever a caller hands the
 # engine. Renaming a method it calls therefore breaks other people's code at the
@@ -283,7 +283,7 @@ def test_a_pre_rename_verifier_is_read_with_a_warning_not_an_attribute_error():
             return 0.25
 
     legacy = Legacy()
-    with pytest.warns(DeprecationWarning, match="renamed in 0.6"):
+    with pytest.warns(DeprecationWarning, match="renamed in 0.5.1"):
         assert full_eval_of(legacy)(_Stub()) == 0.25
     assert shares_eval_counts(legacy) is False
 
@@ -316,7 +316,7 @@ def test_a_pre_rename_verifier_still_drives_a_whole_run_through_the_audit_gate()
     Written as a standalone class rather than a proxy on purpose. A proxy with
     `__getattr__` forwards `full_eval_matches_counts` from whatever it wraps, so
     it would take the reuse shortcut and never reach the legacy method -- the
-    test would pass while testing nothing. Somebody's real pre-0.6 verifier is a
+    test would pass while testing nothing. Somebody's real pre-0.5.1 verifier is a
     class like this one.
 
     `blast_radius=0.6` is L1, so `force_oracle` fires on every merge; with

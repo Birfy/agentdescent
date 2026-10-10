@@ -12,7 +12,7 @@ def test_a_subclass_can_declare_its_expensive_layer_independent():
     """`ThreeLayerVerifier` sets `full_eval_matches_counts = True` as a
     statement about how *that* class is written, and a subclass inherits it --
     so the escape hatch the attribute's docstring offers, "simply does not
-    define it", is not available to a subclass. One that set the pre-0.6
+    define it", is not available to a subclass. One that set the pre-0.5.1
     `oracle_shares_full_set = False` was ignored, its independent expensive
     layer went uncalled, and the gate degraded to the cheap measurement it
     existed to cross-check."""

@@ -210,10 +210,10 @@ pip install agentdescent
 
 ## 30-second tour
 
-For 0.6.0, once published:
+For 0.5.1, once published:
 
 ```bash
-pip install "agentdescent>=0.6.0"
+pip install "agentdescent>=0.5.1"
 agentdescent demo                      # complete offline evolution loop
 ```
 

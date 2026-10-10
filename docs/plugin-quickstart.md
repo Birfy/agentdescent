@@ -10,11 +10,11 @@ until step 3.
 
 ## 1. Install
 
-These commands target **0.6.0**. Once published, install the package with its
+These commands target **0.5.1**. Once published, install the package with its
 MCP extra:
 
 ```bash
-pip install "agentdescent[mcp]>=0.6.0"
+pip install "agentdescent[mcp]>=0.5.1"
 ```
 
 Before publication, or if you already have a source checkout:

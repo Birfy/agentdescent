@@ -334,7 +334,7 @@ class VerifierProtocol(Protocol):
     Not three. `docs/verifier.md` said three for a while, and a verifier written
     from that page fails in the middle of a merge rather than at startup.
 
-    ``full_eval`` was ``oracle_eval`` until 0.6. The engine still reads the old
+    ``full_eval`` was ``oracle_eval`` until 0.5.1. The engine still reads the old
     name, once, with a `DeprecationWarning`
     (:func:`~agentdescent.verifier.full_eval_of`), so an implementation written
     against the old page keeps working until 0.7. The rename is a correction:
