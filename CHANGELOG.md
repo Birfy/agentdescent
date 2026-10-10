@@ -49,6 +49,14 @@ All notable changes to AgentDescent are documented here. The format follows
   re-measured under the superseded-then-replaced contract. `Contract.is_compatible_with`
   is now enforced by the ledger for every commit.
 
+  **The atomic adaptation transaction is enforced, not assumed.** A
+  contract-breaking change to an artifact with declared dependents must land
+  *with* the adapted dependent states in the same `commit_atomic` — if none are
+  supplied, the merge is refused (`missing-adapters`) rather than silently
+  committing just the breaking artifact and leaving dependents registered
+  against a superseded contract. The base version vector for an atomic commit
+  now names every state it writes (candidate + adapters).
+
   `EvolveSpec` supports `extra_artifacts` too. `MemoryCache` / `FileCache` gain
   `invalidate(rendered)`. 10 tests in `tests/test_multi_artifact.py`; full suite
   exit 0.

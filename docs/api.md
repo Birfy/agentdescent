@@ -1103,6 +1103,7 @@ The vocabulary of `category`.
 | `ORACLE_REJECTED` | `'oracle-rejected'` |
 | `CAS_CONFLICT` | `'cas-conflict'` |
 | `UNKNOWN_ARTIFACT` | `'unknown-artifact'` |
+| `MISSING_ADAPTERS` | `'missing-adapters'` |
 
 ### `MergeReport(...)`
 

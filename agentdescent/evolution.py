@@ -2352,9 +2352,12 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     # A contract-breaking commit lands atomically (commit_atomic); this is the
     # consumer side -- re-measure the artifacts that depended on the changed
     # contract. Wired here, after the engine exists, so the callback has
-    # somewhere to read the ledger from.
+    # somewhere to read the ledger from. The reverse dependency graph is also
+    # handed to the aggregator so it can refuse a breaking commit that has
+    # declared dependents but no adapted states to land with it.
     try:
         aggregator.on_contract_change = eng.invalidate_dependents
+        aggregator.contract_dependents = contract_dependents
     except AttributeError:      # a custom aggregator without the slot
         pass
     return eng
