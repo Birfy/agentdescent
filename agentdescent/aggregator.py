@@ -347,22 +347,25 @@ def _allocator_context_from(c: "_Candidate", p_improve: Optional[float] = None,
                             stable_distance: float = 0.0):
     """Build an :class:`~agentdescent.allocator.AllocatorContext` from a candidate.
 
-    The signals the allocator learns from are the ones the candidate's cards
-    already carry (``before_after_delta``, advantage, diff size) plus what the
-    merge itself measured (``p_improve``, stable distance). This is the feedback
-    the worker's per-candidate spend decision is paired with: the worker asks
-    "is this worth the self-verify rollout?" using the same context the merge
-    outcome is reported against, so the model learns from the exact features it
-    decided on.
+    The context carries the **pre-spend features** the worker decided on --
+    advantage, diff size, blast radius -- so the model learns from exactly the
+    inputs its decisions were made on. Post-outcome signals (``p_improve``,
+    ``stable_distance``, the measured delta) are kept on the context for the
+    audit trail but never enter :meth:`AllocatorContext.features`.
+
+    **Fused candidates** are attributed to their first card's advantage and the
+    fused diff's size: the fusion is the union of the surviving proposals, and
+    the first is the one the tournament put forward -- the same attribution the
+    acceptance gate uses when it folds `before_after_delta` back into the
+    posterior.
     """
     from .allocator import AllocatorContext
 
     card = c.cards[0] if c.cards else None
-    delta = getattr(card, "before_after_delta", None)
     adv = getattr(card, "advantage", None)
     size = c.diff.size() if c.diff is not None else 0
     return AllocatorContext(
-        before_after_delta=delta,
+        before_after_delta=getattr(card, "before_after_delta", None),
         advantage=adv,
         size=size,
         p_improve=p_improve,
@@ -1326,12 +1329,28 @@ class Aggregator:
                                c.survived, c.discarded, c.conflicts, p_improve,
                                version, reason, category)
 
+        # Report *every* measured decision to the value allocator exactly once:
+        # the label is "was this candidate worth the expensive evaluation it
+        # got?", and it is True only on a commit. Oracle rejection and
+        # acceptance rejection are negative labels too -- without them the model
+        # would learn only from commits and CAS conflicts, so a rejection-only
+        # run never left warm-up and a mixed run never learned which evaluated
+        # proposals fail (PR #204 review).
+        def _observe_outcome(committed: bool) -> None:
+            if self.allocator is not None:
+                observe = getattr(self.allocator, "observe", None)
+                if callable(observe):
+                    observe(_allocator_context_from(
+                        c, p_improve, stable_distance=stable_distance), committed)
+
         rejected = self._audit(c.artifact, c.artifact_id, c.candidate, c.diff,
                                base_full, cand_full, base_score, cand_score, prior)
         if rejected:
+            _observe_outcome(False)
             return report(None, None, "oracle rejected", MergeOutcome.ORACLE_REJECTED)
 
         if not decision.accept:
+            _observe_outcome(False)
             prior.observe_delta(decision.observed_delta)
             return report(None, None, decision.detail,
                           MergeOutcome(decision.category))
@@ -1340,15 +1359,7 @@ class Aggregator:
         new_version = self._commit_with_retry(c.artifact_id, c.candidate, c.diff,
                                               c.head)
         committed = new_version is not None
-        # Report the outcome to the value allocator (if the engine wired one):
-        # "was this candidate worth the expensive evaluation it got?" is the
-        # label the allocator's value model learns from. Built from the cards
-        # the candidate carried, plus what this merge computed.
-        if self.allocator is not None:
-            observe = getattr(self.allocator, "observe", None)
-            if callable(observe):
-                observe(_allocator_context_from(
-                    c, p_improve, stable_distance=stable_distance), committed)
+        _observe_outcome(committed)
         if not committed:
             self.buffer.settle(c.survivor_cards)
             return report(None, None, "CAS conflict", MergeOutcome.CAS_CONFLICT)

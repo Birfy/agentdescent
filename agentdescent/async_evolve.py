@@ -58,19 +58,21 @@ from .pipeline import EarlyStop, FirstError, StallGuard, WorkerHealth, describe
 from .staleness import StaleAction, StalenessPolicy, get_policy
 
 
-def _async_allocator_context(diff, advantage) -> Any:
+def _async_allocator_context(diff, advantage, blast_radius: float = 0.2) -> Any:
     """Build an :class:`~agentdescent.allocator.AllocatorContext` at an async
-    worker -- the decision side of the allocator loop. Same features as the
-    synchronous worker's: the diff's size and the group-relative advantage the
-    proposing rollout already measured. ``before_after_delta`` is ``None`` (the
-    self-verify's product, not yet known); the aggregator reports the real
-    delta against the same column afterwards."""
+    worker -- the decision side of the allocator loop. Same pre-spend features
+    as the synchronous worker's: the diff's size, the group-relative advantage
+    the proposing rollout already measured, and the artifact's blast radius.
+    ``before_after_delta`` / ``p_improve`` / ``stable_distance`` are the
+    post-outcome signals the merge computes later; they stay off the model's
+    feature vector (see :class:`~agentdescent.allocator.AllocatorContext`)."""
     from .allocator import AllocatorContext
 
     return AllocatorContext(
         before_after_delta=None,     # the self-verify's product, not yet known
         advantage=advantage,
         size=diff.size() if diff is not None else 0,
+        blast_radius=blast_radius,
     )
 
 
@@ -708,7 +710,9 @@ def async_evolve(
                             # per-candidate once the budget is tight (see
                             # :mod:`agentdescent.allocator`).
                             if self_verify and governor.candidate_worth(
-                                    _async_allocator_context(diff, adv)):
+                                    _async_allocator_context(
+                                        diff, adv,
+                                        getattr(artifact, "blast_radius", 0.2))):
                                 after = _checked_reward(
                                     eng.reward(task, eng.run(artifact.apply(diff).render(), task)), task)
                                 delta = after - score
