@@ -1273,7 +1273,7 @@ class EvolutionResult:
     forced_refreshes: int = 0
     #: Rollouts that overran their own predicted duration by ``straggler_factor``
     #: (async path, and only when a ``duration_estimator`` was given). The design's
-    #: L-traj signal; detection only, nothing is resumed.
+    #: L-traj signal; ``resumed`` below counts how many of these were re-run.
     stragglers: int = 0
     #: Stragglers that were re-run against a newer head (async path, and only
     #: when both a ``duration_estimator`` and a ``resume_queue`` were given).
@@ -1535,6 +1535,7 @@ class EvolutionResult:
             "retired_workers": self.retired_workers,
             "forced_refreshes": self.forced_refreshes,
             "stragglers": self.stragglers,
+            "resumed": self.resumed,
             "stop_reason": self.stop_reason,
             "ledger_log": list(self.ledger_log),
             "usage": {"calls": self.usage.calls,
@@ -1663,6 +1664,7 @@ class EvolutionResult:
             retired_workers=d.get("retired_workers", 0),
             forced_refreshes=d.get("forced_refreshes", 0),
             stragglers=d.get("stragglers", 0),
+            resumed=d.get("resumed", 0),
             stop_reason=d.get("stop_reason", "rounds"),
             fusion_trials=[FusionTrial(**t) for t in d.get("fusion_trials", [])],
             # Every cost field is `.get` with a default, so a file written before

@@ -309,6 +309,15 @@ def async_evolve(
         the API a real workload uses. Detection only: resuming a partial rollout
         would need it to expose its turns, and ``run(rendered, task) -> output``
         is opaque.
+    resume_queue:
+        Turn a counted straggler into a **re-run**. A shared
+        :class:`~agentdescent.scheduler.ResumeQueue` passed here receives every
+        abandoned rollout's task and the version it measured; the next idle
+        worker whose shard owns that task re-runs it against the **current**
+        head. A straggler measured version N, its re-run measures version N+k,
+        so the pair is a free cross-version A/B signal. ``None`` (the default)
+        keeps the old behaviour exactly: stragglers are counted and dropped.
+        ``result.resumed`` reports the re-runs.
     shutdown_grace:
         Total seconds to wait for the worker and merger threads after the budget
         expires -- shared across all of them, not per thread. An in-flight

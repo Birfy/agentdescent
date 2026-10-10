@@ -295,11 +295,16 @@ mechanism:
   `async_evolve` directly when you want it. The synchronous path bounds a slow
   rollout with `round_timeout=` instead, which abandons the straggler rather than
   measuring it.
-  **The resume half is not implemented** — nothing pops that queue, and the
-  recorded item carries no continuation state, because a resumable rollout would
-  have to expose its turns and `run(rendered, task) -> output` is opaque. The
-  design's "resume on the latest Ledger for a free cross-version A/B signal"
-  therefore remains a design note, not behaviour. Removing the barrier
+  **The resume half is implemented at the task level, not the turn level.** Pass
+  a shared [`ResumeQueue`](duration-scheduling.md) to `async_evolve` as `resume_queue=` and
+  a counted straggler is *recorded* (task + the version it measured) instead of
+  dropped; the next idle worker whose shard owns that task re-runs it against the
+  **latest** head (`result.resumed`). A straggler measured version N, its re-run
+  measures version N+k, so the pair is the design's free cross-version A/B
+  signal — now behaviour, not a note. What is still **not** implemented is
+  turn-level continuation: the recorded item carries no conversation state,
+  because a resumable rollout would have to expose its turns and
+  `run(rendered, task) -> output` is opaque. Removing the barrier
   ([async](evolution.md#the-barrier-free-runtime-async_evolve)) is what keeps one
   slow rollout from setting the pace in practice.
 - **L-task (data layer)** — Zipfian artifact triggering (head skills flooded,

@@ -186,9 +186,13 @@ paying twice.
 !!! note "Not partial-rollout resume"
     Resuming a half-finished rollout would need `run(rendered, task) -> output` to
     become an inspectable conversation, and that opaque contract is what lets any
-    agent be plugged in at all. [`ResumeQueue`](async.md) stays the turn-level
-    primitive it always was, unwired, rather than being repurposed as a
-    task-level channel because it happens to be a queue.
+    agent be plugged in at all. [`ResumeQueue`](async.md) therefore carries the
+    turn-level item shape, but what `async_evolve(resume_queue=...)` actually
+    pushes and pops is **task-level**: the straggler's task id + the version it
+    measured, re-run against the latest head by the next idle worker that owns it
+    (`result.resumed`). That is re-dispatch of a task, not continuation of a
+    conversation — the free cross-version A/B signal, not turn-level
+    checkpointing.
 
 ## The gate has its own concurrency
 
