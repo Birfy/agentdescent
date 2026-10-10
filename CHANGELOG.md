@@ -6,6 +6,13 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Spec and dataset file failures now report a concise `SpecError` instead of a
+  CLI traceback. Invalid JSON names the input file and line/column; JSONL uses
+  the physical file line, including blank lines. Missing or unreadable specs,
+  invalid UTF-8, and non-object spec JSON also produce actionable errors.
+
 ### Added
 
 - **`AggregatorConfig.audit_drain_per_step` — the L-value consumer, the audit
