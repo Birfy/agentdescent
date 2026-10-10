@@ -2938,13 +2938,14 @@ DurationEstimator(
 ) -> None
 ```
 
-### `ResumeQueue(p90_multiplier: float = 2.0) -> None`
+### `ResumeQueue(p90_multiplier: float = 2.0, max_attempts: int = 1) -> None`
 
 Turn-level checkpoints of timed-out rollouts (partial rollout).
 
 | method | what it does |
 |---|---|
 | `pop_for(task_ids: Sequence[str]) -> Optional[ResumeItem]` | Pop the first resume whose task belongs to `task_ids`. |
+| `push(item: ResumeItem) -> bool` | Queue `item`; `False` when this task has been resumed too often. |
 
 ### `TaskCluster(...)`
 

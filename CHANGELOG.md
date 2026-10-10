@@ -38,6 +38,11 @@ All notable changes to AgentDescent are documented here. The format follows
   reports the re-runs. `resume_queue=None` (the default) is the old behaviour
   exactly: stragglers are counted and dropped.
 
+  **Re-queue is bounded** (`ResumeQueue(max_attempts=...)`, default 1): the
+  queue counts how many times each task has been resumed, and `push` refuses a
+  task past the cap — so a chronically slow task gets exactly `max_attempts`
+  re-runs instead of an infinite resume loop starving the worker's fresh tasks.
+
 - **`ReplaySampler` + `ProposalContext.rejected` — make the settled-evidence pool a consumer.** The aggregator's settled pool (stale / oversized / CAS-conflict evidence cards) was diagnostic-only: nothing read it back. Two consumers now close that loop.
 
   **`ReplaySampler`** (``agentdescent/sampling.py``) is a ``TaskSampler`` that up-weights tasks whose recent proposals were discarded — a signal that is different from pass rate (a task whose proposals keep going stale is not "easy", it is being out-competed by the parallel scheduler). Additive replay bonus, saturating at ``capped_at`` (default 10), scaled by ``temperature`` (default 0.0 = ``DifficultyWeighted`` identically). Wired via ``aggregator.set_settled_consumer(sampler.settle)`` on both the sync and async paths.

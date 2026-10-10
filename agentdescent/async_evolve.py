@@ -797,6 +797,10 @@ def async_evolve(
                     with counter_lock:
                         stragglers[0] += 1
                     if resume_queue is not None:
+                        # `push` refuses a task that has already been resumed
+                        # `max_attempts` times (the queue counts pops), so a
+                        # chronically slow task is dropped rather than re-
+                        # dispatching forever and starving fresh work.
                         resume_queue.push(ResumeItem(
                             task_id=task.id, turn=0, conversation=[],
                             version_at_checkpoint={eng.artifact_id: base_v}))
