@@ -343,9 +343,43 @@ def run_round(
         proposed = []
         proposal_error = "{}: {}".format(type(exc).__name__, str(exc))
 
+    # Copy every proposed artifact before invoking any candidate-specific
+    # callback. Callbacks can close over the proposal objects and otherwise
+    # mutate a later candidate before its turn in the loop.
+    candidate_inputs: List[Tuple[Any, Optional[str]]] = []
+    for raw in proposed:
+        if not isinstance(raw, HarnessCandidate):
+            candidate_inputs.append((raw, None))
+            continue
+        try:
+            files = _freeze_files(raw.files)
+            if isinstance(raw.components, str):
+                raise TypeError("candidate components must be a sequence of strings")
+            candidate_components = tuple(raw.components)
+            if any(
+                not isinstance(component, str) for component in candidate_components
+            ):
+                raise TypeError("candidate components must be strings")
+            candidate_inputs.append(
+                (
+                    HarnessCandidate(
+                        raw.variant,
+                        raw.base_version,
+                        raw.base_sha256,
+                        files,
+                        candidate_components,
+                    ),
+                    None,
+                )
+            )
+        except Exception as exc:
+            candidate_inputs.append(
+                (raw, "{}: {}".format(type(exc).__name__, str(exc)))
+            )
+
     names = [
         c.variant
-        for c in proposed
+        for c, _snapshot_error in candidate_inputs
         if isinstance(c, HarnessCandidate) and isinstance(c.variant, str)
     ]
     duplicate_names = {name for name, count in Counter(names).items() if count > 1}
@@ -353,7 +387,7 @@ def run_round(
     candidate_records: List[CandidateRecord] = []
     candidate_objects: Dict[str, HarnessCandidate] = {}
 
-    for index, raw in enumerate(proposed):
+    for index, (raw, snapshot_error) in enumerate(candidate_inputs):
         if not isinstance(raw, HarnessCandidate):
             name = "<invalid-{}>".format(index)
             candidate_records.append(
@@ -386,23 +420,17 @@ def run_round(
         elif raw.base_sha256 != base_sha:
             reason = "candidate was derived from a different base digest"
 
-        try:
-            files = _freeze_files(raw.files)
-            if isinstance(raw.components, str):
-                raise TypeError("candidate components must be a sequence of strings")
-            proposed_components = tuple(raw.components)
-            if any(not isinstance(c, str) for c in proposed_components):
-                raise TypeError("candidate components must be strings")
-            components = proposed_components
-            candidate = HarnessCandidate(
-                variant, raw.base_version, raw.base_sha256, files, components
-            )
-            artifact_sha = _digest(files)
-        except Exception as exc:
+        if snapshot_error is not None:
             candidate = raw
             artifact_sha = None
             if not reason:
-                reason = "{}: {}".format(type(exc).__name__, str(exc))
+                reason = snapshot_error
+        else:
+            # These values were copied for the entire proposal set before any
+            # screening or evaluation callback ran.
+            candidate = raw
+            components = raw.components
+            artifact_sha = _digest(raw.files)
 
         safe_variant = (
             variant
@@ -479,16 +507,17 @@ def run_round(
             )
         )
 
-    guard_errors: Dict[str, str] = {}
+    guard_errors: Dict[int, str] = {}
 
     def checked_guard(
         base: Measurement, measurement: Optional[Measurement]
     ) -> Sequence[str]:
         if guard_fn is None:
             return ()
-        # select_round calls this in candidate order. Candidate variants are
-        # unique by construction, so they identify any callback failure.
-        current = guard_candidate_names[guard_call_index[0]]
+        # select_round only calls the guard for eligible candidates, in order.
+        # Track the record position, not the user-controlled variant string:
+        # malformed proposals can share their synthetic label with a valid one.
+        current = guard_candidate_indices[guard_call_index[0]]
         guard_call_index[0] += 1
         try:
             result = guard_fn(base, measurement)
@@ -503,9 +532,9 @@ def run_round(
             guard_errors[current] = message
             return ("guard callback error",)
 
-    guard_candidate_names = [
-        candidate.variant
-        for candidate in candidates_for_selection
+    guard_candidate_indices = [
+        index
+        for index, candidate in enumerate(candidates_for_selection)
         if not candidate.gate_failure and _valid_measurement(candidate.measurement)
     ]
     guard_call_index = [0]
@@ -519,8 +548,8 @@ def run_round(
         guard_fn=checked_guard if guard_fn is not None else None,
     )
     updated_records: List[CandidateRecord] = []
-    for result, decision in zip(candidate_records, decisions):
-        guard_error = guard_errors.get(result.variant)
+    for index, (result, decision) in enumerate(zip(candidate_records, decisions)):
+        guard_error = guard_errors.get(index)
         outcome = "guard_error" if guard_error else result.outcome
         reason = guard_error if guard_error else result.reason
         # Selection only updates the candidate's result; pre-evaluation outcomes

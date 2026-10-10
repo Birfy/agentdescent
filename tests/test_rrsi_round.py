@@ -116,6 +116,48 @@ def test_proposal_and_survivors_share_one_immutable_base_snapshot():
     )
 
 
+@pytest.mark.parametrize("mutation_stage", ["screen", "evaluate"])
+def test_all_candidate_artifacts_are_snapshotted_before_callbacks(mutation_stage):
+    files_b = {"x": "original B"}
+    components_b = ["skill"]
+
+    def propose(base):
+        return [
+            HarnessCandidate("a", base.version, base.sha256, {"x": "A"}, ("skill",)),
+            HarnessCandidate("b", base.version, base.sha256, files_b, components_b),
+        ]
+
+    def mutate_b():
+        files_b["x"] = "mutated by callback A"
+        components_b.append("memory")
+
+    def screen(item):
+        if item.variant == "a" and mutation_stage == "screen":
+            mutate_b()
+        if item.variant == "b":
+            assert dict(item.files) == {"x": "original B"}
+            assert item.components == ("skill",)
+        return ScreeningResult(True)
+
+    def evaluate(item):
+        if item.variant == "a" and mutation_stage == "evaluate":
+            mutate_b()
+        if item.variant == "b":
+            assert dict(item.files) == {"x": "original B"}
+            assert item.components == ("skill",)
+        return Measurement(0.8, 100.0)
+
+    result = invoke(propose, screen, evaluate)
+
+    candidate_b = next(c for c in result.record.candidates if c.variant == "b")
+    expected_sha = hashlib.sha256(
+        json.dumps({"x": "original B"}, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    assert candidate_b.outcome == "evaluated"
+    assert candidate_b.components == ("skill",)
+    assert candidate_b.artifact_sha256 == expected_sha
+
+
 def test_screen_and_evaluator_errors_have_explicit_outcomes_and_no_fake_scores():
     def propose(_base):
         return [
@@ -199,6 +241,37 @@ def test_guard_callback_error_is_recorded_and_does_not_abort_other_candidates():
     assert not first.admissible
     assert second.outcome == "evaluated" and second.admissible
     assert result.winner is not None and result.winner.variant == "good"
+
+
+def test_guard_error_does_not_relabel_invalid_proposal_with_colliding_name():
+    def propose(base):
+        return [
+            object(),
+            HarnessCandidate(
+                "<invalid-0>",
+                base.version,
+                base.sha256,
+                {"README.md": "valid artifact"},
+                ("skill",),
+            ),
+        ]
+
+    def guard(_incumbent, _measurement):
+        raise RuntimeError("guard failure")
+
+    result = invoke(
+        propose,
+        lambda _item: ScreeningResult(True),
+        lambda _item: Measurement(0.9, 90.0),
+        guard_fn=guard,
+    )
+
+    malformed, guarded = result.record.candidates
+    assert malformed.variant == guarded.variant == "<invalid-0>"
+    assert malformed.outcome == "proposal_error"
+    assert "non-HarnessCandidate" in malformed.reason
+    assert guarded.outcome == "guard_error"
+    assert guarded.reason == "RuntimeError: guard failure"
 
 
 def test_round_record_roundtrips_through_json():
