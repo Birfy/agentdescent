@@ -58,6 +58,24 @@ from .pipeline import EarlyStop, FirstError, StallGuard, WorkerHealth, describe
 from .staleness import StaleAction, StalenessPolicy, get_policy
 
 
+def _async_allocator_context(diff, advantage, blast_radius: float = 0.2) -> Any:
+    """Build an :class:`~agentdescent.allocator.AllocatorContext` at an async
+    worker -- the decision side of the allocator loop. Same pre-spend features
+    as the synchronous worker's: the diff's size, the group-relative advantage
+    the proposing rollout already measured, and the artifact's blast radius.
+    ``before_after_delta`` / ``p_improve`` / ``stable_distance`` are the
+    post-outcome signals the merge computes later; they stay off the model's
+    feature vector (see :class:`~agentdescent.allocator.AllocatorContext`)."""
+    from .allocator import AllocatorContext
+
+    return AllocatorContext(
+        before_after_delta=None,     # the self-verify's product, not yet known
+        advantage=advantage,
+        size=diff.size() if diff is not None else 0,
+        blast_radius=blast_radius,
+    )
+
+
 def async_evolve(
     tasks,
     reward: Reward,
@@ -117,6 +135,13 @@ def async_evolve(
     #: known, because an opaque `run` cannot report tokens.
     usage: Optional[Usage] = None,
     policies: Optional["Policies"] = None,
+    #: Optional value allocator (see :mod:`agentdescent.allocator`). Pass one
+    #: and, once the token budget is tight, the self-verify rollout is spent
+    #: only on candidates the allocator's value model expects to commit; the
+    #: merge path reports every outcome back so the model learns. ``None`` (the
+    #: default) is the old behaviour exactly -- optional spend degrades against
+    #: the global floors, every candidate treated alike.
+    allocator: Optional[Any] = None,
 ) -> EvolutionResult:
     """Evolve an artifact **without a round barrier**.
 
@@ -338,6 +363,14 @@ def async_evolve(
         acceptance rule and sees a finished run would reasonably conclude it ran.
         New capabilities go here rather than adding another parameter to a
         function that already has thirty-five.
+    allocator:
+        Exactly as in :func:`~agentdescent.evolution.evolve`: value-directed
+        budget allocation (see :mod:`agentdescent.allocator`). ``None`` (the
+        default) is the old behaviour exactly. Pass a value allocator and, once
+        the token budget is tight, the self-verify rollout is spent only on
+        candidates the allocator expects to commit; the merger reports every
+        outcome back so it learns. Requires ``max_tokens``. Counterfactual
+        exploration corrects a biased value model rather than reinforcing it.
 
     Returns
     -------
@@ -382,7 +415,8 @@ def async_evolve(
         cheap_eval_tasks=cheap_eval_tasks, fusion_tournament=fusion_tournament,
         shuffle=shuffle, seed=seed,
         usage=usage, verifier=_pol.verifier, ledger_impl=_pol.ledger,
-        policies_bundle=_pol, checkpointing=checkpointing)
+        policies_bundle=_pol, checkpointing=checkpointing,
+        allocator=allocator)
     eng.meter.start()
     # The cost-aware governor for the async path. The merger loop has no round
     # barrier, so the governor checks per sweep (after each merge, before the
@@ -393,7 +427,8 @@ def async_evolve(
     # eng alongside it.
     governor = BudgetGovernor(max_tokens=max_tokens,
                               stop_on_diminishing=stop_on_diminishing_returns,
-                              efficiency_floor=efficiency_floor)
+                              efficiency_floor=efficiency_floor,
+                              allocator=allocator)
     eng.governor = governor
     if n_workers < 1:
         raise ValueError(f"n_workers must be >= 1, got {n_workers}")
@@ -671,7 +706,13 @@ def async_evolve(
                             # diff applied for a before/after signal. Faithful repos that
                             # only score the candidate on held-out (e.g. EvoSkill) pass
                             # self_verify=False to skip this extra rollout.
-                            if self_verify and governor.allow_self_verify():
+                            # With an allocator installed the decision becomes
+                            # per-candidate once the budget is tight (see
+                            # :mod:`agentdescent.allocator`).
+                            if self_verify and governor.candidate_worth(
+                                    _async_allocator_context(
+                                        diff, adv,
+                                        getattr(artifact, "blast_radius", 0.2))):
                                 after = _checked_reward(
                                     eng.reward(task, eng.run(artifact.apply(diff).render(), task)), task)
                                 delta = after - score

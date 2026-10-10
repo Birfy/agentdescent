@@ -96,6 +96,7 @@ and *how*, that is *what*.
 | `policies` | the contracts: which decisions are replaceable, and what each is given | [Choosing policies](policies.md) |
 | `baselines` | equal-budget baselines the results pages compare against | [Measured results](results.md) |
 | `metrics` | what the run cost: time, calls, staleness ratio, cache hits, sandbox waits | [Usage](usage.md#what-a-run-cost) |
+| `budget` | value-directed allocation: learn which candidate is worth the expensive evaluation, with counterfactual exploration | [Budget allocation](budget.md) |
 | `bench` | the configuration matrix and the rules that make comparing them mean something | [Efficiency](efficiency.md#the-configuration-matrix-bench) |
 
 ## Reading order
