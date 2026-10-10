@@ -7,8 +7,8 @@ import asyncio
 import importlib.metadata
 import json
 import os
+import re
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -63,7 +63,8 @@ def main() -> None:
         assert installed_skill.read_text(encoding="utf-8") == skill_text(), (
             "installed wheel did not provide the shared SKILL.md resource"
         )
-        assert installed_hooks.read_text(encoding="utf-8") == hooks_text(), (
+        launcher = [os.path.abspath(sys.executable), "-m", "agentdescent.cli"]
+        assert installed_hooks.read_text(encoding="utf-8") == hooks_text(launcher), (
             "installed wheel did not provide the hooks.json resource"
         )
         assert "SessionStart" in json.loads(hooks_text())["hooks"], (
@@ -74,6 +75,56 @@ def main() -> None:
         for name in ("PYTHONPATH", "PYTHONHOME"):
             env.pop(name, None)
         env["AGENTDESCENT_HOME"] = str(workdir / "home")
+        env["HOME"] = str(host_home)
+        env["USERPROFILE"] = str(host_home)
+        env["CODEX_HOME"] = str(host_home / ".codex")
+        env["DSH_HOME"] = str(host_home / ".dsh")
+        env["XDG_CONFIG_HOME"] = str(host_home / ".config")
+        # Model a host started after the installer exits: no pip scripts on
+        # PATH, no source checkout, and no ambient Python import overrides.
+        host_env = dict(env, PATH=str(workdir / "empty-path"))
+        (workdir / "empty-path").mkdir()
+        manifests = {}
+        for host in ("claude-code", "codex", "dsh", "opencode"):
+            configured = subprocess.run(
+                [*launcher, "install", host, "--home", str(host_home)],
+                cwd=workdir, env=host_env,
+                text=True, capture_output=True, timeout=30,
+            )
+            assert configured.returncode == 0, configured.stdout + configured.stderr
+        manifests["claude-code"] = json.loads(
+            (plugin / ".mcp.json").read_text())["mcpServers"]["agentdescent"]
+        oc = json.loads((host_home / ".config/opencode/opencode.jsonc").read_text())
+        argv = oc["mcp"]["agentdescent"]["command"]
+        manifests["opencode"] = {"command": argv[0], "args": argv[1:]}
+        # These fields are JSON-quoted strings/arrays in our generated TOML
+        # and YAML. Parse without adding dependencies to the wheel smoke gate.
+        for host, path, separator in (
+            ("codex", host_home / ".codex/config.toml", "="),
+            ("dsh", host_home / ".dsh/cordis.patch.yml", ":"),
+        ):
+            text = path.read_text()
+            manifests[host] = {
+                field: json.loads(re.search(
+                    rf"^\s*{field}\s*{separator}\s*(.+)$", text, re.M).group(1))
+                for field in ("command", "args")
+            }
+        for host, manifest in manifests.items():
+            assert [manifest["command"], *manifest["args"]] == [*launcher, "mcp"]
+            launched = subprocess.run(
+                [manifest["command"], *manifest["args"][:-1], "--help"],
+                cwd=workdir, env=host_env, text=True, capture_output=True, timeout=30,
+            )
+            assert launched.returncode == 0, (host, launched.stdout, launched.stderr)
+        if os.name != "nt":
+            for path in (installed_hooks, host_home / ".dsh/skills/agentdescent/hooks.json"):
+                hook = json.loads(path.read_text())["hooks"]["SessionStart"][0]["hooks"][0]
+                # Drop the intentional best-effort shell suffix so a missing
+                # executable cannot be hidden by `|| true` in this regression.
+                command = hook["command"].removesuffix(" 2>/dev/null || true")
+                status = subprocess.run(command, shell=True, cwd=workdir, env=host_env,
+                                        text=True, capture_output=True, timeout=30)
+                assert status.returncode == 0, status.stdout + status.stderr
 
         policy_init = subprocess.run(
             ["agentdescent", "init", "selection", "--kind", "policy_slot"],
@@ -118,13 +169,11 @@ def main() -> None:
             from mcp import ClientSession, StdioServerParameters
             from mcp.client.stdio import stdio_client
 
-            async def check_server() -> None:
-                command = shutil.which("agentdescent")
-                assert command, "installed agentdescent console script is missing"
+            async def check_server(manifest) -> None:
                 params = StdioServerParameters(
-                    command=command,
-                    args=["mcp"],
-                    env=env,
+                    command=manifest["command"],
+                    args=manifest["args"],
+                    env=host_env,
                 )
                 async with stdio_client(params) as (reader, writer):
                     async with ClientSession(reader, writer) as session:
@@ -138,7 +187,8 @@ def main() -> None:
                             f"MCP doctor failed: {result}"
                         )
 
-            asyncio.run(run_mcp_check(check_server))
+            for manifest in manifests.values():
+                asyncio.run(run_mcp_check(lambda: check_server(manifest)))
 
 
 if __name__ == "__main__":
