@@ -984,7 +984,8 @@ EvidenceCard(
     trajectory_refs: List[Any] = <factory>,
     advantage: Optional[float] = None,
     cost_tokens: int = 0,
-    cost_wallclock: float = 0.0
+    cost_wallclock: float = 0.0,
+    branch: Optional[str] = None
 ) -> None
 ```
 
@@ -1039,11 +1040,12 @@ Aggregator(
 | `checkpoint() -> Optional[dict]` | Serialise the search state the ledger does not persist. |
 | `finalize() -> None` | Publish the current dev head to stable at the end of a clean run. |
 | `finish_step(items: List[Union['_Candidate', MergeReport]]) -> List[MergeReport]` | Phase 3: decide the measured candidates, then age and promote. |
+| `head_for_worker(worker_id: int = 0) -> str` | The ledger branch a worker should snapshot and propose against. |
 | `measure(items: List[Union['_Candidate', MergeReport]]) -> List[Union['_Candidate', MergeReport]]` | Phase 2 for a batch from `begin_step`. **Off-thread safe.** |
 | `recent_settled(task: Any, n: int = 3) -> List[EvidenceCard]` | The most recent N settled cards whose trajectory_refs mention task. |
 | `restore(state: dict) -> None` | Restore state written by `checkpoint`. |
 | `set_settled_consumer(consumer: Optional[Callable[[EvidenceCard], None]]) -> None` | Subscribe a consumer to the settled-evidence pool. |
-| `step() -> List[MergeReport]` | Fire every artifact bucket that is ready and return per-artifact reports. |
+| `step(n_workers: int = 1) -> List[MergeReport]` | Fire every artifact bucket that is ready and return per-artifact reports. |
 
 ### `AggregatorConfig(...)`
 
@@ -1078,10 +1080,12 @@ The contract a custom aggregator must satisfy to plug into `evolve`.
 
 ### `EvidenceBuffer() -> None`
 
-Cards bucketed by target artifact (design doc, section 4.1).
+Cards bucketed by (target artifact, branch) (design doc, section 4.1).
 
 | method | what it does |
 |---|---|
+| `drain(aid: str) -> Dict[str, List[EvidenceCard]]` | Pop every bucket for `aid`, grouped by branch (`""` = dev). |
+| `ready(config: AggregatorConfig) -> List[str]` | Artifact ids with a ready bucket. Each id is listed once, whatever branches it has: the caller drains all of them and merges per branch. |
 | `recent_settled(task: Any, n: int = 3) -> List[EvidenceCard]` | The most recent N settled cards whose `trajectory_refs` mention `task`. |
 | `set_settled_consumer(consumer: Optional[Callable[[EvidenceCard], None]]) -> None` | Subscribe a consumer to every card that is settled. |
 | `settle(cards: List[EvidenceCard]) -> None` | Keep discarded-diff evidence addressable, under a hard bound. |
@@ -1166,6 +1170,9 @@ Ledger(
 | `close() -> None` | Refuse further use of this ledger. Idempotent. |
 | `commit(...)` | Compare-and-swap commit of a single artifact. |
 | `commit_atomic(...)` | Two-phase, all-or-nothing commit of several artifacts. |
+| `discard_head(name: str) -> None` | Delete a forked head branch. |
+| `fork(name: str, from_branch: str = 'dev') -> str` | Create or reset `name` to hold `from_branch`'s current state. |
+| `live_heads() -> List[str]` | Every live head branch: `dev` first, then the `head/` forks. |
 | `promote_to_stable(artifact_id: str) -> Optional[int]` | EMA-style confirmation: copy dev's current artifact onto stable. |
 | `register(artifact: Evolvable, branch: str = 'dev') -> None` | Add a brand-new artifact at version 1 on both branches. |
 | `snapshot(branch: str = 'dev') -> Snapshot` | Materialize every artifact on `branch` into live Evolvables. |
@@ -2794,8 +2801,9 @@ PopulationAggregator(
 |---|---|
 | `checkpoint() -> Optional[dict]` | Serialise the archive and the selection counter. |
 | `finalize() -> None` | Leave the best-scoring candidate on the head, then promote. |
+| `head_for_worker(worker_id: int = 0) -> str` | The branch a worker should snapshot. |
 | `restore(state: dict) -> None` | Restore the archive written by `checkpoint`. |
-| `step() -> List[MergeReport]` | Fire every artifact bucket that is ready and return per-artifact reports. |
+| `step(n_workers: int = 1) -> List[MergeReport]` | Fire every artifact bucket that is ready and return per-artifact reports. |
 
 ### `population_factory(...)`
 

@@ -163,6 +163,9 @@ class EvidenceCard:
     advantage: Optional[float] = None
     cost_tokens: int = 0
     cost_wallclock: float = 0.0
+    #: The ledger branch this diff was proposed against. ``None`` means ``dev``.
+    #: A multi-head run sets this so the aggregator commits back to the same branch.
+    branch: Optional[str] = None
 
     def rebased_onto(self, head: VersionVector) -> "EvidenceCard":
         """Return a copy whose base is advanced to ``head`` for touched keys.

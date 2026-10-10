@@ -976,6 +976,35 @@ def _replay_stats(sampler) -> Optional[Dict[str, Any]]:
     }
 
 
+def _head_for_worker(aggregator: Any, worker_id: int) -> str:
+    """The branch a worker should snapshot, if the aggregator has one.
+
+    ``head_for_worker`` is a multi-head extension. An existing custom
+    aggregator (e.g. ``PromptBreederPopulation``) predates it and has no such
+    method -- for those, every worker starts from ``dev``, which is the
+    behaviour every single-head run has always had."""
+    from .ledger import Ledger
+    fn = getattr(aggregator, "head_for_worker", None)
+    if fn is None:
+        return Ledger.DEV
+    return fn(worker_id)
+
+
+def _step(aggregator: Any, n_workers: int):
+    """Run one merge, passing the worker count only to aggregators that want it.
+
+    ``step(n_workers)`` is a multi-head extension. An existing custom
+    aggregator may implement the published zero-argument ``step()``; passing an
+    argument it does not accept raises ``TypeError`` mid-run. Inspect the
+    signature once and honour whichever shape it has."""
+    import inspect
+    try:
+        accepts_n = "n_workers" in inspect.signature(aggregator.step).parameters
+    except (TypeError, ValueError):      # a builtin or unreadable signature
+        accepts_n = False
+    return aggregator.step(n_workers) if accepts_n else aggregator.step()
+
+
 def _cost_fields(meter: Meter) -> Dict[str, Any]:
     """The meter's counters, keyed as :class:`EvolutionResult` fields.
 
@@ -2989,13 +3018,21 @@ def evolve(
             a worker either adopts the snapshot this round already took, or keeps
             the older one it has.
             """
+            branch = _head_for_worker(aggregator, worker)
+            if branch != Ledger.DEV:
+                fork_snap = ledger.snapshot(branch)
+                fork_art = fork_snap.get(artifact_id)
+                if fork_art is not None:
+                    fork_v = fork_snap.version.get(artifact_id, 0)
+                    return fork_art, fork_v, branch
             if refresh_interval <= 1:
-                return artifact, base_v
+                return artifact, base_v, Ledger.DEV
             with snap_lock:
                 due = (r % refresh_interval) == (stable_hash(worker) % refresh_interval)
                 if worker not in worker_snaps or due:
                     worker_snaps[worker] = (artifact, base_v)
-                return worker_snaps[worker]
+                art, ver = worker_snaps[worker]
+                return art, ver, Ledger.DEV
 
         def _run_unit(unit) -> None:
             """One worker: rollout -> propose -> ingest evidence (against `snap`).
@@ -3026,7 +3063,7 @@ def evolve(
                 return
             # This worker's own view of the artifact. Identical to the round's
             # under the default `refresh_interval=1`; older, by design, above it.
-            mine, mine_v = _snapshot_for(unit.worker)
+            mine, mine_v, mine_branch = _snapshot_for(unit.worker)
             task = by_id[sampler.pick(unit.keys, r)]     # a task from this worker's shard
             # The rollout is the part that can move elsewhere. Everything around
             # it -- which task, what the output implies, who is told about it --
@@ -3106,6 +3143,7 @@ def evolve(
             aggregator.ingest(EvidenceCard(
                 diff=diff, base_version={artifact_id: mine_v}, touched=[artifact_id],
                 before_after_delta=delta, trajectory_refs=[task],
+                branch=mine_branch,
                 # Recorded always, acted on by nobody unless a policy from
                 # `agentdescent.advantage` is installed. It is arithmetic over
                 # two numbers the round already has, and a signal that is only
@@ -3181,7 +3219,7 @@ def evolve(
             # needs no `worker_starved_seconds` of its own: here it would be
             # `merge_seconds x n_workers` by construction.
             with eng.meter.timed("merge_seconds"), eng.meter.timed("merge_gate_seconds"):
-                reports = check_reports(aggregator.step(), aggregator)
+                reports = check_reports(_step(aggregator, n_workers), aggregator)
         except ContractError:
             raise            # a caller-contract violation: the run is meaningless
         except Exception as e:  # noqa: BLE001 - a rollout backend failure (e.g. an

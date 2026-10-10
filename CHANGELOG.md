@@ -4333,3 +4333,19 @@ First public release on PyPI as **`agentdescent`**.
 [0.3.0]: https://github.com/Birfy/agentdescent/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Birfy/agentdescent/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Birfy/agentdescent/releases/tag/v0.1.0
+
+- **`Ledger.fork` / `live_heads` / `discard_head` — multiple live heads (#75).**
+  The ledger held one `dev` branch; `PopulationAggregator` serialised candidates
+  by rewriting it, so no two workers could expand different candidates at once.
+  `fork("head/0")` creates an independent branch with its own version vector;
+  `live_heads()` lists `dev` plus all `head/` forks; `discard_head` cleans up.
+  `Candidate.branch` and `EvidenceCard.branch` carry the fork name.
+  `PopulationAggregator.step(n_workers)` forks a `head/<slot>` per selected
+  candidate and `head_for_worker(wid)` distributes workers across them.
+  `_commit_with_retry` commits to `EvidenceCard.branch`; the sync and async
+  worker loops snapshot from `head_for_worker` instead of hardcoded `dev`.
+  `_decide` passes the candidate's own branch through to the commit (and the
+  CAS-rebase path rebases against that branch, not `dev`), so a fork candidate
+  updates only its fork. `finalize` discards all forks and commits the best
+  candidate to `dev`.
+  Default: `SingleHead` + no forks = old behaviour exactly. 12 tests.
