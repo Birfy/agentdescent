@@ -94,3 +94,18 @@ body:not(:has(.experience)) ::selection{background:var(--ad-accent);color:var(--
 @media(max-width:1220px){body:not(:has(.experience)) .md-content__inner{padding-left:1.55rem;padding-right:1.55rem}}
 @media(max-width:960px){body:not(:has(.experience)) .md-sidebar--primary .md-sidebar__inner,body:not(:has(.experience)) .md-sidebar--secondary .md-sidebar__inner{border:0;min-height:0}body:not(:has(.experience)) .md-content__inner{padding-top:2rem}}
 @media(max-width:760px){body:not(:has(.experience)) .md-header__source{display:none}body:not(:has(.experience)) .md-content__inner{padding:1.7rem 1.1rem 3.5rem}body:not(:has(.experience)) .md-typeset>h1:first-of-type{font-size:2.45rem}body:not(:has(.experience)) .md-typeset>h2{font-size:1.45rem}body:not(:has(.experience)) .md-typeset{font-size:.72rem}}
+body:not(:has(.experience)) .md-header__title{flex:0 1 auto;min-width:0}
+body:not(:has(.experience)) .ad-header-links{display:flex;align-items:center;gap:1.15rem;margin-left:auto;white-space:nowrap;font:650 .64rem Inter,ui-sans-serif,system-ui,sans-serif}
+body:not(:has(.experience)) .ad-header-links a{color:var(--ad-muted);text-decoration:none}
+body:not(:has(.experience)) .ad-header-links a:hover,body:not(:has(.experience)) .ad-header-links .ad-header-active{color:var(--ad-ink)}
+body:not(:has(.experience)) .ad-header-links .ad-header-active{border-bottom:2px solid #8aaa4c;padding-bottom:4px}
+body:not(:has(.experience)) .ad-doc-paths{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.6rem;margin:1.7rem 0 2.5rem}
+body:not(:has(.experience)) .ad-doc-paths a{display:flex;flex-direction:column;gap:.55rem;min-height:10.5rem;background:var(--ad-paper);border:1px solid var(--ad-line);border-radius:5px;padding:1.2rem;text-decoration:none;color:var(--ad-ink)}
+body:not(:has(.experience)) .ad-doc-paths a:hover{border-color:#8aaa4c;background:var(--ad-soft)}
+body:not(:has(.experience)) .ad-doc-paths span{font:700 .55rem ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.08em;color:#73953e}
+body:not(:has(.experience)) .ad-doc-paths strong{font-size:1rem;letter-spacing:-.03em}
+body:not(:has(.experience)) .ad-doc-paths small{font-size:.65rem;line-height:1.6;color:var(--ad-muted)}
+body:not(:has(.experience)) .ad-doc-paths b{margin-top:auto;padding-top:.5rem;font-size:.62rem}
+@media(max-width:1150px){body:not(:has(.experience)) .md-header__source{display:none}}
+@media(max-width:900px){body:not(:has(.experience)) .ad-header-links{display:none}}
+@media(max-width:640px){body:not(:has(.experience)) .ad-doc-paths{grid-template-columns:1fr}body:not(:has(.experience)) .ad-doc-paths a{min-height:0}}
