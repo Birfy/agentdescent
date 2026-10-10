@@ -24,6 +24,8 @@ plugins:
 
 theme:
   name: material
+  logo: assets/mark.svg
+  font: false
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -137,6 +139,7 @@ nav:
 
 markdown_extensions:
   - admonition
+  - meta
   - attr_list
   - md_in_html
   - tables
@@ -156,6 +159,7 @@ markdown_extensions:
 extra_css:
   - assets/experience.css
   - assets/quickstart.css
+  - assets/docs-theme.css
 extra_javascript:
   - assets/experience.js
 
