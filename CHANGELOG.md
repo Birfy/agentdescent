@@ -30,6 +30,26 @@ All notable changes to AgentDescent are documented here. The format follows
   `collect` flag is forced on when `audit_drain_per_step > 0`. `EvolutionResult.
   audit_drained` reports how many ran. Default `0` = the old behaviour exactly.
 
+- **`async_evolve(resume_queue=...)` — the L-traj resume half, the straggler
+  re-run.** The async runtime abandons a rollout that overruns its predicted
+  cost and counts it (`result.stragglers`). With a shared
+  :class:`~agentdescent.scheduler.ResumeQueue` passed in, it now *records* the
+  abandoned task and the version it measured instead of dropping it; the next
+  idle worker whose shard owns that task re-runs it against the **current**
+  head. A straggler measured version N, its re-run measures version N+k, so the
+  pair is a free cross-version A/B signal — the design's L-traj note made
+  behaviour.
+
+  `ResumeQueue.pop_for(task_ids)` hands a queued resume only to a worker whose
+  shard owns the task, so no two workers re-run the same one. `result.resumed`
+  reports the re-runs. `resume_queue=None` (the default) is the old behaviour
+  exactly: stragglers are counted and dropped.
+
+  **Re-queue is bounded** (`ResumeQueue(max_attempts=...)`, default 1): the
+  queue counts how many times each task has been resumed, and `push` refuses a
+  task past the cap — so a chronically slow task gets exactly `max_attempts`
+  re-runs instead of an infinite resume loop starving the worker's fresh tasks.
+
 - **`ReplaySampler` + `ProposalContext.rejected` — make the settled-evidence pool a consumer.** The aggregator's settled pool (stale / oversized / CAS-conflict evidence cards) was diagnostic-only: nothing read it back. Two consumers now close that loop.
 
   **`ReplaySampler`** (``agentdescent/sampling.py``) is a ``TaskSampler`` that up-weights tasks whose recent proposals were discarded — a signal that is different from pass rate (a task whose proposals keep going stale is not "easy", it is being out-competed by the parallel scheduler). Additive replay bonus, saturating at ``capped_at`` (default 10), scaled by ``temperature`` (default 0.0 = ``DifficultyWeighted`` identically). Wired via ``aggregator.set_settled_consumer(sampler.settle)`` on both the sync and async paths.

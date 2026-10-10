@@ -132,7 +132,7 @@ class at a time. They are all in one table instead:
 |---|---|---|
 | [`Ledger.commit_atomic`](ledger.md) | 2PC across several artifacts, for a contract-breaking diff that must land with its adapters | a multi-artifact library; `evolve()` registers exactly one |
 | [`L1SerialGate`](governance.md) | "at most one L1 diff in evaluation anywhere" | concurrent merging; every shipped runtime merges on one thread, so the guarantee already holds by construction |
-| [`ResumeQueue`](duration-scheduling.md) | turn-level checkpoints of a timed-out rollout | a rollout that exposes its turns; `run(rendered, task) -> output` is opaque, which is what lets any agent be plugged in |
+| [`ResumeQueue`](duration-scheduling.md) | turn-level checkpoints of a timed-out rollout | task-level re-run: `async_evolve(resume_queue=...)` pushes a straggler's task + version and the next idle worker re-runs it against the latest head (`result.resumed`). Turn-level continuation still needs `run(rendered, task) -> output` to expose its turns |
 | [`AuditScheduler.pop`](duration-scheduling.md) | draining the Ĝ-ordered audit queue out of band | `AuditScheduler(collect=True)`; the default computes priorities without queuing, because nothing drains it |
 | [`EvidenceBuffer.settled`](aggregator.md) | discarded evidence stays addressable — the structural advantage of artifacts over gradients | re-filing settled cards into the trajectory pool; today it is a bounded diagnostic ring |
 | `TaskScheduler` × artifact axis | the design's L-task is `(task cluster × artifact)` | more than one artifact; `TaskCluster` has no artifact dimension. The *cluster* axis is reachable from `evolve()` via [`ClusterParallel`](parallelism.md) |

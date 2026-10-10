@@ -136,12 +136,13 @@ calls per proposal.
 
 ## What the async path adds
 
-Beyond the barrier removal, three signals only it can report:
+Beyond the barrier removal, four signals only it can report:
 
 | field | meaning |
 |---|---|
 | `result.forced_refreshes` | workers forced to resync because the pipeline stalled — cards arriving, nothing committing |
 | `result.stragglers` | rollouts that overran their predicted duration by `straggler_factor` (needs a [`duration_estimator=`](duration-scheduling.md)) |
+| `result.resumed` | stragglers re-run against a newer head (needs both a `duration_estimator=` and a shared [`resume_queue=`](duration-scheduling.md)) |
 | `result.retired_workers` | workers that gave up after repeated backend failures |
 
 `retired_workers` deserves attention: a run can finish **cleanly** at a fraction

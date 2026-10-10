@@ -272,30 +272,52 @@ class ResumeItem:
     task_id: str
     turn: int
     conversation: List[Any]
-    external_handle: Optional[str]  # e.g. an HPC job id
     version_at_checkpoint: Dict[str, int]
+    external_handle: Optional[str] = None   # e.g. an HPC job id
 
 
 class ResumeQueue:
     """Turn-level checkpoints of timed-out rollouts (partial rollout).
 
-    Write-only in every shipped path, and only one of them writes: the reference
-    runtime pushes, nothing pops, and `async_evolve` -- the loop a real workload
-    reaches -- does not checkpoint at all.
+    The reference runtime pushes turn-level items and nothing pops them. This
+    port does something narrower but wired: :func:`~agentdescent.async_evolve`
+    pushes a **task-level** item (task id + the version it measured) when a
+    rollout overruns its estimate, and its workers pop via :meth:`pop_for` to
+    re-run the abandoned task against the latest head.
 
-    That is deliberate, and it is not what task-level recovery uses. Recovery
-    re-dispatches the **task**: the supervisor notices a worker is gone, sends its
-    work somewhere else under the same lease id, and drops the original's answer
-    if it turns up late. Resuming a partial rollout instead would require
-    `run(rendered, task) -> output` to become an inspectable conversation, and
-    that contract is what lets any agent at all be plugged in.
+    That is deliberate, and it is not what turn-level recovery would use. Full
+    recovery re-dispatches the task with continuation state: a supervisor
+    notices a worker is gone, sends its partial work somewhere else under the
+    same lease id, and drops the original's answer if it turns up late.
+    Resuming a partial rollout would require `run(rendered, task) -> output` to
+    become an inspectable conversation, and that contract is what lets any
+    agent at all be plugged in.
 
-    So this stays the turn-level primitive it always was, unwired, rather than
-    being repurposed as a task-level channel because it happens to be a queue."""
+    So the shipped path is task-level re-run (the free cross-version A/B signal
+    of L-traj), while the item shape stays able to carry the turn-level state a
+    transparent `run` would let us checkpoint.
 
-    def __init__(self, p90_multiplier: float = 2.0) -> None:
+    **Re-queue is bounded.** A resumed task goes through the same straggler
+    check as a fresh one, so without a cap a task that is *always* slow would
+    be pushed, popped, re-run, pushed again, and starve the worker's fresh
+    tasks. :attr:`max_attempts` is the bound: the queue counts how many times
+    each task has been resumed (see :meth:`pop_for`), and :meth:`push` refuses
+    once that count has been reached. The chronically slow task is then dropped
+    -- still counted in ``result.stragglers``, just never re-queued again."""
+
+    def __init__(self, p90_multiplier: float = 2.0,
+                 max_attempts: int = 1) -> None:
         self.p90_multiplier = p90_multiplier
+        #: How many times one task may be resumed before it stops being
+        #: re-queued. The A/B signal needs one re-run; beyond that the task is
+        #: chronically slow and re-dispatching it only starves fresh work.
+        self.max_attempts = max_attempts
         self._items: List[ResumeItem] = []
+        #: task_id -> how many times it has been resumed (popped). What bounds
+        #: the re-queue: `push` refuses a task whose count has hit the cap.
+        self._resumed_count: Dict[str, int] = defaultdict(int)
+        #: How many pushes were refused because the task was past the cap.
+        self.dropped = 0
         # every async worker thread pushes here; list.append happens to be
         # GIL-atomic but pop() + the emptiness check are not.
         self._lock = threading.Lock()
@@ -303,13 +325,41 @@ class ResumeQueue:
     def should_checkpoint(self, elapsed: float, p90: float) -> bool:
         return elapsed > self.p90_multiplier * p90
 
-    def push(self, item: ResumeItem) -> None:
+    def push(self, item: ResumeItem) -> bool:
+        """Queue ``item``; ``False`` when this task has been resumed too often.
+
+        A straggler is dropped (not queued) once its task has been resumed
+        :attr:`max_attempts` times -- the bounded-retry guard against a
+        chronically slow task monopolising a worker's shard. Returns whether the
+        item was accepted."""
+        if self._resumed_count[item.task_id] >= self.max_attempts:
+            self.dropped += 1
+            return False
         with self._lock:
             self._items.append(item)
+        return True
 
     def pop(self) -> Optional[ResumeItem]:
         with self._lock:
             return self._items.pop(0) if self._items else None
+
+    def pop_for(self, task_ids: Sequence[str]) -> Optional[ResumeItem]:
+        """Pop the first resume whose task belongs to ``task_ids``.
+
+        A shared queue is read by every worker; each worker can only re-run
+        tasks in its own shard, so the queue must hand out the right item to
+        the right worker without handing the same task to two of them. ``None``
+        when nothing queued belongs to this worker's shard -- the normal case,
+        which costs one lock acquisition per rollout.
+
+        Popping counts as a resume for that task, which feeds the
+        :attr:`max_attempts` bound in :meth:`push`."""
+        with self._lock:
+            for i, item in enumerate(self._items):
+                if item.task_id in task_ids:
+                    self._resumed_count[item.task_id] += 1
+                    return self._items.pop(i)
+            return None
 
     def __len__(self) -> int:
         return len(self._items)
