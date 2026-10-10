@@ -1275,6 +1275,11 @@ class EvolutionResult:
     #: (async path, and only when a ``duration_estimator`` was given). The design's
     #: L-traj signal; detection only, nothing is resumed.
     stragglers: int = 0
+    #: Stragglers that were re-run against a newer head (async path, and only
+    #: when both a ``duration_estimator`` and a ``resume_queue`` were given).
+    #: A straggler measured the old version; its re-run measures the current
+    #: one, so a non-zero pair is a free cross-version A/B signal (L-traj).
+    resumed: int = 0
     #: Workers that gave up after repeated backend failures (async path only). A
     #: run can finish *cleanly* at a fraction of its requested concurrency, so
     #: `error` stays `None` while throughput quietly drops -- check this to tell a

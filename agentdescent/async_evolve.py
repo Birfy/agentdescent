@@ -52,7 +52,7 @@ from .aggregator import Aggregator, AggregatorConfig, check_reports
 from .evolvable import ContractError, EvidenceCard, vv_staleness
 from .ledger import Ledger, LedgerFailure
 from .sampling import RoundRobin, TaskSampler
-from .scheduler import DurationEstimator
+from .scheduler import DurationEstimator, ResumeItem, ResumeQueue
 from .selection import SingleHead
 from .pipeline import EarlyStop, FirstError, StallGuard, WorkerHealth, describe
 from .staleness import StaleAction, StalenessPolicy, get_policy
@@ -108,6 +108,14 @@ def async_evolve(
     stall_patience: int = 50,
     duration_estimator: Optional["DurationEstimator"] = None,
     straggler_factor: float = 3.0,
+    #: L-traj resume: a shared queue of abandoned stragglers, each carrying the
+    #: task and the version it was rolled out against. A worker that overruns
+    #: its predicted cost is abandoned -- but with a queue present its task is
+    #: recorded instead of just counted, and the next idle worker re-runs it
+    #: against the **latest** head. The straggler measured an old version, the
+    #: re-run measures the new one, so the two are a free cross-version A/B
+    #: signal. ``None`` keeps the old behaviour (count the straggler, drop it).
+    resume_queue: Optional["ResumeQueue"] = None,
     task_sampler: Optional["TaskSampler"] = None,
     on_round: Optional[Callable[[RoundInfo], None]] = None,
     stop_when: Optional[Callable[[RoundInfo], bool]] = None,
@@ -479,6 +487,7 @@ def async_evolve(
     commit_epoch = [0]
     forced_refreshes = [0]
     stragglers = [0]
+    resumed_count = [0]      # stragglers re-run against a newer head (L-traj)
     estimator = duration_estimator
     n_live = sum(1 for s in shards if s)      # workers that will actually start
     live = [n_live]                           # workers still running
@@ -636,8 +645,23 @@ def async_evolve(
                 if forced:
                     with counter_lock:
                         forced_refreshes[0] += 1
-            task = by_shard_id[sampler.pick(shard_ids, i)]
-            i += 1
+            # A straggler abandoned by another worker is re-run here before a
+            # fresh task is picked -- it measured an older head, and re-running
+            # it against the current one is the L-traj A/B signal. `pop_for`
+            # only returns a task in this worker's own shard, so no two workers
+            # re-run the same task.
+            if resume_queue is not None:
+                resumed = resume_queue.pop_for(shard_ids)
+                if resumed is not None:
+                    task = by_shard_id[resumed.task_id]
+                    with counter_lock:
+                        resumed_count[0] += 1
+                else:
+                    task = by_shard_id[sampler.pick(shard_ids, i)]
+                    i += 1
+            else:
+                task = by_shard_id[sampler.pick(shard_ids, i)]
+                i += 1
             # Duration-aware straggler detection (design spec 5.1, L-traj). It
             # existed only in the reference runtime, which accepts nothing but the
             # synthetic router domain -- so the whole L-traj mechanism was
@@ -753,12 +777,20 @@ def async_evolve(
             elapsed = time.time() - t_start
             if estimator is not None:
                 estimator.observe(cost, elapsed)
-                # A rollout that overran its own estimate is a straggler. Counted,
-                # not resumed: `run(rendered, task) -> output` is opaque, so there
-                # is no continuation state to check point (see concepts.md L-traj).
+                # A rollout that overran its own estimate is a straggler. The
+                # reference runtime checkpoints partial turns here; this port's
+                # `run(rendered, task) -> output` is opaque, so there is no
+                # turn-level state to save. What *can* be saved is the task and
+                # the version it measured -- with a resume queue present, that is
+                # re-run against the latest head by the next idle worker, which
+                # turns the abandoned rollout into a free cross-version signal.
                 if predicted > 0 and elapsed > straggler_factor * predicted:
                     with counter_lock:
                         stragglers[0] += 1
+                    if resume_queue is not None:
+                        resume_queue.push(ResumeItem(
+                            task_id=task.id, turn=0, conversation=[],
+                            version_at_checkpoint={eng.artifact_id: base_v}))
             consecutive, warned = 0, False                    # a clean rollout resets
             health.record_success()
             with counter_lock:
@@ -1184,6 +1216,7 @@ def async_evolve(
                              stop_reason="error" if run_error else stop_reason[0],
                              forced_refreshes=forced_refreshes[0],
                              stragglers=stragglers[0],
+                             resumed=resumed_count[0],
                              fusion_trials=_fusion_trials(eng.aggregator),
                              **_cost_fields(eng.meter))
     if gate_pool is not None:

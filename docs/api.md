@@ -38,6 +38,7 @@ EvolutionResult(
     stop_reason: str = 'rounds',
     forced_refreshes: int = 0,
     stragglers: int = 0,
+    resumed: int = 0,
     retired_workers: int = 0,
     audit_drained: int = 0,
     replay: Optional[Dict[str, Any]] = None,
@@ -2941,6 +2942,10 @@ DurationEstimator(
 
 Turn-level checkpoints of timed-out rollouts (partial rollout).
 
+| method | what it does |
+|---|---|
+| `pop_for(task_ids: Sequence[str]) -> Optional[ResumeItem]` | Pop the first resume whose task belongs to `task_ids`. |
+
 ### `TaskCluster(...)`
 
 ```python
@@ -3138,6 +3143,7 @@ async_evolve(
     stall_patience: int = 50,
     duration_estimator: Optional['DurationEstimator'] = None,
     straggler_factor: float = 3.0,
+    resume_queue: Optional['ResumeQueue'] = None,
     task_sampler: Optional['TaskSampler'] = None,
     on_round: Optional[Callable[[RoundInfo], None]] = None,
     stop_when: Optional[Callable[[RoundInfo], bool]] = None,
@@ -3191,6 +3197,7 @@ async_evolve(
 | `stall_patience` | `int` | `50` | Merger sweeps that may pass with cards arriving and nothing committing before every worker is forced to resync, regardless of `async_ratio`. Without it a lag budget larger than the staleness tolerance **livelocks** under the Guarded policy: workers propose against a snapshot too old for the policy to accept, every card is discarded, head never moves, and the lag budget therefore never triggers a refresh either. |
 | `duration_estimator` | `Optional['DurationEstimator']` | `None` | Pass a `DurationEstimator` to fit `seconds ~ intercept + slope * len(prompt)` online and count rollouts that overran their own estimate by more than `straggler_factor` (`result.stragglers`). This is the design's **L-traj** mechanism, which until now lived only in the reference runtime and so was unreachable from the API a real workload uses. Detection only: resuming a partial rollout would need it to expose its turns, and `run(rendered, task) -> output` is opaque. |
 | `straggler_factor` | `float` | `3.0` | As `duration_estimator`. |
+| `resume_queue` | `Optional['ResumeQueue']` | `None` |  |
 | `task_sampler` | `Optional['TaskSampler']` | `None` | Which task a worker takes next from its shard. |
 | `on_round` | `Optional[Callable[[RoundInfo], None]]` | `None` | Called with each `RoundInfo` as a merger sweep completes -- progress for a long run. It runs on the merger thread and must be cheap and thread-safe; an exception is reported, not fatal. |
 | `stop_when` | `Optional[Callable[[RoundInfo], bool]]` | `None` | Asked after `on_round` with the same `RoundInfo`; `True` ends the run with `stop_reason="stop_when"` -- the caller's own budget (dollars, a deadline, a kill file), checked between merger sweeps like the built-in bounds. Same thread and the same rules as `on_round`. |
