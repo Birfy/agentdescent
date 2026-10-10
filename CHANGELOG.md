@@ -10,6 +10,11 @@ All notable changes to AgentDescent are documented here. The format follows
 
 - Keep the interactive demo reachable from the documentation navigation drawer
   on mobile, where the desktop header links are hidden.
+- Machine-local host installs now pin MCP and session hooks to the installing
+  Python, so they work when a later agent process lacks the pip scripts directory
+  on PATH. Stock legacy and previously pinned Codex/OpenCode entries are repaired
+  on reinstall, including after a Python environment moves; custom entries and
+  distributable plugin templates stay intact.
 
 - Spec and dataset file failures now report a concise `SpecError` instead of a
   CLI traceback. Invalid JSON names the input file and line/column; JSONL uses
