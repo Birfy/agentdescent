@@ -16,13 +16,13 @@
   const page = $('.experience');
   const themeButton = $('.theme-toggle');
   if (page && themeButton) {
-    let theme = 'dark';
-    try { theme = localStorage.getItem('agentdescent-theme') || 'dark'; } catch (_) { /* storage may be unavailable */ }
+    let theme = 'light';
+    try { theme = localStorage.getItem('agentdescent-theme-v2') || 'light'; } catch (_) { /* storage may be unavailable */ }
     const setTheme = (next) => {
       page.dataset.theme = next;
       themeButton.innerHTML = next === 'dark' ? '☀ <span>Light mode</span>' : '☾ <span>Dark mode</span>';
       themeButton.setAttribute('aria-label', next === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
-      try { localStorage.setItem('agentdescent-theme', next); } catch (_) { /* storage may be unavailable */ }
+      try { localStorage.setItem('agentdescent-theme-v2', next); } catch (_) { /* storage may be unavailable */ }
     };
     setTheme(theme);
     themeButton.addEventListener('click', () => setTheme(page.dataset.theme === 'dark' ? 'light' : 'dark'));
