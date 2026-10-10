@@ -24,6 +24,7 @@ plugins:
 
 theme:
   name: material
+  custom_dir: site_overrides
   logo: assets/mark.svg
   font: false
   palette:
@@ -51,6 +52,7 @@ theme:
 
 nav:
   - Home: index.md
+  - Documentation: docs.md
   - Getting started:
     - Install and first run: install.md
     - Quickstart — dataset to skill: quickstart-skill.md

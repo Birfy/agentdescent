@@ -5,7 +5,8 @@ description: AgentDescent is a modular evolve engine for prompts, skills, progra
 <div class="experience exp-home" data-theme="light">
   <nav class="exp-nav" aria-label="Main navigation">
     <a class="exp-brand" href="./"><span class="brand-mark">a<span>↘</span></span> agentdescent</a>
-    <div class="exp-nav-links"><a href="#how">How it works</a><a href="#framework">The framework</a><a href="#features">Features</a><a href="#demo">Demo</a><a href="https://github.com/Birfy/agentdescent">GitHub ↗</a><button class="theme-toggle" type="button" aria-label="Switch color theme">◐ <span>Theme</span></button><a class="nav-start" href="install/">Get started <span>↗</span></a></div>
+    <div class="exp-nav-links"><a class="nav-active" aria-current="page" href="./">Overview</a><a href="install/">Quickstart</a><a href="#demo">Interactive demo</a><a href="docs/">Docs</a><a class="nav-github" href="https://github.com/Birfy/agentdescent">GitHub ↗</a></div><button class="theme-toggle" type="button" aria-label="Switch color theme">◐ <span>Theme</span></button>
+    <details class="exp-mobile-menu"><summary>Menu <span>▾</span></summary><div><a aria-current="page" href="./">Overview</a><a href="install/">Quickstart</a><a href="#demo">Interactive demo</a><a href="docs/">Docs</a><a href="https://github.com/Birfy/agentdescent">GitHub ↗</a></div></details>
   </nav>
 
   <main>

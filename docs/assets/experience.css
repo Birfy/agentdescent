@@ -157,7 +157,19 @@ body:has(.experience) .md-main{min-height:100vh}
 @media(max-width:950px){.framework-heading,.feature-heading{gap:5%}.module-seams{grid-template-columns:repeat(3,1fr)}.module-seams a{border-bottom:1px solid var(--line)}.module-seams a:nth-child(3n){border-right:0}.module-seams a:nth-last-child(-n+3){border-bottom:0}.capability-grid{grid-template-columns:repeat(2,1fr)}.capability-grid>a:nth-child(3n){border-right:1px solid var(--line)}.capability-grid>a:nth-child(2n){border-right:0}.capability-grid>a:nth-last-child(-n+3){border-bottom:1px solid var(--line)}.capability-grid>a:nth-last-child(-n+2){border-bottom:0}}
 @media(max-width:650px){.framework-heading,.feature-heading,.methods-band{display:block}.framework-heading .inline-link{margin-top:24px}.recipe-layout{grid-template-columns:1fr}.recipe-options{border-right:0;border-bottom:1px solid var(--line);display:grid;grid-template-columns:1fr 1fr}.recipe-options button{padding:14px;border-right:1px solid var(--line)}.recipe-options button:nth-child(2n){border-right:0}.recipe-options button:nth-child(-n+2){border-bottom:1px solid var(--line)}.recipe-options button strong{font-size:12px}.recipe-options button small{display:none}.recipe-preview-body{padding:22px}.module-seams{grid-template-columns:1fr 1fr}.module-seams a{padding:17px}.module-seams a:nth-child(2n){border-right:0}.module-seams a:last-child{border-bottom:0}.method-list{margin-top:30px}.method-list a{grid-template-columns:95px 1fr 16px;font-size:12px}.capability-grid{grid-template-columns:1fr}.capability-grid>a{min-height:0;border-right:0!important;border-bottom:1px solid var(--line)!important;padding:24px}.capability-grid>a:last-child{border-bottom:0!important}.capability-grid small{padding-top:15px}.feature-tail{align-items:flex-start;flex-direction:column;gap:12px}}
 @media(max-width:650px){.module-seams a:nth-child(odd){border-right:1px solid var(--line)}.module-seams a:nth-last-child(-n+3){border-bottom:1px solid var(--line)}.module-seams a:nth-last-child(-n+2){border-bottom:0}}
-@media(max-width:1100px) and (min-width:651px){.exp-nav-links a:not(.nav-start):not([href$="#framework"]){display:none}}
+.exp-nav{position:relative;z-index:10}
+.exp-nav-links{margin-left:auto;gap:24px}
+.exp-nav-links .nav-active{color:var(--ink);font-weight:750;border-bottom:2px solid #8aaa4c;padding-bottom:4px}
+.exp-mobile-menu{display:none}
+.exp-mobile-menu summary{list-style:none;cursor:pointer;border:1px solid var(--line);border-radius:4px;padding:7px 10px;color:var(--ink);font-size:12px;font-weight:700}
+.exp-mobile-menu summary::-webkit-details-marker{display:none}
+.exp-mobile-menu summary span{margin-left:8px;color:var(--muted)}
+.exp-mobile-menu[open] summary span{display:inline-block;transform:rotate(180deg)}
+.exp-mobile-menu>div{position:absolute;top:calc(100% - 1px);right:5vw;width:min(270px,90vw);display:grid;padding:9px;background:var(--paper);border:1px solid var(--line);border-radius:0 0 5px 5px;box-shadow:0 16px 32px #18221424}
+.exp-mobile-menu a{padding:12px 13px;color:var(--ink);font-size:13px;border-radius:3px}
+.exp-mobile-menu a:hover,.exp-mobile-menu a[aria-current=page]{background:var(--soft)}
+@media(max-width:1100px){.exp-nav-links{gap:15px}.exp-nav-links .nav-github{display:none}}
+@media(max-width:900px){.exp-nav-links{display:none}.exp-mobile-menu{display:block}.theme-toggle{margin-left:auto}}
 .policy-slots{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin-top:21px}
 .policy-slots strong{font:700 10px ui-monospace,monospace;letter-spacing:.06em;color:var(--muted);margin-right:10px}
 .policy-slots span{font:11px ui-monospace,monospace;color:var(--ink);background:var(--soft);border:1px solid var(--line);padding:5px 8px;border-radius:3px}
