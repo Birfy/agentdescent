@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-336 public names across 55 modules.
+340 public names across 56 modules.
 
 ---
 
@@ -245,7 +245,8 @@ evolve(
     stop_when: Optional[Callable[['RoundInfo'], bool]] = None,
     verbose: bool = False,
     usage: Optional[Usage] = None,
-    policies: Optional['Policies'] = None
+    policies: Optional['Policies'] = None,
+    allocator: Optional[Any] = None
 ) -> EvolutionResult
 ```
 
@@ -301,6 +302,7 @@ evolve(
 | `verbose` | `bool` | `False` | Print a line per round. Independent of the `RuntimeWarning` emitted when a run ends early -- that always fires. |
 | `usage` | `Optional[Usage]` | `None` | Share one `Usage` with your model adapters (`claude(usage=u)`, `openai_compatible(usage=u)`) and the result's token counts become real. Without it the run still reports calls, seconds and failures -- `run` is `(rendered, task) -> str`, so an opaque actor has no way to surface tokens, and inventing a number would be worse than reporting zero. |
 | `policies` | `Optional['Policies']` | `None` | Bundle of replaceable pieces (`Policies`). Every field defaults to `None` meaning "current behaviour", so `Policies()` and passing nothing are the same run. The individual keyword arguments -- `task_sampler`, `staleness_policy`, `aggregator_factory` -- are shortcuts onto its fields and keep working; an explicit argument wins over a bundle default rather than being silently ignored. Fields whose implementations have not landed yet raise rather than being accepted and ignored: a caller who passes a custom acceptance rule and sees a finished run would reasonably conclude it ran. New capabilities go here rather than adding another parameter to a function that already has thirty-five. |
+| `allocator` | `Optional[Any]` | `None` | Value-directed budget allocation (see `allocator`). `None` (the default) is the old behaviour exactly: optional spend (fusion tournaments, the self-verify rollout) degrades against the global `soft_floor` / `hard_floor` thresholds as the token budget runs out, every candidate treated alike. Pass a `ValueBudgetAllocator` (or any object with `decide(ctx) -> AllocateDecision` and `observe(ctx, committed)`) and, once the budget is tight, the self-verify rollout is spent only on candidates the allocator's value model expects to commit; the merge path reports every outcome back so the model learns. Requires `max_tokens` to be set (the allocator decides how the budget is spent; `max_tokens` is what exists to spend). Counterfactual exploration re-measures candidates the model judged unworthy, so a biased value model is corrected rather than reinforced. |
 
 ### `reflector(...)`
 
@@ -3143,7 +3145,8 @@ async_evolve(
     stop_when: Optional[Callable[[RoundInfo], bool]] = None,
     verbose: bool = False,
     usage: Optional[Usage] = None,
-    policies: Optional['Policies'] = None
+    policies: Optional['Policies'] = None,
+    allocator: Optional[Any] = None
 ) -> EvolutionResult
 ```
 
@@ -3197,6 +3200,7 @@ async_evolve(
 | `verbose` | `bool` | `False` | Print one line per merger sweep. |
 | `usage` | `Optional[Usage]` | `None` | Share one `Usage` with your model adapters (`claude(usage=u)`, `openai_compatible(usage=u)`) and the result's token counts become real. Without it the run still reports calls, seconds and failures -- `run` is `(rendered, task) -> str`, so an opaque actor has no way to surface tokens, and inventing a number would be worse than reporting zero. |
 | `policies` | `Optional['Policies']` | `None` | Bundle of replaceable pieces (`Policies`). Every field defaults to `None` meaning "current behaviour", so `Policies()` and passing nothing are the same run. The individual keyword arguments -- `task_sampler`, `staleness_policy`, `aggregator_factory` -- are shortcuts onto its fields and keep working; an explicit argument wins over a bundle default rather than being silently ignored. Fields whose implementations have not landed yet raise rather than being accepted and ignored: a caller who passes a custom acceptance rule and sees a finished run would reasonably conclude it ran. New capabilities go here rather than adding another parameter to a function that already has thirty-five. |
+| `allocator` | `Optional[Any]` | `None` | Exactly as in `evolve`: value-directed budget allocation (see `allocator`). `None` (the default) is the old behaviour exactly. Pass a value allocator and, once the token budget is tight, the self-verify rollout is spent only on candidates the allocator expects to commit; the merger reports every outcome back so it learns. Requires `max_tokens`. Counterfactual exploration corrects a biased value model rather than reinforcing it. |
 
 ---
 
@@ -3594,6 +3598,14 @@ Whether a candidate is committed.
 
 `(ledger, verifier, audit, config, policy) -> AggregatorProtocol` — how a custom optimizer is installed.
 
+### `AllocatorContext`
+
+One candidate, as the allocator sees it.
+
+### `AllocatorPolicy`
+
+Decide, per candidate, whether the expensive part of a merge is worth it.
+
 ### `AppendRules`
 
 Accumulate a deduped list of rules/lessons (append-only, content-addressed).
@@ -3673,6 +3685,10 @@ One entry per *category*: competing proposals contradict and are resolved.
 ### `LAYOUTS`
 
 Where a runner writes the evolving tree inside a workspace (`claude_skill`, `skill_library`, `claude_agent`, `dsh_skill`, `agents_skill`, `root`).
+
+### `LearningValueModel`
+
+A tiny online logistic model over the candidate features.
 
 ### `LedgerFailure`
 
@@ -3817,6 +3833,10 @@ Prefix of the output `code_runner` produces when the frozen gate fails, so the f
 ### `ThreadExecutor`
 
 The default: a bounded pool of threads in this process.
+
+### `ValueBudgetAllocator`
+
+Learn which candidates are worth the expensive evaluation.
 
 ### `VerifierProtocol`
 

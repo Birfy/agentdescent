@@ -123,6 +123,12 @@ from .checkpoint import (
     list_checkpoints,
 )
 from .budget import BudgetGovernor, CallBudget, budgeted_completion
+from .allocator import (
+    AllocatorContext,
+    AllocatorPolicy,
+    LearningValueModel,
+    ValueBudgetAllocator,
+)
 from .executor import Executor, Result, ThreadExecutor
 from .sandbox import LocalWorkspaceSandbox, SandboxPool, WorkspaceProvider
 from .sandbox_shared import SharedSandboxPool
@@ -448,4 +454,9 @@ __all__ = [
     "BudgetGovernor",
     "CallBudget",
     "budgeted_completion",
+    # value-directed budget allocation
+    "AllocatorContext",
+    "AllocatorPolicy",
+    "LearningValueModel",
+    "ValueBudgetAllocator",
 ]
