@@ -153,6 +153,11 @@ markdown_extensions:
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
 
+extra_css:
+  - assets/experience.css
+extra_javascript:
+  - assets/experience.js
+
 extra:
   social:
     - icon: fontawesome/brands/github
