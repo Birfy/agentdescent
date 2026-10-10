@@ -52,6 +52,8 @@ theme:
 
 nav:
   - Home: index.md
+  # Keep the demo reachable in Material's mobile drawer when header links hide.
+  - Interactive demo: https://birfy.github.io/agentdescent/#demo
   - Documentation: docs.md
   - Getting started:
     - Install and first run: install.md

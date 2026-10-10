@@ -8,6 +8,8 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- Keep the interactive demo reachable from the documentation navigation drawer
+  on mobile, where the desktop header links are hidden.
 - Prevent Material admonition styles from exposing the mobile menu on desktop
   or overriding the editorial disclosures; keep the homepage install command
   readable without splitting its URL. Add rendered responsive-layout CI checks.
