@@ -113,7 +113,9 @@ def _valid_config(config: SelectionConfig, delta: float) -> bool:
         ))
         and config.beta0 >= 0.0
         and config.beta1 >= 0.0
+        and config.w_s >= 0.0
         and config.w_c >= 0.0
+        and config.w_n >= 0.0
     )
 
 

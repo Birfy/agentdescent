@@ -1,4 +1,5 @@
 import math
+from dataclasses import replace
 
 import pytest
 
@@ -64,6 +65,15 @@ def test_invalid_historical_score_and_overflowing_cost_ratio_are_rejected():
     d = judge(candidate("overflow", .9, 1.7e308), tiny, .5, .05, CFG, {})
     assert not d.admissible
     assert d.reason == "invalid measurement arithmetic"
+
+
+@pytest.mark.parametrize("field", ["beta0", "beta1", "w_s", "w_c", "w_n"])
+def test_negative_selection_weights_are_rejected(field):
+    config = replace(CFG, **{field: -0.1})
+    d = judge(candidate("candidate", 0.9), INCUMBENT, 0.7, 0.05,
+              config, {})
+    assert not d.admissible
+    assert d.reason == "invalid selection configuration"
 
 
 def test_critic_reject_remains_rejected_even_if_measurement_is_attached():
