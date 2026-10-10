@@ -64,7 +64,7 @@ def check(site, screenshots):
                                 assert menu.get_by_role("link", name="Interactive demo").is_visible(), label
                                 style = summary.evaluate("e => ({bg:getComputedStyle(e).backgroundColor,before:getComputedStyle(e,'::before').display,after:getComputedStyle(e,'::after').display})")
                                 assert style == {"bg": "rgba(0, 0, 0, 0)", "before": "none", "after": "none"}, f"{label}: Material decoration leaked: {style}"
-                                assert menu.evaluate("e=>e.getBoundingClientRect().right <= document.documentElement.clientWidth"), label
+                                assert menu.locator(":scope > div").evaluate("e => {const r=e.getBoundingClientRect(); return r.left >= 0 && r.right <= document.documentElement.clientWidth}"), f"{label}: dropdown clipped"
                                 summary.press("Enter")
                                 assert menu.get_attribute("open") is None, label
                                 summary.press("Space")
