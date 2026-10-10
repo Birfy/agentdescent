@@ -261,10 +261,12 @@ artifacts don't starve). Then, in order:
 5. **Statistical acceptance** — commit only if `P(Δ > 0) > 1 − δ` under a Beta
    posterior comparison of candidate vs base, **not** a point threshold. `δ`
    anneals with version (LR decay); a trust-region caps diff size.
-6. **Commit** — compare-and-swap on `dev`, one artifact per merge. (`Ledger`
-   also implements `commit_atomic`, a 2PC across artifacts for a
-   contract-breaking diff that must land with its adapters, but the reference
-   aggregator buckets per artifact and no engine path uses it.)
+6. **Commit** — compare-and-swap on `dev`, one artifact per merge. A
+   contract-breaking diff is routed through `Ledger.commit_atomic` — the 2PC
+   across artifacts the design calls the *atomic adaptation transaction*, and the
+   only commit path that sanctions a deliberate contract change — and artifacts
+   that `depends_on` the changed one are re-measured. Single-artifact runs never
+   touch it; `evolve(extra_artifacts=...)` is what makes it reachable.)
 7. **Dual-branch promotion** — `dev → stable` after *K* **regression-free
    rounds** on dev (EMA-style confirmation). A commit restarts the clock, so the
    artifact most likely to be promoted is the one that has *stopped* changing
@@ -309,10 +311,12 @@ mechanism:
   groups) — both implemented, the latter also reachable from
   `evolve()` as [`DifficultyWeighted`](sampling.md)
   task sampling. The design's cross-product **(task-cluster × artifact)** is
-  **not implemented**: `TaskCluster` has no artifact dimension, and both reference
-  runtimes register exactly one artifact, as does `evolve()` — so the second axis
-  has nowhere to live yet, and the mechanism operates on clusters while the
-  problem statement is about artifacts. The design also calls for a **tail canary
+  **partially implemented**: `TaskCluster` has no artifact dimension yet, but
+  `evolve(extra_artifacts=...)` now gives the artifact axis a place to live —
+  the worker loop proposes against every registered artifact and the aggregator
+  merges their diffs by target, so the *mechanism* operates on multiple
+  artifacts while the *triggering* (which artifact a task's failure implicates)
+  still runs on clusters. The design also calls for a **tail canary
   set** inside held-out eval; that is **not implemented** — held-out is one
   undifferentiated split.
 - **L-value (signal layer)** — most diffs are marginal, a few are high-value

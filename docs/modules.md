@@ -130,13 +130,13 @@ class at a time. They are all in one table instead:
 
 | name | why it exists | what would reach it |
 |---|---|---|
-| [`Ledger.commit_atomic`](ledger.md) | 2PC across several artifacts, for a contract-breaking diff that must land with its adapters | a multi-artifact library; `evolve()` registers exactly one |
+| [`Ledger.commit_atomic`](ledger.md) | 2PC across several artifacts, for a contract-breaking diff that must land with its adapters | `evolve(extra_artifacts=...)` — a contract-breaking diff is routed through it (a single-artifact run still has nothing to commit together) |
 | [`L1SerialGate`](governance.md) | "at most one L1 diff in evaluation anywhere" | concurrent merging; every shipped runtime merges on one thread, so the guarantee already holds by construction |
 | [`ResumeQueue`](duration-scheduling.md) | turn-level checkpoints of a timed-out rollout | a rollout that exposes its turns; `run(rendered, task) -> output` is opaque, which is what lets any agent be plugged in |
 | [`AuditScheduler.pop`](duration-scheduling.md) | draining the Ĝ-ordered audit queue out of band | `AuditScheduler(collect=True)`; the default computes priorities without queuing, because nothing drains it |
 | [`EvidenceBuffer.settled`](aggregator.md) | discarded evidence stays addressable — the structural advantage of artifacts over gradients | re-filing settled cards into the trajectory pool; today it is a bounded diagnostic ring |
-| `TaskScheduler` × artifact axis | the design's L-task is `(task cluster × artifact)` | more than one artifact; `TaskCluster` has no artifact dimension. The *cluster* axis is reachable from `evolve()` via [`ClusterParallel`](parallelism.md) |
-| [`PipelineParallel`](parallelism.md) | one artifact per stage, with upstream blame | a multi-artifact run; `evolve()` **refuses** it rather than degrading to DP in silence |
+| `TaskScheduler` × artifact axis | the design's L-task is `(task cluster × artifact)` | more than one artifact; `TaskCluster` has no artifact dimension. The *cluster* axis is reachable from `evolve()` via [`ClusterParallel`](parallelism.md) — the *artifact* axis is now reachable via `extra_artifacts=` |
+| [`PipelineParallel`](parallelism.md) | one artifact per stage, with upstream blame | `evolve(extra_artifacts=..., parallel=PipelineParallel(...))` — the stages name registered artifacts; without extras it is **refused** rather than degrading to DP in silence |
 
 The rule they share: a primitive that is implemented and unreachable is honest;
 one that is *reachable and silently does nothing* is not, which is why

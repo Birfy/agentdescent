@@ -30,6 +30,44 @@ All notable changes to AgentDescent are documented here. The format follows
   `collect` flag is forced on when `audit_drain_per_step > 0`. `EvolutionResult.
   audit_drained` reports how many ran. Default `0` = the old behaviour exactly.
 
+- **Multi-artifact evolution — `extra_artifacts=` on `evolve()` and `async_evolve()`.**
+  The design's cross-product (task-cluster × artifact) has a place to live: both
+  engines register any number of artifacts, the worker loop proposes against each
+  (PP stages name them; `PipelineParallel` is no longer refused when they exist),
+  the aggregator merges their diffs by target (the evidence buffer already bucketed
+  by `diff.target`), and a contract-breaking diff lands **atomically** via the
+  ledger's `commit_atomic` — which had no engine path before.
+
+  **`extra_artifacts=`** — a `{aid: EvolvingArtifact}` dict alongside the primary.
+  Each extra carries its own `blast_radius`, `strategy` and `Contract`; the worker
+  loop rolls each out and proposes against it (synchronously and on the barrier-free
+  path), and a proposal can name any registered artifact as its diff target.
+
+  **`PipelineParallel`** — `_reject_pipeline_parallel` lifts once `extra_artifacts`
+  are registered, and each stage must name a registered artifact (unknown stages
+  are refused, not silently dropped). `evolve(parallel=PipelineParallel(...))`
+  without extras still raises, as before.
+
+  **Contract dependency graph + atomic adaptation.** `Contract` gains
+  `depends_on` (artifact ids whose contracts it relies on). When a registered
+  artifact commits a contract-breaking diff, the commit goes through
+  `Ledger.commit_atomic` (the only path the ledger sanctions for a deliberate
+  contract change), and the dependents' cached evaluations are evicted so they are
+  re-measured under the superseded-then-replaced contract. `Contract.is_compatible_with`
+  is now enforced by the ledger for every commit.
+
+  **The atomic adaptation transaction is enforced, not assumed.** A
+  contract-breaking change to an artifact with declared dependents must land
+  *with* the adapted dependent states in the same `commit_atomic` — if none are
+  supplied, the merge is refused (`missing-adapters`) rather than silently
+  committing just the breaking artifact and leaving dependents registered
+  against a superseded contract. The base version vector for an atomic commit
+  now names every state it writes (candidate + adapters).
+
+  `EvolveSpec` supports `extra_artifacts` too. `MemoryCache` / `FileCache` gain
+  `invalidate(rendered)`. 10 tests in `tests/test_multi_artifact.py`; full suite
+  exit 0.
+
 - **`ReplaySampler` + `ProposalContext.rejected` — make the settled-evidence pool a consumer.** The aggregator's settled pool (stale / oversized / CAS-conflict evidence cards) was diagnostic-only: nothing read it back. Two consumers now close that loop.
 
   **`ReplaySampler`** (``agentdescent/sampling.py``) is a ``TaskSampler`` that up-weights tasks whose recent proposals were discarded — a signal that is different from pass rate (a task whose proposals keep going stale is not "easy", it is being out-competed by the parallel scheduler). Additive replay bonus, saturating at ``capped_at`` (default 10), scaled by ``temperature`` (default 0.0 = ``DifficultyWeighted`` identically). Wired via ``aggregator.set_settled_consumer(sampler.settle)`` on both the sync and async paths.
