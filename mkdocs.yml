@@ -155,6 +155,7 @@ markdown_extensions:
 
 extra_css:
   - assets/experience.css
+  - assets/quickstart.css
 extra_javascript:
   - assets/experience.js
 
