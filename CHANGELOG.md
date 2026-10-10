@@ -6,6 +6,13 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Add an offline RRSI round-selection mechanism fixture adapted from Google's
+  pinned release, with decision regressions and explicit validation boundaries.
+  This is not yet an `evolve()` integration or full RRSI port; see
+  `docs/algo-rrsi.md`.
+
 ## [0.5.1] — 2026-10-10
 
 ### Release summary

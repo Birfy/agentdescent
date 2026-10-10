@@ -136,6 +136,7 @@ nav:
     - SICA — self-edit: algo-sica.md
     - Gödel Agent — self-modification: algo-godel-agent.md
     - Genesis — persistent recursive worlds: algo-genesis.md
+    - RRSI — regularized harness selection: algo-rrsi.md
   - Design records:
     - Evolving a directory: design-directory-evolution.md
     - Plugin for DSH, Claude Code, Codex and other agents: plugin-design.md
