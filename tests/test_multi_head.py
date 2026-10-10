@@ -192,6 +192,40 @@ def test_prepare_merges_against_own_branch(tmp_path):
     assert prepared.head["a"] == 5, "must merge against head/0's version, not dev's"
 
 
+def test_decide_commits_a_fork_candidate_to_its_own_branch(tmp_path):
+    """A candidate prepared against `head/0` must commit to `head/0`, leaving
+    `dev` untouched (PR #196 review: `_Candidate.branch` was recorded but the
+    commit call defaulted to `dev`, so fork work overwrote the confirmed
+    branch)."""
+    from agentdescent.aggregator import Aggregator, AggregatorConfig, _Candidate
+    from agentdescent.scheduler import AuditScheduler
+    from agentdescent.verifier import ThreeLayerVerifier, VerifierBudget
+    lg = _ledger(tmp_path)
+    lg.fork("head/0")
+    # dev at v1; fork at v1 too (fresh fork copies dev)
+    snap = lg.snapshot("head/0")
+    head = snap.get("a")
+    cand = head.apply(Diff(diff_id="d", target="a", ops={"k": "fork-edited"}, author="w"))
+    # A candidate as `_prepare` would build it for head/0.
+    c = _Candidate(
+        artifact_id="a", artifact=head, candidate=cand,
+        diff=Diff(diff_id="d", target="a", ops={"k": "fork-edited"}, author="w"),
+        cards=[], survivor_cards=[], head=snap.version,
+        fused=False, considered=1, survived=1, discarded=0, conflicts=0,
+        branch="head/0",
+        base_counts=(2.0, 0.0), cand_counts=(3.0, 0.0),
+        base_cheap=1.0, cand_cheap=1.0)
+    v = ThreeLayerVerifier(eval_fn=lambda a, t: 0.5, held_out=[1, 2, 3],
+                           budget=VerifierBudget())
+    agg = Aggregator(lg, v, AuditScheduler(), AggregatorConfig(batch_trigger=1))
+    report = agg._decide(c)
+    assert report.committed_version is not None, "the fork candidate commits"
+    assert lg.head_version("dev").get("a") == 1, (
+        "dev must be untouched by a fork commit")
+    assert lg.head_version("head/0").get("a") == 2, (
+        "the fork branch must receive the commit")
+
+
 def test_multi_head_full_loop_forks_and_admits(tmp_path):
     """End-to-end: workers commit -> archive accumulates -> forks created ->
     workers distributed across dev + forks."""

@@ -1165,7 +1165,10 @@ class Aggregator:
                     return None
                 time.sleep(random.uniform(0.0, self.config.cas_backoff)
                            * (2 ** attempt))
-                snap = self.ledger.snapshot(Ledger.DEV)
+                # Rebase against the *same branch* the original commit targeted
+                # -- a fork candidate must not rebase onto `dev`'s head, which
+                # is a different version vector entirely (PR #196 review).
+                snap = self.ledger.snapshot(branch)
                 fresh = snap.get(artifact_id)
                 if fresh is None:
                     return None
@@ -1367,8 +1370,13 @@ class Aggregator:
                           MergeOutcome(decision.category))
 
         # -- commit (section 4.1): CAS on dev --------------------------------
-        new_version = self._commit_with_retry(c.artifact_id, c.candidate, c.diff,
-                                              c.head)
+        # The candidate was prepared against its branch's own head (`c.head`),
+        # so it must commit to *that* branch -- a fork candidate going to `dev`
+        # would overwrite the confirmed branch and leave the fork unchanged
+        # (PR #196 review). Empty branch means `dev`, the single-head default.
+        new_version = self._commit_with_retry(
+            c.artifact_id, c.candidate, c.diff, c.head,
+            branch=c.branch or Ledger.DEV)
         if new_version is None:
             self.buffer.settle(c.survivor_cards)
             return report(None, None, "CAS conflict", MergeOutcome.CAS_CONFLICT)

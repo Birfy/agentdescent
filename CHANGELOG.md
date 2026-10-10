@@ -4337,5 +4337,8 @@ First public release on PyPI as **`agentdescent`**.
   candidate and `head_for_worker(wid)` distributes workers across them.
   `_commit_with_retry` commits to `EvidenceCard.branch`; the sync and async
   worker loops snapshot from `head_for_worker` instead of hardcoded `dev`.
-  `finalize` discards all forks and commits the best candidate to `dev`.
+  `_decide` passes the candidate's own branch through to the commit (and the
+  CAS-rebase path rebases against that branch, not `dev`), so a fork candidate
+  updates only its fork. `finalize` discards all forks and commits the best
+  candidate to `dev`.
   Default: `SingleHead` + no forks = old behaviour exactly. 12 tests.
