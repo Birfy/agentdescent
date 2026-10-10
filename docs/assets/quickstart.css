@@ -1,0 +1,35 @@
+/* The Quickstart uses the shared editorial design from experience.css. */
+.qs3{max-width:1320px;margin:auto;padding:0 5vw}
+.qs3-hero{padding:94px 0 93px;max-width:860px}
+.qs3-eyebrow{display:flex;align-items:center;gap:9px;color:#6a8f31}
+.experience[data-theme=dark] .qs3-eyebrow{color:var(--accent)}
+.md-typeset .experience .qs3-hero h1{font-size:clamp(56px,6.5vw,92px);letter-spacing:-.075em;margin:20px 0 22px}
+.qs3-hero p{max-width:620px;color:var(--muted);font-size:17px;line-height:1.65}
+.qs3-hero .exp-button{margin-top:30px}
+.qs3-step{display:grid;grid-template-columns:minmax(260px,.75fr) minmax(0,1.25fr);gap:9%;padding:59px 0;border-top:1px solid var(--line)}
+.qs3-step-head>span{color:#7f9d4c}
+.md-typeset .experience .qs3-step h2{font-size:clamp(37px,4vw,58px);margin:16px 0 20px}
+.qs3-step-head p{max-width:330px;color:var(--muted);font-size:14px;line-height:1.7}
+.qs3-step-head code,.qs3-more code{background:var(--soft);color:var(--ink);padding:2px 4px;border-radius:2px}
+.qs3-install-card,.qs3-host-card,.qs3-prompt{border:1px solid var(--line);background:var(--paper);padding:22px;border-radius:5px}
+.qs3-tabbar{display:flex;border-bottom:1px solid var(--line);margin:-22px -22px 22px;padding:0 22px;gap:25px}
+.qs3-tabbar button{border:0;border-bottom:2px solid transparent;background:none;color:var(--muted);padding:17px 0;font-size:13px;font-weight:650}
+.qs3-tabbar button.active{color:var(--ink);border-color:#89aa51}
+.qs3-terminal{background:var(--code);color:#f3f6ed;border-radius:4px;overflow:hidden}
+.qs3-terminal-head{display:flex;justify-content:space-between;align-items:center;padding:12px 15px;border-bottom:1px solid #ffffff26;color:#a7b6a5}
+.qs3-terminal .exp-copy{border:1px solid #ffffff40;color:#ebf1e2;background:transparent}
+.md-typeset .experience .qs3-terminal pre{padding:20px!important;margin:0!important;background:transparent!important;color:#f3f6ed!important;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.75 ui-monospace,SFMono-Regular,Consolas,monospace!important}
+.qs3-install-foot{display:flex;justify-content:space-between;gap:20px;margin-top:18px;color:var(--muted);font-size:12px}.qs3-install-foot a{white-space:nowrap;color:var(--ink);font-weight:700}
+.qs3-host-tabs{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:26px}
+.qs3-host-tabs button{border:1px solid var(--line);border-radius:4px;background:var(--paper);color:var(--muted);padding:9px 11px;font-size:12px;font-weight:650}
+.qs3-host-tabs button.active{background:var(--accent);border-color:#a8cf57;color:var(--accent-ink)}
+.qs3-host-output>span{color:#84a84d}.qs3-host-output>p{color:var(--muted);font-size:12px;margin:8px 0 18px}
+.qs3-prompt-top{display:flex;justify-content:space-between;align-items:center;gap:12px;color:#83a34f}
+.qs3-prompt>p{font-size:16px;line-height:1.7;max-width:750px;padding:35px 0}
+.qs3-prompt-foot{display:flex;flex-wrap:wrap;gap:8px;border-top:1px solid var(--line);padding-top:15px}.qs3-prompt-foot span{background:var(--soft);border-radius:3px;color:var(--muted);padding:5px 8px;font:11px ui-monospace,monospace}
+.qs3-more{padding:70px 0 80px;border-top:1px solid var(--line)}.md-typeset .experience .qs3-more h2{font-size:40px;margin:0 0 28px}
+.qs3-more details{border-top:1px solid var(--line);padding:19px 0}.qs3-more details:last-child{border-bottom:1px solid var(--line)}
+.qs3-more summary{cursor:pointer;font-size:14px;font-weight:650;color:var(--ink)}.qs3-more p{max-width:850px;margin:15px 0 0;color:var(--muted);font-size:13px;line-height:1.7}.qs3-more a{border-bottom:1px solid var(--ink);color:var(--ink)}
+.qs3-end{display:flex;align-items:center;justify-content:space-between;gap:30px;padding:58px 0 85px;border-top:1px solid var(--line)}.qs3-end .section-label{border:0;padding:0;margin-bottom:15px}.md-typeset .experience .qs3-end h2{font-size:45px}.qs3-end p{color:var(--muted);font-size:14px;margin-top:12px}
+@media(max-width:900px){.qs3-step{grid-template-columns:1fr;gap:26px}.qs3-step-head p{max-width:650px}}
+@media(max-width:650px){.qs3-hero{padding:67px 0 72px}.md-typeset .experience .qs3-hero h1{font-size:clamp(48px,10vw,63px)}.qs3-hero p{font-size:15px}.qs3-step{padding:43px 0}.md-typeset .experience .qs3-step h2{font-size:39px}.qs3-install-card,.qs3-host-card,.qs3-prompt{padding:15px}.qs3-tabbar{margin:-15px -15px 17px;padding:0 15px}.qs3-tabbar button{font-size:12px}.qs3-install-foot{flex-direction:column;gap:8px}.qs3-host-tabs button{font-size:11px}.qs3-prompt>p{font-size:14px;padding:25px 0}.qs3-end{align-items:flex-start;flex-direction:column}}
