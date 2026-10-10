@@ -163,6 +163,9 @@
   let activeHost = 'claude';
   let activeKind = 'skill';
   let phase = 0;
+  // A restart invalidates every delayed continuation from the previous demo.
+  let conversation = 0;
+  let plannedKind;
   const approve = $('#demo-approve');
   const start = $('#demo-run');
   const status = $('#demo-status');
@@ -190,31 +193,46 @@
   }));
   start.addEventListener('click', async () => {
     if (start.disabled) return;
+    const run = ++conversation;
     start.disabled = true; phase = 0; approve.hidden = true; demoBody.replaceChildren();
     const path = $('#demo-path').value.trim() || kinds[activeKind].path;
     const kind = kinds[activeKind];
+    plannedKind = kind; // Preset edits configure the next conversation only.
     status.textContent = 'PLANNING'; toolLine.textContent = 'Calling doctor and plan…';
     addMessage('user', 'YOU', `Improve the ${kind.noun} at ${path}. Show the plan and call count before starting.`);
     await pause(460);
+    if (run !== conversation) return;
     addMessage('tool', 'AGENTDESCENT · DOCTOR', 'Checked the agent, provider configuration and run store.', 'No files changed.');
     await pause(580);
+    if (run !== conversation) return;
     addMessage('tool', 'AGENTDESCENT · PLAN', 'Sample plan: 12 cases · 4 workers · up to 48 agent calls.', 'Please review the plan and cost before starting.');
     status.textContent = 'AWAITING APPROVAL'; toolLine.textContent = 'Plan ready · no run started';
     approve.textContent = 'Approve sample run ↗'; approve.hidden = false; phase = 1; start.disabled = false;
   });
   approve.addEventListener('click', async () => {
+    if (phase !== 1 && phase !== 2) return;
+    const run = conversation;
+    const kind = plannedKind;
     approve.hidden = true;
     if (phase === 1) {
       phase = 0; status.textContent = 'RUNNING'; toolLine.textContent = 'start → status → show';
       addMessage('user', 'YOU', 'The plan looks good. Start the sample run.');
-      await pause(380); addMessage('tool', 'AGENTDESCENT · START', 'Started a background evolution run.');
-      await pause(550); addMessage('tool', 'AGENTDESCENT · STATUS', 'Workers proposed edits; the aggregator evaluated the candidate.');
-      await pause(550); addMessage('tool', 'AGENTDESCENT · SHOW', `Proposed diff: + ${kinds[activeKind].example}.`, 'The real artifact remains untouched until you approve apply.');
+      await pause(380);
+      if (run !== conversation) return;
+      addMessage('tool', 'AGENTDESCENT · START', 'Started a background evolution run.');
+      await pause(550);
+      if (run !== conversation) return;
+      addMessage('tool', 'AGENTDESCENT · STATUS', 'Workers proposed edits; the aggregator evaluated the candidate.');
+      await pause(550);
+      if (run !== conversation) return;
+      addMessage('tool', 'AGENTDESCENT · SHOW', `Proposed diff: + ${kind.example}.`, 'The real artifact remains untouched until you approve apply.');
       status.textContent = 'DIFF READY'; toolLine.textContent = 'Diff ready · waiting for apply approval';
       approve.textContent = 'Approve sample apply ↗'; approve.hidden = false; phase = 2;
     } else if (phase === 2) {
       phase = 0; addMessage('user', 'YOU', 'Apply the sample result.');
-      await pause(350); addMessage('tool', 'AGENTDESCENT · APPLY', 'Sample change applied; the original is backed up.', 'This page is only a simulation and changed no files.');
+      await pause(350);
+      if (run !== conversation) return;
+      addMessage('tool', 'AGENTDESCENT · APPLY', 'Sample change applied; the original is backed up.', 'This page is only a simulation and changed no files.');
       status.textContent = 'COMPLETE'; toolLine.textContent = 'Sample workflow complete · no real files changed';
     }
   });
