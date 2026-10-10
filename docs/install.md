@@ -1,162 +1,20 @@
-# Install and first run
+---
+description: Add AgentDescent to Claude Code, Codex, OpenCode or DeepSeek Harness, then ask your agent to improve a skill.
+---
 
-## Current `main`: packaged offline demo
+<div class="experience exp-quickstart">
+  <nav class="exp-nav light-nav" aria-label="Quickstart navigation"><a class="exp-brand" href="../"><span class="brand-mark">A<span>↘</span></span><span>AgentDescent</span></a><div class="exp-nav-links"><a href="../">Overview</a><a href="#connect">Connect your agent</a><a href="#ask">What to say</a><a class="nav-start" href="https://github.com/Birfy/agentdescent">GitHub ↗</a></div></nav>
+  <section class="qs-hero"><div class="qs-hero-glow" aria-hidden="true"></div><div class="qs-breadcrumb"><a href="../">HOME</a><span>/</span> QUICKSTART</div><div class="qs-hero-grid"><div><div class="eyebrow"><span class="pulse-dot"></span> AGENTDESCENT × YOUR CODING AGENT</div><h1>Tell your agent<br><em>what to improve.</em></h1><p>Install the plugin, point it at a skill or prompt, and review its plan and diff right inside Claude Code, Codex, OpenCode or DeepSeek Harness.</p><a class="exp-button primary" href="#connect">Connect your agent <span>↓</span></a><div class="qs-hero-meta"><span>◇ Python 3.10+ for MCP tools</span><span>◇ Works with your agent CLI</span></div></div><div class="qs-hero-art agent-art" aria-label="Illustration of a conversation with AgentDescent"><div class="art-top"><span><i></i><i></i><i></i></span> Claude Code / AgentDescent</div><div class="art-chat"><div class="chat-user"><small>YOU</small><p>Improve my PDF audit skill against these examples.</p></div><div class="chat-tool"><span>✳</span><div><small>AGENTDESCENT · PLAN</small><p>12 cases · 4 workers · estimated call count ready for review</p></div></div><div class="chat-tool"><span>↗</span><div><small>AGENTDESCENT · SHOW</small><p>Proposed changes ready. Review the diff before applying.</p></div></div></div></div></div></section>
 
-```bash
-git clone --branch main https://github.com/Birfy/agentdescent && cd agentdescent
-pip install -e .
-agentdescent demo
-```
+  <section class="qs-simple" id="connect"><div class="section-label">THREE STEPS</div><h2>Set it up once. Then just ask.</h2><div class="simple-steps"><article><span>01</span><div><h3>Install AgentDescent</h3><p>Use current <code>main</code> for the latest host integrations. The MCP extra needs Python 3.10+.</p></div><div class="mini-code"><pre>git clone --branch main https://github.com/Birfy/agentdescent
+cd agentdescent
+pip install -e ".[mcp]"</pre><button class="exp-copy" data-copy="git clone --branch main https://github.com/Birfy/agentdescent&#10;cd agentdescent&#10;pip install -e &quot;.[mcp]&quot;">Copy</button></div></article><article><span>02</span><div><h3>Choose your agent</h3><p>Pick the CLI you already use. Copy its setup command and restart or launch it as shown.</p></div><div class="host-config"><div class="host-tabs" role="tablist" aria-label="Choose an agent"><button class="active" role="tab" aria-selected="true" data-host="claude">Claude Code</button><button role="tab" aria-selected="false" data-host="codex">Codex</button><button role="tab" aria-selected="false" data-host="opencode">OpenCode</button><button role="tab" aria-selected="false" data-host="dsh">DeepSeek Harness</button></div><div class="mini-code host-command"><pre id="qs-host-command">agentdescent install claude-code
+claude --plugin-dir ~/.agentdescent/plugins/claude-code</pre><button id="qs-host-copy" class="exp-copy">Copy</button></div><p class="host-help" id="qs-host-help">Start Claude Code with the plugin directory. In the session, /plugin lists it.</p></div></article><article id="ask"><span>03</span><div><h3>Ask for an improvement</h3><p>Give it an artifact and examples. The agent checks the environment, shows a plan and call count, then asks before it runs or writes changes.</p></div><div class="ask-card"><span>PASTE INSIDE YOUR AGENT</span><p>Improve the skill at <code>~/.claude/skills/pdf-audit</code> against <code>eval/cases.jsonl</code>. Show me the plan and estimated calls before starting. Show the diff before applying.</p><button class="exp-copy" data-copy="Improve the skill at ~/.claude/skills/pdf-audit against eval/cases.jsonl. Show me the plan and estimated calls before starting. Show the diff before applying.">Copy prompt</button></div></article></div></section>
 
-The library supports Python ≥ 3.9 and current `main` installs NumPy for the
-[`audit.ppi`](api.md) estimator. The packaged CLI demo runs offline and needs no
-model API key:
+  <section class="qs-flow"><div><div class="section-label">WHAT HAPPENS IN THE AGENT</div><h2>You stay in control.</h2><p>The agent uses the AgentDescent skill and MCP tools to prepare, run and inspect an evolution. Your real files change only after you approve applying the result.</p><p>Real model-backed runs need a configured provider key; <code>agentdescent doctor</code> reports what is missing. The offline demo below needs none.</p></div><div class="flow-list"><div><span>01</span><b>Doctor + plan</b><small>Checks setup, validates cases and quotes the call count.</small></div><div><span>02</span><b>Start + status</b><small>Runs in the background and reports progress.</small></div><div><span>03</span><b>Show + apply</b><small>Displays the diff; application is a separate approval.</small></div></div></section>
 
-```bash
-agentdescent demo
-```
-
-On current unreleased `main`, a successful run ends with output like:
-
-```
-held-out reward: 1.000 outcomes: {'committed': 1}
-what it learned: rules.md -> 'COLUMN: amount'
-```
-
-After it finishes, try `agentdescent --help` to see the commands or continue to
-the [quickstart](quickstart-skill.md) to connect a model. The library includes
-[`evolve()`](evolution.md), the
-[aggregator](aggregator.md), the [agent layer](agents.md), the
-[data layer](dataloader.md), [directory evolution](directory-evolution.md).
-
-| extra | adds | for |
-|---|---|---|
-| `pip install -e ".[dev]"` | pytest | running the test suite in a contributor checkout |
-| `pip install -e ".[docs]"` | MkDocs Material | building the docs from a contributor checkout |
-| `pip install anthropic` | the Claude SDK | [`claude(...)`](agents.md) |
-| `pip install openhands-ai` | OpenHands SDK (Python ≥ 3.12) | [`openhands(...)`](backends.md) |
-
-Nothing else is needed for an OpenAI-compatible endpoint — GLM, DeepSeek, a local
-vLLM server — because [`openai_compatible`](agents.md) speaks HTTP directly.
-
-## Published v0.5.0 installation and source examples
-
-Install the stable PyPI package with:
-
-```bash
-pip install agentdescent
-```
-
-The v0.5.0 release's documented offline demo uses research examples kept in the
-source repository, outside the installed wheel. To run that example, clone the
-tagged source and install the contributor tools:
-
-```bash
-git clone --branch v0.5.0 https://github.com/Birfy/agentdescent && cd agentdescent
-pip install -e ".[dev]"
-```
-
-Then run the source demo (no API key):
-
-```bash
-python -m examples.run_demo
-```
-
-Examples are research artifacts kept **outside** the installed package (they
-would otherwise squat the top-level `examples` name). This command runs the
-merge-based loop and a fork baseline on the same budget over the
-[reference domain](orchestrator.md), then prints the learning curve and the
-comparison. This is the framework's central claim, reproducible in seconds:
-
-```
-round  dev_acc   stable  commit  fused  stale  confl  oracle
-    0    0.828    0.000       1      1      0      0       0
-    3    1.000    0.000       1      0      0      1       0     ← a contradiction dropped
-    8    1.000    1.000       0      0      0      0       0     ← stable branch catches up
-
-AgentDescent (merge) held-out accuracy : 1.000
-Fork/archive best-fork accuracy        : 0.379
-merge advantage                        : +0.621
-```
-
-Two more that need nothing:
-
-```bash
-python -m examples.skill_dir_evolution    # evolve a skill DIRECTORY a real agent reads
-python -m examples.efficiency             # parallel scaling + async tail-hiding
-```
-
-The complete list — every demo, every algorithm port, and what each one prints —
-is in [run everything](usage.md#1-run-the-demos).
-
-## First real run — with a model
-
-Point the provider layer at whatever you have. Credentials are read from the
-environment at call time and never pass through code:
-
-```bash
-export OPENAI_BASE_URL=https://api.deepseek.com     # or GLM, vLLM, OpenAI itself
-export OPENAI_API_KEY=sk-...
-```
-
-```python
-from agentdescent import SingleSlot, evolve, openai_compatible, reflector, scorer, tasks_from
-from agentdescent.dataloader import hf_rows
-
-rows = hf_rows("openai/gsm8k", config="main", split="train", limit=64)
-model = openai_compatible(model="deepseek-v4-flash")
-
-result = evolve(tasks_from(rows, prompt="question", gold="answer"), scorer("last_number"),
-                run=lambda skill, task: model(f"{skill}\n\n{task.prompt}"),
-                propose=reflector(model),
-                strategy=SingleSlot(initial_value="You are a helpful assistant."),
-                rounds=8, n_workers=8, max_concurrency=8, held_out_frac=0.3)
-
-print(result.rendered)        # the skill it learned
-print(result.final_reward)    # held-out reward
-```
-
-For Claude, `pip install anthropic` and use `claude(model="claude-haiku-4-5")`
-instead — same call everywhere else. Full walkthrough:
-[quickstart](quickstart-skill.md).
-
-!!! tip "Inspect a port with `--dry-run`"
-    All 20 algorithm ports print their configuration and return **with no model call
-    and no API key**. The eight benchmark-faithful ones return before touching data
-    as well; the eleven `MethodPolicy` ports build their policy first, so one on
-    a real benchmark downloads and caches its split during a dry run and says so.
-
-    ```bash
-    python -m examples.ace.ace_context_evolution --dry-run
-    python -m examples.gepa.gepa_prompt_evolution --dry-run
-    ```
-
-## Running the tests
-
-The suite is offline and deterministic — no network, no model API:
-
-```bash
-pytest -q
-```
-
-CI runs it on Python 3.9, 3.10, 3.11 and 3.12 for every push and PR.
-
-## Building the docs
-
-```bash
-pip install -e ".[docs]"
-mkdocs serve                    # live preview at http://127.0.0.1:8000
-mkdocs build --strict           # must pass with no warnings (CI enforces this)
-python -m tools.gen_api_docs    # regenerate the API reference after a signature change
-```
-
-## Where to go next
-
-| you want | go to |
-|---|---|
-| the shortest path from a dataset to a result | [Quickstart — a skill](quickstart-skill.md) |
-| to evolve a folder a real agent reads | [Quickstart — a directory](quickstart-directory.md) |
-| to understand why it is built this way | [Concepts](concepts.md) |
-| every knob on the loop | [The `evolve` method](evolution.md) |
-| a specific module | [Module map](modules.md) |
-| a signature | [API reference](api.md) |
+  <section class="qs-secondary"><div class="section-label">ONE EXTRA MINUTE</div><div class="secondary-grid"><article><span>◇</span><h3>Try the engine offline</h3><p><code>agentdescent demo</code> runs a complete evolution without a model key. It is available on current <code>main</code>.</p><div class="secondary-command"><code>agentdescent demo</code><button class="exp-copy" data-copy="agentdescent demo">Copy</button></div></article><article><span>◇</span><h3>No cases yet?</h3><p>Point the agent at your file and ask it to draft 8–20 cases for you to review first. Good cases are how it knows what “better” means.</p><a href="../plugin-quickstart/">Read the full plugin guide ↗</a></article><article><span>◇</span><h3>Need the details?</h3><p>See host-specific checks, provider keys, CLI fallback for Python 3.9 and how to inspect a run.</p><a href="../plugins/">Explore integration docs ↗</a></article></div></section>
+  <section class="qs-technical"><details id="published-v050-installation-and-source-examples"><summary>Using the published v0.5.0 package</summary><p><code>pip install agentdescent</code> installs the stable release. Its documented offline example lives in the source repository, outside the wheel. To run it, clone the v0.5.0 tag, install the development extra, and use <code>python -m examples.run_demo</code>. For the current plugin workflow above, use the main checkout.</p></details><details id="building-the-docs"><summary>Building these docs locally</summary><p>From the repository checkout, run <code>pip install -e ".[docs]"</code>, then <code>mkdocs serve</code> for a local preview or <code>mkdocs build --strict</code> for the production build.</p></details></section>
+  <section class="exp-cta qs-final"><div><span class="section-label">READY TO GO DEEPER?</span><h2>Make the loop your own.</h2><p>Explore strategies, policies and the Python API whenever you need more control.</p></div><a class="exp-button light" href="../evolution/">Explore evolve() <span>↗</span></a></section>
+  <footer class="exp-footer"><span>AgentDescent <small>© Open source · MIT</small></span><div><a href="../">Overview</a><a href="https://github.com/Birfy/agentdescent">GitHub ↗</a><a href="../plugins/">Plugin docs</a></div></footer>
+</div>
