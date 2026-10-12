@@ -50,8 +50,8 @@ from examples._common import completion_for, confirm
 from .baselines_run import _finer, _fmt, _hotpotqa
 
 
-def _arm(on: bool, alloc_kwargs: Optional[Dict[str, Any]] = None
-         ) -> Tuple[Dict[str, Any], Optional[ValueBudgetAllocator]]:
+def _arm(on: bool, alloc_kwargs: Optional[Dict[str, Any]] = None,
+         seed: int = 0) -> Tuple[Dict[str, Any], Optional[ValueBudgetAllocator]]:
     """The `evolve()` keyword arguments for one arm, and the thing that watched it.
 
     The control is *not* "an empty allocator" -- it is no allocator at all, the
@@ -59,24 +59,30 @@ def _arm(on: bool, alloc_kwargs: Optional[Dict[str, Any]] = None
     rather than the mechanism. The second return value is the allocator itself
     for the `on` arm (it records every decision and observation) and `None` for
     the control. ``alloc_kwargs`` are passed to the allocator constructor (e.g.
-    ``min_observations`` / ``budget_start`` from the command line).
+    ``min_observations`` / ``budget_start`` from the command line); ``seed``
+    seeds the allocator's counterfactual-exploration RNG so a run's exploration
+    is reproducible and isolated from other concurrently running seeds.
     """
     if not on:
         return {}, None
-    alloc = ValueBudgetAllocator(**(alloc_kwargs or {}))
+    alloc = ValueBudgetAllocator(seed=seed, **(alloc_kwargs or {}))
     return {"allocator": alloc}, alloc
 
 
 def _fired_counts(watcher) -> Tuple[int, int]:
-    """``(fired, observed)``: whether the allocator ever did anything but agree.
+    """``(fired, observed)``: whether the allocator ever *changed the spend*.
 
-    `observed` is every merge decision it saw; `fired` counts the decisions
-    where it actually *differed* from the clock -- a skip, or a counterfactual
-    re-measurement. Fired == 0 with observed > 0 means the allocator agreed with
-    the clock everywhere: a control against a control."""
+    `observed` is every merge decision it saw; `fired` counts only decisions
+    where the allocator actually *differed* from the clock -- a real skip. A
+    counterfactual exploration is a re-measurement of a candidate the allocator
+    judged unworthy, and it deep-evals just like the clock would, so it is
+    *not* a spend change: counting it as fired would let an allocator that
+    never skipped anything pass the control-vs-control safeguard.
+    Counterfactuals are reported separately via ``watcher.n_counterfactual``.
+    """
     if watcher is None:
         return 0, 0
-    return (watcher.n_skipped + watcher.n_counterfactual, watcher.n_observed)
+    return watcher.n_skipped, watcher.n_observed
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -174,7 +180,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         seed, on = job
         label = f"allocator {'on ' if on else 'off'} seed={seed}"
         usage = Usage()
-        workload = _build(seed, usage)
+        try:
+            workload = _build(seed, usage)
+        except Exception as e:  # noqa: BLE001 - data load failure is one arm's
+            # problem, not six
+            with printing:
+                print(f"  {label}  BUILD FAILED {type(e).__name__}: {str(e)[:120]}",
+                      file=sys.stderr)
+            return {"seed": seed, "arm": "on" if on else "off",
+                    "test": None, "dev": None, "rollouts": 0, "calls": 0,
+                    "tokens": 0, "committed": 0, "oracle_rejected": 0,
+                    "fired": None, "fired_of": None,
+                    "skipped": None, "counterfactual": None,
+                    "error": f"build failed: {type(e).__name__}: {str(e)[:120]}"}
         kwargs = dict(workload.evolve_kwargs)
         arm_kwargs, watcher = _arm(on, alloc_kwargs)
         kwargs.update(arm_kwargs)
@@ -191,7 +209,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             with printing:
                 print(f"  {label}  FAILED {type(e).__name__}: {str(e)[:120]}",
                       file=sys.stderr)
-            return None
+            # Keep the arm's accrued usage and mark it failed, so the summary
+            # does not silently drop it and compare different surviving seeds
+            # on the two arms.
+            tokens = usage.prompt_tokens + usage.completion_tokens
+            return {"seed": seed, "arm": "on" if on else "off",
+                    "test": None, "dev": None, "rollouts": 0,
+                    "calls": usage.calls, "tokens": tokens,
+                    "committed": 0, "oracle_rejected": 0,
+                    "fired": None, "fired_of": None,
+                    "skipped": None, "counterfactual": None,
+                    "error": f"evolve failed: {type(e).__name__}: {str(e)[:120]}"}
 
         try:
             test = workload.test_eval(result)
@@ -239,12 +267,32 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("every arm failed; nothing to compare.", file=sys.stderr)
         return 4
 
+    # A comparison is only valid over seeds where BOTH arms survived: if off
+    # fails on seed 0 and on fails on seed 1, the per-arm columns above would
+    # be about different seeds. Mark the surviving pairs and say which were
+    # dropped.
+    failed = [r for r in rows if r["error"]]
+    complete_seeds = {
+        r["seed"] for r in rows
+        if not r["error"] and len([x for x in rows
+                                  if x["seed"] == r["seed"] and x["arm"] != r["arm"]
+                                  and not x["error"]]) > 0}
+    dropped = sorted({r["seed"] for r in rows} - complete_seeds)
+    failed_tokens = sum(r["tokens"] for r in failed)
     print()
-    print("| arm | seeds | test (min/med/max) | tokens (med) | commits | "
-          "vetoes | fired |")
+    print(f"arms: {len(rows)} (2 x {len(seeds)} seeds), "
+          f"{len(failed)} failed (spent {failed_tokens:,} tokens before "
+          f"failing)")
+    if dropped:
+        print(f"incomplete seed pairs dropped from quality/cost comparison: "
+              f"{dropped}")
+    print()
+    print("| arm | complete seeds | test (min/med/max) | tokens (med) | "
+          "commits | vetoes | fired |")
     print("|---|---|---|---|---|---|---|")
     for arm in ("off", "on"):
-        group = [r for r in rows if r["arm"] == arm]
+        group = [r for r in rows if r["arm"] == arm and r["seed"] in complete_seeds
+                 and not r["error"]]
         if not group:
             continue
         tests = sorted(r["test"] for r in group if r["test"] is not None)
@@ -252,24 +300,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     f"{tests[0]:.3f} / {statistics.median(tests):.3f} / "
                     f"{tests[-1]:.3f}")
         med_tokens = statistics.median(r["tokens"] for r in group)
-        print(f"| {arm} | {len(tests)}/{len(group)} | {interval} | "
-              f"{med_tokens:,.0f} | "
+        print(f"| {arm} | {len(group)} | {interval} | {med_tokens:,.0f} | "
               f"{sum(r['committed'] for r in group)} | "
               f"{sum(r['oracle_rejected'] for r in group)} | "
-              f"{sum(r['fired'] for r in group)}/"
-              f"{sum(r['fired_of'] for r in group)} |")
+              f"{sum(r['fired'] or 0 for r in group)}/"
+              f"{sum(r['fired_of'] or 0 for r in group)} |")
 
-    fired_on = sum(r["fired"] for r in rows if r["arm"] == "on")
-    observed_on = sum(r["fired_of"] for r in rows if r["arm"] == "on")
+    fired_on = sum(r["fired"] or 0 for r in rows if r["arm"] == "on")
+    observed_on = sum(r["fired_of"] or 0 for r in rows if r["arm"] == "on")
     if observed_on and fired_on == 0:
         # Before any quality claim: a mechanism that never differed from the
         # clock is a control against a control.
         print(f"\nallocator never fired: it agreed with the clock on all "
-              f"{observed_on} decisions (0 skipped, 0 counterfactual). The "
-              "quality and token columns above are not about the mechanism -- "
-              "check that --max-tokens is tight enough for the allocator's "
-              "budget_start, and that self-verify is on (the allocator gates "
-              "the self-verify rollout; without it there is nothing to gate).")
+              f"{observed_on} decisions (0 skipped). The quality and token "
+              "columns above are not about the mechanism -- check that "
+              "--max-tokens is tight enough for the allocator's budget_start, "
+              "and that self-verify is on (the allocator gates the self-verify "
+              "rollout; without it there is nothing to gate).")
     elif observed_on == 0:
         print(f"\nallocator saw no merge decisions on the `on` arm "
               f"({observed_on} observed). The arms ran different workloads or "

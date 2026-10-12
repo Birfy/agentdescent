@@ -42,6 +42,7 @@ and the merge decisions (the value).
 from __future__ import annotations
 
 import math
+import random
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Protocol, Sequence, Tuple, runtime_checkable
 
@@ -304,6 +305,14 @@ class ValueBudgetAllocator:
     #: skip decision, so a model fit on a workload where advantage never moved
     #: cannot skip on advantage noise.
     min_weight: float = 0.01
+    #: Seed for the counterfactual-exploration RNG. ``decide`` must not draw
+    #: from the process-global ``random``: ``evolve(seed=...)`` uses a *local*
+    #: RNG for task shuffling, so a global draw would make exploration depend on
+    #: unrelated process state and, with concurrent runs, on scheduling. Each
+    #: allocator owns a ``random.Random(self.seed)``, so two runs with the same
+    #: seed explore identically and two concurrent runs with different seeds do
+    #: not interfere.
+    seed: int = 0
 
     # -- state ---------------------------------------------------------------
 
@@ -311,6 +320,11 @@ class ValueBudgetAllocator:
     _n_skipped: int = 0
     _n_counterfactual: int = 0
     _n_committed: int = 0
+    _rng: random.Random = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if self._rng is None:
+            self._rng = random.Random(self.seed)
 
     @property
     def n_observed(self) -> int:
@@ -355,9 +369,11 @@ class ValueBudgetAllocator:
         if not confident or p >= 0.5:
             return AllocateDecision(
                 deep_eval=True, predicted_value=p, n_observed=self._n_obs)
-        # Low value: skip, unless this is a counterfactual exploration.
-        from random import random
-        if random() < self._epsilon():
+        # Low value: skip, unless this is a counterfactual exploration. The
+        # draw comes from this allocator's own seeded RNG, not the process
+        # global -- so exploration is reproducible per run and isolated between
+        # concurrently running seeds.
+        if self._rng.random() < self._epsilon():
             self._n_counterfactual += 1
             return AllocateDecision(
                 deep_eval=True, counterfactual=True,

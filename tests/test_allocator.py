@@ -260,7 +260,7 @@ def test_async_evolve_accepts_allocator():
 
 
 # ---------------------------------------------------------------------------
-# every measured decision reports exactly one outcome (PR #204 review)
+# every measured decision reports exactly one outcome
 # ---------------------------------------------------------------------------
 
 
@@ -280,8 +280,7 @@ def _candidate(artifact, cand, diff, *, base_counts=(2.0, 0.0),
 def test_every_merge_outcome_is_observed_exactly_once(tmp_path):
     """Oracle rejection, acceptance rejection, commit and CAS conflict must
     each report exactly one outcome to the allocator -- rejection is a negative
-    label, and without it a model fit on commits alone never leaves warm-up
-    (PR #204 review)."""
+    label, and without it a model fit on commits alone never leaves warm-up."""
     from agentdescent.aggregator import Aggregator, AggregatorConfig
     from agentdescent.evolvable import Diff
     from agentdescent.evolution import AppendRules, EvolvingArtifact
@@ -381,7 +380,7 @@ def test_every_merge_outcome_is_observed_exactly_once(tmp_path):
 def test_sync_async_pre_spend_features_are_identical():
     """The decision-time features the sync and async workers build must be the
     same vector the aggregator trains on -- advantage, size, blast radius, and
-    nothing post-outcome (PR #204 review)."""
+    nothing post-outcome."""
     from agentdescent.evolvable import Diff
     diff = Diff(diff_id="d", target="a", ops={"k1": "v", "k2": "w"}, author="w")
     from agentdescent.evolution import _allocator_context
@@ -415,7 +414,7 @@ def test_fused_observe_uses_the_originating_proposal_context():
     """A fused commit's label attaches to the *originating* proposal's pre-spend
     vector, not the fused diff's union size -- the worker decided on the single
     proposal, and training on a union size no decision saw leaks post-merge
-    information (PR #204 review, finding 2 remainder)."""
+    information."""
     from agentdescent.aggregator import _allocator_context_from
     from agentdescent.evolvable import Diff
     from agentdescent.evolution import EvolvingArtifact
@@ -442,7 +441,7 @@ def test_single_winner_observes_the_selected_proposal_not_the_first_entrant():
     """When the tournament picks a *later* single proposal (no fusion), the
     commit label must attach to the winning proposal's card -- not the first
     (possibly losing) entrant. Labeling a losing card as committed teaches the
-    model the wrong proposal succeeded (PR #204 review, third finding)."""
+    model the wrong proposal succeeded."""
     from agentdescent.aggregator import _allocator_context_from
     from agentdescent.evolvable import Diff
     from agentdescent.evolution import EvolvingArtifact
@@ -491,7 +490,7 @@ class _RecordingAllocator:
 def test_fused_commit_observes_originating_proposal_end_to_end():
     """A real `evolve()` run fuses two proposals and commits the union; the
     observe input must be a worker's actual pre-spend vector (the single rule's
-    size 1), never the fused size 2 (PR #204 review finding 2 remainder)."""
+    size 1), never the fused size 2."""
     import warnings
     from agentdescent.evolution import AppendRules
 
@@ -511,13 +510,18 @@ def test_fused_commit_observes_originating_proposal_end_to_end():
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        evolve(tasks, reward, run=run, propose=make_propose,
-               strategy=AppendRules(), rounds=1, n_workers=2,
-               max_concurrency=1, max_tokens=10_000, allocator=rec,
-               held_out_frac=0.5, shuffle=False)
+        res = evolve(tasks, reward, run=run, propose=make_propose,
+                     strategy=AppendRules(), rounds=1, n_workers=2,
+                     max_concurrency=1, max_tokens=10_000, allocator=rec,
+                     held_out_frac=0.5, shuffle=False)
 
     assert rec.decided, "workers must call decide before spending"
     assert rec.observed, "the merge must call observe"
+    # The fusion must actually have committed -- otherwise the observation is
+    # about nothing.
+    assert res.fusion_stats().fused_wins >= 1, (
+        f"the fused candidate must have committed, got "
+        f"fused_wins={res.fusion_stats().fused_wins}")
     # Every observed vector's size must be one the allocator actually decided
     # on -- a single proposal's diff size. The fused union (size >= 2) must not
     # appear, because no worker ever decided about a size-2 candidate.
@@ -583,8 +587,7 @@ def _single_winner_run(rec, tasks, make_propose):
 def test_single_winner_observes_selected_proposal_end_to_end():
     """The tournament chooses the good (size-2) proposal over the first bad
     (size-1) entrant, commits it fused=False; the observe vector must be the
-    *winning* proposal's, not the first (losing) entrant's (PR #204 third
-    finding)."""
+    *winning* proposal's, not the first (losing) entrant's."""
     rec = _RecordingAllocator()
     tasks = [Task(id=f"t{i}", prompt="q") for i in range(8)]
     proposals = iter(["bad: BAD", "good: GOOD\npad: PAD", None, None])
@@ -607,7 +610,9 @@ def test_single_winner_observes_selected_proposal_end_to_end():
 
 
 def test_async_single_winner_observes_selected_proposal_end_to_end():
-    """Same guarantee on the barrier-free path."""
+    """Same guarantee on the barrier-free path, hardened: exactly one committed
+    observation, and its full vector (not just the size) is the winning
+    proposal's -- never the losing entrant's."""
     import warnings
     from agentdescent.async_evolve import async_evolve
     rec = _RecordingAllocator()
@@ -634,19 +639,24 @@ def test_async_single_winner_observes_selected_proposal_end_to_end():
                                   fromlist=["AggregatorConfig"]).AggregatorConfig(
                                       batch_trigger=2, fusion_tournament=True))
     assert rec.decided, "workers must call decide"
-    assert len(rec.observed) >= 1, rec.observed
-    # whichever single winner committed, its observe vector must be the winning
-    # proposal's own (size 2), never the losing entrant's (size 1).
-    for feats, committed in rec.observed:
-        if committed:
-            assert feats[1] == _nsize(2), (
-                f"async single winner must observe its own size-2 vector, got "
-                f"{feats}")
+    assert sorted({f[1] for f in rec.decided}) == [_nsize(1), _nsize(2)], (
+        f"decisions must have seen both proposal sizes, got {rec.decided}")
+    # Exactly one observation, committed, and it is the winner's full vector.
+    assert len(rec.observed) == 1, (
+        f"expected exactly one merge observation, got {rec.observed}")
+    feats, committed = rec.observed[0]
+    assert committed, "the good (size-2) proposal must have committed"
+    assert feats == (0.0, _nsize(2), 0.2), (
+        f"async single winner must observe its own full vector, got {feats}")
 
 
 def test_async_fused_commit_observes_originating_proposal_end_to_end():
-    """Same guarantee on the barrier-free path: the merger's observe for a
-    fused commit carries a worker's pre-spend vector, not the union size."""
+    """Same guarantee on the barrier-free path: whenever the merger observes a
+    committed candidate, its vector is a worker's actual pre-spend vector (the
+    individual rule's size 1), never the fused union size. The sync twin pins
+    the fusion *commit* deterministically; on the async path a fusion's win
+    depends on merge timing, so this asserts the attribution invariant instead
+    -- the part the review's fused-union counterexample was about."""
     import warnings
     from agentdescent.async_evolve import async_evolve
     from agentdescent.evolution import AppendRules
@@ -673,6 +683,15 @@ def test_async_fused_commit_observes_originating_proposal_end_to_end():
             max_tokens=10_000, allocator=rec, held_out_frac=0.5,
             shuffle=False)
     assert rec.decided, "workers must call decide before spending"
+    # Every observed vector's size must be one the allocator actually decided
+    # on -- a single proposal's diff size. The fused union (size >= 2) must not
+    # appear, because no worker ever decided about a size-2 candidate.
+    decided_sizes = {f[1] for f in rec.decided}
+    assert decided_sizes, "workers must have decided on some candidates"
+    for feats, committed in rec.observed:
+        assert feats[1] in decided_sizes, (
+            f"async observe fed size {feats[1]}, but decisions only saw "
+            f"sizes {decided_sizes}")
     decided_sizes = {f[1] for f in rec.decided}
     for feats, committed in rec.observed:
         assert feats[1] in decided_sizes, (
@@ -707,8 +726,50 @@ def test_ab_allocator_arm_wiring():
     on_watcher._n_skipped += 1
     fired, observed = ab._fired_counts(on_watcher)
     assert fired == 1 and observed == 1, (
-        "fired counts decisions where the allocator differed from the clock "
-        "(a skip or a counterfactual), observed counts every decision it saw")
+        "fired counts decisions where the allocator actually changed the spend "
+        "(a skip), observed counts every decision it saw")
+
+
+def test_counterfactual_only_does_not_count_as_fired():
+    """`_fired_counts` must not count counterfactual exploration as a spend
+    change: a counterfactual deep-evals exactly like the clock would, so an
+    allocator that only ever explored (never skipped) is still a control
+    against a control."""
+    import bench.ab_allocator as ab
+    from agentdescent.allocator import AllocatorContext
+    watcher = ab._arm(True)[1]
+    watcher.observe(AllocatorContext(), committed=True)
+    watcher._n_counterfactual += 1     # exploration only, no skip
+    fired, observed = ab._fired_counts(watcher)
+    assert fired == 0, (
+        "counterfactual exploration alone must not count as fired")
+    assert observed == 1
+    # a real skip does count
+    watcher._n_skipped += 1
+    fired, observed = ab._fired_counts(watcher)
+    assert fired == 1, "a real skip is the allocation change that fired counts"
+
+
+def test_allocator_seed_controls_exploration_and_is_reproducible():
+    """`decide` must draw counterfactual exploration from the allocator's own
+    seeded RNG, not the process global -- two allocators with the same seed
+    explore identically, two with different seeds do not interfere."""
+    from agentdescent.allocator import AllocatorContext
+
+    def _explore(seed):
+        alloc = ValueBudgetAllocator(
+            min_observations=0, epsilon_start=0.8, epsilon_end=0.8, seed=seed)
+        # force the model to be confident + predict low value, so decide rolls
+        for _ in range(5):
+            alloc.observe(AllocatorContext(advantage=-2.0, size=1), False)
+        low = AllocatorContext(advantage=-2.0, size=1)
+        return [alloc.decide(low).counterfactual for _ in range(40)]
+
+    a1 = _explore(7)
+    a2 = _explore(7)          # same seed -> identical exploration
+    assert a1 == a2, "same seed must give the same exploration decisions"
+    b1 = _explore(99)
+    assert a1 != b1, "different seeds must give different exploration draws"
 
 
 def test_size_magnitude_does_not_dominate_the_advantage():

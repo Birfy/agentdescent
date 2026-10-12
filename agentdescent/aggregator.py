@@ -365,7 +365,7 @@ def _allocator_context_from(c: "_Candidate", p_improve: Optional[float] = None,
       label must attach to *that proposal's* card -- not an arbitrary first
       card that may be a losing entrant. Labeling the first (losing) card as
       committed teaches the model the wrong proposal succeeded and supplies no
-      observation for the actual winner (PR #204 review, third finding).
+      observation for the actual winner.
 
     Either way the vector is a worker's actual pre-spend input (advantage,
     the card's own diff size, the artifact's blast radius) -- never a fused
@@ -1368,7 +1368,7 @@ class Aggregator:
         # acceptance rejection are negative labels too -- without them the model
         # would learn only from commits and CAS conflicts, so a rejection-only
         # run never left warm-up and a mixed run never learned which evaluated
-        # proposals fail (PR #204 review).
+        # proposals fail.
         def _observe_outcome(committed: bool) -> None:
             if self.allocator is not None:
                 observe = getattr(self.allocator, "observe", None)
