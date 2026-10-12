@@ -259,6 +259,61 @@ def hf_feature_names(dataset: str, split: str, feature: str, *,
 
 
 # ---------------------------------------------------------------------------
+# ModelScope mirror (for datasets whose HuggingFace endpoint is unreachable)
+# ---------------------------------------------------------------------------
+
+#: A ModelScope-hosted copy of HotpotQA, fetched as a plain JSON file. The
+#: HuggingFace datasets-server can be unreachable from some networks while
+#: ModelScope stays up, so :func:`hf_rows_modelscope` is the fallback that
+#: loads the *same* rows from a different mirror.
+MODELSCOPE_HOTPOTQA_URL = (
+    "https://www.modelscope.cn/api/v1/datasets/OpenDataLab/HotpotQA/repo"
+    "?Revision=master&FilePath=raw%2Fhotpot_dev_distractor_v1.json"
+)
+
+
+def _hotpotqa_context_to_dict(context) -> dict:
+    """Normalise a HotpotQA ``context`` to the dict shape the engine expects.
+
+    The HuggingFace datasets-server already yields ``{"title": [...],
+    "sentences": [[...], ...]}``; the raw JSON mirror yields the original
+    ``[[title, [sentence, ...]], ...]`` pairs. Callers (GEPA's
+    ``_render_context``) read ``context["title"]`` and ``context["sentences"]``,
+    so the pairs are converted here, once, at load time.
+    """
+    if isinstance(context, dict):
+        return context
+    titles, sents = [], []
+    for title, sentences in context:
+        titles.append(title)
+        sents.append(list(sentences))
+    return {"title": titles, "sentences": sents}
+
+
+def hf_rows_modelscope(url: str = MODELSCOPE_HOTPOTQA_URL, *,
+                       limit: int = 100, cache: bool = True,
+                       timeout: float = 60.0) -> List[dict]:
+    """Load HotpotQA rows from a ModelScope mirror (plain JSON file).
+
+    Equivalent to :func:`hf_rows` for the ``hotpotqa/hotpot_qa`` validation
+    split, but via a ModelScope-hosted raw file instead of the HuggingFace
+    datasets-server -- for networks where one reachable mirror and not the
+    other. Rows are the same fields (``context`` / ``question`` / ``answer``),
+    with ``context`` normalised to the ``{"title": ..., "sentences": ...}``
+    dict the examples read.
+
+    Cached under ``~/.cache/agentdescent/modelscope/`` keyed by the URL, so a
+    repeat call does not re-download the ~46 MB file.
+    """
+    data = fetch_bytes(url, cache_subdir="modelscope", timeout=timeout)
+    rows = json.loads(data)
+    out: List[dict] = []
+    for r in rows[:limit]:
+        out.append({**r, "context": _hotpotqa_context_to_dict(r.get("context", []))})
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Gated datasets (optional, lazy `datasets` import)
 # ---------------------------------------------------------------------------
 

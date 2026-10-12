@@ -50,18 +50,20 @@ from examples._common import completion_for, confirm
 from .baselines_run import _finer, _fmt, _hotpotqa
 
 
-def _arm(on: bool) -> Tuple[Dict[str, Any], Optional[ValueBudgetAllocator]]:
+def _arm(on: bool, alloc_kwargs: Optional[Dict[str, Any]] = None
+         ) -> Tuple[Dict[str, Any], Optional[ValueBudgetAllocator]]:
     """The `evolve()` keyword arguments for one arm, and the thing that watched it.
 
     The control is *not* "an empty allocator" -- it is no allocator at all, the
     engine's default. Otherwise the comparison could be measuring the wiring
     rather than the mechanism. The second return value is the allocator itself
     for the `on` arm (it records every decision and observation) and `None` for
-    the control.
+    the control. ``alloc_kwargs`` are passed to the allocator constructor (e.g.
+    ``min_observations`` / ``budget_start`` from the command line).
     """
     if not on:
         return {}, None
-    alloc = ValueBudgetAllocator()
+    alloc = ValueBudgetAllocator(**(alloc_kwargs or {}))
     return {"allocator": alloc}, alloc
 
 
@@ -80,7 +82,20 @@ def _fired_counts(watcher) -> Tuple[int, int]:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--dataset", choices=["hotpotqa", "finer"], default="hotpotqa")
+    p.add_argument("--source", choices=["hf", "modelscope"], default="hf",
+                   help="HotpotQA data source: the HuggingFace datasets-server "
+                        "('hf', default) or the ModelScope mirror ('modelscope') "
+                        "for networks where one is reachable and the other is not")
     p.add_argument("--budget-rollouts", type=int, default=96)
+    p.add_argument("--min-observations", type=int, default=None,
+                   help="allocator `min_observations` (merge decisions before it "
+                        "may skip). Lower than the default 5 for workloads whose "
+                        "whole run has few merges, so the A/B can actually see "
+                        "the allocator act")
+    p.add_argument("--budget-start", type=float, default=None,
+                   help="allocator `budget_start` -- the remaining fraction below "
+                        "which the allocator starts skipping low-value candidates. "
+                        "Default 0.5")
     p.add_argument("--workers", type=int, default=4)
     p.add_argument("--seeds", default="0,1,2")
     p.add_argument("--fetch", type=int, default=48)
@@ -137,10 +152,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     total = Usage()
     shared = {"self_verify": args.self_verify,
               "eval_concurrency": args.eval_concurrency}
+    # Optional allocator configuration from the command line (so a workload
+    # whose whole run has few merges can still exercise the skip decision).
+    alloc_kwargs = {}
+    if args.min_observations is not None:
+        alloc_kwargs["min_observations"] = args.min_observations
+    if args.budget_start is not None:
+        alloc_kwargs["budget_start"] = args.budget_start
 
     def _build(seed: int, usage: Usage):
         completion = completion_for(args, usage=usage)
-        return (_hotpotqa(args.fetch, seed, completion, **shared)
+        return (_hotpotqa(args.fetch, seed, completion, source=args.source, **shared)
                 if args.dataset == "hotpotqa"
                 else _finer(args.pool, args.top_k, seed, completion, **shared))
 
@@ -154,7 +176,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         usage = Usage()
         workload = _build(seed, usage)
         kwargs = dict(workload.evolve_kwargs)
-        arm_kwargs, watcher = _arm(on)
+        arm_kwargs, watcher = _arm(on, alloc_kwargs)
         kwargs.update(arm_kwargs)
         kwargs.setdefault("rounds", 10_000)
 

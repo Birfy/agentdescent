@@ -55,11 +55,12 @@ from examples._common import completion_for, confirm, score_tasks
 
 def _hotpotqa(fetch: int, seed: int, completion, *, self_verify: bool = True,
               eval_concurrency: int = 8,
-              val_cap: Optional[int] = None) -> Workload:
+              val_cap: Optional[int] = None,
+              source: str = "hf") -> Workload:
     """GEPA's dataset and actor; the engine's own optimizer."""
     from examples.gepa import gepa_prompt_evolution as gepa
 
-    ds = gepa.load_dataset(fetch, seed=seed)
+    ds = gepa.load_dataset(fetch, seed=seed, source=source)
     reward = gepa.make_reward()
     agent = gepa.gepa_agent(completion)
 
