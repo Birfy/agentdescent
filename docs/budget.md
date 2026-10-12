@@ -59,14 +59,22 @@ explains the labels without teaching a usable pre-spend predictor; restricting
 both sides to the pre-spend columns keeps the learning loop sound. A logit clip
 and an L2 term keep one extreme candidate from blowing the weights.
 
-**Fused commits keep their originating context.** When the aggregator merges
-several proposals into one candidate and commits it, the observe input is the
-**first surviving proposal's** pre-spend vector — the size the worker actually
-decided on, not the fused union's size. A fusion's union size is a post-merge
-artefact no worker ever saw; attaching the commit label to it would teach the
-model values for candidates it never decided about. The originating proposal is
-`candidate.cards[0].diff`, the same attribution the acceptance gate uses when it
-folds `before_after_delta` back into the posterior.
+**Every commit is attributed to a worker's actual pre-spend vector.** Which
+card an outcome attaches to depends on how the candidate was chosen:
+
+- **Fused** (the candidate is the union of several proposals): the commit label
+  attaches to the **first contributor's** pre-spend vector — the card the
+  tournament put forward, the same attribution the acceptance gate uses when it
+  folds `before_after_delta` back into the posterior. A fusion's union size is
+  a post-merge artefact no worker ever decided on.
+- **Not fused** (the tournament chose a single proposal): the label attaches to
+  the **winning proposal's** card, found by matching the selected diff — never
+  an arbitrary first entrant, which may be a losing proposal. Labeling a losing
+  card as committed would teach the model the wrong proposal succeeded and
+  supply no observation for the actual winner.
+
+Either way the vector is what a worker decided on (advantage, the card's own
+diff size, the artifact's blast radius) — never a post-merge size.
 
 **Counterfactual exploration.** A candidate the model judged unworthy is
 skipped — except with probability `epsilon`, when it is evaluated anyway. The
@@ -98,7 +106,36 @@ thresholds remain the *ceiling* the allocator may never exceed: it can skip a
 candidate the clock would have deep-evaluated, never spend on one the clock
 refused.
 
-## 4. What this does not do
+## 4. The A/B — is it actually worth it?
+
+The mechanism's own premise is *an analogy without an A/B is decoration*. The
+equal-budget experiment is [`bench/ab_allocator.py`](https://github.com/Birfy/agentdescent/blob/main/bench/ab_allocator.py):
+
+```bash
+python -m bench.ab_allocator --dataset hotpotqa --budget-rollouts 96 \
+    --seeds 0,1,2 --provider claude --model GLM-5.2 \
+    --max-tokens 500_000 --yes
+```
+
+Two arms on identical workloads, budgets and seeds, one argument different:
+
+| arm | what runs |
+|---|---|
+| `off` | `allocator=None` — the clock degrades optional spend |
+| `on` | `allocator=ValueBudgetAllocator()` — learned per-candidate spend |
+
+The table reports **test quality, measured tokens and whether the allocator
+fired**. The fired check is the first thing to read: an allocator that agreed
+with the clock everywhere (`fired == 0` with `observed > 0`) is a control
+against a control, and its token column is about nothing. `--max-tokens` must
+be set — below the budget the allocator stays inert, and the two arms are then
+the same run.
+
+If the `on` arm does not win here (equal-or-better quality at fewer tokens, or
+better quality at the same tokens), delete it and record the negative result on
+this page. That is the outcome the premise asks for explicitly.
+
+## 5. What this does not do
 
 - **It does not raise the budget.** `max_tokens` is still the cap; the allocator
   only decides how to spend what exists. Requires `max_tokens` to be set.

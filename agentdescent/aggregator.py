@@ -353,19 +353,27 @@ def _allocator_context_from(c: "_Candidate", p_improve: Optional[float] = None,
     ``stable_distance``, the measured delta) are kept on the context for the
     audit trail but never enter :meth:`AllocatorContext.features`.
 
-    **Fused candidates keep their originating pre-spend context.** The size is
-    taken from the first card's *original* diff -- the proposal the worker
-    actually decided on -- not the fused diff's union size. A fusion is the
-    union of several proposals, and its size is a post-merge artefact no worker
-    ever saw; training the spend model on union sizes would teach it values for
-    candidates it never decided about (PR #204 review, finding 2 remainder).
-    The advantage is likewise the first card's, and the blast radius the
-    artifact's -- both exactly what the worker had. So a fused commit's label
-    is attached to the originating proposal's pre-spend vector.
+    **Which card is the candidate's origin depends on how it was chosen:**
+
+    * **Fused** (`c.fused`): the candidate is the union of the surviving
+      proposals, so its commit label attaches to the *first contributor's*
+      pre-spend vector -- the explicit attribution rule for fusions. The first
+      card is the one the tournament put forward, the same attribution the
+      acceptance gate uses when it folds `before_after_delta` back into the
+      posterior.
+    * **Not fused**: the tournament chose one single proposal, so the commit
+      label must attach to *that proposal's* card -- not an arbitrary first
+      card that may be a losing entrant. Labeling the first (losing) card as
+      committed teaches the model the wrong proposal succeeded and supplies no
+      observation for the actual winner (PR #204 review, third finding).
+
+    Either way the vector is a worker's actual pre-spend input (advantage,
+    the card's own diff size, the artifact's blast radius) -- never a fused
+    union size, which is a post-merge artefact no worker decided on.
     """
     from .allocator import AllocatorContext
 
-    card = c.cards[0] if c.cards else None
+    card = _attributable_card(c)
     adv = getattr(card, "advantage", None)
     # The worker decided on *this* card's diff, not the merged union.
     size = card.diff.size() if card is not None and card.diff is not None else 0
@@ -377,6 +385,26 @@ def _allocator_context_from(c: "_Candidate", p_improve: Optional[float] = None,
         stable_distance=stable_distance,
         blast_radius=getattr(c.artifact, "blast_radius", 0.2),
     )
+
+
+def _attributable_card(c: "_Candidate"):
+    """The evidence card a commit outcome should be attributed to.
+
+    Fusions: the first contributor (the card the tournament put forward).
+    Single winners: the card whose diff *is* the selected diff -- not the
+    first entrant, which may be a losing proposal. Falls back to the first
+    card when none matches (a custom fusion policy may return a diff outside
+    ``c.cards``), since there is then no better attribution available."""
+    if not c.cards:
+        return None
+    if getattr(c, "fused", False):
+        return c.cards[0]
+    selected = getattr(c, "diff", None)
+    for card in c.cards:
+        if card.diff is selected or getattr(card.diff, "diff_id", None) == \
+                getattr(selected, "diff_id", None):
+            return card
+    return c.cards[0]
 
 
 class EvidenceBuffer:

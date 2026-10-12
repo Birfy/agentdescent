@@ -431,6 +431,36 @@ def test_fused_observe_uses_the_originating_proposal_context():
         f"{ctx.features()}")
 
 
+def test_single_winner_observes_the_selected_proposal_not_the_first_entrant():
+    """When the tournament picks a *later* single proposal (no fusion), the
+    commit label must attach to the winning proposal's card -- not the first
+    (possibly losing) entrant. Labeling a losing card as committed teaches the
+    model the wrong proposal succeeded (PR #204 review, third finding)."""
+    from agentdescent.aggregator import _allocator_context_from
+    from agentdescent.evolvable import Diff
+    from agentdescent.evolution import EvolvingArtifact
+    art = EvolvingArtifact("a", {"k": "v0"}, blast_radius=0.2)
+    bad = Diff(diff_id="bad", target="a", ops={"k": "BAD"}, author="w")      # size 1
+    good = Diff(diff_id="good", target="a",
+                ops={"k": "GOOD", "pad": "PAD"}, author="w")                 # size 2
+    bad_card = type("Card", (), {"advantage": 0.1,
+                                 "before_after_delta": -0.5,
+                                 "diff": bad})()
+    good_card = type("Card", (), {"advantage": 0.7,
+                                  "before_after_delta": 0.9,
+                                  "diff": good})()
+    cand = art.apply(good)
+    c = type("C", (), {
+        "artifact": art, "candidate": cand, "diff": good,
+        "cards": [bad_card, good_card], "fused": False})()
+    ctx = _allocator_context_from(c, p_improve=0.99, stable_distance=0.3)
+    # The tournament chose GOOD (size 2); the label attaches to its vector,
+    # not the first entrant BAD (size 1).
+    assert ctx.features() == (0.7, 2.0, 0.2), (
+        f"single-winner observe must use the selected proposal's vector, got "
+        f"{ctx.features()}")
+
+
 class _RecordingAllocator:
     """Records every decide/observe input feature vector, then always deep-evals.
 
@@ -491,6 +521,121 @@ def test_fused_commit_observes_originating_proposal_end_to_end():
             f"sizes {decided_sizes} -- the fused union size leaked into training")
 
 
+class _MultiKeyStrategy:
+    """AppendRules-shaped but with per-line keys: a proposal of `k1: v1\\nk2: v2`
+    becomes a two-op diff. Lets a test emit proposals of different sizes."""
+
+    def initial(self):
+        return {}
+
+    def render(self, state):
+        return "\n".join(f"{k}: {v}" for k, v in sorted(state.items())) or "(empty)"
+
+    def to_diff(self, state, proposal, author, base_version, target):
+        from agentdescent.evolvable import Diff
+        ops = {}
+        for line in (proposal or "").splitlines():
+            k, _, v = line.partition(":")
+            k, v = k.strip(), v.strip()
+            if k:
+                ops[k] = v
+        if not ops or all(state.get(k) == v for k, v in ops.items()):
+            return None
+        return Diff(diff_id=f"{author}:{'/'.join(sorted(ops))}:{base_version}",
+                    target=target, ops=ops, author=author)
+
+
+def _single_winner_run(rec, tasks, make_propose):
+    """A run where the tournament picks a *later* single proposal (not the
+    first entrant, not a fusion): first worker proposes a bad one-op rule, the
+    second a good two-op rule; reward favours the good one, so the tournament
+    selects it with fused=False. Returns the evolve result."""
+    import warnings
+    from agentdescent.evolution import evolve
+    from agentdescent.strategies import KeyedRules
+
+    def run(rendered, task):
+        return rendered
+
+    def reward(task, output):
+        # 1 iff GOOD present and BAD absent -- the good proposal wins alone.
+        return 1.0 if ("GOOD" in output and "BAD" not in output) else 0.0
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return evolve(
+            tasks, reward, run=run, propose=make_propose,
+            strategy=_MultiKeyStrategy(),
+            rounds=1, n_workers=2, max_concurrency=1, max_tokens=10_000,
+            allocator=rec, held_out_frac=0.5, shuffle=False,
+            agg_config=__import__("agentdescent.aggregator",
+                                  fromlist=["AggregatorConfig"]).AggregatorConfig(
+                                      batch_trigger=2, fusion_tournament=True))
+
+
+def test_single_winner_observes_selected_proposal_end_to_end():
+    """The tournament chooses the good (size-2) proposal over the first bad
+    (size-1) entrant, commits it fused=False; the observe vector must be the
+    *winning* proposal's, not the first (losing) entrant's (PR #204 third
+    finding)."""
+    rec = _RecordingAllocator()
+    tasks = [Task(id=f"t{i}", prompt="q") for i in range(8)]
+    proposals = iter(["bad: BAD", "good: GOOD\npad: PAD", None, None])
+
+    def make_propose(rendered, task, output, score):
+        return next(proposals, None)
+
+    res = _single_winner_run(rec, tasks, make_propose)
+    assert rec.decided, "workers must call decide"
+    # decisions saw size 1 (bad) and size 2 (good+pad)
+    assert sorted({f[1] for f in rec.decided}) == [1.0, 2.0], rec.decided
+    # the winner (size 2) committed; the observe vector must be its own
+    # (0.0, 2.0, 0.2) -- not the losing first entrant's (0.0, 1.0, 0.2).
+    assert len(rec.observed) == 1, rec.observed
+    feats, committed = rec.observed[0]
+    assert committed, "the good proposal must have committed"
+    assert feats == (0.0, 2.0, 0.2), (
+        f"single winner must observe its own vector, got {feats}")
+
+
+def test_async_single_winner_observes_selected_proposal_end_to_end():
+    """Same guarantee on the barrier-free path."""
+    import warnings
+    from agentdescent.async_evolve import async_evolve
+    rec = _RecordingAllocator()
+    tasks = [Task(id=f"t{i}", prompt="q") for i in range(8)]
+    proposals = iter(["bad: BAD", "good: GOOD\npad: PAD", None, None])
+
+    def make_propose(rendered, task, output, score):
+        return next(proposals, None)
+
+    def run(rendered, task):
+        return rendered
+
+    def reward(task, output):
+        return 1.0 if ("GOOD" in output and "BAD" not in output) else 0.0
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        async_evolve(
+            tasks, reward, run=run, propose=make_propose,
+            strategy=_MultiKeyStrategy(), n_workers=2, max_iters=20,
+            max_seconds=0.5, max_tokens=10_000, allocator=rec,
+            held_out_frac=0.5, shuffle=False,
+            agg_config=__import__("agentdescent.aggregator",
+                                  fromlist=["AggregatorConfig"]).AggregatorConfig(
+                                      batch_trigger=2, fusion_tournament=True))
+    assert rec.decided, "workers must call decide"
+    assert len(rec.observed) >= 1, rec.observed
+    # whichever single winner committed, its observe vector must be the winning
+    # proposal's own (size 2), never the losing entrant's (size 1).
+    for feats, committed in rec.observed:
+        if committed:
+            assert feats[1] == 2.0, (
+                f"async single winner must observe its own size-2 vector, got "
+                f"{feats}")
+
+
 def test_async_fused_commit_observes_originating_proposal_end_to_end():
     """Same guarantee on the barrier-free path: the merger's observe for a
     fused commit carries a worker's pre-spend vector, not the union size."""
@@ -525,3 +670,34 @@ def test_async_fused_commit_observes_originating_proposal_end_to_end():
         assert feats[1] in decided_sizes, (
             f"async observe fed size {feats[1]}, but decisions only saw "
             f"sizes {decided_sizes}")
+
+
+# ---------------------------------------------------------------------------
+# the A/B script's arm wiring (bench/ab_allocator.py)
+# ---------------------------------------------------------------------------
+
+
+def test_ab_allocator_arm_wiring():
+    """`bench.ab_allocator._arm` returns no allocator on the control arm and a
+    fresh `ValueBudgetAllocator` (with a way to say whether it fired) on the
+    treatment arm -- so an A/B run can tell "the allocator helped" from "it
+    never ran" (the review's repeated 'no paid calls / real-dataset A/B'
+    concern)."""
+    import bench.ab_allocator as ab
+
+    off_kwargs, off_watcher = ab._arm(False)
+    assert off_kwargs == {}, "the control arm must be the engine default"
+    assert off_watcher is None
+
+    on_kwargs, on_watcher = ab._arm(True)
+    assert on_kwargs.get("allocator") is on_watcher, (
+        "the treatment arm must pass the watched allocator to evolve()")
+    assert ab._fired_counts(on_watcher) == (0, 0), (
+        "a fresh allocator has not fired yet")
+    from agentdescent.allocator import AllocatorContext
+    on_watcher.observe(AllocatorContext(), committed=False)
+    on_watcher._n_skipped += 1
+    fired, observed = ab._fired_counts(on_watcher)
+    assert fired == 1 and observed == 1, (
+        "fired counts decisions where the allocator differed from the clock "
+        "(a skip or a counterfactual), observed counts every decision it saw")
