@@ -83,6 +83,7 @@ nav:
     - Sandboxes: sandboxes.md
     - Async — no round barrier: async.md
     - Duration-aware scheduling: duration-scheduling.md
+    - Budget allocation: budget.md
   - The decision plane (policies):
     - Choosing policies: policies.md
     - Using the slots — a guide: policy-guide.md

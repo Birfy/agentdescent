@@ -343,6 +343,33 @@ class _Candidate:
         return self.base_counts is not None and self.cand_counts is not None
 
 
+def _allocator_context_from(c: "_Candidate", p_improve: Optional[float] = None,
+                            stable_distance: float = 0.0):
+    """Build an :class:`~agentdescent.allocator.AllocatorContext` from a candidate.
+
+    The signals the allocator learns from are the ones the candidate's cards
+    already carry (``before_after_delta``, advantage, diff size) plus what the
+    merge itself measured (``p_improve``, stable distance). This is the feedback
+    the worker's per-candidate spend decision is paired with: the worker asks
+    "is this worth the self-verify rollout?" using the same context the merge
+    outcome is reported against, so the model learns from the exact features it
+    decided on.
+    """
+    from .allocator import AllocatorContext
+
+    card = c.cards[0] if c.cards else None
+    delta = getattr(card, "before_after_delta", None)
+    adv = getattr(card, "advantage", None)
+    size = c.diff.size() if c.diff is not None else 0
+    return AllocatorContext(
+        before_after_delta=delta,
+        advantage=adv,
+        size=size,
+        p_improve=p_improve,
+        stable_distance=stable_distance,
+        blast_radius=getattr(c.artifact, "blast_radius", 0.2),
+    )
+
 
 class EvidenceBuffer:
     """Cards bucketed by target artifact (design doc, section 4.1).
@@ -573,6 +600,12 @@ class Aggregator:
                        self.acceptance_policy, self.promotion_policy):
             install_policy(policy, verifier, cfg)
         self.buffer = EvidenceBuffer()
+        #: Optional value allocator (see :mod:`agentdescent.allocator`), wired
+        #: by the engine so the merge path can feed commit outcomes back into
+        #: it. ``None`` keeps the old behaviour; the aggregator never consults
+        #: the allocator for a decision (the worker does, through the budget
+        #: governor), it only reports what happened.
+        self.allocator: Optional[Any] = None
         self._posteriors: Dict[str, BetaPosterior] = defaultdict(BetaPosterior)
         #: How many queued audits the L-value consumer drained and ran against
         #: the oracle. Zero when ``audit_drain_per_step`` is 0 (the default).
@@ -1269,12 +1302,13 @@ class Aggregator:
         # the annealed threshold -- not a point estimate crossing a line.
         prior = self._posteriors[c.artifact_id]
         base_score, cand_score = c.base_cheap, c.cand_cheap
+        stable_distance = self._stable_distance(c.artifact_id, c.candidate)
         decision = self.acceptance_policy.accept(MergeContext(
             artifact=c.artifact, candidate=c.candidate, cards=c.cards,
             base_counts=c.base_counts, cand_counts=c.cand_counts,
             diff=c.diff, base_cheap=base_score, cand_cheap=cand_score,
             prior=prior, trust_radius=c.artifact.blast_radius,
-            stable_distance=self._stable_distance(c.artifact_id, c.candidate)))
+            stable_distance=stable_distance))
         p_improve = decision.p_improve
 
         # The full held-out rates. The regression guard below must use *these*
@@ -1305,7 +1339,17 @@ class Aggregator:
         # -- commit (section 4.1): CAS on dev --------------------------------
         new_version = self._commit_with_retry(c.artifact_id, c.candidate, c.diff,
                                               c.head)
-        if new_version is None:
+        committed = new_version is not None
+        # Report the outcome to the value allocator (if the engine wired one):
+        # "was this candidate worth the expensive evaluation it got?" is the
+        # label the allocator's value model learns from. Built from the cards
+        # the candidate carried, plus what this merge computed.
+        if self.allocator is not None:
+            observe = getattr(self.allocator, "observe", None)
+            if callable(observe):
+                observe(_allocator_context_from(
+                    c, p_improve, stable_distance=stable_distance), committed)
+        if not committed:
             self.buffer.settle(c.survivor_cards)
             return report(None, None, "CAS conflict", MergeOutcome.CAS_CONFLICT)
 
