@@ -25,18 +25,19 @@ from agentdescent.evolution import Task, evolve
 
 
 def _high():
-    return AllocatorContext(before_after_delta=0.9, advantage=1.0, size=2)
+    return AllocatorContext(advantage=1.0, size=2)
 
 
 def _low():
-    return AllocatorContext(before_after_delta=0.0, advantage=-0.5, size=2)
+    return AllocatorContext(advantage=-0.5, size=2)
 
 
-#: A candidate *before* the self-verify ran -- delta not yet measured, which is
-#: what the worker actually decides on. The value model must distinguish these
-#: on the signals that are available up front (advantage, size), not on delta.
+#: A candidate *before* the self-verify ran -- the pre-spend features only
+#: (advantage, size, blast radius), which is what the worker actually decides
+#: on. The post-outcome signals (delta, P(improve), stable distance) never
+#: enter the model's feature vector.
 def _unmeasured(advantage: float, size: int = 2):
-    return AllocatorContext(before_after_delta=None, advantage=advantage, size=size)
+    return AllocatorContext(advantage=advantage, size=size)
 
 
 # ---------------------------------------------------------------------------
@@ -44,20 +45,20 @@ def _unmeasured(advantage: float, size: int = 2):
 # ---------------------------------------------------------------------------
 
 
-def test_value_model_learns_high_delta_predicts_commit():
+def test_value_model_learns_high_advantage_predicts_commit():
     m = LearningValueModel(lr=0.3, reg=0.05)
     for _ in range(30):
         m.update(_high().features(), True)
         m.update(_low().features(), False)
     p_high = m.predict(_high().features())
     p_low = m.predict(_low().features())
-    assert p_high > p_low, "the model must learn that a positive delta commits"
+    assert p_high > p_low, "the model must learn that a positive advantage commits"
 
 
 def test_value_model_stays_calm_on_a_single_outlier():
     """One extreme candidate must not blow the weights -- the logit clip."""
     m = LearningValueModel(lr=0.3, reg=0.05)
-    m.update((0.999999, 1.0, 64, 0.0, 0.0, 0.0, 0.2), True)   # extreme
+    m.update((0.999999, 64, 1.0), True)   # extreme pre-spend vector
     for _ in range(10):
         m.update(_low().features(), False)
     assert all(abs(w) < 1e6 for w in m._w), "weights must stay finite"
@@ -70,7 +71,7 @@ def test_value_model_bias_learns_on_all_zero_features():
     the last weight, matched against ``1.0`` in the gradient, and never double-
     counted in the logit."""
     m = LearningValueModel(lr=0.3, reg=0.05)
-    zeros = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    zeros = (0.0, 0.0, 0.0)   # advantage, size, blast_radius
     for _ in range(50):
         m.update(zeros, True)          # every all-zero candidate commits
     assert m.predict(zeros) > 0.6, "the bias must learn a non-neutral prior"
@@ -84,8 +85,8 @@ def test_value_model_blast_radius_moves_its_own_weight():
     actually moves prediction: a candidate with high blast_radius but nothing
     else measured must be scored differently from the all-zero baseline."""
     m = LearningValueModel(lr=0.3, reg=0.05)
-    zeros = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-    blast = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)     # only blast_radius set
+    zeros = (0.0, 0.0, 0.0)          # nothing measured
+    blast = (0.0, 0.0, 1.0)          # only blast_radius set
     # All-zero candidates commit; blast-only candidates do not.
     for _ in range(30):
         m.update(zeros, True)
@@ -249,3 +250,154 @@ def test_async_evolve_accepts_allocator():
             n_workers=2, max_seconds=5.0, max_tokens=100_000,
             allocator=alloc, held_out_frac=0.4)
     assert res.final_reward is not None
+
+
+# ---------------------------------------------------------------------------
+# every measured decision reports exactly one outcome (PR #204 review)
+# ---------------------------------------------------------------------------
+
+
+def _candidate(artifact, cand, diff, *, base_counts=(2.0, 0.0),
+               cand_counts=(3.0, 0.0), fused=False, base_cheap=0.9,
+               cand_cheap=0.95):
+    """A measured `_Candidate` for the merge path."""
+    from agentdescent.aggregator import _Candidate
+    return _Candidate(
+        artifact_id=artifact.id, artifact=artifact, candidate=cand, diff=diff,
+        cards=[], survivor_cards=[], head={artifact.id: artifact.version},
+        fused=fused, considered=1, survived=1, discarded=0, conflicts=0,
+        base_counts=base_counts, cand_counts=cand_counts,
+        base_cheap=base_cheap, cand_cheap=cand_cheap)
+
+
+def test_every_merge_outcome_is_observed_exactly_once(tmp_path):
+    """Oracle rejection, acceptance rejection, commit and CAS conflict must
+    each report exactly one outcome to the allocator -- rejection is a negative
+    label, and without it a model fit on commits alone never leaves warm-up
+    (PR #204 review)."""
+    from agentdescent.aggregator import Aggregator, AggregatorConfig
+    from agentdescent.evolvable import Diff
+    from agentdescent.evolution import AppendRules, EvolvingArtifact
+    from agentdescent.ledger import Ledger
+    from agentdescent.scheduler import AuditScheduler
+    from agentdescent.verifier import ThreeLayerVerifier, VerifierBudget
+
+    class AlwaysRejectAudit(AuditScheduler):
+        """`force_oracle` always opens, and the oracle always vetoes."""
+
+        def force_oracle(self, blast_radius, artifact_id):
+            return True
+
+        def full_eval(self, artifact):   # not used; see below
+            return 0.0
+
+    class VetoingVerifier(ThreeLayerVerifier):
+        def full_eval(self, artifact):
+            return 0.0          # never better than base -> oracle veto
+
+    def serialize(a): return {"state": a.state, "blast_radius": a.blast_radius}
+    def deserialize(aid, v, s):
+        return EvolvingArtifact(aid, s.get("state", {}), v,
+                                s.get("blast_radius", 0.2))
+    lg = Ledger(str(tmp_path / "repo"), serialize, deserialize)
+    lg.register(EvolvingArtifact("a", {"k": "v0"}, blast_radius=0.2))
+    base = lg.snapshot(Ledger.DEV).get("a")
+
+    alloc = ValueBudgetAllocator(min_observations=1, epsilon_start=0.0,
+                                 epsilon_end=0.0)
+
+    def state_scorer(a, t):
+        return 0.9 if a.state.get("k") == "v1" else 0.3
+
+    def make_agg(verifier, audit=None):
+        if audit is None:
+            audit = AuditScheduler()
+        return Aggregator(lg, verifier, audit,
+                          AggregatorConfig(batch_trigger=1))
+    agg = make_agg(ThreeLayerVerifier(
+        eval_fn=state_scorer, held_out=[1, 2, 3],
+        budget=VerifierBudget(oracle_calls_remaining=100)))
+    agg.allocator = alloc
+
+    before = alloc.n_observed
+
+    # 1. Acceptance rejection: candidate fails the Beta test (cheap and full
+    #    layers agree it is worse, so the audit gate stays closed).
+    cand_bad = base.apply(Diff(diff_id="bad", target="a", ops={"k": "bad"},
+                               author="w"))
+    c_bad = _candidate(base, cand_bad,
+                       Diff(diff_id="bad", target="a", ops={"k": "bad"},
+                            author="w"),
+                       base_counts=(2.0, 1.0),      # rate 0.67
+                       cand_counts=(1.0, 3.0),      # rate 0.25, clearly worse
+                       cand_cheap=0.1)              # cheap agrees it is worse
+    r_bad = agg._decide(c_bad)
+    assert r_bad.category in ("below-threshold", "cas-conflict"), r_bad.category
+    # exactly one observation, and it is a negative label
+    assert alloc.n_observed == before + 1, "acceptance rejection must observe once"
+    assert alloc.n_committed == 0
+
+    # 2. Commit: candidate beats the base on the full held-out.
+    cand_good = base.apply(Diff(diff_id="good", target="a",
+                                ops={"k": "v1"}, author="w"))
+    c_good = _candidate(base, cand_good,
+                        Diff(diff_id="good", target="a", ops={"k": "v1"},
+                             author="w"),
+                        base_counts=(2.0, 1.0),      # rate 0.67
+                        cand_counts=(4.0, 0.0))      # rate 1.0, better
+    r_good = agg._decide(c_good)
+    assert r_good.category == "committed", r_good.category
+    assert alloc.n_observed == before + 2, "a commit must observe once"
+    assert alloc.n_committed == 1
+
+    # 3. Oracle rejection: `force_oracle` always opens and the oracle vetoes
+    #    -- one more negative observation.
+    agg_oracle = make_agg(VetoingVerifier(
+        eval_fn=state_scorer, held_out=[1, 2, 3],
+        budget=VerifierBudget(oracle_calls_remaining=100)),
+        audit=AlwaysRejectAudit())
+    agg_oracle.allocator = alloc
+    # force_oracle always opens and the oracle (full_eval -> 0.0, or the
+    # candidate's sub-base rate) vetoes -- a third, negative observation.
+    c_oracle = _candidate(base, cand_bad,
+                          Diff(diff_id="oracle", target="a", ops={"k": "bad"},
+                               author="w"),
+                          base_counts=(2.0, 1.0), cand_counts=(1.0, 3.0),
+                          cand_cheap=0.1)
+    r_oracle = agg_oracle._decide(c_oracle)
+    assert r_oracle.category == "oracle-rejected", r_oracle.category
+    assert alloc.n_observed == before + 3, (
+        "oracle rejection must observe once")
+    assert alloc.n_committed == 1, "a veto is a negative label"
+
+
+def test_sync_async_pre_spend_features_are_identical():
+    """The decision-time features the sync and async workers build must be the
+    same vector the aggregator trains on -- advantage, size, blast radius, and
+    nothing post-outcome (PR #204 review)."""
+    from agentdescent.evolvable import Diff
+    diff = Diff(diff_id="d", target="a", ops={"k1": "v", "k2": "w"}, author="w")
+    from agentdescent.evolution import _allocator_context
+    from agentdescent.async_evolve import _async_allocator_context
+    sync = _allocator_context(diff, advantage=0.7, score=0.3, blast_radius=0.4)
+    async_ctx = _async_allocator_context(diff, advantage=0.7, blast_radius=0.4)
+    assert sync.features() == async_ctx.features(), (
+        "sync and async decision features must match")
+    # Only the three pre-spend features are model inputs; post-outcome signals
+    # are absent even when supplied.
+    assert sync.features() == (0.7, 2.0, 0.4)
+    # The training-side context (with post-outcome fields filled) must produce
+    # the same feature vector as the decision side.
+    from agentdescent.aggregator import _allocator_context_from
+    from agentdescent.evolution import EvolvingArtifact
+    art = EvolvingArtifact("a", {"k": "v0"}, blast_radius=0.4)
+    cand = art.apply(diff)
+    card = type("Card", (), {"advantage": 0.7,
+                             "before_after_delta": 0.9})()
+    c = type("C", (), {
+        "artifact": art, "candidate": cand, "diff": diff,
+        "cards": [card], "fused": False})()
+    trained = _allocator_context_from(c, p_improve=0.99, stable_distance=0.3)
+    assert trained.features() == sync.features(), (
+        "training features must equal decision features, so the model cannot "
+        "fit labels with post-outcome signals the decision never sees")

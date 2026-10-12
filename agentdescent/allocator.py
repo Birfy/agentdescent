@@ -62,16 +62,23 @@ __all__ = [
 class AllocatorContext:
     """One candidate, as the allocator sees it.
 
-    All fields are arithmetic over numbers the merge path already computes; the
-    allocator does not ask the engine to measure anything new. ``None`` means
-    "not measured", never "zero" -- a missing advantage and a real zero
-    advantage are different facts (the zero-advantage filter exists because of
-    exactly that distinction).
+    All fields are arithmetic over numbers the engine already computes; the
+    allocator adds no new measurement, only a new reader of existing ones.
+
+    **The features the model learns on are exactly the features the worker can
+    see *before* the expensive evaluation.** The decision happens at the
+    worker, which knows the proposing rollout's advantage, the diff's size and
+    the artifact's blast radius -- but not the before/after delta (that is the
+    self-verify rollout's own product), P(improve), or stable distance (both
+    computed later in the merge). Training on those post-outcome features while
+    deciding on the pre-spend ones fits a model that explains the labels without
+    teaching a usable pre-spend predictor. So :meth:`features` returns **only**
+    the pre-spend vector; the post-outcome fields exist for diagnostics and the
+    audit trail, never as model inputs.
     """
 
-    #: The local before/after delta the proposing worker measured. The strongest
-    #: cheap signal that a diff helps, and the one every acceptance policy folds
-    #: in as extra evidence for the candidate.
+    #: The local before/after delta the proposing worker measured. **Not a
+    #: model input** (unavailable at decision time) -- kept for diagnostics.
     before_after_delta: Optional[float] = None
     #: Group-relative advantage (GRPO-style z-score) of the proposing rollout.
     #: ``None`` when the group was too small to standardise against.
@@ -79,30 +86,34 @@ class AllocatorContext:
     #: ``len(diff.ops)`` -- the trust region's own notion of diff size.
     size: int = 0
     #: The cheap layer's P(improve), when the candidate reached acceptance.
+    #: **Not a model input** (computed in the merge, after the decision).
     p_improve: Optional[float] = None
     #: The learned layer's uncertainty (``learned_eval``), when available.
+    #: **Not a model input.**
     uncertainty: Optional[float] = None
     #: How far the candidate sits from the confirmed ``stable`` branch.
+    #: **Not a model input** (computed in the merge).
     stable_distance: float = 0.0
-    #: The artifact's blast radius.
+    #: The artifact's blast radius. Known up front, so it *is* a model input.
     blast_radius: float = 0.2
 
     def features(self) -> Tuple[float, ...]:
-        """A fixed-length numeric vector for the value model.
+        """The **pre-spend** feature vector the value model learns and predicts
+        on: ``(advantage, size, blast_radius)``.
 
-        Missing values are ``0.0`` here; the model treats a column of all zeros
-        as "this signal was never measured on this workload" rather than "this
-        candidate scored zero", which is why :attr:`before_after_delta` and
-        :attr:`advantage` are kept as separate columns with their own zero-fill
-        rather than collapsed.
-        """
+        Exactly the features the worker has when it asks "is this worth the
+        self-verify rollout?". Training on the same vector (see
+        :func:`agentdescent.aggregator._allocator_context_from`) is what keeps
+        decision and feedback inputs identical, so the model cannot fit the
+        labels with post-outcome features that the decision never sees.
+
+        ``advantage`` is zero-filled when missing (group too small to
+        standardise) -- a separate fact from a genuine zero advantage, but the
+        distinction is preserved in the audit fields, not needed for the
+        logistic fit."""
         return (
-            self.before_after_delta if self.before_after_delta is not None else 0.0,
             self.advantage if self.advantage is not None else 0.0,
             float(self.size),
-            self.p_improve if self.p_improve is not None else 0.0,
-            self.uncertainty if self.uncertainty is not None else 0.0,
-            self.stable_distance,
             self.blast_radius,
         )
 
@@ -110,12 +121,11 @@ class AllocatorContext:
     def value_hint(self) -> float:
         """A single scalar summary, for diagnostics and the epsilon anneal.
 
-        The unweighted mean of the two strongest cheap signals: a positive
-        before/after delta and a positive advantage both say "this candidate
-        moved the needle locally". Rough by design -- the model learns the
-        weights; this is only the initial guess that starts it."""
-        hints = [v for v in (self.before_after_delta, self.advantage) if v is not None]
-        return (sum(hints) / len(hints)) if hints else 0.0
+        The advantage alone, since it is the one pre-spend signal most likely
+        to separate a committing candidate from a rejected one. Rough by
+        design -- the model learns the weight; this is only the initial guess
+        that starts it."""
+        return self.advantage if self.advantage is not None else 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -189,18 +199,19 @@ class LearningValueModel:
     reg: float = 0.05
     #: Logit clip, so a single outlier cannot send the weights to infinity.
     max_logit: float = 3.0
-    #: Weights, one per feature in :meth:`AllocatorContext.features`, plus bias.
-    _w: List[float] = field(default_factory=lambda: [0.0] * 8)
+    #: Weights, one per feature in :meth:`AllocatorContext.features` (three:
+    #: advantage, size, blast_radius), plus bias.
+    _w: List[float] = field(default_factory=lambda: [0.0] * 4)
 
     def __post_init__(self) -> None:
-        if len(self._w) != 8:
-            self._w = [0.0] * 8
+        if len(self._w) != 4:
+            self._w = [0.0] * 4
 
     def predict(self, features: Tuple[float, ...]) -> float:
-        # The weights are ``[w0..w6, bias]``: the first seven match the seven
-        # features one-to-one, the last is the intercept. Not ``zip(self._w,
-        # features)`` -- that would silently match the bias weight against the
-        # seventh feature and then add it again as the intercept.
+        # The weights are ``[w0, w1, w2, bias]``: the first three match the
+        # three pre-spend features one-to-one, the last is the intercept. Not
+        # ``zip(self._w, features)`` -- that would silently match the bias
+        # weight against a feature and then add it again as the intercept.
         logit = self._bias() + sum(
             wi * x for wi, x in zip(self._w[:-1], features))
         logit = max(-self.max_logit, min(self.max_logit, logit))

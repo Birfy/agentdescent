@@ -44,13 +44,20 @@ Two halves, one object:
 **Value-directed allocation.** Once the budget is tight (`remaining_fraction`
 below the allocator's `budget_start`, default 0.5), the self-verify rollout is
 spent only on candidates the value model expects to commit. `LearningValueModel`
-is a tiny online logistic model over the features the merge path already
-measures — the proposing rollout's local `before_after_delta`, its
-group-relative `advantage`, the diff's size, the merge's P(improve), and the
-candidate's distance from `stable`. It is fit online against commit outcomes
-("did it commit"), so it needs no labelled data: the engine knows the label for
-free. A logit clip and an L2 term keep one extreme candidate from blowing the
-weights.
+is a tiny online logistic model over the **pre-spend features the worker
+actually has at decision time** — the proposing rollout's group-relative
+`advantage`, the diff's `size`, and the artifact's `blast_radius`. It is fit
+online against commit outcomes ("did it commit"), so it needs no labelled data:
+the engine knows the label for free.
+
+**Decision and training see the same vector.** The post-outcome signals the
+merge computes later — the before/after `delta` (the self-verify rollout's own
+product), `P(improve)`, the distance from `stable` — are kept on the context
+for the audit trail but **never enter the model's feature vector**. Training on
+post-outcome features while deciding on pre-spend ones would fit a model that
+explains the labels without teaching a usable pre-spend predictor; restricting
+both sides to the pre-spend columns keeps the learning loop sound. A logit clip
+and an L2 term keep one extreme candidate from blowing the weights.
 
 **Counterfactual exploration.** A candidate the model judged unworthy is
 skipped — except with probability `epsilon`, when it is evaluated anyway. The
@@ -71,9 +78,11 @@ The decision and the feedback are two separate points on the merge path:
   [`AllocatorContext`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/allocator.py)
   built from the diff's size and the rollout's advantage. High-value candidates
   keep the spend; low-value ones lose it; counterfactual ones get it anyway.
-- **The aggregator reports** — after each merge, the outcome
-  (`observe(ctx, committed)`) is fed back, so the value model learns which
-  features predict a commit.
+- **The aggregator reports** — every measured decision is reported exactly
+  once (`observe(ctx, committed)`): a commit, an oracle rejection, an
+  acceptance rejection and a CAS conflict all produce an observation. Oracle
+  and acceptance rejections are **negative labels** — without them the model
+  would learn only from commits and never know which evaluated proposals fail.
 
 `allocator=None` (the default) is the old behaviour byte for byte. The clock
 thresholds remain the *ceiling* the allocator may never exceed: it can skip a

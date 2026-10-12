@@ -315,18 +315,18 @@ _EvalCache = MemoryCache
 
 
 def _allocator_context(diff: "Diff", advantage: Optional[float],
-                       score: float) -> Any:
+                       score: float, blast_radius: float = 0.2) -> Any:
     """Build an :class:`~agentdescent.allocator.AllocatorContext` at the worker.
 
-    The worker has the features that are *known before* the self-verify rollout
-    -- the group-relative advantage and the diff's size -- but not the
-    before/after delta, which is the rollout's own product. So the decision
-    context leaves ``before_after_delta`` as ``None`` (the value model treats
-    it as "not measured yet", the same column the aggregator reports the true
-    delta against afterwards); the *feedback* context built by the aggregator
-    carries the real delta. Same feature vector, different knownness -- which
-    is exactly what lets the model learn "high delta predicts commit" from the
-    feedback while the decision side sees the signals available up front.
+    The worker builds the **pre-spend** features the allocator decides on --
+    the proposing rollout's group-relative advantage, the diff's size, and the
+    artifact's blast radius. The before/after delta is the self-verify
+    rollout's own product and is not known yet; ``p_improve`` and
+    ``stable_distance`` are computed later in the merge. So the decision
+    context leaves those ``None``/default, and :meth:`AllocatorContext.features`
+    -- the vector the model actually sees -- returns only the pre-spend
+    columns, which is exactly what the aggregator trains on too (see
+    :func:`~agentdescent.aggregator._allocator_context_from`).
     """
     from .allocator import AllocatorContext
 
@@ -334,6 +334,7 @@ def _allocator_context(diff: "Diff", advantage: Optional[float],
         before_after_delta=None,     # the self-verify's product, not yet known
         advantage=advantage,
         size=diff.size() if diff is not None else 0,
+        blast_radius=blast_radius,
     )
 
 
@@ -3157,7 +3158,8 @@ def evolve(
             # once the budget is tight it spends the self-verify rollout only on
             # candidates its value model expects to commit (see
             # :mod:`agentdescent.allocator`).
-            if self_verify and governor.candidate_worth(_allocator_context(diff, adv, score)):
+            if self_verify and governor.candidate_worth(_allocator_context(
+                    diff, adv, score, getattr(mine, "blast_radius", 0.2))):
                 after = _checked_reward(
                     reward(task, run(mine.apply(diff).render(), task)), task)
                 delta = after - score
