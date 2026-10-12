@@ -393,7 +393,8 @@ def test_sync_async_pre_spend_features_are_identical():
     art = EvolvingArtifact("a", {"k": "v0"}, blast_radius=0.4)
     cand = art.apply(diff)
     card = type("Card", (), {"advantage": 0.7,
-                             "before_after_delta": 0.9})()
+                             "before_after_delta": 0.9,
+                             "diff": diff})()
     c = type("C", (), {
         "artifact": art, "candidate": cand, "diff": diff,
         "cards": [card], "fused": False})()
@@ -401,3 +402,126 @@ def test_sync_async_pre_spend_features_are_identical():
     assert trained.features() == sync.features(), (
         "training features must equal decision features, so the model cannot "
         "fit labels with post-outcome signals the decision never sees")
+
+
+def test_fused_observe_uses_the_originating_proposal_context():
+    """A fused commit's label attaches to the *originating* proposal's pre-spend
+    vector, not the fused diff's union size -- the worker decided on the single
+    proposal, and training on a union size no decision saw leaks post-merge
+    information (PR #204 review, finding 2 remainder)."""
+    from agentdescent.aggregator import _allocator_context_from
+    from agentdescent.evolvable import Diff
+    from agentdescent.evolution import EvolvingArtifact
+    art = EvolvingArtifact("a", {"k": "v0"}, blast_radius=0.2)
+    proposal = Diff(diff_id="p1", target="a", ops={"k1": "v"}, author="w")
+    fused = Diff(diff_id="fused(p1+p2)", target="a",
+                 ops={"k1": "v", "k2": "w"}, author="aggregator")   # size 2
+    card = type("Card", (), {"advantage": 0.7,
+                             "before_after_delta": 0.9,
+                             "diff": proposal})()                    # size 1
+    cand = art.apply(fused)
+    c = type("C", (), {
+        "artifact": art, "candidate": cand, "diff": fused,
+        "cards": [card], "fused": True})()
+    ctx = _allocator_context_from(c, p_improve=0.99, stable_distance=0.3)
+    # The decision side saw the proposal (size 1), and the fused label must
+    # attach to that same vector -- not the fused size 2.
+    assert ctx.features() == (0.7, 1.0, 0.2), (
+        f"fused observe must use the originating proposal's size, got "
+        f"{ctx.features()}")
+
+
+class _RecordingAllocator:
+    """Records every decide/observe input feature vector, then always deep-evals.
+
+    Lets an end-to-end run prove fused commits observe the *originating*
+    proposal's pre-spend vector, not the fused union size."""
+
+    def __init__(self):
+        self.decided = []
+        self.observed = []
+        self.budget_start = 2.0        # budget never tight -> always decide
+
+    def decide(self, ctx):
+        self.decided.append(ctx.features())
+        from agentdescent.allocator import AllocateDecision
+        return AllocateDecision(deep_eval=True)
+
+    def observe(self, ctx, committed):
+        self.observed.append((ctx.features(), committed))
+
+
+def test_fused_commit_observes_originating_proposal_end_to_end():
+    """A real `evolve()` run fuses two proposals and commits the union; the
+    observe input must be a worker's actual pre-spend vector (the single rule's
+    size 1), never the fused size 2 (PR #204 review finding 2 remainder)."""
+    import warnings
+    from agentdescent.evolution import AppendRules
+
+    rec = _RecordingAllocator()
+    tasks = [Task(id=f"t{i}", prompt="q") for i in range(8)]
+
+    def run(rendered, task):
+        return rendered
+
+    def reward(task, output):
+        return min(1.0, output.count("rule") * 0.5)
+
+    propose = iter([f"rule {i}" for i in range(20)])
+
+    def make_propose(rendered, task, output, score):
+        return next(propose, "rule x")
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        evolve(tasks, reward, run=run, propose=make_propose,
+               strategy=AppendRules(), rounds=1, n_workers=2,
+               max_concurrency=1, max_tokens=10_000, allocator=rec,
+               held_out_frac=0.5, shuffle=False)
+
+    assert rec.decided, "workers must call decide before spending"
+    assert rec.observed, "the merge must call observe"
+    # Every observed vector's size must be one the allocator actually decided
+    # on -- a single proposal's diff size. The fused union (size >= 2) must not
+    # appear, because no worker ever decided about a size-2 candidate.
+    decided_sizes = {f[1] for f in rec.decided}
+    for feats, committed in rec.observed:
+        assert feats[1] in decided_sizes, (
+            f"observe fed size {feats[1]}, but decisions only saw "
+            f"sizes {decided_sizes} -- the fused union size leaked into training")
+
+
+def test_async_fused_commit_observes_originating_proposal_end_to_end():
+    """Same guarantee on the barrier-free path: the merger's observe for a
+    fused commit carries a worker's pre-spend vector, not the union size."""
+    import warnings
+    from agentdescent.async_evolve import async_evolve
+    from agentdescent.evolution import AppendRules
+
+    rec = _RecordingAllocator()
+    tasks = [Task(id=f"t{i}", prompt="q") for i in range(8)]
+
+    def run(rendered, task):
+        return rendered
+
+    def reward(task, output):
+        return min(1.0, output.count("rule") * 0.5)
+
+    propose = iter([f"rule {i}" for i in range(20)])
+
+    def make_propose(rendered, task, output, score):
+        return next(propose, "rule x")
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res = async_evolve(
+            tasks, reward, run=run, propose=make_propose,
+            strategy=AppendRules(), n_workers=2, max_seconds=5.0,
+            max_tokens=10_000, allocator=rec, held_out_frac=0.5,
+            shuffle=False)
+    assert rec.decided, "workers must call decide before spending"
+    decided_sizes = {f[1] for f in rec.decided}
+    for feats, committed in rec.observed:
+        assert feats[1] in decided_sizes, (
+            f"async observe fed size {feats[1]}, but decisions only saw "
+            f"sizes {decided_sizes}")
