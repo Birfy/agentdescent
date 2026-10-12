@@ -107,13 +107,22 @@ class AllocatorContext:
         decision and feedback inputs identical, so the model cannot fit the
         labels with post-outcome features that the decision never sees.
 
-        ``advantage`` is zero-filled when missing (group too small to
-        standardise) -- a separate fact from a genuine zero advantage, but the
-        distinction is preserved in the audit fields, not needed for the
-        logistic fit."""
+        **All three columns are brought to a comparable scale.** A logistic fit
+        is scale-sensitive: a diff-size column in raw ops (1..100+) would
+        dominate the group-relative advantage (a z-score, roughly -3..3) and the
+        blast radius ([0, 1]) purely by magnitude, so the learned weights — and
+        therefore the skip decisions — would be driven by size no matter what
+        the advantage said. ``size`` is therefore mapped through
+        ``log1p`` and normalised to ``[0, 1]`` against a nominal ceiling of
+        100 ops (``log1p(100)``), which keeps the three inputs comparable while
+        preserving order and monotonicity. ``advantage`` is zero-filled when
+        missing (group too small to standardise); blast radius is already a
+        fraction.
+        """
+        import math
         return (
             self.advantage if self.advantage is not None else 0.0,
-            float(self.size),
+            math.log1p(max(0, self.size)) / math.log1p(100),
             self.blast_radius,
         )
 

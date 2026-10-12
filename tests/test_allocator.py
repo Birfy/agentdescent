@@ -40,6 +40,13 @@ def _unmeasured(advantage: float, size: int = 2):
     return AllocatorContext(advantage=advantage, size=size)
 
 
+def _nsize(size: int) -> float:
+    """The normalised size column: ``log1p(size)/log1p(100)``, matching
+    :meth:`AllocatorContext.features`."""
+    import math
+    return math.log1p(max(0, size)) / math.log1p(100)
+
+
 # ---------------------------------------------------------------------------
 # the value model
 # ---------------------------------------------------------------------------
@@ -385,7 +392,7 @@ def test_sync_async_pre_spend_features_are_identical():
         "sync and async decision features must match")
     # Only the three pre-spend features are model inputs; post-outcome signals
     # are absent even when supplied.
-    assert sync.features() == (0.7, 2.0, 0.4)
+    assert sync.features() == (0.7, _nsize(2), 0.4)
     # The training-side context (with post-outcome fields filled) must produce
     # the same feature vector as the decision side.
     from agentdescent.aggregator import _allocator_context_from
@@ -426,7 +433,7 @@ def test_fused_observe_uses_the_originating_proposal_context():
     ctx = _allocator_context_from(c, p_improve=0.99, stable_distance=0.3)
     # The decision side saw the proposal (size 1), and the fused label must
     # attach to that same vector -- not the fused size 2.
-    assert ctx.features() == (0.7, 1.0, 0.2), (
+    assert ctx.features() == (0.7, _nsize(1), 0.2), (
         f"fused observe must use the originating proposal's size, got "
         f"{ctx.features()}")
 
@@ -456,7 +463,7 @@ def test_single_winner_observes_the_selected_proposal_not_the_first_entrant():
     ctx = _allocator_context_from(c, p_improve=0.99, stable_distance=0.3)
     # The tournament chose GOOD (size 2); the label attaches to its vector,
     # not the first entrant BAD (size 1).
-    assert ctx.features() == (0.7, 2.0, 0.2), (
+    assert ctx.features() == (0.7, _nsize(2), 0.2), (
         f"single-winner observe must use the selected proposal's vector, got "
         f"{ctx.features()}")
 
@@ -588,13 +595,14 @@ def test_single_winner_observes_selected_proposal_end_to_end():
     res = _single_winner_run(rec, tasks, make_propose)
     assert rec.decided, "workers must call decide"
     # decisions saw size 1 (bad) and size 2 (good+pad)
-    assert sorted({f[1] for f in rec.decided}) == [1.0, 2.0], rec.decided
+    assert sorted({f[1] for f in rec.decided}) == [_nsize(1), _nsize(2)], \
+        rec.decided
     # the winner (size 2) committed; the observe vector must be its own
-    # (0.0, 2.0, 0.2) -- not the losing first entrant's (0.0, 1.0, 0.2).
+    # (0.0, nsize(2), 0.2) -- not the losing first entrant's (0.0, nsize(1), 0.2).
     assert len(rec.observed) == 1, rec.observed
     feats, committed = rec.observed[0]
     assert committed, "the good proposal must have committed"
-    assert feats == (0.0, 2.0, 0.2), (
+    assert feats == (0.0, _nsize(2), 0.2), (
         f"single winner must observe its own vector, got {feats}")
 
 
@@ -631,7 +639,7 @@ def test_async_single_winner_observes_selected_proposal_end_to_end():
     # proposal's own (size 2), never the losing entrant's (size 1).
     for feats, committed in rec.observed:
         if committed:
-            assert feats[1] == 2.0, (
+            assert feats[1] == _nsize(2), (
                 f"async single winner must observe its own size-2 vector, got "
                 f"{feats}")
 
@@ -701,3 +709,28 @@ def test_ab_allocator_arm_wiring():
     assert fired == 1 and observed == 1, (
         "fired counts decisions where the allocator differed from the clock "
         "(a skip or a counterfactual), observed counts every decision it saw")
+
+
+def test_size_magnitude_does_not_dominate_the_advantage():
+    """The size column is normalised so a raw-op magnitude (1..100+) cannot
+    blow its logistic weight and override the advantage (a z-score) in the
+    skip decision. Before normalisation a candidate with high advantage but a
+    large diff was predicted near-certain *not* to commit, purely because the
+    raw size column swamped the fit."""
+    m = LearningValueModel(lr=0.2, reg=0.05, max_logit=3.0)
+    # Large-diff candidates never commit; small-diff ones (with high advantage)
+    # always commit.
+    for _ in range(30):
+        m.update((0.1, _nsize(50), 0.2), False)
+        m.update((1.0, _nsize(1), 0.2), True)
+    # A new candidate with high advantage and a large diff must still lean
+    # commit -- the advantage signal must survive, not be swamped by size.
+    p_hi_adv_big = m.predict((1.0, _nsize(50), 0.2))
+    assert p_hi_adv_big > 0.5, (
+        f"high advantage must not be vetoed by a large diff size; got "
+        f"P(commit)={p_hi_adv_big:.3f}")
+    # ...and a low-advantage large-diff candidate stays a clear reject.
+    p_low_adv_big = m.predict((0.1, _nsize(50), 0.2))
+    assert p_low_adv_big < 0.5, (
+        f"low advantage with large diff should reject; got P(commit)="
+        f"{p_low_adv_big:.3f}")
