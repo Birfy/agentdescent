@@ -51,7 +51,7 @@ def test_resume_queue_pop_for_never_hands_same_task_twice():
 def test_resume_queue_push_refuses_a_task_resumed_past_max_attempts():
     """A task that keeps being a straggler must stop being re-queued once it
     has been resumed `max_attempts` times -- otherwise it starves the worker's
-    fresh tasks (PR #198 review: repeated re-queue has no bound)."""
+    fresh tasks."""
     q = ResumeQueue(max_attempts=1)
     item = ResumeItem(task_id="a", turn=0, conversation=[],
                       version_at_checkpoint={"art": 5})
@@ -82,9 +82,7 @@ def test_resume_queue_max_attempts_bounds_a_chronically_slow_task():
 
 def test_resume_queue_duplicate_pushes_before_any_pop_are_bounded():
     """A burst of pushes for the same task, before the first pop, must not all
-    be accepted: the cap counts *queued* copies too, not just popped ones
-    (PR #198 review: `push` checked only `_resumed_count`, so three pushes
-    with no pop in between all landed and were all handed out)."""
+    be accepted: the cap counts *queued* copies too, not just popped ones."""
     q = ResumeQueue(max_attempts=1)
     item = ResumeItem(task_id="a", turn=0, conversation=[],
                       version_at_checkpoint={"art": 5})
@@ -100,8 +98,7 @@ def test_resume_queue_duplicate_pushes_before_any_pop_are_bounded():
 
 def test_resume_queue_pop_counts_toward_the_cap_too():
     """`pop()` (not just `pop_for`) is a resume and must feed the same bound:
-    after a pop, a re-push of the same task is refused (PR #198 review: `pop()`
-    never updated the count, so a consumer that used it could exceed the cap)."""
+    after a pop, a re-push of the same task is refused."""
     q = ResumeQueue(max_attempts=1)
     item = ResumeItem(task_id="a", turn=0, conversation=[],
                       version_at_checkpoint={"art": 5})
@@ -116,35 +113,50 @@ def test_resume_queue_pop_counts_toward_the_cap_too():
 # ---------------------------------------------------------------------------
 
 def test_async_re_runs_a_straggler_against_the_newer_head():
-    """A worker whose rollout overruns its estimate is re-run; result.resumed
-    reports it, and the re-run happens against the current head."""
+    """A worker whose rollout overruns its estimate is re-run against a head
+    that has since advanced -- not re-executed for its own sake. The `run`
+    records the artifact each rollout saw, so the test can tell the two apart:
+    t0 is slow (a straggler) while another shard commits a clue; t0's re-run
+    must render the artifact *with* the clue, i.e. a newer version than the
+    one its abandoned rollout measured."""
     import time
-    slow_first = {"flag": True}
+    renders = []                     # (task_id, rendered) per rollout
 
     def run(rendered, task):
-        if slow_first["flag"]:
-            slow_first["flag"] = False
-            time.sleep(0.05)          # overruns the estimator's tiny prior
-        return "yes"
+        renders.append((task.id, rendered))
+        if task.id == "t0":
+            time.sleep(0.2)          # t0 is always slow: a chronic straggler
+        return "correct" if "clue" in rendered else "wrong"
 
-    # A `DurationEstimator` with a tiny prior predicts ~0s, so the first
-    # rollout of every task is a straggler by construction.
+    # Only t0 stays unsolved; every other task that lands a proposal commits a
+    # clue, advancing the head between t0's abandoned rollout and its re-run.
+    def propose(rendered, task, output, reward):
+        if task.id != "t0" and "clue" not in rendered:
+            return "add a clue"
+        return None
+
+    # A `DurationEstimator` with a tiny prior predicts ~0s, so every rollout
+    # of t0 (0.2s) is a straggler by construction.
     estimator = DurationEstimator(prior=0.0001, min_samples=100)
     q = ResumeQueue()
     tasks = [Task(id=f"t{i}", prompt="q") for i in range(4)]
 
     result = async_evolve(
-        tasks, lambda t, o: 1.0 if o == "yes" else 0.0,
-        run=run, propose=lambda rd, t, o, r: None,
+        tasks, lambda t, o: 1.0 if o == "correct" else 0.0,
+        run=run, propose=propose,
         strategy=AppendRules(),
         n_workers=2, duration_estimator=estimator, resume_queue=q,
         straggler_factor=2.0, max_seconds=10.0, held_out_frac=0.5)
-    # every task overran on its first try; at least one was re-run.
+    # t0 is always a straggler; it must have been re-run at least once.
     assert result.stragglers >= 1
     assert result.resumed >= 1, f"expected re-runs, got {result.resumed}"
-    # A queued straggler is re-run when a worker is free; some may legitimately
-    # still be queued when the run ends (no worker got to them), which is fine.
-    assert result.resumed <= result.stragglers
+    t0_renders = [r for tid, r in renders if tid == "t0"]
+    assert len(t0_renders) >= 2, (
+        "t0 must be rolled out at least twice (abandoned + re-run)")
+    assert "clue" not in t0_renders[0], (
+        "the first rollout measured the pre-clue head")
+    assert "clue" in t0_renders[-1], (
+        "the re-run must render the newer head, not re-run the old one")
 
 
 def test_async_without_resume_queue_keeps_old_behaviour():
@@ -172,7 +184,7 @@ def test_async_without_resume_queue_keeps_old_behaviour():
 
 def test_a_chronically_slow_task_cannot_be_resumed_forever():
     """A task that is *always* a straggler gets bounded re-runs, not an
-    infinite resume loop starving the worker's fresh tasks (PR #198 review)."""
+    infinite resume loop starving the worker's fresh tasks."""
     import time
 
     def run(rendered, task):

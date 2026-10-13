@@ -98,10 +98,12 @@ value-directed evaluation or Genesis blind-mode proposals.
   Wired end to end: the worker asks the governor `candidate_worth(ctx)` before the self-verify rollout; the aggregator reports **every** measured decision exactly once (`observe(ctx, committed)`), with oracle rejection and acceptance rejection as negative labels — a model fit on commits alone never leaves warm-up. **Every commit is attributed to a worker's actual pre-spend vector**: a fused candidate keeps its first contributor's context, and a tournament-selected single proposal is matched to its own winning card — never a losing first entrant, never a fused union size. The feature vector is **scale-normalised**: the raw-op diff size (1..100+) would swamp the advantage (a z-score) and blast radius in a raw logistic fit, so `size` is mapped through `log1p` to `[0, 1]` — verified by a regression where a high-advantage, large-diff candidate still predicts commit. `allocator=None` (the default) is the old behaviour byte for byte — the clock thresholds remain the *ceiling* the allocator may never exceed. 25 tests in `tests/test_allocator.py` (incl. negative-outcome, sync/async feature-parity, end-to-end fused + single-winner regressions, the A/B arm wiring, and the size-scale regression). **`bench/ab_allocator.py`** is the equal-budget A/B (off vs on, real datasets HotpotQA/finer, per-seed quality + measured tokens + a fired check that distinguishes "the allocator helped" from "it never ran"); exported from the package root; `docs/api.md` regenerated.
 
 - **`async_evolve(resume_queue=...)` — the L-traj resume half, the straggler
-  re-run.** The async runtime abandons a rollout that overruns its predicted
-  cost and counts it (`result.stragglers`). With a shared
+  re-run.** Detection is **after-return**: `run(rendered, task) -> output` is
+  opaque, so a rollout that overruns its predicted cost is noticed once it has
+  finished (it is not cancelled mid-flight) and counted
+  (`result.stragglers`). With a shared
   :class:`~agentdescent.scheduler.ResumeQueue` passed in, it now *records* the
-  abandoned task and the version it measured instead of dropping it; the next
+  detected task and the version it measured instead of dropping it; the next
   idle worker whose shard owns that task re-runs it against the **current**
   head. A straggler measured version N, its re-run measures version N+k, so the
   pair is a free cross-version A/B signal — the design's L-traj note made

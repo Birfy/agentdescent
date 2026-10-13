@@ -320,7 +320,7 @@ class ResumeQueue:
         self._resumed_count: Dict[str, int] = defaultdict(int)
         #: task_id -> how many of that task are currently sitting in the queue.
         #: The other half of the bound: a burst of pushes for the same task
-        #: before any pop must not all be accepted (PR #198 review).
+        #: before any pop must not all be accepted.
         self._queued_count: Dict[str, int] = defaultdict(int)
         #: How many pushes were refused because the task was past the cap.
         self.dropped = 0
@@ -338,10 +338,8 @@ class ResumeQueue:
         :attr:`max_attempts` times -- the bounded-retry guard against a
         chronically slow task monopolising a worker's shard. The bound counts
         *both* the resumes already handed out and the copies of the task still
-        queued, so a burst of pushes before any pop cannot exceed the cap
-        (PR #198 review: ``push`` checked only the popped count, so three
-        pushes with no pop in between were all accepted). Returns whether the
-        item was accepted."""
+        queued, so a burst of pushes before any pop cannot exceed the cap.
+        Returns whether the item was accepted."""
         with self._lock:
             total = (self._resumed_count[item.task_id]
                      + self._queued_count[item.task_id])

@@ -126,9 +126,11 @@ def async_evolve(
     stall_patience: int = 50,
     duration_estimator: Optional["DurationEstimator"] = None,
     straggler_factor: float = 3.0,
-    #: L-traj resume: a shared queue of abandoned stragglers, each carrying the
-    #: task and the version it was rolled out against. A worker that overruns
-    #: its predicted cost is abandoned -- but with a queue present its task is
+    #: L-traj resume: a shared queue of detected stragglers, each carrying the
+    #: task and the version it was rolled out against. Detection is
+    #: **after-return**: ``run(rendered, task) -> output`` is opaque, so a
+    #: rollout that overruns its predicted cost is noticed once it has returned
+    #: (it is not cancelled mid-flight). With a queue present its task is
     #: recorded instead of just counted, and the next idle worker re-runs it
     #: against the **latest** head. The straggler measured an old version, the
     #: re-run measures the new one, so the two are a free cross-version A/B
@@ -337,10 +339,12 @@ def async_evolve(
     resume_queue:
         Turn a counted straggler into a **re-run**. A shared
         :class:`~agentdescent.scheduler.ResumeQueue` passed here receives every
-        abandoned rollout's task and the version it measured; the next idle
+        detected straggler's task and the version it measured; the next idle
         worker whose shard owns that task re-runs it against the **current**
         head. A straggler measured version N, its re-run measures version N+k,
-        so the pair is a free cross-version A/B signal. ``None`` (the default)
+        so the pair is a free cross-version A/B signal. Detection is
+        **after-return** -- a rollout that overruns its estimate is noticed
+        once it has finished, not cancelled mid-flight. ``None`` (the default)
         keeps the old behaviour exactly: stragglers are counted and dropped.
         ``result.resumed`` reports the re-runs.
     shutdown_grace:
