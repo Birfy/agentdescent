@@ -588,6 +588,7 @@ def test_ten_constants_is_a_real_ceiling_on_an_answer():
 
 @needs_sandbox
 def test_a_program_answer_is_fitted_and_scored_end_to_end(tmp_path, monkeypatch):
+    pytest.importorskip("scipy", reason="upstream fits constants with scipy.optimize")
     monkeypatch.setattr(srbench, "cache_path",
                         lambda subdir, name: str(tmp_path / name))
     rng = np.random.default_rng(1)
