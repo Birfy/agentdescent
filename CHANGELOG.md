@@ -37,6 +37,10 @@ All notable changes to AgentDescent are documented here. The format follows
   rejected the diff (the adaptive policy's current region) instead of the
   config constants (#224).
 
+- `BudgetGovernor`'s diminishing-returns stop skips a non-finite (`NaN`/`inf`)
+  round reward like `None` instead of letting it poison the peak efficiency, and
+  no longer misfires or crashes when `min_efficiency_samples < 2` (#242).
+
 ## [0.5.1] — 2026-10-10
 
 ### Release summary

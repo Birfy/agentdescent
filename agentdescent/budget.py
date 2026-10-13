@@ -33,6 +33,7 @@ spent, never whether the run's numbers mean anything.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
@@ -260,10 +261,18 @@ class BudgetGovernor:
         A round that spent no tokens records nothing: ``Δreward / 0`` is not
         infinity, it is a round whose cost was not measured, and letting it into
         the sample would make an unmeasured run look infinitely efficient.
+
+        A non-finite reward (``NaN`` or ``inf``) is a failed measurement too, and
+        is skipped exactly like ``None``: the next finite round is differenced
+        against the last finite one. Letting it through would poison the peak
+        -- a leading ``NaN`` peak disables the stop for the rest of the run, an
+        ``inf`` one fires it on a run that is still paying for itself.
         """
         if reward is None or not isinstance(reward, (int, float)):
             return
         reward = float(reward)
+        if not math.isfinite(reward):
+            return
         if self._prev_reward is None:
             self._prev_reward = reward
             self._prev_spent = self._spent
@@ -293,12 +302,18 @@ class BudgetGovernor:
         if not self.stop_on_diminishing or self.max_tokens is None:
             return False
         samples = self._efficiencies
-        if len(samples) < self.min_efficiency_samples:
+        # `not samples` as well as the threshold: `min_efficiency_samples <= 0`
+        # must not reach `max([])`.
+        if not samples or len(samples) < self.min_efficiency_samples:
             return False
         peak = max(samples)
         if peak <= 0:
             return False
-        recent = sum(samples[-2:]) / 2.0
+        # The recent rate is the mean of the last (up to) two samples, divided
+        # by how many there actually are -- with one sample, a fixed `/ 2`
+        # reads a run at its own peak as having halved.
+        window = samples[-2:]
+        recent = sum(window) / len(window)
         return recent < self.efficiency_floor * peak
 
     # -- what the run reports --------------------------------------------------
