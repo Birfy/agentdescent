@@ -8,6 +8,10 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- `AdaptiveTrustRegion` widens when a window is dominated by `OVERSIZED`
+  refusals (the size cap was binding) instead of treating them like gate
+  refusals and leaving the region stuck (#226).
+
 - The `OVERSIZED` merge report now quotes the trust region that actually
   rejected the diff (the adaptive policy's current region) instead of the
   config constants (#224).
