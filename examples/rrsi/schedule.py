@@ -48,6 +48,18 @@ import math
 from typing import List
 
 
+def _validate_bounds(b_min: int, b_max: int) -> None:
+    """Raise ``ValueError`` unless ``1 <= b_min <= b_max`` are plain ints."""
+    if not isinstance(b_min, int) or isinstance(b_min, bool):
+        raise ValueError("b_min must be an int")
+    if not isinstance(b_max, int) or isinstance(b_max, bool):
+        raise ValueError("b_max must be an int")
+    if b_min < 1 or b_max < 1:
+        raise ValueError("b_min and b_max must be >= 1")
+    if b_min > b_max:
+        raise ValueError("b_min must be <= b_max")
+
+
 def edit_budget(t: int, T: int, b_min: int, b_max: int) -> int:
     """Return ``b_t`` for round ``t`` (0-indexed) of a ``T``-round run.
 
@@ -61,14 +73,7 @@ def edit_budget(t: int, T: int, b_min: int, b_max: int) -> int:
     Defensive validation (AgentDescent convention, not upstream parity):
     ``b_min`` / ``b_max`` must be positive integers with ``b_min <= b_max``.
     """
-    if not isinstance(b_min, int) or isinstance(b_min, bool):
-        raise ValueError("b_min must be an int")
-    if not isinstance(b_max, int) or isinstance(b_max, bool):
-        raise ValueError("b_max must be an int")
-    if b_min < 1 or b_max < 1:
-        raise ValueError("b_min and b_max must be >= 1")
-    if b_min > b_max:
-        raise ValueError("b_min must be <= b_max")
+    _validate_bounds(b_min, b_max)
     if not isinstance(T, int) or isinstance(T, bool):
         raise ValueError("T must be an int")
     if not isinstance(t, int) or isinstance(t, bool):
@@ -88,4 +93,7 @@ def budget_table(T: int, b_min: int, b_max: int) -> List[int]:
         raise ValueError("T must be an int")
     if T < 0:
         raise ValueError("T must be >= 0")
+    # Validate bounds up front: for T == 0 the comprehension is empty and
+    # would otherwise silently accept invalid bounds.
+    _validate_bounds(b_min, b_max)
     return [edit_budget(t, T, b_min, b_max) for t in range(T)]

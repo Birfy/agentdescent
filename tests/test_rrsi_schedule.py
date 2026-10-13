@@ -83,3 +83,19 @@ def test_budget_table_rejects_negative_T():
     with pytest.raises(ValueError, match="T must be >= 0"):
         budget_table(-1, 1, 3)
     assert budget_table(0, 1, 3) == []
+
+
+@pytest.mark.parametrize(
+    "b_min,b_max,match",
+    [
+        (0, 0, ">= 1"),
+        (3, 1, "<="),
+        (True, 3, "b_min must be an int"),
+        (1, 2.0, "b_max must be an int"),
+    ],
+)
+def test_budget_table_validates_bounds_even_for_zero_rounds(b_min, b_max, match):
+    # T == 0 yields an empty table, but invalid bounds must still be refused
+    # rather than silently returning [].
+    with pytest.raises(ValueError, match=match):
+        budget_table(0, b_min, b_max)
