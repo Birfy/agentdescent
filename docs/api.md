@@ -1116,7 +1116,8 @@ MergeReport(
     prob_improve: float,
     committed_version: Optional[int],
     reason: str = '',
-    category: str = ''
+    category: str = '',
+    oversized: int = 0
 ) -> None
 ```
 
@@ -2858,7 +2859,7 @@ Group-relative advantage, an adaptive trust region, distance from stable. &nbsp;
 
 ### `AdaptiveTrustRegion(...)`
 
-Widen the diff-size cap while merges land; tighten when they do not.
+Widen the diff-size cap when merges land or oversized refusals dominate; tighten on reversals.
 
 ```python
 AdaptiveTrustRegion(

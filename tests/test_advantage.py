@@ -270,6 +270,33 @@ def test_a_gate_that_is_refusing_does_not_move_the_region_either_way():
     assert region.current == start
 
 
+def test_a_window_of_oversized_refusals_widens_the_region():
+    """``oversized`` means the trust region itself rejected the diffs. Leaving
+    the cap unchanged would keep refusing the same sizes; widen instead. This
+    is the opposite of a gate refusal (``below-threshold``), which must not
+    move the region either way."""
+    region = AdaptiveTrustRegion(window=4, widen=2.0,
+                                 initial=TrustRegion(ops=4, chars=1000))
+    for _ in range(4):
+        region.observe("oversized")
+    assert region.current.ops == 8
+    assert region.current.chars == 2000
+    assert len(region.history) == 2
+
+
+def test_a_minority_of_oversized_refusals_does_not_widen_by_itself():
+    """Same threshold as accept_rate_to_widen: a single oversized among gate
+    refusals is not enough evidence that the region is the limiter."""
+    region = AdaptiveTrustRegion(window=4, widen=2.0,
+                                 initial=TrustRegion(ops=4, chars=1000),
+                                 accept_rate_to_widen=0.5)
+    for outcome in ("below-threshold", "below-threshold",
+                    "below-threshold", "oversized"):
+        region.observe(outcome)
+    assert region.current.ops == 4
+    assert region.current.chars == 1000
+
+
 def test_it_stops_at_its_bounds():
     """Unbounded growth ends with a trust region that constrains nothing, which
     is the same as not having one."""

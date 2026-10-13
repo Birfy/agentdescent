@@ -287,7 +287,7 @@ class TrustRegion:
 
 
 class AdaptiveTrustRegion:
-    """Widen the diff-size cap while merges land; tighten when they do not.
+    """Widen the diff-size cap when merges land or oversized refusals dominate; tighten on reversals.
 
     The shipped caps are ``6`` ops and ``32_000`` characters. Both are guesses --
     the second exists because a comment records that the op count alone was not
@@ -297,10 +297,13 @@ class AdaptiveTrustRegion:
 
     The rule is PPO's adaptive KL coefficient with the terms renamed. Over the
     last ``window`` merges: a high acceptance rate with no reversals means the
-    region is not what is limiting progress, so widen it; any reversal -- a
-    rollback, or an oracle veto -- means the last widening bought a change that
-    should not have landed, so tighten. Reversals are weighted more heavily than
-    acceptances because they are the expensive direction.
+    region is not what is limiting progress, so widen it; a high rate of
+    ``oversized`` refusals means the region *is* what is limiting progress, so
+    also widen it; any reversal -- a rollback, or an oracle veto -- means the
+    last widening bought a change that should not have landed, so tighten.
+    Reversals are weighted more heavily than acceptances because they are the
+    expensive direction. Gate refusals (``below-threshold``, ``all-stale``, …)
+    move nothing either way.
 
     Bounded at both ends. Unbounded growth ends with a trust region that does not
     constrain anything, which is the same as not having one.
@@ -327,7 +330,9 @@ class AdaptiveTrustRegion:
         """Record one merge outcome and return the region for the next merge.
 
         ``outcome`` is a :class:`~agentdescent.aggregator.MergeOutcome` value --
-        ``"committed"``, ``"oracle-rejected"``, ``"below-threshold"``, and so on.
+        ``"committed"``, ``"oracle-rejected"``, ``"oversized"``,
+        ``"below-threshold"``, and so on. ``"oversized"`` widens the region
+        (the size cap was binding); gate refusals leave it unchanged.
         """
         self._recent.append(outcome)
         if len(self._recent) < self.window:
@@ -335,10 +340,17 @@ class AdaptiveTrustRegion:
         reversals = sum(1 for o in self._recent
                         if o in ("oracle-rejected", "rolled-back"))
         accepted = sum(1 for o in self._recent if o == "committed")
-        rate = accepted / len(self._recent)
+        oversized = sum(1 for o in self._recent if o == "oversized")
+        n = len(self._recent)
+        rate = accepted / n
+        oversized_rate = oversized / n
         if reversals:
             factor = self.tighten
         elif rate >= self.accept_rate_to_widen:
+            factor = self.widen
+        elif oversized_rate >= self.accept_rate_to_widen:
+            # The trust region itself rejected these diffs. Widening is the
+            # fix; leaving the cap unchanged keeps refusing the same sizes.
             factor = self.widen
         else:
             # Merges are being refused by the *gate*, not by size. Widening would
