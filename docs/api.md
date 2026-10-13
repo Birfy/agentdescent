@@ -2947,6 +2947,7 @@ Turn-level checkpoints of timed-out rollouts (partial rollout).
 
 | method | what it does |
 |---|---|
+| `pop() -> Optional[ResumeItem]` | Pop the next resume. Counts as a resume for that task, feeding the `max_attempts` bound in `push`. |
 | `pop_for(task_ids: Sequence[str]) -> Optional[ResumeItem]` | Pop the first resume whose task belongs to `task_ids`. |
 | `push(item: ResumeItem) -> bool` | Queue `item`; `False` when this task has been resumed too often. |
 
