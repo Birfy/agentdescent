@@ -348,8 +348,9 @@ class CallBudget:
     ``base`` is the default the adapter was constructed with. The engine never
     raises ``next`` above ``base`` (a model call that costs more than the
     caller's configured ceiling is a bill the caller did not agree to), and
-    never drops it below ``base // 4`` (a reasoning model starved below a
-    quarter of its budget returns empty content — measured, see
+    never drops it below ``floor`` — by default ``max(256, base // 4)``
+    capped at ``base`` (a reasoning model starved below a quarter of its
+    budget returns empty content — measured, see
     :func:`agentdescent.agents.claude`).
     """
 
