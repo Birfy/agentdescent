@@ -313,9 +313,15 @@ class ResumeQueue:
         #: chronically slow and re-dispatching it only starves fresh work.
         self.max_attempts = max_attempts
         self._items: List[ResumeItem] = []
-        #: task_id -> how many times it has been resumed (popped). What bounds
-        #: the re-queue: `push` refuses a task whose count has hit the cap.
+        #: task_id -> how many times it has been resumed (popped). Half of what
+        #: bounds the re-queue: `push` refuses a task whose *total* (this plus
+        #: how many of it are still queued) has hit the cap, so a task that was
+        #: pushed several times without a pop in between cannot exceed it either.
         self._resumed_count: Dict[str, int] = defaultdict(int)
+        #: task_id -> how many of that task are currently sitting in the queue.
+        #: The other half of the bound: a burst of pushes for the same task
+        #: before any pop must not all be accepted (PR #198 review).
+        self._queued_count: Dict[str, int] = defaultdict(int)
         #: How many pushes were refused because the task was past the cap.
         self.dropped = 0
         # every async worker thread pushes here; list.append happens to be
@@ -330,18 +336,32 @@ class ResumeQueue:
 
         A straggler is dropped (not queued) once its task has been resumed
         :attr:`max_attempts` times -- the bounded-retry guard against a
-        chronically slow task monopolising a worker's shard. Returns whether the
+        chronically slow task monopolising a worker's shard. The bound counts
+        *both* the resumes already handed out and the copies of the task still
+        queued, so a burst of pushes before any pop cannot exceed the cap
+        (PR #198 review: ``push`` checked only the popped count, so three
+        pushes with no pop in between were all accepted). Returns whether the
         item was accepted."""
-        if self._resumed_count[item.task_id] >= self.max_attempts:
-            self.dropped += 1
-            return False
         with self._lock:
+            total = (self._resumed_count[item.task_id]
+                     + self._queued_count[item.task_id])
+            if total >= self.max_attempts:
+                self.dropped += 1
+                return False
             self._items.append(item)
+            self._queued_count[item.task_id] += 1
         return True
 
     def pop(self) -> Optional[ResumeItem]:
+        """Pop the next resume. Counts as a resume for that task, feeding the
+        :attr:`max_attempts` bound in :meth:`push`."""
         with self._lock:
-            return self._items.pop(0) if self._items else None
+            if not self._items:
+                return None
+            item = self._items.pop(0)
+            self._queued_count[item.task_id] -= 1
+            self._resumed_count[item.task_id] += 1
+            return item
 
     def pop_for(self, task_ids: Sequence[str]) -> Optional[ResumeItem]:
         """Pop the first resume whose task belongs to ``task_ids``.
@@ -357,8 +377,10 @@ class ResumeQueue:
         with self._lock:
             for i, item in enumerate(self._items):
                 if item.task_id in task_ids:
+                    del self._items[i]
+                    self._queued_count[item.task_id] -= 1
                     self._resumed_count[item.task_id] += 1
-                    return self._items.pop(i)
+                    return item
             return None
 
     def __len__(self) -> int:

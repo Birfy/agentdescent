@@ -80,6 +80,37 @@ def test_resume_queue_max_attempts_bounds_a_chronically_slow_task():
     assert len(q) == 0, "nothing may remain queued past the cap"
 
 
+def test_resume_queue_duplicate_pushes_before_any_pop_are_bounded():
+    """A burst of pushes for the same task, before the first pop, must not all
+    be accepted: the cap counts *queued* copies too, not just popped ones
+    (PR #198 review: `push` checked only `_resumed_count`, so three pushes
+    with no pop in between all landed and were all handed out)."""
+    q = ResumeQueue(max_attempts=1)
+    item = ResumeItem(task_id="a", turn=0, conversation=[],
+                      version_at_checkpoint={"art": 5})
+    assert q.push(item), "first push is always accepted"
+    assert not q.push(item), "a second queued copy must be refused"
+    assert not q.push(item), "a third queued copy must be refused"
+    assert len(q) == 1, "only the first push may land"
+    assert q.dropped == 2, "the two refusals must be counted"
+    # And the single queued copy is what `pop_for` hands out, once.
+    assert q.pop_for(["a"]) is not None, "the accepted item is resumed"
+    assert q.pop_for(["a"]) is None, "nothing is left to hand out twice"
+
+
+def test_resume_queue_pop_counts_toward_the_cap_too():
+    """`pop()` (not just `pop_for`) is a resume and must feed the same bound:
+    after a pop, a re-push of the same task is refused (PR #198 review: `pop()`
+    never updated the count, so a consumer that used it could exceed the cap)."""
+    q = ResumeQueue(max_attempts=1)
+    item = ResumeItem(task_id="a", turn=0, conversation=[],
+                      version_at_checkpoint={"art": 5})
+    assert q.push(item)
+    assert q.pop() is not None, "the item is resumed via pop()"
+    assert not q.push(item), (
+        "a task popped once must not be re-queued past the cap")
+
+
 # ---------------------------------------------------------------------------
 # the engine path
 # ---------------------------------------------------------------------------
