@@ -13,8 +13,8 @@ The whole surface is small:
   ``urllib`` (no ``datasets`` dependency);
 * :func:`hf_feature_names` -- the label vocabulary of a ClassLabel feature
   (e.g. FiNER's XBRL tag names);
-* :func:`fetch_text` / :func:`fetch_bytes` -- a cached raw-URL fetch (for data
-  hosted as plain files on GitHub, etc.);
+* :func:`fetch_text` / :func:`fetch_bytes` -- a raw-URL fetch with optional
+  on-disk cache (for data hosted as plain files on GitHub, etc.);
 * :func:`load_gated_hf` -- a best-effort loader for **gated** datasets via a lazy
   ``datasets`` import + an ``HF_TOKEN``; returns ``None`` if unavailable.
 
@@ -186,23 +186,36 @@ def _read_url(url: str, timeout: float) -> bytes:
 
 
 def fetch_bytes(url: str, *, cache_subdir: str = "raw", filename: Optional[str] = None,
-                timeout: float = 60.0) -> bytes:
-    """Fetch a raw URL, caching the bytes on disk (keyed by ``filename``)."""
+                timeout: float = 60.0, cache: bool = True) -> bytes:
+    """Fetch a raw URL, optionally caching the bytes on disk (keyed by ``filename``).
+
+    With ``cache=True`` (default), an existing cache entry is returned and a miss
+    is written after the download. With ``cache=False``, an existing cache entry
+    is ignored and the response is not written — matching :func:`hf_rows` /
+    ``_rows_payload`` bypass semantics.
+    """
     filename = filename or _slug(url)[-180:]
     path = cache_path(cache_subdir, filename)
-    if not os.path.exists(path):
-        data = _read_url(url, timeout)
+    if cache and os.path.exists(path):
+        with open(path, "rb") as f:
+            return f.read()
+    data = _read_url(url, timeout)
+    if cache:
         with open(path, "wb") as f:
             f.write(data)
-    with open(path, "rb") as f:
-        return f.read()
+    return data
 
 
 def fetch_text(url: str, *, cache_subdir: str = "raw", filename: Optional[str] = None,
-               timeout: float = 60.0, encoding: str = "utf-8") -> str:
-    """Fetch a raw URL as decoded text, cached on disk."""
+               timeout: float = 60.0, encoding: str = "utf-8",
+               cache: bool = True) -> str:
+    """Fetch a raw URL as decoded text, optionally cached on disk.
+
+    ``cache`` has the same meaning as in :func:`fetch_bytes`: ``False`` bypasses
+    and does not refresh the on-disk entry.
+    """
     return fetch_bytes(url, cache_subdir=cache_subdir, filename=filename,
-                       timeout=timeout).decode(encoding, errors="ignore")
+                       timeout=timeout, cache=cache).decode(encoding, errors="ignore")
 
 
 # ---------------------------------------------------------------------------
@@ -302,10 +315,14 @@ def hf_rows_modelscope(url: str = MODELSCOPE_HOTPOTQA_URL, *,
     with ``context`` normalised to the ``{"title": ..., "sentences": ...}``
     dict the examples read.
 
-    Cached under ``~/.cache/agentdescent/modelscope/`` keyed by the URL, so a
-    repeat call does not re-download the ~46 MB file.
+    With ``cache=True`` (default), responses live under
+    ``~/.cache/agentdescent/modelscope/`` keyed by the URL so a repeat call
+    does not re-download the ~46 MB file. With ``cache=False``, any existing
+    cache entry is ignored and the fresh response is not written back — the
+    same bypass contract as :func:`hf_rows`.
     """
-    data = fetch_bytes(url, cache_subdir="modelscope", timeout=timeout)
+    data = fetch_bytes(url, cache_subdir="modelscope", timeout=timeout,
+                       cache=cache)
     rows = json.loads(data)
     out: List[dict] = []
     for r in rows[:limit]:
