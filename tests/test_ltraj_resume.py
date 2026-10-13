@@ -114,16 +114,23 @@ def test_resume_queue_pop_counts_toward_the_cap_too():
 
 def test_async_re_runs_a_straggler_against_the_newer_head():
     """A worker whose rollout overruns its estimate is re-run against a head
-    that has since advanced -- not re-executed for its own sake. The `run`
-    records the artifact each rollout saw, so the test can tell the two apart:
-    t0 is slow (a straggler) while another shard commits a clue; t0's re-run
-    must render the artifact *with* the clue, i.e. a newer version than the
-    one its abandoned rollout measured."""
+    that has since advanced -- not re-executed for its own sake.
+
+    Each `pop_for()` hand-off is associated with the worker call that follows
+    it (a thread-local flag consumed by `run`), so the assertion is about the
+    *resumed call specifically*, not any later ordinary rollout of the same
+    task: t0 is slow (a straggler) while another shard commits a clue, and the
+    resumed t0 call must render the artifact *with* the clue -- a newer version
+    than the one its abandoned rollout measured."""
+    import threading
     import time
-    renders = []                     # (task_id, rendered) per rollout
+    renders = []                     # (task_id, rendered, is_resumed) per call
+    resumed_flag = threading.local()
 
     def run(rendered, task):
-        renders.append((task.id, rendered))
+        is_resumed = getattr(resumed_flag, "pending", False)
+        resumed_flag.pending = False
+        renders.append((task.id, rendered, is_resumed))
         if task.id == "t0":
             time.sleep(0.2)          # t0 is always slow: a chronic straggler
         return "correct" if "clue" in rendered else "wrong"
@@ -141,6 +148,16 @@ def test_async_re_runs_a_straggler_against_the_newer_head():
     q = ResumeQueue()
     tasks = [Task(id=f"t{i}", prompt="q") for i in range(4)]
 
+    # Flag the worker call that a `pop_for` hand-off immediately precedes.
+    real_pop_for = q.pop_for
+
+    def flagged_pop_for(task_ids):
+        item = real_pop_for(task_ids)
+        if item is not None:
+            resumed_flag.pending = True
+        return item
+
+    q.pop_for = flagged_pop_for
     result = async_evolve(
         tasks, lambda t, o: 1.0 if o == "correct" else 0.0,
         run=run, propose=propose,
@@ -150,13 +167,69 @@ def test_async_re_runs_a_straggler_against_the_newer_head():
     # t0 is always a straggler; it must have been re-run at least once.
     assert result.stragglers >= 1
     assert result.resumed >= 1, f"expected re-runs, got {result.resumed}"
-    t0_renders = [r for tid, r in renders if tid == "t0"]
-    assert len(t0_renders) >= 2, (
-        "t0 must be rolled out at least twice (abandoned + re-run)")
-    assert "clue" not in t0_renders[0], (
-        "the first rollout measured the pre-clue head")
-    assert "clue" in t0_renders[-1], (
-        "the re-run must render the newer head, not re-run the old one")
+    resumed_t0 = [r for tid, r, is_res in renders
+                  if tid == "t0" and is_res]
+    assert resumed_t0, (
+        "no t0 call was flagged as following a pop_for hand-off; the resume "
+        f"mechanism never fired: {renders!r}")
+    assert "clue" in resumed_t0[-1], (
+        "the resumed call itself must render the newer head; "
+        f"resumed t0 calls saw {resumed_t0!r}")
+
+
+def test_async_stale_resume_negative_control_fails():
+    """If the resumed call re-runs the *old* (pre-clue) state, the newer-head
+    assertion above must fail -- the test discriminates the resumed call's
+    version from any later ordinary rollout (review: the regression passed
+    even when the resumed call rendered the old state, because a later
+    ordinary t0 rollout supplied the clue-bearing render)."""
+    import threading
+    import time
+    import pytest
+    renders = []
+    resumed_flag = threading.local()
+
+    def run(rendered, task):
+        is_resumed = getattr(resumed_flag, "pending", False)
+        resumed_flag.pending = False
+        # The negative control: a resumed call renders the stale head, even
+        # though the artifact has since gained the clue.
+        if is_resumed and "clue" in rendered:
+            rendered = rendered.replace("clue", "")
+        renders.append((task.id, rendered, is_resumed))
+        if task.id == "t0":
+            time.sleep(0.2)
+        return "correct" if "clue" in rendered else "wrong"
+
+    def propose(rendered, task, output, reward):
+        if task.id != "t0" and "clue" not in rendered:
+            return "add a clue"
+        return None
+
+    estimator = DurationEstimator(prior=0.0001, min_samples=100)
+    q = ResumeQueue()
+    tasks = [Task(id=f"t{i}", prompt="q") for i in range(4)]
+    real_pop_for = q.pop_for
+
+    def flagged_pop_for(task_ids):
+        item = real_pop_for(task_ids)
+        if item is not None:
+            resumed_flag.pending = True
+        return item
+
+    q.pop_for = flagged_pop_for
+    result = async_evolve(
+        tasks, lambda t, o: 1.0 if o == "correct" else 0.0,
+        run=run, propose=propose,
+        strategy=AppendRules(),
+        n_workers=2, duration_estimator=estimator, resume_queue=q,
+        straggler_factor=2.0, max_seconds=10.0, held_out_frac=0.5)
+    resumed_t0 = [r for tid, r, is_res in renders
+                  if tid == "t0" and is_res]
+    assert resumed_t0, "premise: the resume mechanism fired"
+    with pytest.raises(AssertionError):
+        assert "clue" in resumed_t0[-1], (
+            "the resumed call must render the newer head")
 
 
 def test_async_without_resume_queue_keeps_old_behaviour():
