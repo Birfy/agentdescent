@@ -273,25 +273,27 @@ def test_multi_head_full_loop_forks_and_admits(tmp_path):
         assert agg.head_for_worker(1) == agg._forks[0]
 
 
-def test_async_evolve_explores_forks_end_to_end(tmp_path):
-    """The async runtime must reach the advertised parallel heads, not keep
-    every worker on `dev`. A beam selection forks when the archive holds
-    several candidates; driving `async_evolve` through that selection must
-    create the forks and hand workers out across dev + the forks (PR #196
-    review issue 2: the worker picked its branch once at startup, before forks
-    existed, and never revisited it)."""
+def _run_async_fork_probe(*, forced_dev=False):
+    """Drive `async_evolve` through a `Beam(2)` selection and report which
+    branches the workers actually selected.
+
+    Every task carries one of a few clues; a proposal adds its clue, so the
+    archive accumulates several candidates (held-out shares the clues) and the
+    beam keeps the top few -- the shape that provably forks. The fork branches
+    are discarded by `finalize()`, so the probe observes the seam directly: it
+    wraps `async_evolve._head_for_worker` (the only place a worker learns its
+    branch) and records every branch handed out, plus how deep the forks went.
+    ``forced_dev`` replaces that seam with a constant ``dev`` to prove the
+    assertions below actually discriminate."""
+    import importlib
     import threading
     import warnings
-    from agentdescent.async_evolve import async_evolve
-    from agentdescent.evolution import Policies
+    from agentdescent.ledger import Ledger
     from agentdescent.population import PopulationAggregator
     from agentdescent.selection import Beam
 
-    # Every task carries one of a few clues; a proposal adds its clue, so the
-    # archive accumulates several candidates (held-out shares the clues) and
-    # the beam keeps the top few -- the shape that provably forks. The forks
-    # are discarded by `finalize()`, so the aggregator records the deepest it
-    # reached during the run.
+    ae = importlib.import_module("agentdescent.async_evolve")
+
     def run(rendered, task):
         return "yes" if task.meta["h"] in rendered else "no"
 
@@ -302,8 +304,17 @@ def test_async_evolve_explores_forks_end_to_end(tmp_path):
              for i in range(20)]
     reward = lambda t, o: 1.0 if o == "yes" else 0.0
 
-    deepest = {"forks": 0}
+    picked = []                 # branch every worker chose, in call order
     lock = threading.Lock()
+    deepest = {"forks": 0}
+
+    real = ae._head_for_worker
+
+    def recording(aggregator, worker_id):
+        branch = real(aggregator, worker_id) if not forced_dev else Ledger.DEV
+        with lock:
+            picked.append(branch)
+        return branch
 
     class Tracking(PopulationAggregator):
         def step(self, n_workers=1):
@@ -317,17 +328,53 @@ def test_async_evolve_explores_forks_end_to_end(tmp_path):
                         staleness_policy=policy, selection=Beam(2),
                         artifact_id="artifact")
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        result = async_evolve(
-            tasks, reward, run=run, propose=propose, strategy=AppendRules(),
-            n_workers=4, async_ratio=0, max_seconds=8.0, held_out_frac=0.4,
-            aggregator_factory=factory)
+    ae._head_for_worker = recording
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            result = ae.async_evolve(
+                tasks, reward, run=run, propose=propose, strategy=AppendRules(),
+                n_workers=4, async_ratio=0, max_seconds=8.0, held_out_frac=0.4,
+                aggregator_factory=factory)
+    finally:
+        ae._head_for_worker = real
+    return result, picked, deepest
+
+
+def test_async_evolve_workers_snapshot_fork_branches(tmp_path):
+    """A worker must snapshot/propose against a fork, not just against `dev`.
+
+    The branch-routing fix (PR #196 review issue 2) re-selects each worker's
+    branch on every snapshot refresh. This asserts the *route*: a fork-holding
+    run must hand at least one worker a non-dev branch through
+    `_head_for_worker`, the exact seam the async worker reads before it
+    snapshots and submits its evidence."""
+    result, picked, deepest = _run_async_fork_probe()
     assert result.error is None
     assert result.final_reward > 0.0, (
         "premise: the run must learn some clues before it can fork")
     assert deepest["forks"] >= 1, (
-        "async_evolve must create forks, not keep every worker on dev")
+        "premise: the beam must fork during the run")
+    forks_picked = [b for b in picked if b != "dev"]
+    assert forks_picked, (
+        "no worker was ever routed to a fork; every `_head_for_worker` call "
+        f"returned dev: {sorted(set(picked))}")
+
+
+def test_async_evolve_workers_routed_to_dev_by_force_fails_the_assertion(tmp_path):
+    """Negative control: if the branch seam is forced back to `dev` the
+    fork-route assertion above must fail -- proving it discriminates a real
+    fork snapshot from fork creation alone."""
+    import pytest
+    result, picked, deepest = _run_async_fork_probe(forced_dev=True)
+    assert result.error is None
+    assert deepest["forks"] >= 1, (
+        "premise: the forks still get created; only the worker route is forced")
+    assert picked and all(b == "dev" for b in picked), (
+        "premise: forced_dev must keep every worker on dev")
+    with pytest.raises(AssertionError):
+        assert [b for b in picked if b != "dev"], \
+            "async_evolve must route a worker to a fork"
 
 
 def test_step_compat_legacy_zero_arg_aggregator(tmp_path):
