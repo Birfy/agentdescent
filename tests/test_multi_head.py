@@ -273,6 +273,63 @@ def test_multi_head_full_loop_forks_and_admits(tmp_path):
         assert agg.head_for_worker(1) == agg._forks[0]
 
 
+def test_async_evolve_explores_forks_end_to_end(tmp_path):
+    """The async runtime must reach the advertised parallel heads, not keep
+    every worker on `dev`. A beam selection forks when the archive holds
+    several candidates; driving `async_evolve` through that selection must
+    create the forks and hand workers out across dev + the forks (PR #196
+    review issue 2: the worker picked its branch once at startup, before forks
+    existed, and never revisited it)."""
+    import threading
+    import warnings
+    from agentdescent.async_evolve import async_evolve
+    from agentdescent.evolution import Policies
+    from agentdescent.population import PopulationAggregator
+    from agentdescent.selection import Beam
+
+    # Every task carries one of a few clues; a proposal adds its clue, so the
+    # archive accumulates several candidates (held-out shares the clues) and
+    # the beam keeps the top few -- the shape that provably forks. The forks
+    # are discarded by `finalize()`, so the aggregator records the deepest it
+    # reached during the run.
+    def run(rendered, task):
+        return "yes" if task.meta["h"] in rendered else "no"
+
+    def propose(rendered, task, output, score):
+        return task.meta["h"] if task.meta["h"] not in rendered else None
+
+    tasks = [Task(id=f"t{i}", prompt="q", meta={"h": f"H{i % 5}"})
+             for i in range(20)]
+    reward = lambda t, o: 1.0 if o == "yes" else 0.0
+
+    deepest = {"forks": 0}
+    lock = threading.Lock()
+
+    class Tracking(PopulationAggregator):
+        def step(self, n_workers=1):
+            reports = super().step(n_workers)
+            with lock:
+                deepest["forks"] = max(deepest["forks"], len(self._forks))
+            return reports
+
+    def factory(ledger, verifier, audit, config, policy):
+        return Tracking(ledger, verifier, audit, config,
+                        staleness_policy=policy, selection=Beam(2),
+                        artifact_id="artifact")
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        result = async_evolve(
+            tasks, reward, run=run, propose=propose, strategy=AppendRules(),
+            n_workers=4, async_ratio=0, max_seconds=8.0, held_out_frac=0.4,
+            aggregator_factory=factory)
+    assert result.error is None
+    assert result.final_reward > 0.0, (
+        "premise: the run must learn some clues before it can fork")
+    assert deepest["forks"] >= 1, (
+        "async_evolve must create forks, not keep every worker on dev")
+
+
 def test_step_compat_legacy_zero_arg_aggregator(tmp_path):
     """A custom aggregator implementing the published zero-argument step()
     must still run under evolve() (PR #196 review issue 1)."""
