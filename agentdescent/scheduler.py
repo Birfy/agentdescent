@@ -272,8 +272,8 @@ class ResumeItem:
     task_id: str
     turn: int
     conversation: List[Any]
-    external_handle: Optional[str]  # e.g. an HPC job id
     version_at_checkpoint: Dict[str, int]
+    external_handle: Optional[str] = None   # e.g. an HPC job id
 
 
 class ResumeQueue:
@@ -310,6 +310,20 @@ class ResumeQueue:
     def pop(self) -> Optional[ResumeItem]:
         with self._lock:
             return self._items.pop(0) if self._items else None
+
+    def pop_for(self, task_ids: Sequence[str]) -> Optional[ResumeItem]:
+        """Pop the first resume whose task belongs to ``task_ids``.
+
+        A shared queue is read by every worker; each worker can only re-run
+        tasks in its own shard, so the queue must hand out the right item to
+        the right worker without handing the same task to two of them. ``None``
+        when nothing queued belongs to this worker's shard -- the normal case,
+        which costs one lock acquisition per rollout."""
+        with self._lock:
+            for i, item in enumerate(self._items):
+                if item.task_id in task_ids:
+                    return self._items.pop(i)
+            return None
 
     def __len__(self) -> int:
         return len(self._items)
