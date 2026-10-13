@@ -499,16 +499,17 @@ passed.
   archive. The recursion is the search.
 * **Details**: [algo-genesis.md](algo-genesis.md)
 
-## RRSI — pre-port selection core
+## RRSI — pre-port selection and edit-budget schedule
 
-[`algo-rrsi.md`](algo-rrsi.md) documents an offline implementation of the
-pinned Google RRSI round-selection rule and its validation differences. This is
-a partial mechanism fixture, **not yet one of the engine-integrated algorithm
-ports** above: it does not implement RRSI proposal regulation, pre-evaluation
-critic screening, a measured per-edit ledger, pruning, or a run loop. It makes
-no benchmark or transfer claim. The round candidates are assumed to have been
-screened and evaluated from the same incumbent; the fixture does not yet enforce
-that orchestration contract.
+[`algo-rrsi.md`](algo-rrsi.md) documents offline implementations of the pinned
+Google RRSI round-selection rule and the cosine-annealed L0 edit-budget
+schedule, plus their validation differences. This is a partial mechanism
+fixture, **not yet one of the engine-integrated algorithm ports** above: it
+does not implement the full proposal-regulation loop (history / stall
+exploration), pre-evaluation critic screening, a measured per-edit ledger,
+pruning, or a run loop. It makes no benchmark or transfer claim. The round
+candidates are assumed to have been screened and evaluated from the same
+incumbent; the fixture does not yet enforce that orchestration contract.
 
 ## The eleven MethodPolicy ports
 

@@ -8,6 +8,10 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- Add the RRSI cosine-annealed L0 edit-budget schedule (`examples/rrsi/schedule.py`)
+  adapted from the pinned Google release, with endpoint / float-guard / bound
+  regressions (#238). Still not an `evolve()` integration; see `docs/algo-rrsi.md`.
+
 - Add an offline RRSI round-selection mechanism fixture adapted from Google's
   pinned release, with decision regressions and explicit validation boundaries.
   This is not yet an `evolve()` integration or full RRSI port; see
