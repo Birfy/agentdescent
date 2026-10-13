@@ -314,6 +314,30 @@ def _checked_reward(value, task: "Task") -> float:
 _EvalCache = MemoryCache
 
 
+def _allocator_context(diff: "Diff", advantage: Optional[float],
+                       score: float, blast_radius: float = 0.2) -> Any:
+    """Build an :class:`~agentdescent.allocator.AllocatorContext` at the worker.
+
+    The worker builds the **pre-spend** features the allocator decides on --
+    the proposing rollout's group-relative advantage, the diff's size, and the
+    artifact's blast radius. The before/after delta is the self-verify
+    rollout's own product and is not known yet; ``p_improve`` and
+    ``stable_distance`` are computed later in the merge. So the decision
+    context leaves those ``None``/default, and :meth:`AllocatorContext.features`
+    -- the vector the model actually sees -- returns only the pre-spend
+    columns, which is exactly what the aggregator trains on too (see
+    :func:`~agentdescent.aggregator._allocator_context_from`).
+    """
+    from .allocator import AllocatorContext
+
+    return AllocatorContext(
+        before_after_delta=None,     # the self-verify's product, not yet known
+        advantage=advantage,
+        size=diff.size() if diff is not None else 0,
+        blast_radius=blast_radius,
+    )
+
+
 class EvolvingArtifact:
     """An :class:`~agentdescent.evolvable.Evolvable`: flat state + a strategy.
 
@@ -1875,7 +1899,8 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
                   verifier: Optional[Any] = None,
                   ledger_impl: Optional[Any] = None,
                   policies_bundle: Optional[Policies] = None,
-                  checkpointing: bool = False) -> _Engine:
+                  checkpointing: bool = False,
+                  allocator: Optional[Any] = None) -> _Engine:
     """Wire the ledger, runtime, verifier and aggregator (shared by
     :func:`evolve` and :func:`~agentdescent.async_evolve.async_evolve`)."""
     import tempfile
@@ -2156,6 +2181,14 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
 
     aggregator = (aggregator_factory or _default_aggregator)(
         ledger, verifier, AuditScheduler(), cfg, staleness_policy)
+    # Wire the value allocator (if any) so the merge path can report commit
+    # outcomes back into it. The worker asks the allocator its per-candidate
+    # spend decision through the budget governor; this is the feedback half.
+    if allocator is not None and hasattr(aggregator, "allocator"):
+        try:
+            aggregator.allocator = allocator
+        except AttributeError:      # slots, or a read-only property
+            pass
     # Wire the two settled-evidence consumers now that the aggregator exists:
     # a sampler that implements settle() gets every discarded card, and the
     # propose adapter reads the recent ones for the task it is about to retry.
@@ -2342,6 +2375,13 @@ def evolve(
     #: are known, because an opaque `run` cannot report tokens.
     usage: Optional[Usage] = None,
     policies: Optional["Policies"] = None,
+    #: Optional value allocator (see :mod:`agentdescent.allocator`). Pass one
+    #: and, once the token budget is tight, the self-verify rollout is spent
+    #: only on candidates the allocator's value model expects to commit; the
+    #: merge path reports every outcome back so the model learns. ``None`` (the
+    #: default) is the old behaviour exactly -- optional spend degrades against
+    #: the global floors, every candidate treated alike.
+    allocator: Optional[Any] = None,
 ) -> EvolutionResult:
     """Evolve an artifact. Provide either ``agent`` (with ``solve``/``propose``)
     or the ``run`` / ``propose`` callables directly.
@@ -2663,6 +2703,21 @@ def evolve(
         acceptance rule and sees a finished run would reasonably conclude it ran.
         New capabilities go here rather than adding another parameter to a
         function that already has thirty-five.
+    allocator:
+        Value-directed budget allocation (see :mod:`agentdescent.allocator`).
+        ``None`` (the default) is the old behaviour exactly: optional spend
+        (fusion tournaments, the self-verify rollout) degrades against the
+        global ``soft_floor`` / ``hard_floor`` thresholds as the token budget
+        runs out, every candidate treated alike. Pass a
+        :class:`~agentdescent.allocator.ValueBudgetAllocator` (or any object
+        with ``decide(ctx) -> AllocateDecision`` and ``observe(ctx, committed)``)
+        and, once the budget is tight, the self-verify rollout is spent only on
+        candidates the allocator's value model expects to commit; the merge
+        path reports every outcome back so the model learns. Requires
+        ``max_tokens`` to be set (the allocator decides how the budget is
+        spent; ``max_tokens`` is what exists to spend). Counterfactual
+        exploration re-measures candidates the model judged unworthy, so a
+        biased value model is corrected rather than reinforced.
 
     Returns
     -------
@@ -2747,7 +2802,7 @@ def evolve(
             policies=policies, checkpointing=checkpointing,
             stop_on_diminishing_returns=stop_on_diminishing_returns,
             efficiency_floor=efficiency_floor,
-            call_budget=call_budget)
+            call_budget=call_budget, allocator=allocator)
 
     if pipelined_gate:
         # The mirror of the block above, and the same reasoning: a knob accepted
@@ -2806,7 +2861,8 @@ def evolve(
         cheap_eval_tasks=cheap_eval_tasks, fusion_tournament=fusion_tournament,
             shuffle=shuffle, seed=seed,
         usage=usage, verifier=_pol.verifier, ledger_impl=_pol.ledger,
-        policies_bundle=_pol, checkpointing=checkpointing)
+        policies_bundle=_pol, checkpointing=checkpointing,
+        allocator=allocator)
     # Start the clock after the wiring, before the first unit of work: setup
     # is not what a time-to-quality number is asking about.
     eng.meter.start()
@@ -2855,7 +2911,8 @@ def evolve(
     # clean merge instead of being cut mid-round. Inert without max_tokens.
     governor = BudgetGovernor(max_tokens=max_tokens,
                               stop_on_diminishing=stop_on_diminishing_returns,
-                              efficiency_floor=efficiency_floor)
+                              efficiency_floor=efficiency_floor,
+                              allocator=allocator)
     for r in range(rounds):
         if deadline is not None and time.time() >= deadline:
             stop_reason = "max_seconds"
@@ -3097,7 +3154,12 @@ def evolve(
             # the delta it produces feeds the acceptance test's tie-breaker
             # (``observe_delta``), never the commit gates, so skipping it costs
             # ranking precision on the advantage signal and nothing else.
-            if self_verify and governor.allow_self_verify():
+            # With an allocator installed the decision becomes per-candidate:
+            # once the budget is tight it spends the self-verify rollout only on
+            # candidates its value model expects to commit (see
+            # :mod:`agentdescent.allocator`).
+            if self_verify and governor.candidate_worth(_allocator_context(
+                    diff, adv, score, getattr(mine, "blast_radius", 0.2))):
                 after = _checked_reward(
                     reward(task, run(mine.apply(diff).render(), task)), task)
                 delta = after - score

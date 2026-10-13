@@ -92,6 +92,16 @@ class BudgetGovernor:
     #: How many efficiency samples before the rule may fire. Four rounds is the
     #: floor at which "the peak" and "the recent rate" are different claims.
     min_efficiency_samples: int = 4
+    #: Optional per-candidate value allocator (see :mod:`agentdescent.allocator`).
+    #: ``None`` (the default) is the old behaviour exactly: fusion and
+    #: self-verify degrade against the global ``soft_floor`` / ``hard_floor``
+    #: thresholds, every candidate treated alike. With one, the governor asks it
+    #: whether a candidate is worth the expensive spend once the budget is
+    #: tight, and feeds the commit outcome back so it learns. The thresholds
+    #: remain as the *ceiling* the allocator may never exceed -- the allocator
+    #: can skip a candidate the clock would have deep-evaluated, never the
+    #: reverse.
+    allocator: Optional[Any] = None
     #: Cumulative spend, set by ``spend``. Kept as a field so ``affords`` can
     #: be asked without re-passing the number the caller just passed.
     _spent: int = 0
@@ -156,6 +166,50 @@ class BudgetGovernor:
         if self.max_tokens is None:
             return True
         return self._spent < self.max_tokens * self.hard_floor
+
+    # -- value-directed allocation (EvoAlloc-style, off by default) ----------
+
+    def candidate_worth(self, ctx: Any) -> bool:
+        """Whether ``ctx``'s candidate is worth the expensive evaluation.
+
+        With no :attr:`allocator` this is :meth:`allow_self_verify` -- the old
+        behaviour, exactly. With one, and once the budget is tight
+        (:attr:`remaining_fraction` below the allocator's ``budget_start``),
+        the allocator decides: a candidate it expects to commit keeps the
+        spend, one it expects to be rejected loses it. The clock thresholds
+        remain the *ceiling*: the allocator can skip a candidate the clock
+        would have spent on, never spend on one the clock refused.
+
+        ``ctx`` is whatever the allocator's ``decide`` takes -- the engine
+        builds an :class:`~agentdescent.allocator.AllocatorContext` at the call
+        site.
+        """
+        if self.max_tokens is None:
+            return True
+        if self.allocator is None:
+            return self.allow_self_verify()
+        decide = getattr(self.allocator, "decide", None)
+        if not callable(decide):
+            return self.allow_self_verify()
+        # The clock's ceiling still applies: no allocator may spend past the
+        # hard floor, whatever value it predicts.
+        if self._spent >= self.max_tokens * self.hard_floor:
+            return False
+        remaining = self.remaining_fraction()
+        budget_start = getattr(self.allocator, "budget_start", 0.5)
+        if remaining >= budget_start:
+            return True
+        return bool(decide(ctx).deep_eval)
+
+    def observe_allocated(self, ctx: Any, committed: bool) -> None:
+        """Feed a merge outcome back to the allocator.
+
+        Called by the engine for every candidate that was actually evaluated,
+        so the value model learns which features predict a commit. No-op with
+        no allocator."""
+        observe = getattr(self.allocator, "observe", None)
+        if callable(observe):
+            observe(ctx, committed)
 
     def affords_next_round(self) -> bool:
         """Whether the projection says one more round fits the budget.

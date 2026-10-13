@@ -343,6 +343,69 @@ class _Candidate:
         return self.base_counts is not None and self.cand_counts is not None
 
 
+def _allocator_context_from(c: "_Candidate", p_improve: Optional[float] = None,
+                            stable_distance: float = 0.0):
+    """Build an :class:`~agentdescent.allocator.AllocatorContext` from a candidate.
+
+    The context carries the **pre-spend features the worker decided on** --
+    advantage, diff size, blast radius -- so the model learns from exactly the
+    inputs its decisions were made on. Post-outcome signals (``p_improve``,
+    ``stable_distance``, the measured delta) are kept on the context for the
+    audit trail but never enter :meth:`AllocatorContext.features`.
+
+    **Which card is the candidate's origin depends on how it was chosen:**
+
+    * **Fused** (`c.fused`): the candidate is the union of the surviving
+      proposals, so its commit label attaches to the *first contributor's*
+      pre-spend vector -- the explicit attribution rule for fusions. The first
+      card is the one the tournament put forward, the same attribution the
+      acceptance gate uses when it folds `before_after_delta` back into the
+      posterior.
+    * **Not fused**: the tournament chose one single proposal, so the commit
+      label must attach to *that proposal's* card -- not an arbitrary first
+      card that may be a losing entrant. Labeling the first (losing) card as
+      committed teaches the model the wrong proposal succeeded and supplies no
+      observation for the actual winner.
+
+    Either way the vector is a worker's actual pre-spend input (advantage,
+    the card's own diff size, the artifact's blast radius) -- never a fused
+    union size, which is a post-merge artefact no worker decided on.
+    """
+    from .allocator import AllocatorContext
+
+    card = _attributable_card(c)
+    adv = getattr(card, "advantage", None)
+    # The worker decided on *this* card's diff, not the merged union.
+    size = card.diff.size() if card is not None and card.diff is not None else 0
+    return AllocatorContext(
+        before_after_delta=getattr(card, "before_after_delta", None),
+        advantage=adv,
+        size=size,
+        p_improve=p_improve,
+        stable_distance=stable_distance,
+        blast_radius=getattr(c.artifact, "blast_radius", 0.2),
+    )
+
+
+def _attributable_card(c: "_Candidate"):
+    """The evidence card a commit outcome should be attributed to.
+
+    Fusions: the first contributor (the card the tournament put forward).
+    Single winners: the card whose diff *is* the selected diff -- not the
+    first entrant, which may be a losing proposal. Falls back to the first
+    card when none matches (a custom fusion policy may return a diff outside
+    ``c.cards``), since there is then no better attribution available."""
+    if not c.cards:
+        return None
+    if getattr(c, "fused", False):
+        return c.cards[0]
+    selected = getattr(c, "diff", None)
+    for card in c.cards:
+        if card.diff is selected or getattr(card.diff, "diff_id", None) == \
+                getattr(selected, "diff_id", None):
+            return card
+    return c.cards[0]
+
 
 class EvidenceBuffer:
     """Cards bucketed by target artifact (design doc, section 4.1).
@@ -573,6 +636,12 @@ class Aggregator:
                        self.acceptance_policy, self.promotion_policy):
             install_policy(policy, verifier, cfg)
         self.buffer = EvidenceBuffer()
+        #: Optional value allocator (see :mod:`agentdescent.allocator`), wired
+        #: by the engine so the merge path can feed commit outcomes back into
+        #: it. ``None`` keeps the old behaviour; the aggregator never consults
+        #: the allocator for a decision (the worker does, through the budget
+        #: governor), it only reports what happened.
+        self.allocator: Optional[Any] = None
         self._posteriors: Dict[str, BetaPosterior] = defaultdict(BetaPosterior)
         #: How many queued audits the L-value consumer drained and ran against
         #: the oracle. Zero when ``audit_drain_per_step`` is 0 (the default).
@@ -1271,12 +1340,13 @@ class Aggregator:
         # the annealed threshold -- not a point estimate crossing a line.
         prior = self._posteriors[c.artifact_id]
         base_score, cand_score = c.base_cheap, c.cand_cheap
+        stable_distance = self._stable_distance(c.artifact_id, c.candidate)
         decision = self.acceptance_policy.accept(MergeContext(
             artifact=c.artifact, candidate=c.candidate, cards=c.cards,
             base_counts=c.base_counts, cand_counts=c.cand_counts,
             diff=c.diff, base_cheap=base_score, cand_cheap=cand_score,
             prior=prior, trust_radius=c.artifact.blast_radius,
-            stable_distance=self._stable_distance(c.artifact_id, c.candidate)))
+            stable_distance=stable_distance))
         p_improve = decision.p_improve
 
         # The full held-out rates. The regression guard below must use *these*
@@ -1294,12 +1364,28 @@ class Aggregator:
                                c.survived, c.discarded, c.conflicts, p_improve,
                                version, reason, category)
 
+        # Report *every* measured decision to the value allocator exactly once:
+        # the label is "was this candidate worth the expensive evaluation it
+        # got?", and it is True only on a commit. Oracle rejection and
+        # acceptance rejection are negative labels too -- without them the model
+        # would learn only from commits and CAS conflicts, so a rejection-only
+        # run never left warm-up and a mixed run never learned which evaluated
+        # proposals fail.
+        def _observe_outcome(committed: bool) -> None:
+            if self.allocator is not None:
+                observe = getattr(self.allocator, "observe", None)
+                if callable(observe):
+                    observe(_allocator_context_from(
+                        c, p_improve, stable_distance=stable_distance), committed)
+
         rejected = self._audit(c.artifact, c.artifact_id, c.candidate, c.diff,
                                base_full, cand_full, base_score, cand_score, prior)
         if rejected:
+            _observe_outcome(False)
             return report(None, None, "oracle rejected", MergeOutcome.ORACLE_REJECTED)
 
         if not decision.accept:
+            _observe_outcome(False)
             prior.observe_delta(decision.observed_delta)
             return report(None, None, decision.detail,
                           MergeOutcome(decision.category))
@@ -1307,7 +1393,9 @@ class Aggregator:
         # -- commit (section 4.1): CAS on dev --------------------------------
         new_version = self._commit_with_retry(c.artifact_id, c.candidate, c.diff,
                                               c.head)
-        if new_version is None:
+        committed = new_version is not None
+        _observe_outcome(committed)
+        if not committed:
             self.buffer.settle(c.survivor_cards)
             return report(None, None, "CAS conflict", MergeOutcome.CAS_CONFLICT)
 
