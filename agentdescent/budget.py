@@ -363,8 +363,9 @@ class CallBudget:
     ``base`` is the default the adapter was constructed with. The engine never
     raises ``next`` above ``base`` (a model call that costs more than the
     caller's configured ceiling is a bill the caller did not agree to), and
-    never drops it below ``base // 4`` (a reasoning model starved below a
-    quarter of its budget returns empty content — measured, see
+    never drops it below ``floor`` — by default ``max(256, base // 4)``
+    capped at ``base`` (a reasoning model starved below a quarter of its
+    budget returns empty content — measured, see
     :func:`agentdescent.agents.claude`).
     """
 
@@ -377,12 +378,23 @@ class CallBudget:
     next: Optional[int] = None
     #: The floor: a reasoning model below this returns nothing. Measured on
     #: deepseek-v4-flash at 1024: four of eight reflection prompts came back
-    #: empty. ``base // 4`` is the conservative reading of that.
+    #: empty. The default is ``max(256, base // 4)``, **capped at** ``base`` so
+    #: a small configured ceiling (``base < 256``) cannot be silently raised
+    #: above what the caller agreed to (#234).
     floor: Optional[int] = None
 
     def __post_init__(self) -> None:
+        if self.base < 1:
+            raise ValueError(f"base must be >= 1, got {self.base}")
         if self.floor is None:
-            self.floor = max(256, self.base // 4)
+            # Cap at base: an absolute 256 floor above a smaller configured
+            # ceiling would make every allocate() overspend (#234).
+            self.floor = min(self.base, max(256, self.base // 4))
+        elif self.floor < 1:
+            raise ValueError(f"floor must be >= 1, got {self.floor}")
+        elif self.floor > self.base:
+            raise ValueError(
+                f"floor ({self.floor}) cannot exceed base ({self.base})")
 
     def allocate(self, score: float, budget_remaining: float,
                  *, max_boost: float = 1.0) -> None:

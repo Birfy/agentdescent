@@ -65,7 +65,7 @@ def test_allocate_clamps_score():
 
 def test_floor_is_base_div_4():
     assert CallBudget(base=8192).floor == 2048
-    assert CallBudget(base=1024).floor == 256  # minimum
+    assert CallBudget(base=1024).floor == 256  # absolute floor when base >= 256
 
 
 def test_custom_floor():
@@ -79,6 +79,42 @@ def test_custom_floor():
     small.allocate(0.0, 0.0)
     # 100*0.25 = 25 < 50 → floor binds
     assert small.next == 50
+
+
+def test_default_floor_capped_at_base_when_base_below_256():
+    """Absolute floor 256 must not raise next above a smaller configured base (#234)."""
+    for base in (1, 64, 100, 200, 255):
+        b = CallBudget(base=base)
+        assert b.floor == base
+        b.allocate(0.0, 0.0)
+        assert b.next == base
+        b.allocate(1.0, 1.0)
+        assert b.next == base
+        assert b.next <= b.base
+
+
+def test_allocate_never_above_base_for_small_bases():
+    for base in (50, 100, 200, 255, 256, 512):
+        b = CallBudget(base=base)
+        for score in (0.0, 0.5, 1.0, -1.0, 2.0):
+            for remaining in (0.0, 0.5, 1.0):
+                b.allocate(score, remaining)
+                assert b.next <= b.base
+                assert b.next >= b.floor
+
+
+def test_rejects_floor_above_base():
+    with pytest.raises(ValueError, match="cannot exceed base"):
+        CallBudget(base=100, floor=256)
+
+
+def test_rejects_non_positive_base_and_floor():
+    with pytest.raises(ValueError, match="base must be >= 1"):
+        CallBudget(base=0)
+    with pytest.raises(ValueError, match="base must be >= 1"):
+        CallBudget(base=-10)
+    with pytest.raises(ValueError, match="floor must be >= 1"):
+        CallBudget(base=100, floor=0)
 
 
 def test_next_none_by_default():

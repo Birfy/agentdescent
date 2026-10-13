@@ -19,6 +19,10 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- `CallBudget` default floor is capped at `base`, so a configured ceiling below
+  256 can no longer be silently raised above what the caller agreed to (#234).
+  Explicit `floor > base` and non-positive `base`/`floor` raise `ValueError`.
+
 - `hf_rows_modelscope(cache=False)` now bypasses an existing on-disk cache and
   does not write the fresh response back (#229). `fetch_bytes` / `fetch_text`
   accept the same `cache` flag so the raw-URL helpers share the `hf_rows`
