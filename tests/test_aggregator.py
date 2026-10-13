@@ -568,3 +568,64 @@ def test_oversized_report_quotes_the_region_that_rejected(tmp_path):
     assert reports and reports[0].category == MergeOutcome.OVERSIZED
     assert "3 ops / 500 chars" in reports[0].reason, reports[0].reason
     assert "99 ops" not in reports[0].reason
+
+
+def test_mixed_batch_oversized_refusals_reach_the_adaptive_region(tmp_path):
+    """A batch with oversized diffs *and* an in-range one reports the in-range
+    card's gate outcome. The region must still learn that its cap refused
+    diffs, or one valid proposal per batch keeps it stuck (#226)."""
+    from agentdescent.advantage import AdaptiveTrustRegion, TrustRegion
+    from agentdescent.aggregator import (Aggregator, AggregatorConfig,
+                                         MergeOutcome)
+    from agentdescent.evolvable import Diff, EvidenceCard
+    from agentdescent.evolution import AppendRules, EvolvingArtifact
+    from agentdescent.ledger import Ledger
+    from agentdescent.scheduler import AuditScheduler
+    from agentdescent.verifier import ThreeLayerVerifier, VerifierBudget
+
+    lg = Ledger(str(tmp_path), lambda a: {"state": dict(a.state)},
+                lambda aid, v, s: EvolvingArtifact(aid, s.get("state", {}), v,
+                                                   0.2, None, AppendRules()))
+    lg.register(EvolvingArtifact("a", {}, 1, 0.2, None, AppendRules()))
+    # The in-range diff makes things worse, so the gate refuses it: the
+    # report's category is then ``below-threshold`` -- a gate refusal that,
+    # read alone, tells the region nothing about the two it refused for size.
+    verifier = ThreeLayerVerifier(
+        eval_fn=lambda art, tasks: 0.1 if "s" in art.state else 0.9,
+        held_out=[1, 2, 3], budget=VerifierBudget())
+    policy = AdaptiveTrustRegion(initial=TrustRegion(ops=3, chars=500),
+                                 window=50)
+    agg = Aggregator(lg, verifier, AuditScheduler(),
+                     AggregatorConfig(batch_trigger=3, trust_region_policy=policy))
+    for i in range(2):
+        huge = Diff(diff_id=f"huge{i}", target="a",
+                    ops={f"h{i}_{j}": "v" for j in range(5)}, author="w")
+        agg.ingest(EvidenceCard(diff=huge, base_version={"a": 1}, touched=["a"],
+                                before_after_delta=0.1, trajectory_refs=[]))
+    small = Diff(diff_id="small", target="a", ops={"s": "v"}, author="w")
+    agg.ingest(EvidenceCard(diff=small, base_version={"a": 1}, touched=["a"],
+                            before_after_delta=0.1, trajectory_refs=[]))
+
+    reports = agg.step()
+    assert len(reports) == 1, reports
+    report = reports[0]
+    assert report.oversized == 2, report
+    assert report.category == MergeOutcome.BELOW_THRESHOLD, report.category
+    assert list(policy._recent) == [MergeOutcome.OVERSIZED], list(policy._recent)
+
+
+def test_trust_region_outcome_keeps_commits_and_reversals():
+    """Only a merge that refused oversized diffs *and did not land* is told as
+    oversized; a commit still widens and a reversal must still tighten."""
+    from agentdescent.aggregator import Aggregator, MergeOutcome, MergeReport
+
+    def rep(category, oversized):
+        return MergeReport("a", None, False, 3, 1, 0, 0, 0.0, None, "",
+                           category, oversized=oversized)
+
+    outcome = Aggregator._trust_region_outcome
+    assert outcome(rep(MergeOutcome.ALL_STALE, 1)) == "oversized"
+    assert outcome(rep(MergeOutcome.BELOW_THRESHOLD, 2)) == "oversized"
+    assert outcome(rep(MergeOutcome.COMMITTED, 2)) == "committed"
+    assert outcome(rep(MergeOutcome.ORACLE_REJECTED, 2)) == "oracle-rejected"
+    assert outcome(rep(MergeOutcome.BELOW_THRESHOLD, 0)) == "below-threshold"

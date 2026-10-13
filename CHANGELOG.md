@@ -8,9 +8,17 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- `AdaptiveTrustRegion` widens when a window is dominated by `OVERSIZED`
+  refusals (the size cap was binding) instead of treating them like gate
+  refusals and leaving the region stuck (#226). A batch that mixes oversized
+  diffs with stale or in-range ones now also counts as `oversized` for the
+  region unless it committed or was reversed; `MergeReport.oversized` records
+  how many diffs the size cap refused.
+
 - Allocator A/B comparisons now use the same fully scored seed pairs for
   quality and token summaries, retain spend for excluded runs, and seed each
   treatment allocator from its run seed.
+
 - The `OVERSIZED` merge report now quotes the trust region that actually
   rejected the diff (the adaptive policy's current region) instead of the
   config constants (#224).
