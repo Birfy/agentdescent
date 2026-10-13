@@ -590,3 +590,60 @@ class Ledger:
                 self.repo_path, "log", f"-{limit}", "--pretty=format:%h %s"
             )
             return out.splitlines() if out else []
+
+    # -- multiple live heads (issue #75) --------------------------------------
+    #
+    # `DEV` is the primary head and the one every existing caller reads. A
+    # multi-head run forks additional branches under `HEAD_PREFIX` so that a
+    # caller reading only `dev` still gets the primary head, and `live_heads()`
+    # can find the forks from git itself.
+
+    #: The fork namespace. ``head/0``, ``head/1``, ... are live heads beside
+    #: ``dev``. Not ``dev/0``: git cannot have both a branch ``dev`` (a ref file)
+    #: and ``dev/0`` (which needs ``dev`` to be a ref *directory*).
+    HEAD_PREFIX = "head/"
+
+    def fork(self, name: str, from_branch: str = DEV) -> str:
+        """Create or reset ``name`` to hold ``from_branch``'s current state.
+
+        The branch is a *live head*: workers may be started from it, it has its
+        own version vector, and a commit against it does not touch ``dev``.
+        ``name`` must be a live-head name (``head/<slot>``); forking over
+        ``stable`` or another caller's branch is refused rather than silently
+        repointing it."""
+        if not name.startswith(self.HEAD_PREFIX):
+            raise ValueError(
+                f"fork name must start with {self.HEAD_PREFIX!r}, got {name!r}; "
+                "`dev` and `stable` are not forks and resetting them here would "
+                "move a head other callers are reading.")
+        with self._exclusive():
+            self._ensure_open()
+            self._checkout(from_branch)
+            _git(self.repo_path, "branch", "-f", name)
+            return name
+
+    def live_heads(self) -> List[str]:
+        """Every live head branch: ``dev`` first, then the ``head/`` forks."""
+        with self._exclusive():
+            self._ensure_open()
+            out = _git(self.repo_path, "branch", "--list",
+                       "--format=%(refname:short)")
+            names = [n.strip() for n in (out or "").splitlines() if n.strip()]
+            forks = sorted(n for n in names if n.startswith(self.HEAD_PREFIX))
+            return [self.DEV] + forks
+
+    def discard_head(self, name: str) -> None:
+        """Delete a forked head branch.
+
+        ``dev`` and ``stable`` are refused: deleting them is not a population
+        operation, and a caller who means to reset them should use ``fork``
+        from an explicit source."""
+        if not name.startswith(self.HEAD_PREFIX):
+            raise ValueError(
+                f"discard_head refuses {name!r}: only {self.HEAD_PREFIX}* "
+                "branches are forks.")
+        with self._exclusive():
+            self._ensure_open()
+            if self._current_branch == name:
+                self._checkout(self.DEV)
+            _git(self.repo_path, "branch", "-D", name)

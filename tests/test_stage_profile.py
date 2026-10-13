@@ -43,6 +43,9 @@ HELD_OUT_IDS = {f"t{i}" for i in range(N_TASKS // 2, N_TASKS)}
 #: Shared by `_async` and `_starved_share`, which have to agree: the second
 #: divides by it, and a helper that guessed would silently rescale the ratio.
 _WORKERS = 4
+#: What one held-out evaluation sleeps in `_slow_gate_run`. Named because the
+#: gate-time bounds below are multiples of it.
+_GATE_SLEEP = 0.05
 
 
 def _tasks(n=N_TASKS):
@@ -69,9 +72,15 @@ def _slow_gate_run(rendered, task):
     ledger I/O -- which does not scale with the sleep, so the fix is to make the
     gate decisively the larger term rather than to move the threshold, which
     would delete the signal instead of stabilising it. At 50 ms over fifteen
-    runs the share spanned 0.676-0.996 with a median of 0.994."""
+    runs the share spanned 0.676-0.996 with a median of 0.994.
+
+    It still flaked on CI (0.456, 0.493 on 3.13), and the cause was not load:
+    on an idle box a quarter to a half of runs carry an extra ~0.5 s of merger
+    time *outside* the gate, which halves the ratio (#236). So the tests below
+    no longer assert the ratio; they assert the gate time this sleep guarantees,
+    which a loaded machine can only lengthen -- see `_assert_gate_paid_for`."""
     if task.id in HELD_OUT_IDS:
-        time.sleep(0.05)
+        time.sleep(_GATE_SLEEP)
     return _run(rendered, task)
 
 
@@ -220,11 +229,36 @@ def test_a_slow_gate_starves_the_workers_on_the_async_path():
     """
     r = _async(run=_slow_gate_run, async_ratio=1, max_seconds=2.5)
     assert r.worker_starved_seconds > 0.0
-    # And the gate is where the merger's time went, not the merging. This is a
-    # supporting observation, not the discriminator: `_slow_rollout_run`, whose
-    # gate costs nothing, measures 0.990-0.993 on the same ratio because its
-    # merging is cheap too. Starvation above is what separates the two.
-    assert r.gate_share() > 0.5
+    # And the gate's own timer saw the slow evaluation. Supporting, not the
+    # discriminator: starvation above is what separates this run from
+    # `_slow_rollout_run`. At this pool width one held-out scoring is a single
+    # sleep, which a gate that costs nothing (~0.09 s of bookkeeping, measured)
+    # can also reach -- so this is a liveness check, and the bound with teeth is
+    # the width-1 test below. It used to be `gate_share() > 0.5`, which flaked
+    # on a non-gate term (#236).
+    _assert_gate_paid_for(r, serial_evals=1)
+
+
+def _assert_gate_paid_for(r, *, serial_evals: int) -> None:
+    """The gate timer holds at least the sleep it is guaranteed to contain.
+
+    Every sweep that produced a report scored a *new* candidate on the held-out
+    set inside `merge_gate_seconds` -- memoisation cannot skip a signature it
+    has not seen -- and each held-out evaluation sleeps `_GATE_SLEEP`. With
+    `serial_evals` of them forced one after another (1 at the default pool
+    width, all four held-out tasks at `eval_concurrency=1`), the gate is at
+    least `serial_evals x _GATE_SLEEP`. One-sided by construction: a loaded
+    machine can stretch a sleep but never shorten it, which is the property the
+    old `gate_share() > 0.5` threshold lacked (#236).
+
+    Measured at 50 ms on an idle 8-core box: 0.32-0.56 s at the default width
+    and 0.71-0.93 s at width 1, against bounds of 0.05 s and 0.2 s. With the
+    sleep removed the gate reads ~0.09 s, under the width-1 bound -- that is
+    the margin that makes the width-1 assertion falsifiable.
+    """
+    assert len(r.history) >= 1, "no sweep reported, so the gate never ran"
+    assert r.merge_gate_seconds >= serial_evals * _GATE_SLEEP
+    assert r.merge_gate_seconds <= r.merge_seconds + 1e-9
 
 
 def _starved_share(r) -> float:
@@ -274,7 +308,9 @@ def test_narrowing_the_gates_own_pool_still_starves_workers():
     r = _async(run=_slow_gate_run, async_ratio=1, max_seconds=2.5,
                eval_concurrency=1)
     assert _starved_share(r) > 0.0
-    assert r.gate_share() > 0.5
+    # Width 1 serialises the four held-out tasks, so one gated scoring alone
+    # is four sleeps long.
+    _assert_gate_paid_for(r, serial_evals=len(HELD_OUT_IDS))
 
 
 def test_the_two_ratios_are_the_arithmetic_they_claim():
