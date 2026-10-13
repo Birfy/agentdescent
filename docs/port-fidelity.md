@@ -502,13 +502,14 @@ passed.
 ## RRSI — pre-port selection core
 
 [`algo-rrsi.md`](algo-rrsi.md) documents an offline implementation of the
-pinned Google RRSI round-selection rule and its validation differences. This is
-a partial mechanism fixture, **not yet one of the engine-integrated algorithm
-ports** above: it does not implement RRSI proposal regulation, pre-evaluation
-critic screening, a measured per-edit ledger, pruning, or a run loop. It makes
-no benchmark or transfer claim. The round candidates are assumed to have been
-screened and evaluated from the same incumbent; the fixture does not yet enforce
-that orchestration contract.
+pinned Google RRSI round-selection rule and its validation differences. A
+single-round runner now enforces one immutable incumbent snapshot, screening
+before evaluation, and round-wide selection. This is a partial mechanism
+fixture, **not yet one of the engine-integrated algorithm ports** above: the
+screening callback is only a seam and does not implement RRSI's leakage/model
+critic; there is no proposal regularization, measured per-edit ledger, pruning,
+resume loop, CLI, or `evolve()` adapter. It makes no benchmark or transfer
+claim.
 
 ## The eleven MethodPolicy ports
 
