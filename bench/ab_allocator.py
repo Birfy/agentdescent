@@ -347,7 +347,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
               f"({observed_on} observed). The arms ran different workloads or "
               "nothing was ever evaluated -- the quality column is about "
               "nothing.")
-    elif observed_on:
+    elif not complete_seeds and observed_on:
         print(f"\nallocator observed {observed_on} decision(s), but no complete "
               "successfully scored seed pairs survived; no paired result is "
               "available.")

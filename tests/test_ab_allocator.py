@@ -5,7 +5,8 @@ from types import SimpleNamespace
 
 
 def _run_main(monkeypatch, capsys, tmp_path, *, scores, spend, seeds=(7,),
-              evolve_failures=None, build_fail_call=None):
+              evolve_failures=None, build_fail_call=None,
+              allocator_counts=None):
     import bench.ab_allocator as ab
 
     class Workload:
@@ -37,7 +38,9 @@ def _run_main(monkeypatch, capsys, tmp_path, *, scores, spend, seeds=(7,),
 
         def __init__(self, seed=0, **_kwargs):
             self.seed = seed
-            self.n_skipped = self.n_observed = self.n_counterfactual = 0
+            self.n_skipped, self.n_observed = (allocator_counts or {}).get(
+                seed, (0, 0))
+            self.n_counterfactual = 0
             type(self).seeds.append(seed)
 
     evolve_seeds = []
@@ -171,6 +174,41 @@ def test_treatment_allocator_receives_each_distinct_run_seed(
     assert "| off | 2 | 0.500 / 0.500 / 0.500 | 10 |" in out
     assert "| on | 2 | 0.500 / 0.500 / 0.500 | 20 |" in out
     assert len(payload["rows"]) == 4
+
+
+def test_successful_pair_with_allocator_decisions_keeps_paired_summary(
+        monkeypatch, capsys, tmp_path):
+    rc, out, _err, payload, _alloc_seeds, _evolve_seeds = _run_main(
+        monkeypatch, capsys, tmp_path,
+        seeds=(12,),
+        scores={(12, "off"): 0.4, (12, "on"): 0.6},
+        spend=_spend((12,), 10, 20),
+        allocator_counts={12: (2, 5)})
+
+    assert rc == 0
+    assert "| off | 1 | 0.400 / 0.400 / 0.400 | 10 |" in out
+    assert "| on | 1 | 0.600 / 0.600 / 0.600 | 20 |" in out
+    assert "2/5 |" in out
+    assert "No complete successfully scored seed pairs" not in out
+    assert "but no complete successfully scored seed pairs survived" not in out
+    assert len(payload["rows"]) == 2
+
+
+def test_empty_pair_with_allocator_decisions_reports_no_comparison(
+        monkeypatch, capsys, tmp_path):
+    rc, out, _err, payload, _alloc_seeds, _evolve_seeds = _run_main(
+        monkeypatch, capsys, tmp_path,
+        seeds=(13,),
+        scores={(13, "off"): 0.4,
+                (13, "on"): RuntimeError("final scorer unavailable")},
+        spend=_spend((13,), 10, 20),
+        allocator_counts={13: (2, 5)})
+
+    assert rc == 4
+    assert "No complete successfully scored seed pairs" in out
+    assert "allocator observed 5 decision(s), but no complete" in out
+    assert "| arm | complete seeds |" not in out
+    assert len(payload["rows"]) == 2
 
 
 def test_evolution_failure_still_retains_its_usage_and_build_failure_row(
