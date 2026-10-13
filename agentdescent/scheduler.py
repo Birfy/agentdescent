@@ -295,11 +295,29 @@ class ResumeQueue:
 
     So the shipped path is task-level re-run (the free cross-version A/B signal
     of L-traj), while the item shape stays able to carry the turn-level state a
-    transparent `run` would let us checkpoint."""
+    transparent `run` would let us checkpoint.
 
-    def __init__(self, p90_multiplier: float = 2.0) -> None:
+    **Re-queue is bounded.** A resumed task goes through the same straggler
+    check as a fresh one, so without a cap a task that is *always* slow would
+    be pushed, popped, re-run, pushed again, and starve the worker's fresh
+    tasks. :attr:`max_attempts` is the bound: the queue counts how many times
+    each task has been resumed (see :meth:`pop_for`), and :meth:`push` refuses
+    once that count has been reached. The chronically slow task is then dropped
+    -- still counted in ``result.stragglers``, just never re-queued again."""
+
+    def __init__(self, p90_multiplier: float = 2.0,
+                 max_attempts: int = 1) -> None:
         self.p90_multiplier = p90_multiplier
+        #: How many times one task may be resumed before it stops being
+        #: re-queued. The A/B signal needs one re-run; beyond that the task is
+        #: chronically slow and re-dispatching it only starves fresh work.
+        self.max_attempts = max_attempts
         self._items: List[ResumeItem] = []
+        #: task_id -> how many times it has been resumed (popped). What bounds
+        #: the re-queue: `push` refuses a task whose count has hit the cap.
+        self._resumed_count: Dict[str, int] = defaultdict(int)
+        #: How many pushes were refused because the task was past the cap.
+        self.dropped = 0
         # every async worker thread pushes here; list.append happens to be
         # GIL-atomic but pop() + the emptiness check are not.
         self._lock = threading.Lock()
@@ -307,9 +325,19 @@ class ResumeQueue:
     def should_checkpoint(self, elapsed: float, p90: float) -> bool:
         return elapsed > self.p90_multiplier * p90
 
-    def push(self, item: ResumeItem) -> None:
+    def push(self, item: ResumeItem) -> bool:
+        """Queue ``item``; ``False`` when this task has been resumed too often.
+
+        A straggler is dropped (not queued) once its task has been resumed
+        :attr:`max_attempts` times -- the bounded-retry guard against a
+        chronically slow task monopolising a worker's shard. Returns whether the
+        item was accepted."""
+        if self._resumed_count[item.task_id] >= self.max_attempts:
+            self.dropped += 1
+            return False
         with self._lock:
             self._items.append(item)
+        return True
 
     def pop(self) -> Optional[ResumeItem]:
         with self._lock:
@@ -322,10 +350,14 @@ class ResumeQueue:
         tasks in its own shard, so the queue must hand out the right item to
         the right worker without handing the same task to two of them. ``None``
         when nothing queued belongs to this worker's shard -- the normal case,
-        which costs one lock acquisition per rollout."""
+        which costs one lock acquisition per rollout.
+
+        Popping counts as a resume for that task, which feeds the
+        :attr:`max_attempts` bound in :meth:`push`."""
         with self._lock:
             for i, item in enumerate(self._items):
                 if item.task_id in task_ids:
+                    self._resumed_count[item.task_id] += 1
                     return self._items.pop(i)
             return None
 
