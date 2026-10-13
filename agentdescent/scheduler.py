@@ -279,19 +279,23 @@ class ResumeItem:
 class ResumeQueue:
     """Turn-level checkpoints of timed-out rollouts (partial rollout).
 
-    Write-only in every shipped path, and only one of them writes: the reference
-    runtime pushes, nothing pops, and `async_evolve` -- the loop a real workload
-    reaches -- does not checkpoint at all.
+    The reference runtime pushes turn-level items and nothing pops them. This
+    port does something narrower but wired: :func:`~agentdescent.async_evolve`
+    pushes a **task-level** item (task id + the version it measured) when a
+    rollout overruns its estimate, and its workers pop via :meth:`pop_for` to
+    re-run the abandoned task against the latest head.
 
-    That is deliberate, and it is not what task-level recovery uses. Recovery
-    re-dispatches the **task**: the supervisor notices a worker is gone, sends its
-    work somewhere else under the same lease id, and drops the original's answer
-    if it turns up late. Resuming a partial rollout instead would require
-    `run(rendered, task) -> output` to become an inspectable conversation, and
-    that contract is what lets any agent at all be plugged in.
+    That is deliberate, and it is not what turn-level recovery would use. Full
+    recovery re-dispatches the task with continuation state: a supervisor
+    notices a worker is gone, sends its partial work somewhere else under the
+    same lease id, and drops the original's answer if it turns up late.
+    Resuming a partial rollout would require `run(rendered, task) -> output` to
+    become an inspectable conversation, and that contract is what lets any
+    agent at all be plugged in.
 
-    So this stays the turn-level primitive it always was, unwired, rather than
-    being repurposed as a task-level channel because it happens to be a queue."""
+    So the shipped path is task-level re-run (the free cross-version A/B signal
+    of L-traj), while the item shape stays able to carry the turn-level state a
+    transparent `run` would let us checkpoint."""
 
     def __init__(self, p90_multiplier: float = 2.0) -> None:
         self.p90_multiplier = p90_multiplier

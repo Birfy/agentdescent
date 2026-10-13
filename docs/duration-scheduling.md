@@ -104,21 +104,27 @@ rollouts=727, learned base≈0.006s, stragglers detected=108
 This is the *detection* half of the design's partial-rollout mechanism (§5.1),
 driven by a live estimate: a rollout predicted to be short but running long is
 identified and counted, so it shows up in the stats instead of silently setting
-the pace. The design's other half — setting it aside and resuming it against the
-latest ledger — is where the mechanism stops:
+the pace. The design's other half — setting it aside and re-running it against
+the latest ledger — is implemented at the **task level** (see below), with the
+**turn level** still closed:
 
-!!! warning "Straggler *resume* is not implemented"
+!!! warning "Straggler *resume* is task-level, not turn-level"
     A rollout that overruns its predicted cost is flagged into `ResumeQueue` and
     counted — that part is real, and it is what keeps a straggler from silently
-    defining the round's wall-clock in the reported stats. But the rollout is not
-    interrupted (the flag is recorded *after* it returns), the queued item carries
-    no continuation state, and **nothing pops the queue**. True turn-level
-    checkpoint-and-resume would need a rollout contract that exposes its turns;
-    the engine's `run(rendered, task) -> output` is opaque. What actually prevents
-    one slow rollout from stalling the rest today is removing the barrier — see
-    [the async runtime](evolution.md#the-barrier-free-runtime-async_evolve), which
-    the [efficiency experiments](efficiency.md) measure at ~2.65x over a sync
-    barrier under heavy-tailed latency.
+    defining the round's wall-clock in the reported stats. The rollout is not
+    interrupted (the flag is recorded *after* it returns). Pass a shared
+    `ResumeQueue` to `async_evolve(resume_queue=...)` and the next idle worker
+    whose shard owns the straggler's task **re-runs it against the current
+    head** (`result.resumed`): the straggler measured version N, its re-run
+    measures version N+k, so the pair is the design's free cross-version A/B
+    signal. What remains closed is turn-level checkpoint-and-resume: the queued
+    item carries no continuation state, which would need a rollout contract that
+    exposes its turns, and the engine's `run(rendered, task) -> output` is
+    opaque. What actually prevents one slow rollout from stalling the rest today
+    is removing the barrier — see
+    [the async runtime](evolution.md#the-barrier-free-runtime-async_evolve),
+    which the [efficiency experiments](efficiency.md) measure at ~2.65x over a
+    sync barrier under heavy-tailed latency.
 
 ---
 
