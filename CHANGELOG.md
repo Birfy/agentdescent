@@ -6,6 +6,12 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The `OVERSIZED` merge report now quotes the trust region that actually
+  rejected the diff (the adaptive policy's current region) instead of the
+  config constants (#224).
+
 ## [0.5.1] — 2026-10-10
 
 ### Release summary

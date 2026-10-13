@@ -534,3 +534,37 @@ def test_audit_drain_requeue_preserves_priority_order(tmp_path):
     remaining = sched.pop()
     assert remaining is not None and remaining.diff_id == "low", (
         f"the low-priority audit must still be queued, got {remaining!r}")
+
+
+def test_oversized_report_quotes_the_region_that_rejected(tmp_path):
+    """With an adaptive region, the OVERSIZED report must name the region the
+    size check used, not the config constants it replaced (#224)."""
+    from agentdescent.advantage import AdaptiveTrustRegion, TrustRegion
+    from agentdescent.aggregator import (Aggregator, AggregatorConfig,
+                                         MergeOutcome)
+    from agentdescent.evolvable import Diff, EvidenceCard
+    from agentdescent.evolution import AppendRules, EvolvingArtifact
+    from agentdescent.ledger import Ledger
+    from agentdescent.scheduler import AuditScheduler
+    from agentdescent.verifier import ThreeLayerVerifier, VerifierBudget
+
+    lg = Ledger(str(tmp_path), lambda a: {"state": dict(a.state)},
+                lambda aid, v, s: EvolvingArtifact(aid, s.get("state", {}), v,
+                                                   0.2, None, AppendRules()))
+    lg.register(EvolvingArtifact("a", {}, 1, 0.2, None, AppendRules()))
+    verifier = ThreeLayerVerifier(eval_fn=lambda art, tasks: 0.5,
+                                  held_out=[1, 2, 3], budget=VerifierBudget())
+    policy = AdaptiveTrustRegion(initial=TrustRegion(ops=3, chars=500))
+    agg = Aggregator(lg, verifier, AuditScheduler(),
+                     AggregatorConfig(batch_trigger=1, trust_region_ops=99,
+                                      trust_region_chars=10 ** 6,
+                                      trust_region_policy=policy))
+    huge = Diff(diff_id="huge", target="a",
+                ops={f"k{i}": "v" for i in range(5)}, author="w")
+    agg.ingest(EvidenceCard(diff=huge, base_version={"a": 1}, touched=["a"],
+                            before_after_delta=0.1, trajectory_refs=[]))
+
+    reports = agg.step()
+    assert reports and reports[0].category == MergeOutcome.OVERSIZED
+    assert "3 ops / 500 chars" in reports[0].reason, reports[0].reason
+    assert "99 ops" not in reports[0].reason

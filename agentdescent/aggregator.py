@@ -954,14 +954,15 @@ class Aggregator:
         moves."""
         return getattr(self.promotion_policy, "survival", {})
 
-    def _apply_trust_region(self, cards):
+    def _apply_trust_region(self, cards, region=None):
         """Split cards into (within budget, oversized), settling the rejects.
 
         Oversized diffs used to be dropped *before* `considered` was computed and
         never settled, so a runaway reflector vanished from the report and from
         the evidence pool at once -- the most expensive failure to diagnose is
         the one that leaves no trace."""
-        region = self._trust_region()
+        if region is None:
+            region = self._trust_region()
 
         def within(card) -> bool:
             if card.diff.size() > region.ops:
@@ -1172,7 +1173,8 @@ class Aggregator:
         # dropped *before* `considered` was computed and never settled, so they
         # vanished from both the report and the evidence pool -- silently.
         n_considered = len(cards)
-        cards, oversized = self._apply_trust_region(cards)
+        region = self._trust_region()
+        cards, oversized = self._apply_trust_region(cards, region)
 
         head = snap.version
         survivors, discarded = self._staleness_filter(artifact, head, cards)
@@ -1187,8 +1189,8 @@ class Aggregator:
                 return MergeReport(artifact_id, None, False, n_considered, 0,
                                    len(oversized), 0, 0.0, None,
                                    f"{len(oversized)} diff(s) outside the trust "
-                                   f"region ({self.config.trust_region_ops} ops / "
-                                   f"{self.config.trust_region_chars} chars)",
+                                   f"region ({region.ops} ops / "
+                                   f"{region.chars} chars)",
                                    MergeOutcome.OVERSIZED)
             return MergeReport(artifact_id, None, False, n_considered, 0,
                                len(discarded) + len(oversized), 0, 0.0, None,
