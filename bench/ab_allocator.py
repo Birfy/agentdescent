@@ -133,8 +133,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    args = build_parser().parse_args(argv)
-    seeds = [int(s) for s in args.seeds.split(",") if s.strip()]
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    seed_parts = [part.strip() for part in args.seeds.split(",")]
+    if not seed_parts or any(not part for part in seed_parts):
+        parser.error("--seeds must be a non-empty comma-separated list of integers")
+    try:
+        seeds = [int(part) for part in seed_parts]
+    except ValueError:
+        parser.error("--seeds must be a non-empty comma-separated list of integers")
+    if len(set(seeds)) != len(seeds):
+        parser.error("--seeds values must be unique")
 
     print(f"Mechanism: value-directed budget allocator")
     print(f"Dataset  : {args.dataset}")
@@ -194,7 +203,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     "skipped": None, "counterfactual": None,
                     "error": f"build failed: {type(e).__name__}: {str(e)[:120]}"}
         kwargs = dict(workload.evolve_kwargs)
-        arm_kwargs, watcher = _arm(on, alloc_kwargs)
+        arm_kwargs, watcher = _arm(on, alloc_kwargs, seed=seed)
         kwargs.update(arm_kwargs)
         kwargs.setdefault("rounds", 10_000)
 
@@ -221,17 +230,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     "skipped": None, "counterfactual": None,
                     "error": f"evolve failed: {type(e).__name__}: {str(e)[:120]}"}
 
+        scoring_error = None
         try:
             test = workload.test_eval(result)
+            if test is None:
+                scoring_error = "final scoring returned no score"
         except Exception as e:  # noqa: BLE001
             with printing:
                 print(f"  {label}  scoring failed: {type(e).__name__}",
                       file=sys.stderr)
             test = None
+            scoring_error = (f"final scoring failed: {type(e).__name__}: "
+                             f"{str(e)[:120]}")
+
+        if scoring_error == "final scoring returned no score":
+            with printing:
+                print(f"  {label}  scoring failed: {scoring_error}",
+                      file=sys.stderr)
 
         outcomes = result.outcomes()
         fired, observed = _fired_counts(watcher)
         tokens = usage.prompt_tokens + usage.completion_tokens
+        errors = [str(result.error)] if result.error else []
+        if scoring_error:
+            errors.append(scoring_error)
         row = {
             "seed": seed, "arm": "on" if on else "off",
             "test": test, "dev": result.final_reward,
@@ -242,7 +264,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "fired": fired, "fired_of": observed,
             "skipped": watcher.n_skipped if watcher else 0,
             "counterfactual": watcher.n_counterfactual if watcher else 0,
-            "error": result.error,
+            "error": "; ".join(errors) or None,
+            "scoring_error": scoring_error,
         }
         with printing:
             print(f"  {label}  test={_fmt(test)} dev={_fmt(row['dev'])}  "
@@ -267,17 +290,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("every arm failed; nothing to compare.", file=sys.stderr)
         return 4
 
-    # A comparison is only valid over seeds where BOTH arms survived: if off
-    # fails on seed 0 and on fails on seed 1, the per-arm columns above would
-    # be about different seeds. Mark the surviving pairs and say which were
-    # dropped.
+    # A paired comparison requires both arms to have a run with no error and a
+    # final test score. Keep failed runs and their partner's spend in `rows`,
+    # but use exactly the measurable pairs for both quality and token summaries.
+    by_seed: Dict[int, Dict[str, Dict[str, Any]]] = {}
+    for row in rows:
+        by_seed.setdefault(row["seed"], {})[row["arm"]] = row
     failed = [r for r in rows if r["error"]]
     complete_seeds = {
-        r["seed"] for r in rows
-        if not r["error"] and len([x for x in rows
-                                  if x["seed"] == r["seed"] and x["arm"] != r["arm"]
-                                  and not x["error"]]) > 0}
-    dropped = sorted({r["seed"] for r in rows} - complete_seeds)
+        seed for seed, pair in by_seed.items()
+        if all(arm in pair and not pair[arm]["error"]
+               and pair[arm]["test"] is not None for arm in ("off", "on"))
+    }
+    dropped = sorted(set(by_seed) - complete_seeds)
     failed_tokens = sum(r["tokens"] for r in failed)
     print()
     print(f"arms: {len(rows)} (2 x {len(seeds)} seeds), "
@@ -286,29 +311,45 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if dropped:
         print(f"incomplete seed pairs dropped from quality/cost comparison: "
               f"{dropped}")
+        excluded_rows = [r for r in rows if r["seed"] not in complete_seeds]
+        excluded_failed_tokens = sum(r["tokens"] for r in excluded_rows
+                                     if r["error"])
+        excluded_partner_tokens = sum(r["tokens"] for r in excluded_rows
+                                      if not r["error"])
+        print("spend excluded from paired quality/cost but retained: "
+              f"{excluded_failed_tokens + excluded_partner_tokens:,} tokens "
+              f"({excluded_failed_tokens:,} in failed runs; "
+              f"{excluded_partner_tokens:,} in non-failed runs)")
     print()
-    print("| arm | complete seeds | test (min/med/max) | tokens (med) | "
-          "commits | vetoes | fired |")
-    print("|---|---|---|---|---|---|---|")
-    for arm in ("off", "on"):
-        group = [r for r in rows if r["arm"] == arm and r["seed"] in complete_seeds
-                 and not r["error"]]
-        if not group:
-            continue
-        tests = sorted(r["test"] for r in group if r["test"] is not None)
-        interval = ("n/a" if not tests else
-                    f"{tests[0]:.3f} / {statistics.median(tests):.3f} / "
-                    f"{tests[-1]:.3f}")
-        med_tokens = statistics.median(r["tokens"] for r in group)
-        print(f"| {arm} | {len(group)} | {interval} | {med_tokens:,.0f} | "
-              f"{sum(r['committed'] for r in group)} | "
-              f"{sum(r['oracle_rejected'] for r in group)} | "
-              f"{sum(r['fired'] or 0 for r in group)}/"
-              f"{sum(r['fired_of'] or 0 for r in group)} |")
+    if complete_seeds:
+        print("| arm | complete seeds | test (min/med/max) | tokens (med) | "
+              "commits | vetoes | fired |")
+        print("|---|---|---|---|---|---|---|")
+        for arm in ("off", "on"):
+            group = [by_seed[seed][arm] for seed in sorted(complete_seeds)]
+            tests = sorted(r["test"] for r in group)
+            interval = (f"{tests[0]:.3f} / {statistics.median(tests):.3f} / "
+                        f"{tests[-1]:.3f}")
+            med_tokens = statistics.median(r["tokens"] for r in group)
+            print(f"| {arm} | {len(group)} | {interval} | {med_tokens:,.0f} | "
+                  f"{sum(r['committed'] for r in group)} | "
+                  f"{sum(r['oracle_rejected'] for r in group)} | "
+                  f"{sum(r['fired'] or 0 for r in group)}/"
+                  f"{sum(r['fired_of'] or 0 for r in group)} |")
+    else:
+        print("No complete successfully scored seed pairs; paired quality/cost "
+              "comparison unavailable.")
 
-    fired_on = sum(r["fired"] or 0 for r in rows if r["arm"] == "on")
-    observed_on = sum(r["fired_of"] or 0 for r in rows if r["arm"] == "on")
-    if observed_on and fired_on == 0:
+    # Diagnostics attached to the paired result must describe the same on-arm
+    # runs as its table. If no pair survived, report the raw on-arm observations
+    # instead so the failure path remains useful.
+    diagnostic_rows = (
+        [by_seed[seed]["on"] for seed in sorted(complete_seeds)]
+        if complete_seeds else [r for r in rows if r["arm"] == "on"]
+    )
+    fired_on = sum(r["fired"] or 0 for r in diagnostic_rows)
+    observed_on = sum(r["fired_of"] or 0 for r in diagnostic_rows)
+    if complete_seeds and observed_on and fired_on == 0:
         # Before any quality claim: a mechanism that never differed from the
         # clock is a control against a control.
         print(f"\nallocator never fired: it agreed with the clock on all "
@@ -317,11 +358,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
               "--max-tokens is tight enough for the allocator's budget_start, "
               "and that self-verify is on (the allocator gates the self-verify "
               "rollout; without it there is nothing to gate).")
-    elif observed_on == 0:
+    elif complete_seeds and observed_on == 0:
         print(f"\nallocator saw no merge decisions on the `on` arm "
               f"({observed_on} observed). The arms ran different workloads or "
               "nothing was ever evaluated -- the quality column is about "
               "nothing.")
+    elif not complete_seeds and observed_on:
+        print(f"\nallocator observed {observed_on} decision(s), but no complete "
+              "successfully scored seed pairs survived; no paired result is "
+              "available.")
 
     if args.json_out:
         import json
@@ -329,7 +374,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             json.dump({"args": vars(args), "rows": rows}, fh, indent=2)
         print(f"\nwrote {args.json_out}")
 
-    return 0
+    return 0 if complete_seeds else 4
 
 
 if __name__ == "__main__":
