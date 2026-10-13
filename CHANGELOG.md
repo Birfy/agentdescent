@@ -15,6 +15,11 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- `hf_rows_modelscope(cache=False)` now bypasses an existing on-disk cache and
+  does not write the fresh response back (#229). `fetch_bytes` / `fetch_text`
+  accept the same `cache` flag so the raw-URL helpers share the `hf_rows`
+  bypass contract.
+
 - `AdaptiveTrustRegion` widens when a window is dominated by `OVERSIZED`
   refusals (the size cap was binding) instead of treating them like gate
   refusals and leaving the region stuck (#226). A batch that mixes oversized
