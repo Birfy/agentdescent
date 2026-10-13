@@ -15,10 +15,26 @@ def test_spec_requires_object(payload):
         EvolveSpec.from_dict(payload)
 
 
+def _json_location(contents):
+    """Where the interpreter's own JSON parser places the error.
+
+    The loader relays ``JSONDecodeError.lineno/colno``; the exact position is
+    the parser's call and changed in Python 3.13 (a trailing comma is reported
+    at the comma, not at the closing bracket), so it is derived, not hard-coded.
+    """
+    try:
+        json.loads(contents)
+    except json.JSONDecodeError as e:
+        return e.lineno, e.colno
+    raise AssertionError("fixture is valid JSON")
+
+
 def test_spec_json_location(tmp_path):
     path = tmp_path / "broken.json"
-    path.write_text('{\n "kind": "text",\n}\n')
-    with pytest.raises(SpecError, match="line 3, column 1") as exc:
+    contents = '{\n "kind": "text",\n}\n'
+    path.write_text(contents)
+    line, col = _json_location(contents)
+    with pytest.raises(SpecError, match=f"line {line}, column {col}\\b") as exc:
         load_spec(str(path))
     assert str(path) in str(exc.value)
 
@@ -35,14 +51,19 @@ def test_spec_read_errors(tmp_path, kind):
     assert str(path) in str(exc.value)
 
 
-@pytest.mark.parametrize("ext,contents,line", [
-    ("json", '[\n {"prompt": "ok"},\n]', 3),
-    ("jsonl", '\n{"prompt": "ok"}\n\n{"prompt": }\n', 4),
+@pytest.mark.parametrize("ext,contents", [
+    ("json", '[\n {"prompt": "ok"},\n]'),
+    ("jsonl", '\n{"prompt": "ok"}\n\n{"prompt": }\n'),
 ])
-def test_data_json_location(tmp_path, ext, contents, line):
+def test_data_json_location(tmp_path, ext, contents):
     path = tmp_path / ("cases." + ext)
     path.write_text(contents)
-    with pytest.raises(SpecError, match=f"line {line}, column") as exc:
+    if ext == "json":
+        line, col = _json_location(contents)
+    else:
+        # JSONL: the bad record is on file line 4; the column is the parser's.
+        line, col = 4, _json_location('{"prompt": }')[1]
+    with pytest.raises(SpecError, match=f"line {line}, column {col}\\b") as exc:
         load_rows({"path": str(path)})
     assert str(path) in str(exc.value)
 

@@ -38,7 +38,7 @@ The suite is **offline and deterministic** (no network, no model API):
 pytest -q
 ```
 
-CI runs the same suite on Python 3.9 / 3.10 / 3.11 / 3.12 for every push and PR. Please
+CI runs the same suite on Python 3.9 / 3.10 / 3.11 / 3.12 / 3.13 for every push and PR. Please
 add or update tests for any behavior change — the reference domain
 (`agentdescent/domains/router.py`) and the example stubs let you test the full
 parallel/async loop without an API key.
