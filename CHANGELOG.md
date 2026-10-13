@@ -17,7 +17,9 @@ All notable changes to AgentDescent are documented here. The format follows
 
 - Allocator A/B comparisons now use the same fully scored seed pairs for
   quality and token summaries, retain spend for excluded runs, and seed each
-  treatment allocator from its run seed.
+  treatment allocator from its run seed. The runner rejects invalid or
+  duplicate seed lists before setup and scopes allocator diagnostics to the
+  pairs included in the comparison.
 
 - The `OVERSIZED` merge report now quotes the trust region that actually
   rejected the diff (the adaptive policy's current region) instead of the

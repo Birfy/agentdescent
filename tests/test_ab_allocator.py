@@ -3,6 +3,8 @@
 import json
 from types import SimpleNamespace
 
+import pytest
+
 
 def _run_main(monkeypatch, capsys, tmp_path, *, scores, spend, seeds=(7,),
               evolve_failures=None, build_fail_call=None,
@@ -209,6 +211,84 @@ def test_empty_pair_with_allocator_decisions_reports_no_comparison(
     assert "allocator observed 5 decision(s), but no complete" in out
     assert "| arm | complete seeds |" not in out
     assert len(payload["rows"]) == 2
+
+
+def test_excluded_allocator_skips_do_not_hide_control_warning_for_included_pairs(
+        monkeypatch, capsys, tmp_path):
+    rc, out, _err, payload, _alloc_seeds, _evolve_seeds = _run_main(
+        monkeypatch, capsys, tmp_path,
+        seeds=(21, 22),
+        scores={(21, "off"): 0.4, (21, "on"): 0.4,
+                (22, "off"): 0.4,
+                (22, "on"): RuntimeError("final scorer unavailable")},
+        spend={(21, "off"): 10, (21, "on"): 20,
+               (22, "off"): 10, (22, "on"): 20},
+        allocator_counts={21: (0, 4), 22: (2, 2)})
+
+    assert rc == 0
+    assert "| off | 1 | 0.400 / 0.400 / 0.400 | 10 |" in out
+    assert "| on | 1 | 0.400 / 0.400 / 0.400 | 20 |" in out
+    assert "| on | 1 | 0.400 / 0.400 / 0.400 | 20 | 1 | 0 | 0/4 |" in out
+    assert "allocator never fired: it agreed with the clock on all 4 decisions " \
+           "(0 skipped)" in out
+    assert "allocator never fired: it agreed with the clock on all 6 decisions" \
+           " (0 skipped)" not in out
+    assert "30 tokens (20 in failed runs; 10 in non-failed runs)" in out
+    assert len(payload["rows"]) == 4
+
+
+def test_excluded_observations_do_not_mask_no_decisions_for_included_pairs(
+        monkeypatch, capsys, tmp_path):
+    rc, out, _err, payload, _alloc_seeds, _evolve_seeds = _run_main(
+        monkeypatch, capsys, tmp_path,
+        seeds=(31, 32),
+        scores={(31, "off"): 0.4, (31, "on"): 0.4,
+                (32, "off"): 0.4,
+                (32, "on"): RuntimeError("final scorer unavailable")},
+        spend={(31, "off"): 10, (31, "on"): 20,
+               (32, "off"): 10, (32, "on"): 20},
+        allocator_counts={31: (0, 0), 32: (3, 5)})
+
+    assert rc == 0
+    assert "| on | 1 | 0.400 / 0.400 / 0.400 | 20 | 1 | 0 | 0/0 |" in out
+    assert "allocator saw no merge decisions on the `on` arm (0 observed)." in out
+    assert "allocator observed 5 decision(s), but no complete" not in out
+    assert "30 tokens (20 in failed runs; 10 in non-failed runs)" in out
+    assert len(payload["rows"]) == 4
+
+
+@pytest.mark.parametrize(
+    ("seed_arg", "message"),
+    [("7,7", "--seeds values must be unique"),
+     ("", "--seeds must be a non-empty comma-separated list of integers"),
+     ("7,not-an-integer", "--seeds must be a non-empty comma-separated list of integers"),
+     ("7,,8", "--seeds must be a non-empty comma-separated list of integers")],
+)
+def test_invalid_seed_lists_fail_before_confirmation_or_run_setup(
+        monkeypatch, capsys, seed_arg, message):
+    import bench.ab_allocator as ab
+
+    calls = []
+
+    def called(name, result=None):
+        def stub(*_args, **_kwargs):
+            calls.append(name)
+            return result
+        return stub
+
+    monkeypatch.setattr(ab, "confirm", called("confirm", True))
+    monkeypatch.setattr(ab, "completion_for", called("provider"))
+    monkeypatch.setattr(ab, "_finer", called("dataset"))
+    monkeypatch.setattr(ab, "_hotpotqa", called("dataset"))
+    monkeypatch.setattr(ab, "evolve", called("evolve"))
+
+    with pytest.raises(SystemExit) as exc:
+        ab.main(["--dataset", "finer", "--seeds", seed_arg])
+
+    captured = capsys.readouterr()
+    assert exc.value.code == 2
+    assert message in captured.err
+    assert calls == []
 
 
 def test_evolution_failure_still_retains_its_usage_and_build_failure_row(

@@ -133,8 +133,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    args = build_parser().parse_args(argv)
-    seeds = [int(s) for s in args.seeds.split(",") if s.strip()]
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    seed_parts = [part.strip() for part in args.seeds.split(",")]
+    if not seed_parts or any(not part for part in seed_parts):
+        parser.error("--seeds must be a non-empty comma-separated list of integers")
+    try:
+        seeds = [int(part) for part in seed_parts]
+    except ValueError:
+        parser.error("--seeds must be a non-empty comma-separated list of integers")
+    if len(set(seeds)) != len(seeds):
+        parser.error("--seeds values must be unique")
 
     print(f"Mechanism: value-directed budget allocator")
     print(f"Dataset  : {args.dataset}")
@@ -331,8 +340,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("No complete successfully scored seed pairs; paired quality/cost "
               "comparison unavailable.")
 
-    fired_on = sum(r["fired"] or 0 for r in rows if r["arm"] == "on")
-    observed_on = sum(r["fired_of"] or 0 for r in rows if r["arm"] == "on")
+    # Diagnostics attached to the paired result must describe the same on-arm
+    # runs as its table. If no pair survived, report the raw on-arm observations
+    # instead so the failure path remains useful.
+    diagnostic_rows = (
+        [by_seed[seed]["on"] for seed in sorted(complete_seeds)]
+        if complete_seeds else [r for r in rows if r["arm"] == "on"]
+    )
+    fired_on = sum(r["fired"] or 0 for r in diagnostic_rows)
+    observed_on = sum(r["fired_of"] or 0 for r in diagnostic_rows)
     if complete_seeds and observed_on and fired_on == 0:
         # Before any quality claim: a mechanism that never differed from the
         # clock is a control against a control.
