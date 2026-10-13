@@ -157,17 +157,28 @@ class Workspace:
         self._names = {n for n in binary_names if n}
 
     def command(self, argv: Sequence[str], env: Mapping[str, str]) -> List[str]:
-        """The argv to run on *this* host for a session command."""
+        """The argv to run on *this* host for a session command.
+
+        ``env`` is the environment the argv will run under; the allowlisted
+        :data:`CONTAINER_ENV` names in it are forwarded into the container by name,
+        so the returned argv carries no credential values."""
         argv = list(argv)
         if not self._prefix:
             return argv
         if self._binary and argv and argv[0] in self._names:
             argv[0] = self._binary       # the mounted path, not the host's PATH
         passed: List[str] = []
+        # By *name* only: `exec --env NAME` reads the value from the environment
+        # the engine client runs under, so a key never lands on the argv, where
+        # `ps` and every process listing on the host would show it. That makes
+        # `env` a contract: it must be the environment the returned argv is run
+        # with -- which both callers already pass as `run_cli(..., env=env)`.
         for name in CONTAINER_ENV:
-            value = env.get(name)
-            if value is not None:
-                passed += ["--env", f"{name}={value}"]
+            if env.get(name) is not None:
+                passed += ["--env", name]
+        # The workspace's own variables are fixed container paths (`HOME`,
+        # `TMPDIR`, the CA bundle), not credentials, and do not exist on the host
+        # side under those values -- so they are the one thing passed by value.
         for name, value in self._env.items():
             passed += ["--env", f"{name}={value}"]
         return self._prefix[:-1] + passed + [self._prefix[-1]] + argv

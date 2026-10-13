@@ -2766,12 +2766,42 @@ def test_the_sandbox_passes_named_variables_and_rewrites_only_the_agent():
                         {"ANTHROPIC_API_KEY": "k", "CLAUDE_CODE_SESSION_ID": "host"})
     assert got[-3:] == ["/opt/pkg/bin/claude", "-p", "hi"]
     assert got[:4] == ["docker", "exec", "-w", "/work"]
-    assert got[got.index("--env") + 1] == "ANTHROPIC_API_KEY=k"
+    # forwarded by name: `exec --env NAME` reads the value from the client's env
+    assert got[got.index("--env") + 1] == "ANTHROPIC_API_KEY"
     assert f"HOME={CONTAINER_HOME}" in got
     # the host's session identity is not on the list, so it cannot arrive by accident
     assert not any("CLAUDE_CODE_SESSION_ID" in part for part in got)
     # a command that is not the agent goes in untouched
     assert space.command(["sh", "-c", "ls /"], {})[-3:] == ["sh", "-c", "ls /"]
+
+
+def test_no_secret_value_reaches_the_container_argv():
+    """A key on the `docker exec` argv is visible to `ps` on the whole host.
+
+    Allowlisted credentials cross by *name* (the engine client reads the value from
+    the environment `run_cli` runs it under); anything not on the allowlist does not
+    cross at all. Either way no secret value may appear in `command(...)`.
+    """
+    from examples.genesis._sandbox import CONTAINER_ENV, CONTAINER_HOME, Workspace
+
+    space = Workspace("/host/ws", prefix=["docker", "exec", "-w", "/work", "cid"],
+                      env={"HOME": CONTAINER_HOME}, binary="/opt/pkg/bin/claude",
+                      binary_names=("claude",))
+    secrets = {"ANTHROPIC_API_KEY": "sk-ant-SECRET-1",
+               "ANTHROPIC_AUTH_TOKEN": "tok-SECRET-2",
+               "HTTPS_PROXY": "http://user:SECRET-3@proxy:8080",
+               # not on the allowlist: must not cross in any form
+               "OPENAI_API_KEY": "sk-SECRET-4", "GITHUB_TOKEN": "ghp_SECRET-5"}
+    got = space.command(["claude", "-p", "hi"], secrets)
+    joined = "\0".join(got)
+    for value in secrets.values():
+        assert value not in joined
+    forwarded = [got[i + 1] for i, part in enumerate(got) if part == "--env"]
+    for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "HTTPS_PROXY"):
+        assert name in CONTAINER_ENV and name in forwarded
+    assert not any(n.startswith(("OPENAI_API_KEY", "GITHUB_TOKEN")) for n in forwarded)
+    # the fixed container paths are still passed by value
+    assert f"HOME={CONTAINER_HOME}" in forwarded
 
 
 def test_a_shared_toolchain_directory_is_not_mounted():
