@@ -286,6 +286,11 @@ class MergeReport:
     #: Stable bucket for the same outcome, safe to count across rounds. ``reason``
     #: interpolates values ("P(delta>0)=0.42 <= 0.75"), so it makes a useless key.
     category: str = ""
+    #: How many diffs in this batch the trust region refused for size. Non-zero
+    #: on an ``oversized`` report, but also on a mixed batch whose category is
+    #: decided by the cards that *were* in range (or by staleness) -- which is
+    #: how an adaptive region still learns its cap was binding (#226).
+    oversized: int = 0
 
 
 @dataclass
@@ -330,6 +335,8 @@ class _Candidate:
     survived: int
     discarded: int
     conflicts: int
+    #: Diffs the trust region refused in this batch; carried onto the report.
+    oversized: int = 0
 
     #: Filled by `Aggregator._measure`. `None` until then, which is what makes a
     #: candidate that skipped the phase fail loudly rather than commit on zeros.
@@ -756,7 +763,7 @@ class Aggregator:
             # -- not from a second reading of the same decision. A trust region
             # that adapted to its own guess about what happened would be tuning
             # itself against a number nothing else in the run agrees with.
-            self._observe_trust_region(report.category)
+            self._observe_trust_region(self._trust_region_outcome(report))
         self._age_and_promote(reports)
         self._drain_audit_queue(self.config.audit_drain_per_step)
         return reports
@@ -990,6 +997,24 @@ class Aggregator:
                                chars=self.config.trust_region_chars)
         return policy.current
 
+    @staticmethod
+    def _trust_region_outcome(report: MergeReport) -> str:
+        """The outcome an adaptive region should learn from ``report``.
+
+        Usually its category. But a batch that mixes oversized diffs with stale
+        or in-range ones reports the category of the cards that got further, so
+        reading the category alone hides the size cap whenever any other card
+        is present -- one valid proposal per batch keeps the region stuck (#226).
+        A merge that refused oversized diffs and did not land is therefore told
+        as ``oversized``. A commit already widens, and a reversal must still
+        tighten, so both keep their category.
+        """
+        if report.oversized and report.category not in (
+                MergeOutcome.COMMITTED, MergeOutcome.ORACLE_REJECTED,
+                "rolled-back"):
+            return MergeOutcome.OVERSIZED.value
+        return report.category
+
     def _observe_trust_region(self, outcome: str) -> None:
         """Tell an adaptive region how the merge it sized turned out."""
         policy = getattr(self.config, "trust_region_policy", None)
@@ -1191,10 +1216,12 @@ class Aggregator:
                                    f"{len(oversized)} diff(s) outside the trust "
                                    f"region ({region.ops} ops / "
                                    f"{region.chars} chars)",
-                                   MergeOutcome.OVERSIZED)
+                                   MergeOutcome.OVERSIZED,
+                                   oversized=len(oversized))
             return MergeReport(artifact_id, None, False, n_considered, 0,
                                len(discarded) + len(oversized), 0, 0.0, None,
-                               "all stale / rejected", MergeOutcome.ALL_STALE)
+                               "all stale / rejected", MergeOutcome.ALL_STALE,
+                               oversized=len(oversized))
 
         kept_cards, conflicts = self._resolve_conflicts(artifact, survivors)
         kept_diffs = [c.diff for c in kept_cards]
@@ -1204,7 +1231,8 @@ class Aggregator:
             diff=best_diff, cards=kept_cards, survivor_cards=survivors,
             head=head, fused=fused,
             considered=n_considered, survived=len(survivors),
-            discarded=len(discarded), conflicts=conflicts)
+            discarded=len(discarded), conflicts=conflicts,
+            oversized=len(oversized))
 
     def _measure(self, c: "_Candidate") -> "_Candidate":
         """Score the base and the candidate. **Touches no aggregator state.**
@@ -1292,7 +1320,8 @@ class Aggregator:
         def report(diff, version, reason, category) -> MergeReport:
             return MergeReport(c.artifact_id, diff, c.fused, c.considered,
                                c.survived, c.discarded, c.conflicts, p_improve,
-                               version, reason, category)
+                               version, reason, category,
+                               oversized=c.oversized)
 
         rejected = self._audit(c.artifact, c.artifact_id, c.candidate, c.diff,
                                base_full, cand_full, base_score, cand_score, prior)

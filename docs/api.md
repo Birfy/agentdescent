@@ -1114,7 +1114,8 @@ MergeReport(
     prob_improve: float,
     committed_version: Optional[int],
     reason: str = '',
-    category: str = ''
+    category: str = '',
+    oversized: int = 0
 ) -> None
 ```
 
