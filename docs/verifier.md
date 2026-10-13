@@ -100,7 +100,7 @@ verifier.eval_counts(artifact)    # (successes, failures) on the FULL held-out s
 verifier.full_eval(artifact)      # the same eval_fn, whole set, spends budget
 ```
 
-!!! warning "`full_eval` was `oracle_eval` until 0.6"
+!!! warning "`full_eval` was `oracle_eval` until 0.5.1"
     The old name promised an independent source of truth. Every layer here calls
     the one `eval_fn` you supplied and they differ only in **how many tasks** they
     score — so this layer bounds *sampling error* and cannot detect *bias*. If
@@ -216,7 +216,7 @@ eval_counts(artifact) -> (successes, failures) # the acceptance test, full set
 full_eval(artifact) -> float                   # the same eval_fn, whole set
 ```
 
-Pre-0.6 code named the last one `oracle_eval`. The engine still reads that name,
+Pre-0.5.1 code named the last one `oracle_eval`. The engine still reads that name,
 once, with a `DeprecationWarning`, and drops it in 0.7.
 
 There is also one **optional** attribute, read with a default so a substitute
@@ -230,7 +230,7 @@ Set it when both are the same measurement, and the aggregator will reuse the
 rates it already has rather than asking twice. Leave it out when your full-set
 scorer is genuinely independent — then it is called, and it must stay exact: a
 `full_eval` that gets cheaper under budget pressure holds a veto over commits.
-The pre-0.6 spelling `oracle_shares_full_set` is still read, and the new name
+The pre-0.5.1 spelling `oracle_shares_full_set` is still read, and the new name
 wins if a class carries both.
 
 An [`aggregator_factory`](aggregator.md#replacing-aggregator_factory-aggregatorprotocol)

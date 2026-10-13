@@ -1,236 +1,45 @@
 ---
-description: AgentDescent puts the deep-learning training stack on top of self-evolving LLM agents: diffs are the gradients, and the aggregator is the optimizer step.
+description: AgentDescent is a modular evolve engine for prompts, skills, programs, agent harnesses and custom artifacts. Compose strategies, policies, actors and evaluators in one loop.
 ---
 
-# AgentDescent
+<div class="experience exp-home" data-theme="light">
+  <nav class="exp-nav" aria-label="Main navigation">
+    <a class="exp-brand" href="./"><span class="brand-mark">a<span>↘</span></span> agentdescent</a>
+    <div class="exp-nav-links"><a class="nav-active" aria-current="page" href="./">Overview</a><a href="install/">Quickstart</a><a href="#demo">Interactive demo</a><a href="docs/">Docs</a><a class="nav-github" href="https://github.com/Birfy/agentdescent">GitHub ↗</a></div><button class="theme-toggle" type="button" aria-label="Switch color theme">◐ <span>Theme</span></button>
+    <details class="exp-mobile-menu"><summary>Menu <span>▾</span></summary><div><a aria-current="page" href="./">Overview</a><a href="install/">Quickstart</a><a href="#demo">Interactive demo</a><a href="docs/">Docs</a><a href="https://github.com/Birfy/agentdescent">GitHub ↗</a></div></details>
+  </nav>
 
-**Gradient descent — but the parameters are agents.** A parallel, asynchronous
-framework for self-evolving agents (skills, prompts, harnesses) where **diffs are
-the gradients** and **the aggregator is the optimizer**.
+  <main>
+    <section class="exp-hero">
+      <div class="hero-content"><div class="eyebrow"><span class="pulse-dot"></span> OPEN SOURCE · BUILT FOR CODING AGENTS</div><h1>Evolve<br><em>anything.</em></h1><p>Prompts, skills, programs, agent harnesses, or your own artifact type. AgentDescent gives each a measurable evolution loop, with interchangeable modules for how candidates are proposed, selected, merged and accepted.</p><div class="hero-ctas"><a class="exp-button primary" href="install/">Install AgentDescent <span>↗</span></a><a class="exp-button ghost" href="#framework">Explore the framework <span>↓</span></a></div><div class="hero-command"><span>$</span><code tabindex="0">curl -fsSL https://raw.githubusercontent.com/Birfy/agentdescent/main/scripts/install.sh | bash</code><button class="exp-copy" data-copy="curl -fsSL https://raw.githubusercontent.com/Birfy/agentdescent/main/scripts/install.sh | bash">Copy</button></div></div>
+      <div class="hero-aside" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="orbit orbit-three"></div><div class="orbit-center">a<span>↘</span></div><div class="orbit-note note-one">artifact <b>01</b></div><div class="orbit-note note-two">algorithm <b>02</b></div><div class="orbit-note note-three">evolve() <b>03</b></div></div>
+    </section>
 
-AgentDescent puts the *deep-learning training stack* on top of agents — data /
-tensor / pipeline parallelism, parameter servers, decoupled/asynchronous RL,
-partial rollout — applied to recursive self-improvement, where the "parameters"
-are a **library of evolvable artifacts** (skills, prompts, harness modules,
-verifiers) and the "gradients" are **diffs carrying evidence cards**.
+    <section class="proof-strip" aria-label="AgentDescent at a glance"><span>ONE ENGINE · MANY POSSIBILITIES</span><div><b>01</b> Your artifact, your representation</div><div><b>02</b> Swappable algorithm modules</div><div><b>03</b> One evolve() entry point</div></section>
 
-!!! quote "The core observation"
-    Serial RSI is bounded at **1 diff / T_iter**. AgentDescent runs *N* workers in
-    parallel and merges their diffs into a shared, versioned artifact library,
-    targeting **O(N / T_iter)** improvement throughput.
+    <section class="exp-section exp-intro" id="how"><div class="section-label">THE IDEA <span>01 / 05</span></div><div class="intro-grid"><h2>Define what changes.<br>Measure what improves.</h2><div><p>AgentDescent is not tied to a prompt format. A <strong>Strategy</strong> represents your artifact as state and turns proposals into diffs. An <strong>actor</strong> tries tasks; a <strong>reward</strong> says what success means. The loop explores candidates, evaluates them and commits accepted changes to a versioned ledger.</p><a class="inline-link" href="evolution/">Meet evolve() <span>↗</span></a></div></div><div class="process-line"><div><span>01</span><strong>Represent</strong><small>Choose a built-in Strategy or write your own</small></div><div><span>02</span><strong>Explore</strong><small>Run and propose candidates in parallel</small></div><div><span>03</span><strong>Evaluate and merge</strong><small>Use your reward and chosen policies</small></div></div></section>
 
-The one place the analogy *must* break defines the whole system:
 
-!!! warning "Gradients add, diffs do not"
-    Aggregation is therefore **not averaging** but **conflict resolution +
-    statistical acceptance + transactional commit**. That merge is what
-    [`aggregator.py`](aggregator.md) implements.
+    <section class="exp-section framework" id="framework"><div class="section-label">THE MODULAR ENGINE <span>02 / 05</span></div><div class="framework-heading"><div><h2>One <em>evolve()</em>.<br>Many algorithms.</h2><p>Keep the loop; change its decisions. Choose what the artifact is, who proposes edits, how work runs, and which candidates survive. Swap one module or supply your own optimizer.</p></div><a class="inline-link" href="policies/">Explore all policy slots <span>↗</span></a></div>
+      <div class="recipe-layout"><div class="recipe-options" role="tablist" aria-label="Algorithm configuration examples"><button class="active" role="tab" aria-selected="true" data-recipe="base"><span>01 / THE BASELINE</span><strong>Start with the default loop</strong><small>Pair an artifact with an actor and reward.</small></button><button role="tab" aria-selected="false" data-recipe="search"><span>02 / SEARCH</span><strong>Search a wider frontier</strong><small>Change selection and task sampling.</small></button><button role="tab" aria-selected="false" data-recipe="merge"><span>03 / MERGE</span><strong>Resolve edits differently</strong><small>Plug in reflective conflict and fusion.</small></button><button role="tab" aria-selected="false" data-recipe="custom"><span>04 / YOUR ALGORITHM</span><strong>Replace the optimizer</strong><small>Bring an aggregator with its own state.</small></button></div><div class="recipe-preview"><div class="recipe-preview-top"><span>AN EVOLVE RECIPE</span><span id="recipe-kicker">DEFAULT</span></div><div class="recipe-preview-body"><h3 id="recipe-title">Start with one artifact.</h3><p id="recipe-copy">The same entry point handles the task, reward, actor and artifact strategy. Unspecified policy slots use their defaults.</p><pre id="recipe-code">evolve(tasks, reward, agent=agent,
+       strategy=FileTree(files),
+       policies=Policies())</pre><small id="recipe-note">Illustrative configuration · supply your own tasks, reward, agent and files.</small></div></div></div>
+      <div class="module-seams"><a href="strategies/"><span>01 / WHAT</span><strong>Strategy</strong><small>Represent state and proposals.</small></a><a href="agents/"><span>02 / WHO</span><strong>Actor</strong><small>Run tasks and propose changes.</small></a><a href="rewards/"><span>03 / BETTER</span><strong>Reward</strong><small>Define what success means.</small></a><a href="policies/"><span>04 / WHICH</span><strong>Policies</strong><small>Select, sample, fuse, accept.</small></a><a href="parallelism/"><span>05 / HOW</span><strong>Parallelism</strong><small>Control task and worker layout.</small></a><a href="aggregator-factory/"><span>06 / OPTIMIZER</span><strong>Aggregator</strong><small>Replace the full merge pipeline.</small></a></div><div class="policy-slots"><strong>8 SWAPPABLE DECISIONS</strong><span>task sampler</span><span>selection</span><span>proposal</span><span>conflict</span><span>fusion</span><span>acceptance</span><span>promotion</span><span>staleness</span></div><p class="framework-foot">A policy slot only changes that decision. For algorithms with their own population or optimizer state, use <a href="aggregator-factory/">aggregator_factory ↗</a>. <a href="modules/">See the full module map ↗</a></p>
+    </section>
 
----
+    <section class="exp-lab" id="demo"><div class="section-label">INTERACTIVE AGENT DEMO <span>03 / 05</span></div><div class="lab-heading"><div><h2>See it inside<br><em>your agent.</em></h2><p>AgentDescent also works inside Claude Code, Codex and other coding agents. Walk through a sample conversation, from plan to proposed diff.</p></div><div class="lab-side-note"><span class="pulse-dot"></span> BROWSER SIMULATION<br><small>No model calls or files changed</small></div></div>
+      <div class="agent-demo"><div class="demo-config"><span class="panel-overline">SET UP THE SCENARIO</span><div class="control-title">Your agent</div><div class="demo-hosts" role="tablist" aria-label="Agent for demo"><button class="active" role="tab" aria-selected="true" data-demo-host="claude">Claude Code</button><button role="tab" aria-selected="false" data-demo-host="codex">Codex</button><button role="tab" aria-selected="false" data-demo-host="opencode">OpenCode</button><button role="tab" aria-selected="false" data-demo-host="dsh">DeepSeek Harness</button></div><div class="control-title demo-target-title">What to improve</div><div class="demo-presets"><button class="active" data-demo-kind="skill">Skill</button><button data-demo-kind="prompt">Prompt</button><button data-demo-kind="code">Agent code</button></div><label class="demo-path-label" for="demo-path">Artifact path</label><input id="demo-path" value="~/.claude/skills/pdf-audit" spellcheck="false"><button class="exp-button primary lab-run" id="demo-run">Start sample conversation <span>↗</span></button></div>
+        <div class="demo-chat"><div class="lab-display-top"><div><span class="window-dots"><i></i><i></i><i></i></span><b id="demo-window-title">CLAUDE CODE / AGENTDESCENT</b></div><span id="demo-status">READY</span></div><div class="demo-chat-body" id="demo-chat-body" aria-live="polite"><div class="demo-welcome"><span>✳</span><strong>See what your agent can do.</strong><small>Choose a host, then start the sample conversation.</small></div></div><div class="demo-chat-footer"><div><span class="tool-light"></span><span id="demo-tool-line">doctor → plan → start → show → apply</span></div><button id="demo-approve" hidden>Approve sample run ↗</button></div></div></div><div class="lab-under"><span>This demo illustrates the workflow; it does not contact an agent.</span><a href="install/">Use it for real <span>↗</span></a></div>
+    </section>
 
-## Start here
+    <section class="exp-section inside" id="inside"><div class="section-label">WHAT CAN EVOLVE <span>04 / 05</span></div><div class="inside-heading"><h2>More than prompts.<br>More than skills.</h2><p>Any artifact you can represent, propose changes to and evaluate can fit the loop. Start with built-in strategies or define the three-method Strategy contract for your own state.</p></div><div class="artifact-picker" role="tablist" aria-label="Artifact types"><button class="active" role="tab" aria-selected="true" data-artifact="prompt">Instruction</button><button role="tab" aria-selected="false" data-artifact="skill">Skill library</button><button role="tab" aria-selected="false" data-artifact="code">Program / harness</button><button role="tab" aria-selected="false" data-artifact="custom">Your artifact</button></div><div class="artifact-view"><div><span class="artifact-kicker" id="artifact-kicker">SINGLE SLOT STRATEGY</span><h3 id="artifact-title">Evolve one instruction.</h3><p id="artifact-copy">Replace a single value and compare candidates against the tasks you care about.</p><a class="inline-link" id="artifact-link" href="quickstart-skill/">Read the prompt quickstart <span>↗</span></a></div><div class="artifact-code"><div><span>ARTIFACT STATE</span><small id="artifact-filename">prompt.md</small></div><pre id="artifact-preview">You are a helpful assistant.
 
-### Have a dataset
++ Respond with only the requested answer.
++ Omit extra explanation and restatement.</pre></div></div><div class="methods-band"><div><span class="panel-overline">20 RUNNABLE METHOD PORTS</span><h3>Algorithms are examples,<br>not the limit.</h3><p>The repository ports published methods onto the same engines. ACE evolves context, GEPA searches prompts, DGM edits an agent harness, and OpenEvolve searches programs. Each declares its own strategy, policies or optimizer.</p><a class="inline-link" href="self-evolution-examples/">Explore all 20 methods <span>↗</span></a></div><div class="method-list"><a href="algo-ace/"><b>ACE</b><span>Context / playbook</span><small>↗</small></a><a href="algo-gepa/"><b>GEPA</b><span>Prompt / Pareto search</span><small>↗</small></a><a href="algo-dgm/"><b>DGM</b><span>Agent harness / archive</span><small>↗</small></a><a href="algo-openevolve/"><b>OpenEvolve</b><span>Program / islands</span><small>↗</small></a></div></div></section>
 
-That is the whole input.
+    <section class="exp-section feature-section" id="features"><div class="section-label">BUILT FOR THE WHOLE LOOP <span>05 / 05</span></div><div class="feature-heading"><h2>Research flexibility.<br>Engineering control.</h2><p>AgentDescent includes the machinery around an algorithm: scheduling work, checking candidates, handling conflicts and keeping accepted versions. Use what you need; replace the parts your method changes.</p></div><div class="capability-grid"><a href="parallelism/"><span>01 / PARALLEL WORK</span><h3>Split the search.</h3><p>Shard tasks, partition artifact sections or lease task clusters with pluggable parallel strategies.</p><small>DataParallel · TensorParallel · ClusterParallel ↗</small></a><a href="async/"><span>02 / ASYNC RUNTIME</span><h3>Keep workers moving.</h3><p>Run without a round barrier. The merger processes evidence while workers continue, with staleness and backpressure controls.</p><small>Explore the async runtime ↗</small></a><a href="aggregator/"><span>03 / CONFLICT-AWARE MERGE</span><h3>Combine what belongs.</h3><p>Resolve contradictory diffs, fuse compatible changes and accept candidates against held-out evidence.</p><small>Follow the aggregator ↗</small></a><a href="verifier/"><span>04 / EVALUATION</span><h3>Measure before committing.</h3><p>Optionally rank on a fixed cheap subset, use the full held-out set for commit decisions and cache repeated evaluations.</p><small>Understand verification ↗</small></a><a href="ledger/"><span>05 / VERSIONED STATE</span><h3>Know what changed.</h3><p>A git-backed ledger records artifact versions and accepted diffs, with development and stable branches.</p><small>Inspect the ledger ↗</small></a><a href="governance/"><span>06 / GOVERNANCE</span><h3>Control the blast radius.</h3><p>Keep protected material outside the evolving artifact and use stronger gates for agent harnesses or code.</p><small>Read the governance model ↗</small></a></div><div class="feature-tail"><span>BRING YOUR OWN AGENT</span><p>Use Claude, an OpenAI-compatible endpoint, a local model or your own <code>run</code> and <code>propose</code> functions.</p><a class="inline-link" href="agents/">Connect an actor <span>↗</span></a></div></section>
 
-```python
-from agentdescent import SingleSlot, evolve, openai_compatible, reflector, scorer, tasks_from
-from agentdescent.dataloader import hf_rows
-
-rows = hf_rows("hotpotqa/hotpot_qa", "validation", config="distractor", limit=40)
-model = openai_compatible(model="deepseek-v4-flash")
-
-tasks = tasks_from(rows, prompt="question", gold="answer")     # rows -> Task objects
-run = lambda skill, task: model(f"{skill}\n\n{task.prompt}")   # the skill meets the question
-
-result = evolve(tasks, scorer("exact"), run=run, propose=reflector(model),
-                strategy=SingleSlot(initial_value="You are a helpful assistant."),
-                rounds=8, n_workers=8, max_concurrency=8, held_out_frac=0.3,
-                patience=3, target_reward=0.98)
-
-print(result.rendered)        # the skill it learned
-print(result.final_reward)    # held-out reward
-print(result.outcomes())      # why it went that way
-```
-
-Run as written, that lifted held-out exact match from **0.167 to 0.583** and wrote
-*"Respond with only the requested answer, omitting any extra explanation or
-restatement."* — see [Quickstart](quickstart-skill.md) for the full measurement.
-
-### Have a directory
-
-A skill folder, a folder of subagent definitions, or the agent's own code:
-
-```python
-from agentdescent import FileTree, evolve, load_tree, scorer, tree_reflector, tree_runner
-from agentdescent.agents import claude_code, openai_compatible
-from agentdescent.governance import SKILL_BLAST_RADIUS
-
-path = "~/.claude/skills/pdf-audit"                      # your directory
-tree = load_tree(path)                                   # -> {"SKILL.md": ..., ...}
-strategy = FileTree(tree, max_files_per_diff=2)          # file paths are the state keys
-run = tree_runner(claude_code(extra_args=["--permission-mode", "acceptEdits"]),
-                  layout="claude_skill", name="pdf-audit",
-                  overlay=strategy.frozen_files(tree))   # a fresh workspace per rollout
-
-result = evolve(tasks, scorer("contains"), run=run, strategy=strategy,
-                propose=tree_reflector(openai_compatible(model="deepseek-v4-flash"),
-                                       strategy=strategy),
-                artifact_id="pdf-audit", blast_radius=SKILL_BLAST_RADIUS,   # L2
-                self_verify=False, cheap_eval_tasks=4,   # a rollout is a real agent call
-                rounds=6, n_workers=4, max_concurrency=4, held_out_frac=0.3)
-
-result.write_to(path)     # opt in; backs up first
-```
-
-Each rollout materialises the candidate into a throwaway workspace and a **real
-agent reads the files off disk**. See
-[Quickstart — a directory](quickstart-directory.md).
-
-Neither is a separate system: both build ordinary arguments and call
-[`evolve()`](evolution.md), which is where you go the moment you want more.
-
-```bash
-pip install agentdescent
-```
-
----
-
-## Where to go next
-
-<div class="grid cards" markdown>
-
--   :material-download: **[Install and first run](install.md)** — start here
-
-    Install, then reproduce the central claim in seconds with no API key.
-
--   :material-rocket-launch: **[Quickstart — dataset to skill](quickstart-skill.md)**
-
-    One call, three decisions: your data, how to score it, which model. With the
-    measured result of running it.
-
--   :material-folder-cog: **[Quickstart — a directory](quickstart-directory.md)**
-
-    A skill folder, an agent folder, or its code — evolved by an agent that reads
-    the files.
-
--   :material-power-plug: **[Use it from your agent](plugins.md)**
-
-    The plugin for DeepSeek Harness, Claude Code and Codex: say "evolve this"
-    inside the agent. Also evolves the plugins themselves. New here? Start with
-    [the plugin in three commands](plugin-quickstart.md) — `agentdescent demo`
-    runs a whole evolution with no API key.
-
--   :material-star-four-points: **[The `evolve` method](evolution.md)**
-
-    The one entry point underneath. Every capability is a plug-in to one
-    `evolve()` parameter — this is the map, with an example per module.
-
--   :material-lightbulb-on: **[Concepts](concepts.md)**
-
-    The *why*: the training↔RSI analogy, staleness, the aggregator as a
-    discrete-space optimizer, the three long tails, governance.
-
--   :material-sitemap: **[Architecture](architecture.md)**
-
-    How the components fit together and how a diff travels from a worker to a
-    committed change.
-
--   :material-view-grid-plus: **[Module map](modules.md)**
-
-    Every module, what it is for, and a reading order for whatever you are doing.
-
--   :material-api: **[API reference](api.md)**
-
-    Every public name with its real signature — generated from the code, and
-    tested against it.
-
--   :material-chart-box: **[Measured results](results.md)**
-
-    Every empirical claim with the setup that produced it — including the
-    benchmarks where the honest answer is "nothing to learn here".
-
+    <section class="exp-cta"><div><span class="section-label">READY WHEN YOU ARE</span><h2>Start with your agent.</h2><p>One command installs AgentDescent and connects supported agents on your PATH.</p></div><a class="exp-button primary" href="install/">Open Quickstart <span>↗</span></a></section>
+  </main>
+  <footer class="exp-footer"><a class="exp-brand" href="./"><span class="brand-mark">a<span>↘</span></span> agentdescent</a><span>Open source · MIT</span><div><a href="https://github.com/Birfy/agentdescent">GitHub ↗</a><a href="plugins/">Plugin docs</a><a href="results/">Results</a></div></footer>
 </div>
-
-**Building blocks** (each plugs into `evolve`):
-- **[The decision plane](policies.md)** — every replaceable decision (selection, sampling, merge, acceptance, promotion) in one `Policies` bundle
-
-<div class="grid cards" markdown>
-
--   :material-connection: **[Agents & LLMs](agents.md)** → `agent=`
-
-    Any `prompt -> text` is a completion: Claude, GLM/OpenAI-compatible, a CLI
-    coding agent, a callable, a stub.
-
--   :material-file-tree: **[Strategies](strategies.md)** → `strategy=`
-
-    What the artifact *is*: one slot, a playbook, keyed categories, or a
-    directory. The key space is the design decision.
-
--   :material-cog-sync: **[The aggregator](aggregator.md)** → `aggregator_factory=`
-
-    The optimizer — tune the reference merge/acceptance pipeline, or swap in your
-    own.
-
--   :material-vector-triangle: **[Parallelism](parallelism.md)** → `parallel=`
-
-    Pluggable DP / TP methods, plus [sampling](sampling.md) for which rollout to
-    spend and [scheduling](duration-scheduling.md) for when.
-
--   :material-source-branch-sync: **[Async](async.md)** → `asynchronous=True`
-
-    Barrier-free workers, a lag budget, and the
-    [staleness policies](staleness.md) that keep it safe.
-
--   :material-shield-lock: **[Governance](governance.md)** → `blast_radius=`
-
-    L2 skills merge freely, L1 harnesses are oracle-gated, L0 is frozen — and
-    frozen *paths* for a directory.
-
-</div>
-
----
-
-## The central analogy
-
-| Model training | AgentDescent (parallel RSI) |
-|---|---|
-| parameter tensor θ | library of [`Evolvable`](data-model.md) artifacts |
-| gradient *g* | [`Diff` + `EvidenceCard`](data-model.md) |
-| parameter server | git-backed, version-vectored [`Ledger`](ledger.md) |
-| optimizer step | [`Aggregator`](aggregator.md) merge decision |
-| per-param adaptive LR (Adam) | per-artifact Beta-posterior test |
-| staleness / decoupled PPO | [per-diff η + rebase re-verify](staleness.md) |
-| partial rollout | [straggler detection](duration-scheduling.md) (`ResumeQueue`; resume not implemented) |
-| EMA (weight averaging) | [`stable`/`dev` dual branch](ledger.md#two-branches-dev-and-stable) |
-| training code (not self-modifiable) | [L0 frozen layer](governance.md) |
-
----
-
-## 30-second tour
-
-```bash
-pip install -e ".[dev]"
-
-python -m examples.run_demo            # RQ1: merge vs fork (synchronous DP)
-python -m examples.run_async           # FlashEvolve-style async + staleness policies
-python -m examples.skill_dir_evolution # evolve a skill directory a real agent reads
-python -m examples.rq2_staleness       # RQ2: staleness tolerance sweep
-pytest                                 # the suite, no external services
-```
-
-Step by step: [install and first run](install.md). Everything runnable, with the
-output each one produces: [run everything](usage.md).
-
-No LLM or external service is required: the
-[reference domain](orchestrator.md#why-a-synthetic-domain-exists-at-all) is a
-fully deterministic keyword-router skill, so the entire parallel loop runs
-in-process and is unit-tested — while still producing genuine diffs that
-measurably improve a held-out metric.
-
-!!! note "Scope"
-    This is a **research reference implementation**, faithful to the design's
-    *mechanisms* and runnable end-to-end on a synthetic domain — not a
-    production system. See the design spec §2 for the honest, narrowed novelty
-    claim relative to FlashEvolve / SkillClaw / CoEvoSkills.

@@ -192,8 +192,9 @@ async def main():
 asyncio.run(main())
 ```
 
-Expected: the eight tools (`apply cancel doctor plan resume show start status`)
-and a doctor report.
+Expected tools: `apply cancel doctor plan resume show start status audit_drift
+audit_pending audit_recompute audit_rescan audit_resolve audit_scorecard audit_status`
+and a doctor report (15 total: eight run-lifecycle tools and seven audit tools).
 
 ## 6. The web panel
 

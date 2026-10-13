@@ -258,6 +258,12 @@ class ProposalContext:
     #: Proposals this worker already made, newest last. Empty unless the policy
     #: asked to be given them.
     history: Sequence[str] = ()
+    #: Evidence cards the aggregator discarded for this task -- stale, oversized,
+    #: or lost to a CAS race -- most recent last. Empty unless the run wires a
+    #: settled-evidence reader. A proposal policy can read these to avoid
+    #: re-proposing what was just thrown away ("do not re-propose what was just
+    #: rejected", which the engine could not express before this field).
+    rejected: Sequence["EvidenceCard"] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -328,7 +334,7 @@ class VerifierProtocol(Protocol):
     Not three. `docs/verifier.md` said three for a while, and a verifier written
     from that page fails in the middle of a merge rather than at startup.
 
-    ``full_eval`` was ``oracle_eval`` until 0.6. The engine still reads the old
+    ``full_eval`` was ``oracle_eval`` until 0.5.1. The engine still reads the old
     name, once, with a `DeprecationWarning`
     (:func:`~agentdescent.verifier.full_eval_of`), so an implementation written
     against the old page keeps working until 0.7. The rename is a correction:

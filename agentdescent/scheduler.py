@@ -213,6 +213,18 @@ class AuditScheduler:
                 heapq.heapify(self._items)
             return priority
 
+    def requeue(self, item: _AuditItem) -> None:
+        """Put a popped item back with its **original** priority.
+
+        ``submit`` recomputes priority from ``blast_radius * uncertainty /
+        trust``, and trust may have moved since the item was first submitted --
+        so re-submitting with the original ``blast_radius`` and ``uncertainty``
+        would give a different (and potentially lower) priority. This method
+        pushes the item back with the priority it was popped with, so relative
+        order is preserved across a transient failure and retry."""
+        with self._lock:
+            heapq.heappush(self._items, item)
+
     def force_oracle(self, blast_radius: float, artifact_id: str) -> bool:
         """High-impact or low-trust changes are forced through the oracle.
 

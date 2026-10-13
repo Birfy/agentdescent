@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-332 public names across 54 modules.
+340 public names across 56 modules.
 
 ---
 
@@ -39,6 +39,8 @@ EvolutionResult(
     forced_refreshes: int = 0,
     stragglers: int = 0,
     retired_workers: int = 0,
+    audit_drained: int = 0,
+    replay: Optional[Dict[str, Any]] = None,
     usage: Usage = <factory>,
     wallclock: float = 0.0,
     rollouts: int = 0,
@@ -61,7 +63,8 @@ EvolutionResult(
     sandboxes_created: int = 0,
     sandboxes_reused: int = 0,
     sandbox_failures: int = 0,
-    fusion_trials: List['FusionTrial'] = <factory>
+    fusion_trials: List['FusionTrial'] = <factory>,
+    budget: Optional[Dict[str, Any]] = None
 ) -> None
 ```
 
@@ -170,6 +173,7 @@ RoundInfo(
     elapsed_s: float = 0.0,
     rollouts: int = 0,
     calls: int = 0,
+    tokens: int = 0,
     considered: int = 0,
     discarded_stale: int = 0,
     conflicts_dropped: int = 0,
@@ -220,6 +224,10 @@ evolve(
     max_seconds: Optional[float] = None,
     max_rollouts: Optional[int] = None,
     max_calls: Optional[int] = None,
+    max_tokens: Optional[int] = None,
+    stop_on_diminishing_returns: bool = False,
+    efficiency_floor: float = 0.25,
+    call_budget: Optional['CallBudget'] = None,
     self_verify: bool = True,
     held_out_frac: float = 0.4,
     repo_path: Optional[str] = None,
@@ -237,7 +245,8 @@ evolve(
     stop_when: Optional[Callable[['RoundInfo'], bool]] = None,
     verbose: bool = False,
     usage: Optional[Usage] = None,
-    policies: Optional['Policies'] = None
+    policies: Optional['Policies'] = None,
+    allocator: Optional[Any] = None
 ) -> EvolutionResult
 ```
 
@@ -271,6 +280,10 @@ evolve(
 | `max_seconds` | `Optional[float]` | `None` | Wall-clock budget. `None` (default) means unbounded; the async path uses `20.0` when unset. |
 | `max_rollouts` | `Optional[int]` | `None` | The budget in the two units a comparison has to hold fixed: rollouts completed, and actor invocations (`run` + `propose`). `rounds` is not one of them -- configurations differ in how much model a round buys, so a budget fixed in rounds hands the wider configuration more model and then reports the extra model as a win for parallelism. Either bound stops the run with `stop_reason` `"max_rollouts"` / `"max_calls"`. **Checked at the round barrier, so a run overshoots by up to one round.** A round is dispatched or it is not; stopping halfway would leave a half-merged round, and the states a comparison compares are the ones a merge produced. So a budget is a *bound on where to stop*, never the number to compare on: read the spend the run actually reported (`result.rollouts`, `result.usage.calls`), which is what `baselines` does -- it refuses to call two arms equal-budget when their measured spends differ. The async path has no barrier and enforces both per rollout, so it overshoots by at most the rollouts already in flight. |
 | `max_calls` | `Optional[int]` | `None` | As `max_rollouts`. |
+| `max_tokens` | `Optional[int]` | `None` | Hard cap on total tokens consumed (`prompt_tokens + completion_tokens`). A reasoning model can spend 40k tokens on hidden thinking in one call, so `max_calls` and `max_rollouts` do not bound cost: a 20-round run with 4 workers is 80 rollouts and ~160 model calls, but at 40k tokens each that is 6.4M tokens -- the bill, not the count, is what a deployment needs to control. Checked at the round barrier alongside the other budgets; the async path checks per-rollout for tighter control. Stops with `stop_reason="max_tokens"`. `None` (default) means unbounded. |
+| `stop_on_diminishing_returns` | `bool` | `False` | Stop when the run's own return per token has fallen off its peak by more than `efficiency_floor`. The economic rule: keep buying compute while it pays, stop when it does not -- *even with budget left*. Off by default, because a run whose reward only rises late would be cut short by it, and because it needs `max_tokens` (return per token needs a cost to divide by). Stops with `stop_reason="diminishing_returns"`. |
+| `efficiency_floor` | `float` | `0.25` | How far below the peak counts as diminishing, when the stop above is on. Self-calibrating against the run's own best rate, so it is a *ratio*, not an absolute quantity: a reward is in `[0, 1]` and a token count is in the millions, and their quotient has no interpretable scale. |
+| `call_budget` | `Optional['CallBudget']` | `None` | An adaptive per-call thinking budget (o1-style test-time scaling). Pass a `CallBudget` whose `base` matches the adapter's configured `max_tokens`, and the engine adjusts the per-call ceiling based on each parent's score and the remaining budget — promising parents get more thinking, dead-end ones get less, and the allocation tightens as the token budget is spent. The adapter must be wrapped with `budgeted_completion` for this to reach it. `None` (default) means the per-call ceiling is the adapter's own and never changes. |
 | `self_verify` | `bool` | `True` | Re-run the trajectory with the diff applied to record a local before/after delta. Doubles the rollouts spent per proposal; ports that score candidates only on held-out should pass `False`. |
 | `held_out_frac` | `float` | `0.4` | Fraction of `tasks` reserved for held-out scoring, in `(0, 1)`. |
 | `repo_path` | `Optional[str]` | `None` | Where the git-backed ledger lives. Omit for a throwaway repo that is removed when this call returns (not held until interpreter exit, so a sweep does not accumulate one git repo per run); **passing the same path again resumes** that ledger, and a caller-supplied path is never deleted. Git runs with an isolated config, so a personal `~/.gitconfig` (`commit.gpgsign`, `core.hooksPath`) cannot fail the ledger's own bookkeeping commits. |
@@ -289,6 +302,7 @@ evolve(
 | `verbose` | `bool` | `False` | Print a line per round. Independent of the `RuntimeWarning` emitted when a run ends early -- that always fires. |
 | `usage` | `Optional[Usage]` | `None` | Share one `Usage` with your model adapters (`claude(usage=u)`, `openai_compatible(usage=u)`) and the result's token counts become real. Without it the run still reports calls, seconds and failures -- `run` is `(rendered, task) -> str`, so an opaque actor has no way to surface tokens, and inventing a number would be worse than reporting zero. |
 | `policies` | `Optional['Policies']` | `None` | Bundle of replaceable pieces (`Policies`). Every field defaults to `None` meaning "current behaviour", so `Policies()` and passing nothing are the same run. The individual keyword arguments -- `task_sampler`, `staleness_policy`, `aggregator_factory` -- are shortcuts onto its fields and keep working; an explicit argument wins over a bundle default rather than being silently ignored. Fields whose implementations have not landed yet raise rather than being accepted and ignored: a caller who passes a custom acceptance rule and sees a finished run would reasonably conclude it ran. New capabilities go here rather than adding another parameter to a function that already has thirty-five. |
+| `allocator` | `Optional[Any]` | `None` | Value-directed budget allocation (see `allocator`). `None` (the default) is the old behaviour exactly: optional spend (fusion tournaments, the self-verify rollout) degrades against the global `soft_floor` / `hard_floor` thresholds as the token budget runs out, every candidate treated alike. Pass a `ValueBudgetAllocator` (or any object with `decide(ctx) -> AllocateDecision` and `observe(ctx, committed)`) and, once the budget is tight, the self-verify rollout is spent only on candidates the allocator's value model expects to commit; the merge path reports every outcome back so the model learns. Requires `max_tokens` to be set (the allocator decides how the budget is spent; `max_tokens` is what exists to spend). Counterfactual exploration re-measures candidates the model judged unworthy, so a biased value model is corrected rather than reinforced. |
 
 ### `reflector(...)`
 
@@ -1028,7 +1042,9 @@ Aggregator(
 | `finalize() -> None` | Publish the current dev head to stable at the end of a clean run. |
 | `finish_step(items: List[Union['_Candidate', MergeReport]]) -> List[MergeReport]` | Phase 3: decide the measured candidates, then age and promote. |
 | `measure(items: List[Union['_Candidate', MergeReport]]) -> List[Union['_Candidate', MergeReport]]` | Phase 2 for a batch from `begin_step`. **Off-thread safe.** |
+| `recent_settled(task: Any, n: int = 3) -> List[EvidenceCard]` | The most recent N settled cards whose trajectory_refs mention task. |
 | `restore(state: dict) -> None` | Restore state written by `checkpoint`. |
+| `set_settled_consumer(consumer: Optional[Callable[[EvidenceCard], None]]) -> None` | Subscribe a consumer to the settled-evidence pool. |
 | `step() -> List[MergeReport]` | Fire every artifact bucket that is ready and return per-artifact reports. |
 
 ### `AggregatorConfig(...)`
@@ -1048,6 +1064,7 @@ AggregatorConfig(
     accept_samples: int = 4000,
     cas_attempts: int = 3,
     cas_backoff: float = 0.05,
+    audit_drain_per_step: int = 0,
     fusion_tournament: bool = False,
     bounded_gate: bool = False
 ) -> None
@@ -1067,6 +1084,8 @@ Cards bucketed by target artifact (design doc, section 4.1).
 
 | method | what it does |
 |---|---|
+| `recent_settled(task: Any, n: int = 3) -> List[EvidenceCard]` | The most recent N settled cards whose `trajectory_refs` mention `task`. |
+| `set_settled_consumer(consumer: Optional[Callable[[EvidenceCard], None]]) -> None` | Subscribe a consumer to every card that is settled. |
 | `settle(cards: List[EvidenceCard]) -> None` | Keep discarded-diff evidence addressable, under a hard bound. |
 
 ### `MergeOutcome`
@@ -1097,7 +1116,8 @@ MergeReport(
     prob_improve: float,
     committed_version: Optional[int],
     reason: str = '',
-    category: str = ''
+    category: str = '',
+    oversized: int = 0
 ) -> None
 ```
 
@@ -2681,6 +2701,23 @@ Archive(
 
 Keep the `k` best-scoring candidates and spread the workers over them.
 
+### `CostEfficient(...)`
+
+FlatPuct that pays for exploration out of a budget. **Test-time scaling.**
+
+```python
+CostEfficient(
+    c_puct: float = 1.0,
+    cost_exponent: float = 1.0,
+    prior_exponent: float = 0.0,
+    anneal: bool = True
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `cost_factors(rows: Sequence[Candidate]) -> List[float]` | `cost**alpha` per row, normalised so the mean is 1. |
+
 ### `MCTS(exploration: float = 1.4) -> None`
 
 UCT over the candidate tree: one evolve step is one rollout.
@@ -2711,7 +2748,8 @@ SelectionContext(
     head: Candidate,
     candidates: Sequence[Candidate] = (),
     round: int = 0,
-    n_workers: int = 1
+    n_workers: int = 1,
+    budget_remaining: float = 1.0
 ) -> None
 ```
 
@@ -2821,7 +2859,7 @@ Group-relative advantage, an adaptive trust region, distance from stable. &nbsp;
 
 ### `AdaptiveTrustRegion(...)`
 
-Widen the diff-size cap while merges land; tighten when they do not.
+Widen the diff-size cap when merges land or oversized refusals dominate; tighten on reversals.
 
 ```python
 AdaptiveTrustRegion(
@@ -2882,6 +2920,7 @@ Allocates oracle budget by estimated value G-hat (design doc, 5.3).
 | method | what it does |
 |---|---|
 | `force_oracle(blast_radius: float, artifact_id: str) -> bool` | High-impact or low-trust changes are forced through the oracle. |
+| `requeue(item: _AuditItem) -> None` | Put a popped item back with its **original** priority. |
 | `update_trust(artifact_id: str, oracle_agreed: bool) -> None` | Raise trust when cheap eval agreed with the oracle, lower it when not. |
 
 ### `DurationEstimator(...)`
@@ -3075,6 +3114,10 @@ async_evolve(
     max_seconds: float = 20.0,
     max_iters: Optional[int] = None,
     max_calls: Optional[int] = None,
+    max_tokens: Optional[int] = None,
+    stop_on_diminishing_returns: bool = False,
+    efficiency_floor: float = 0.25,
+    call_budget: Optional[CallBudget] = None,
     target_reward: Optional[float] = None,
     patience: Optional[int] = None,
     max_worker_errors: int = 3,
@@ -3103,7 +3146,8 @@ async_evolve(
     stop_when: Optional[Callable[[RoundInfo], bool]] = None,
     verbose: bool = False,
     usage: Optional[Usage] = None,
-    policies: Optional['Policies'] = None
+    policies: Optional['Policies'] = None,
+    allocator: Optional[Any] = None
 ) -> EvolutionResult
 ```
 
@@ -3124,6 +3168,10 @@ async_evolve(
 | `max_seconds` | `float` | `20.0` | Wall-clock budget for the **production phase only**. Two things still happen after it, so budget for them: a bounded shutdown (`shutdown_grace`, since an in-flight rollout cannot be cancelled) and **one held-out scoring pass** to compute `final_reward`. That pass is memoised per (artifact, task), so it is free when the final head was already scored by a sweep and costs a full held-out sweep of the backend when it was not -- which is exactly the case when the budget was too short for any sweep to finish. |
 | `max_iters` | `Optional[int]` | `None` | Stop after this many worker rollouts in total (a budget, not a barrier). |
 | `max_calls` | `Optional[int]` | `None` | Stop after this many actor invocations (`run` + `propose`) in total. The second half of an equal-budget comparison: two configurations matched on rollouts still differ in model spend whenever one of them asks for more proposals per rollout, and the cheaper unit is the one a reader assumes was held fixed. Both bounds are checked as each rollout lands, so a run overshoots only by what was already in flight. |
+| `max_tokens` | `Optional[int]` | `None` | Stop after this many tokens in total (`prompt + completion`), as the meter measured them. The third budget unit, and the one cost is measured in: `max_calls` and `max_iters` count invocations, and a reasoning model can spend 40k tokens on hidden thinking in a single one, so neither bounds the bill. Checked as each rollout lands (tighter than the synchronous path's round barrier), and a `BudgetGovernor` degrades optional spend -- fusion tournaments at 75% of the budget, self-verify at 90% -- before the wall. `None` (default) means unbounded, and no governor is constructed. |
+| `stop_on_diminishing_returns` | `bool` | `False` | Stop when the run's measured return per token falls off its own peak by more than `efficiency_floor`. Off by default; needs `max_tokens`. See `evolve`. |
+| `efficiency_floor` | `float` | `0.25` | How far below the peak counts as diminishing, when the stop above is on. A self-calibrating ratio, not an absolute rate. See `evolve`. |
+| `call_budget` | `Optional[CallBudget]` | `None` | An adaptive per-call thinking budget (o1-style test-time scaling). See `evolve`; the allocation happens before each worker's `propose` call, gated by the same `score` and `governor.remaining_fraction()` the synchronous path uses. |
 | `target_reward` | `Optional[float]` | `None` | Stop as soon as a sweep's held-out reward reaches this. Compared against the real reward, never against an acceptance probability. |
 | `patience` | `Optional[int]` | `None` | Stop after this many consecutive merge sweeps that fail to beat the best held-out reward seen so far. The async analogue of the synchronous knob: there are no round barriers here, so a *sweep* (one drain-and-merge by the merger) is the unit. `None` disables it. |
 | `max_worker_errors` | `int` | `3` | Consecutive failed rollouts before a worker that has *never* succeeded gives up. Workers that have succeeded at least once never retire; they back off and keep trying until the run's own budget ends it. |
@@ -3153,6 +3201,7 @@ async_evolve(
 | `verbose` | `bool` | `False` | Print one line per merger sweep. |
 | `usage` | `Optional[Usage]` | `None` | Share one `Usage` with your model adapters (`claude(usage=u)`, `openai_compatible(usage=u)`) and the result's token counts become real. Without it the run still reports calls, seconds and failures -- `run` is `(rendered, task) -> str`, so an opaque actor has no way to surface tokens, and inventing a number would be worse than reporting zero. |
 | `policies` | `Optional['Policies']` | `None` | Bundle of replaceable pieces (`Policies`). Every field defaults to `None` meaning "current behaviour", so `Policies()` and passing nothing are the same run. The individual keyword arguments -- `task_sampler`, `staleness_policy`, `aggregator_factory` -- are shortcuts onto its fields and keep working; an explicit argument wins over a bundle default rather than being silently ignored. Fields whose implementations have not landed yet raise rather than being accepted and ignored: a caller who passes a custom acceptance rule and sees a finished run would reasonably conclude it ran. New capabilities go here rather than adding another parameter to a function that already has thirty-five. |
+| `allocator` | `Optional[Any]` | `None` | Exactly as in `evolve`: value-directed budget allocation (see `allocator`). `None` (the default) is the old behaviour exactly. Pass a value allocator and, once the token budget is tight, the self-verify rollout is spent only on candidates the allocator expects to commit; the merger reports every outcome back so it learns. Requires `max_tokens`. Counterfactual exploration corrects a biased value model rather than reinforcing it. |
 
 ---
 
@@ -3411,7 +3460,7 @@ ArmResult(
 ) -> None
 ```
 
-### `Budget(rollouts: int, calls: Optional[int] = None) -> None`
+### `Budget(rollouts: int, calls: Optional[int] = None, tokens: Optional[int] = None) -> None`
 
 What every arm is allowed to spend.
 
@@ -3550,9 +3599,21 @@ Whether a candidate is committed.
 
 `(ledger, verifier, audit, config, policy) -> AggregatorProtocol` — how a custom optimizer is installed.
 
+### `AllocatorContext`
+
+One candidate, as the allocator sees it.
+
+### `AllocatorPolicy`
+
+Decide, per candidate, whether the expensive part of a merge is worth it.
+
 ### `AppendRules`
 
 Accumulate a deduped list of rules/lessons (append-only, content-addressed).
+
+### `BudgetGovernor`
+
+Tracks token spend against a cap and decides what to degrade.
 
 ### `CALIBRATION_CEILING`
 
@@ -3565,6 +3626,10 @@ Where a calibration share sits when the improvement pool is still finding new er
 ### `CacheProtocol`
 
 Somewhere to keep evaluations. In one process, across many, or on disk.
+
+### `CallBudget`
+
+A mutable per-call max_tokens, set by the engine before each expansion.
 
 ### `Completion`
 
@@ -3621,6 +3686,10 @@ One entry per *category*: competing proposals contradict and are resolved.
 ### `LAYOUTS`
 
 Where a runner writes the evolving tree inside a workspace (`claude_skill`, `skill_library`, `claude_agent`, `dsh_skill`, `agents_skill`, `root`).
+
+### `LearningValueModel`
+
+A tiny online logistic model over the candidate features.
 
 ### `LedgerFailure`
 
@@ -3766,6 +3835,10 @@ Prefix of the output `code_runner` produces when the frozen gate fails, so the f
 
 The default: a bounded pool of threads in this process.
 
+### `ValueBudgetAllocator`
+
+Learn which candidates are worth the expensive evaluation.
+
 ### `VerifierProtocol`
 
 Four methods, from `grep 'self\.verifier\.' agentdescent/aggregator.py`.
@@ -3785,6 +3858,10 @@ Agentic backends -- a base agent that *navigates documents with tools*, not just
 ### `baselines`
 
 The control every efficiency number in this repository is missing.
+
+### `budgeted_completion`
+
+Wrap a `max_tokens -> Completion` factory into an adaptive Completion.
 
 ### `dataloader`
 

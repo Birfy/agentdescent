@@ -98,9 +98,10 @@ def test_pending_intake_is_bounded_by_the_lag_budget():
 # ---------------------------------------------------------------------------
 
 
-def _counting_run(**kw):
+def _counting_run(*, on_propose=None, **kw):
     """Run the async path with the cards and the ledger reads counted."""
     import tempfile
+    import threading
     import warnings
 
     from agentdescent import Policies
@@ -108,15 +109,21 @@ def _counting_run(**kw):
     from agentdescent.evolution import EvolvingArtifact
     from agentdescent.ledger import Ledger
 
-    seen = {"cards": 0, "reads": 0}
+    seen = {"cards": 0, "reads": 0, "read_log": [], "worker_rollouts": {}}
+    lock = threading.Lock()
+
+    def record_read(kind):
+        with lock:
+            seen["reads"] += 1
+            seen["read_log"].append((threading.current_thread(), kind))
 
     class _Ledger(Ledger):
         def head_version(self, branch=Ledger.DEV):
-            seen["reads"] += 1
+            record_read("head_version")
             return super().head_version(branch)
 
         def snapshot(self, branch=Ledger.DEV):
-            seen["reads"] += 1
+            record_read("snapshot")
             return super().snapshot(branch)
 
     class _Agg(Aggregator):
@@ -132,14 +139,21 @@ def _counting_run(**kw):
     n = [0]
 
     def propose(rendered, task, output, score):
-        n[0] += 1
-        return f"rule {n[0]}"
+        # Proposals run on workers, unlike run(), which also scores merge gates.
+        with lock:
+            worker = threading.current_thread()
+            seen["worker_rollouts"][worker] = seen["worker_rollouts"].get(worker, 0) + 1
+            n[0] += 1
+            rule = f"rule {n[0]}"
+        if on_propose is not None:
+            on_propose(ledger)
+        return rule
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         result = async_evolve(
             _tasks(n=12), lambda t, o: 0.0, run=lambda rendered, t: "x",
-            propose=propose, strategy=AppendRules(), n_workers=2,
+            propose=propose, strategy=AppendRules(), n_workers=kw.pop("n_workers", 2),
             max_iters=20, max_seconds=10.0, self_verify=False,
             aggregator_factory=lambda l, v, a, c, p: _Agg(
                 l, v, a, c, staleness_policy=p),
@@ -168,32 +182,44 @@ def test_the_stale_denominator_counts_each_card_once():
     assert 0.0 <= result.stale_rate() <= 1.0
 
 
+def _assert_worker_snapshot_reads(on_propose=None):
+    # Twenty rollouts cannot exhaust either budget. Disable the independent
+    # commit-triggered refresh too: exactly one startup snapshot is legitimate.
+    # A single worker makes the rollout count exact, without timing or sleeps.
+    result, seen = _counting_run(
+        n_workers=1, async_ratio=64, stall_patience=64,
+        resync_on_commit=False, on_propose=on_propose)
+    assert result.error is None
+    assert result.rollouts == 20 and result.history, "premise: work and merges ran"
+    assert result.forced_refreshes == 0
+    assert len(seen["worker_rollouts"]) == 1
+    worker, rollouts = next(iter(seen["worker_rollouts"].items()))
+    assert rollouts == result.rollouts
+    reads = [kind for thread, kind in seen["read_log"] if thread is worker]
+    # Startup, merger, promotion, and shutdown reads on other threads are not
+    # worker drift checks. Keep them out rather than guessing a per-sweep cost.
+    assert len(seen["read_log"]) > len(reads), "premise: non-worker reads occurred"
+    assert reads == ["snapshot"], (
+        f"worker ledger reads: {reads}; expected only its startup snapshot "
+        f"across {rollouts} rollouts")
+
+
 def test_a_worker_does_not_read_the_ledger_once_per_rollout():
-    """Drift is measured against a head the merger publishes, not against git.
+    """Drift checks use the published head, without a git read per rollout.
 
-    Every ledger read is a `git checkout` behind a process-wide file lock and an
-    RLock the whole run queues on, so asking "am I far enough behind to resync?"
-    got more expensive with exactly the concurrency it exists to support.
-
-    The property is that reads scale with **merger sweeps**, not with rollouts:
-    each sweep costs two here plus one inside `Aggregator._process`, and startup
-    and shutdown cost a handful. A worker reading per rollout adds a term this
-    bound has no room for -- measured on this workload, 46 reads before and 22
-    after, against a budget of 27.
-
-    The constant is 16 rather than the 12 this workload actually spends, and the
-    slack is the point. At 12 the bound sat exactly on the observed value: ten
-    local runs all reported 27 reads against a budget of 27, so any single extra
-    read failed the run, and CI duly produced one (31 reads for 6 sweeps, a
-    constant of 13 -- the startup/shutdown path is timing-dependent in a way the
-    per-sweep term is not). A zero-margin assertion is a flake, not a guarantee.
-    What it exists to catch is an order-of-magnitude term: a per-rollout read
-    adds ~21 on this workload, which clears any of these budgets by a mile.
+    Count reads by worker provenance under a schedule with no refresh due. The
+    old total-read budget depended on the number of merger sweeps and omitted a
+    legitimate stable-distance snapshot, so harmless scheduling changes failed.
+    This pins the worker property directly, without loosening a slack constant.
     """
-    result, seen = _counting_run()
-    assert result.rollouts > 0 and result.history, "premise: the run did something"
-    budget = 3 * len(result.history) + 16
-    assert seen["reads"] <= budget, (
-        f"{seen['reads']} ledger reads for {len(result.history)} sweeps and "
-        f"{result.rollouts} rollouts (budget {budget}) -- a worker is asking git "
-        "for the head on every loop again")
+    _assert_worker_snapshot_reads()
+
+
+def test_worker_read_guard_rejects_per_rollout_reads():
+    """Negative controls must fail the same assertion as a worker regression."""
+    import pytest
+
+    for method in ("head_version", "snapshot"):
+        with pytest.raises(AssertionError, match="worker ledger reads:"):
+            _assert_worker_snapshot_reads(
+                on_propose=lambda ledger: getattr(ledger, method)())

@@ -129,6 +129,15 @@ class Candidate:
     #: says how good it is, and the two are different claims about a candidate
     #: that is slow today because it is a first draft of the right idea.
     prior: Optional[float] = None
+    #: What it costs to expand this candidate, in the caller's unit -- tokens on
+    #: a token-budgeted run, wall-clock seconds otherwise, or whatever a custom
+    #: aggregator measures. ``None`` means *unknown*, not zero: the same
+    #: distinction ``score`` and ``prior`` make, and for the same reason. A
+    #: policy that ranks by score-per-cost must not read a missing cost as
+    #: "free" -- that would make an unmeasured candidate the most attractive
+    #: one on the board. A policy that cannot measure cost leaves this ``None``
+    #: and does not read it.
+    cost: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -147,6 +156,15 @@ class SelectionContext:
     candidates: Sequence[Candidate] = ()
     round: int = 0
     n_workers: int = 1
+    #: Fraction of the run's budget still unspent, in ``[0, 1]``. ``1.0`` when the
+    #: caller set no budget (a run with no ceiling never runs short of one), and
+    #: what a budget-aware policy anneals its exploration by: a placement made
+    #: with 10% left has less time to pay off than one made at the start, so the
+    #: exploration it buys is worth proportionally less. This is the o1-style
+    #: test-time-scaling decision expressed as a search parameter -- spend to
+    #: explore while there is budget to exploit what you find, and stop paying
+    #: for exploration once there is not.
+    budget_remaining: float = 1.0
 
 
 @runtime_checkable
@@ -630,3 +648,105 @@ class MCTS(SingleHead):
         # to the same arm would make a batch worth one rollout of information.
         chosen = ranked[:n] or [ctx.head]
         return [chosen[i % len(chosen)] for i in range(n)]
+
+
+class CostEfficient(FlatPuct):
+    """FlatPuct that pays for exploration out of a budget. **Test-time scaling.**
+
+    The o1 insight, applied to search: *a token is worth more where the search
+    still has time to act on what it buys.* o1 spends more thinking on the
+    problem it is unsure of; this spends the next expansion on the candidate
+    whose exploration buys the most quality per unit of remaining budget. The
+    formula keeps :class:`FlatPuct`'s rank exploitation and adds two things:
+
+    * **Cost discounts exploration, not exploitation.** The exploration term is
+      divided by the candidate's cost, so a speculative expansion of an
+      expensive candidate has to beat a speculative expansion of a cheap one.
+      The exploitation term is left alone: a candidate the ranking already
+      places at the top is grounded, and cost must not disqualify it -- charging
+      cost against exploitation would bias the search against complex solutions
+      (whose artifacts are longer and costlier to expand) in favour of short
+      ones, which is not a quality judgment and must not be smuggled in as one.
+
+    * **Exploration anneals with the remaining budget.** The bonus is scaled by
+      ``ctx.budget_remaining``: at the start it is ``1.0`` and the policy
+      explores as FlatPuct does, and as the budget is spent the bonus shrinks
+      toward zero, so the last expansions exploit what the run actually found.
+      This is what an anytime search must do -- an exploration made with 5% of
+      the budget left cannot pay off before the run ends -- and it is the
+      difference between spending a budget and *allocating* it.
+
+    ``cost_exponent`` (``alpha``) sets how hard cost is charged: ``0`` ignores it
+    and is FlatPuct exactly, ``1`` is full value-per-cost. The default is ``1``.
+    ``anneal=False`` pins the exploration bonus at full strength, which is the
+    ablation that separates "cost-aware" from "budget-aware".
+
+    **Unknown cost is the mean, not zero.** A candidate whose cost was never
+    measured is charged the pool's mean, for the same reason :attr:`Candidate.prior`
+    falls back to the mean: reading a missing number as ``0`` would make every
+    unmeasured candidate free to explore, which is exactly backwards. With no
+    costs measured at all the divisor is ``1`` for every candidate and this
+    policy is :class:`FlatPuct` to the floating-point bit — a property the
+    tests assert, so the mechanism cannot silently change a cost-blind run.
+    """
+
+    def __init__(self, c_puct: float = 1.0, cost_exponent: float = 1.0,
+                 prior_exponent: float = 0.0, anneal: bool = True) -> None:
+        super().__init__(c_puct=c_puct, prior_exponent=prior_exponent)
+        self.cost_exponent = max(0.0, float(cost_exponent))
+        self.anneal = anneal
+
+    def cost_factors(self, rows: Sequence[Candidate]) -> List[float]:
+        """``cost**alpha`` per row, normalised so the mean is 1.
+
+        Normalising by the mean is what keeps the divisor scale-free: the
+        exploration term is a rank-scale quantity and dividing it by a raw token
+        count (thousands) would collapse exploration to zero. Dividing by the
+        *mean cost* means an average-cost candidate keeps the FlatPuct divisor
+        of 1, a cheaper one gets more exploration, a costlier one less -- and a
+        pool with one uniform cost is unchanged.
+        """
+        if self.cost_exponent == 0.0:
+            return [1.0] * len(rows)
+        raw = [c.cost if c.cost is not None and c.cost > 0 else None for c in rows]
+        known = [x for x in raw if x is not None]
+        mean = (sum(known) / len(known)) if known else 1.0
+        effective = [x if x is not None else mean for x in raw]
+        factors = [max(1e-9, (x / mean)) ** self.cost_exponent for x in effective]
+        return factors
+
+    def select(self, ctx: SelectionContext, n: int) -> Sequence[Candidate]:
+        rows = list(ctx.candidates)
+        if len(rows) <= 1:
+            return super().select(ctx, n)
+        ranks = self._rank_scores(rows)
+        visits = [c.selected for c in rows]
+        priors = self._priors(rows)
+        costs = self.cost_factors(rows)
+        # The annealing factor is the remaining budget when asked to anneal, and
+        # 1.0 otherwise. `budget_remaining` is clamped: a caller that passes a
+        # negative fraction (a bug) must not invert the exploration term.
+        scale = (max(0.0, min(1.0, ctx.budget_remaining)) if self.anneal else 1.0)
+        by_version = {c.version: i for i, c in enumerate(rows)}
+        picked: List[Candidate] = []
+        for _ in range(n):
+            total = sum(visits)
+            best, best_puct = 0, -math.inf
+            for i, row in enumerate(rows):
+                explore = (self.c_puct * priors[i]
+                           * math.sqrt(total) / (1 + visits[i])
+                           * scale / costs[i])
+                puct = ranks[i] + explore
+                if puct > best_puct:
+                    best, best_puct = i, puct
+            picked.append(rows[best])
+            # Same ancestor reservation FlatPuct does, so a run of this policy is
+            # one rule with a cost term rather than a second selection rule.
+            seen: Set[int] = set()
+            node: Optional[int] = best
+            while node is not None and node not in seen:
+                seen.add(node)
+                visits[node] += 1
+                parent = rows[node].parent
+                node = by_version.get(parent) if parent is not None else None
+        return picked

@@ -8,6 +8,270 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- Add an offline RRSI round-selection mechanism fixture adapted from Google's
+  pinned release, with decision regressions and explicit validation boundaries.
+  This is not yet an `evolve()` integration or full RRSI port; see
+  `docs/algo-rrsi.md`.
+
+### Fixed
+
+- `hf_rows_modelscope(cache=False)` now bypasses an existing on-disk cache and
+  does not write the fresh response back (#229). `fetch_bytes` / `fetch_text`
+  accept the same `cache` flag so the raw-URL helpers share the `hf_rows`
+  bypass contract.
+
+- `AdaptiveTrustRegion` widens when a window is dominated by `OVERSIZED`
+  refusals (the size cap was binding) instead of treating them like gate
+  refusals and leaving the region stuck (#226). A batch that mixes oversized
+  diffs with stale or in-range ones now also counts as `oversized` for the
+  region unless it committed or was reversed; `MergeReport.oversized` records
+  how many diffs the size cap refused.
+
+- Allocator A/B comparisons now use the same fully scored seed pairs for
+  quality and token summaries, retain spend for excluded runs, and seed each
+  treatment allocator from its run seed. The runner rejects invalid or
+  duplicate seed lists before setup and scopes allocator diagnostics to the
+  pairs included in the comparison.
+
+- The `OVERSIZED` merge report now quotes the trust region that actually
+  rejected the diff (the adaptive policy's current region) instead of the
+  config constants (#224).
+
+## [0.5.1] — 2026-10-10
+
+### Release summary
+
+- Agent-first editorial website and plugin quickstart, modular-framework
+  explanations, unified documentation styling, and an illustrative in-browser
+  workflow that makes no model calls or file changes. The optional one-command
+  setup installs current main and connects supported agent CLIs on PATH; it
+  is not a pinned-release installer.
+- Token budgets, cost-aware selection, graceful budget degradation and optional
+  diminishing-returns stopping; checkpointed search state survives a restart.
+- Sparse verifier auditing and calibration, opt-in priority-ordered audit drain,
+  and replay-aware sampling and proposals that can use settled evidence.
+- Policy-slot evolution, the EvoX Genesis port with skill extraction and read-only
+  investigation, and the porous-molecule tree-search example. Research examples
+  remain in the source repository rather than the installed wheel.
+- More reliable first runs: actionable spec/dataset errors, policy-slot scaffolds,
+  fail-fast host installation and a clean installed-wheel CLI/MCP smoke gate.
+
+### Upgrade notes
+
+- Python >= 3.9 remains supported; the MCP extra requires Python >= 3.10.
+  NumPy >= 1.20 is now an installed dependency for prediction-powered auditing.
+- Use `ThreeLayerVerifier.full_eval` and `full_eval_matches_counts`. The old
+  `oracle_eval` and `oracle_shares_full_set` aliases remain available; using
+  `oracle_eval` emits a `DeprecationWarning`. Removal is planned for 0.7.
+- Checkpointing, replay weighting and audit draining remain opt-in. Token-budget
+  enforcement depends on usage reported by the model adapter; it is not a
+  provider-side hard spending limit.
+
+The detailed changes below cover the merged commits since 0.5.0. They do not
+include the open multi-head, multi-artifact, asynchronous trajectory-resume,
+value-directed evaluation or Genesis blind-mode proposals.
+
+### Fixed
+
+- Interactive demo restarts no longer interleave with an older approval run,
+  and the displayed artifact stays tied to the run that produced it.
+- Keep the interactive demo reachable from the documentation navigation drawer
+  on mobile, where the desktop header links are hidden.
+- Prevent Material admonition styles from exposing the mobile menu on desktop
+  or overriding the editorial disclosures; keep the homepage install command
+  readable without splitting its URL. Add rendered responsive-layout CI checks.
+
+- Machine-local host installs now pin MCP and session hooks to the installing
+  Python, so they work when a later agent process lacks the pip scripts directory
+  on PATH. Stock legacy and previously pinned Codex/OpenCode entries are repaired
+  on reinstall, including after a Python environment moves; custom entries and
+  distributable plugin templates stay intact.
+
+- Spec and dataset file failures now report a concise `SpecError` instead of a
+  CLI traceback. Invalid JSON names the input file and line/column; JSONL uses
+  the physical file line, including blank lines. Missing or unreadable specs,
+  invalid UTF-8, and non-object spec JSON also produce actionable errors.
+
+### Added
+
+- **`AggregatorConfig.audit_drain_per_step` — the L-value consumer, the audit
+  queue's missing reader.** `AuditScheduler.submit()` computes
+  `priority = blast_radius × uncertainty / trust` for every merge, but with the
+  default `collect=False` nothing queues, and with `collect=True` nothing pops
+  the heap — the audit that actually runs is the inline `force_oracle` threshold
+  gate, which reads trust but not the ranking. `concepts.md` calls this *"the
+  priority queue has no consumer"* and says to treat the ranking as a priority
+  *model*, not work in flight.
+
+  `_drain_audit_queue(max_per_step)` pops the highest-priority queued audits
+  after each `finish_step`, runs `full_eval` on the stored `(base_state,
+  candidate)` pair, and updates trust from the oracle's verdict. The scheduler's
+  `collect` flag is forced on when `audit_drain_per_step > 0`. `EvolutionResult.
+  audit_drained` reports how many ran. Default `0` = the old behaviour exactly.
+
+- **Value-directed budget allocation — `evolve(allocator=...)` / `async_evolve(allocator=...)`.** `BudgetGovernor` degrades optional spend (fusion tournaments, the self-verify rollout) against global floors: once `spent / max_tokens` crosses a threshold, *every* candidate stops getting the expensive part. The EvoAlloc line of work measures the cost of that fixed allocation when evaluation is the scarce resource — this replaces it with a **per-candidate** decision learned from the run's own merge history.
+
+  **`ValueBudgetAllocator`** (`agentdescent/allocator.py`) is a learner with two halves. **Value-directed allocation**: once the token budget is tight, the self-verify rollout is spent only on candidates the value model expects to commit — a `LearningValueModel`, a tiny online logistic fit over the **pre-spend features the worker actually decides on** (the rollout's group-relative advantage, the diff's size, the artifact's blast radius), with a logit clip and L2 so one outlier cannot blow the weights. The model is trained on exactly that vector — post-outcome signals (delta, P(improve), stable distance) are kept for the audit trail but never enter `AllocatorContext.features` — so it cannot fit the labels with signals the decision never sees. **Counterfactual exploration**: a candidate the model judged unworthy is skipped — except with epsilon probability, when it is evaluated anyway; the outcome is then ground truth the model was wrong about, and it learns from it. Without this term a value-based allocator only ever sees the candidates it already believed in, and a biased prior is never corrected — the selection-bias collapse this term exists to prevent.
+
+  Wired end to end: the worker asks the governor `candidate_worth(ctx)` before the self-verify rollout; the aggregator reports **every** measured decision exactly once (`observe(ctx, committed)`), with oracle rejection and acceptance rejection as negative labels — a model fit on commits alone never leaves warm-up. **Every commit is attributed to a worker's actual pre-spend vector**: a fused candidate keeps its first contributor's context, and a tournament-selected single proposal is matched to its own winning card — never a losing first entrant, never a fused union size. The feature vector is **scale-normalised**: the raw-op diff size (1..100+) would swamp the advantage (a z-score) and blast radius in a raw logistic fit, so `size` is mapped through `log1p` to `[0, 1]` — verified by a regression where a high-advantage, large-diff candidate still predicts commit. `allocator=None` (the default) is the old behaviour byte for byte — the clock thresholds remain the *ceiling* the allocator may never exceed. 25 tests in `tests/test_allocator.py` (incl. negative-outcome, sync/async feature-parity, end-to-end fused + single-winner regressions, the A/B arm wiring, and the size-scale regression). **`bench/ab_allocator.py`** is the equal-budget A/B (off vs on, real datasets HotpotQA/finer, per-seed quality + measured tokens + a fired check that distinguishes "the allocator helped" from "it never ran"); exported from the package root; `docs/api.md` regenerated.
+
+- **`ReplaySampler` + `ProposalContext.rejected` — make the settled-evidence pool a consumer.** The aggregator's settled pool (stale / oversized / CAS-conflict evidence cards) was diagnostic-only: nothing read it back. Two consumers now close that loop.
+
+  **`ReplaySampler`** (``agentdescent/sampling.py``) is a ``TaskSampler`` that up-weights tasks whose recent proposals were discarded — a signal that is different from pass rate (a task whose proposals keep going stale is not "easy", it is being out-competed by the parallel scheduler). Additive replay bonus, saturating at ``capped_at`` (default 10), scaled by ``temperature`` (default 0.0 = ``DifficultyWeighted`` identically). Wired via ``aggregator.set_settled_consumer(sampler.settle)`` on both the sync and async paths.
+
+  **`ProposalContext.rejected`** — a new field carrying the most recent settled cards for the task being rolled out. The docstring said "'do not re-propose what was just rejected' is inexpressible" — this field makes it expressible.
+
+  **`ReplayAwareProposal`** (``agentdescent/replay.py``) is a ``ProposalPolicy`` wrapper that reads ``ctx.rejected`` and, when non-empty, appends a summary of the rejected diffs (paths, base version, delta) to the context's ``output`` before delegating. A model-based inner policy that renders ``output`` — the shipped ``LLMAgent.propose`` — naturally sees "these were discarded, do not repeat them".
+
+  ``recent_settled`` on both ``Buffer`` and ``Aggregator`` filter the pool by task id. ``Buffer.set_settled_consumer`` pushes cards to the sampler. 11 files, +580/-8. Full suite exit 0.
+- **`Investigator` — a read-only delegation whose findings persist into the record.**
+  The Genesis reference implementation has an `:read` investigator role
+  (`agents/investigator.ex`) that a manager hands a question and that may write only
+  `CONTEXT.md`. `--investigate` ports it: a manager marks a delegation `"investigate":
+  true`, the delegation runs `Investigator` (`examples/genesis/_investigator.py`) instead
+  of the recursion, and what it finds is folded into the node's `CONTEXT.md` under
+  `## Findings` — so it enters the version and the next agent inherits it.
+
+  It exists because of a blind spot in the port, not to complete a roster of roles:
+  `_MANAGER_PROMPT` carries the `CONTEXT.md` chain and a *listing* of the files at a
+  node, never their contents, since this port's agents have no read tool. A manager
+  deciding from the code is deciding blind, and the investigator is the one actor
+  allowed to read a node and leave a note about it.
+
+  Deliberately narrow. The role's fan-out to `subagent_investigator` is **not** ported,
+  because fanning out read-only sub-agents is what a manager with read tools of its own
+  is for, and that is the port's session work. The one write it may make is the record
+  at the node it was sent to; source edits and writes to an ancestor's record are
+  refused and counted.
+
+  14 tests in `tests/test_genesis_investigator.py`, offline and deterministic.
+
+- **`SkillExtractor` — a skill is distilled from an accepted contribution, and the run
+  inherits it.** `LocalWorld.skills()` already collected `.agents/skills/` along the node
+  chain — `hierarchical_skill_names/2`, and what the paper lists among what an
+  accepted version carries (§3.1) — the read half and nothing else.
+  `--extract-skills` adds the write half: `SkillExtractor` (`examples/genesis/_skills.py`)
+  distils the contribution a root just accepted into a skill file, checks the skills that
+  already exist so it does not duplicate one, and places it at the node where it is
+  relevant.
+
+  It runs at the **root episode boundary**, not after the merge. A post-merge version
+  is one no later episode of the run ever sees, so the loop would still be open; inside
+  the episode the skill rides in the same proposal and the next agent inherits it.
+
+  The flag also turns on `LocalWorld.skill_bodies`, which puts inherited skill *bodies*
+  in the brief. Without it the feature is decorative — the brief otherwise carries only
+  names, and fetching a body needs a `skill_read` tool this port's agents do not have, so
+  "read one before using it" was an instruction none of them could follow.
+
+  `skill_add`'s frontmatter is rendered here rather than emitted by the model — the
+  format is the tool's, not the model's. Skills get their own trust-region bucket
+  (`max_skill_edits=2` beside `max_edits=4`), because a lesson trimmed to make room for
+  the file it distils is self-defeating. `skills=None` is the old behaviour exactly.
+
+  22 tests in `tests/test_genesis_skills.py`, offline and deterministic.
+
+- **`evolve(max_tokens=...)`: a budget in the unit that maps to the bill.**
+  `max_calls` and `max_rollouts` count invocations, and a reasoning model can
+  spend 40k tokens on hidden thinking in a single one -- so a 20-round run with
+  4 workers is 80 rollouts and ~160 calls but, at 40k tokens each, 6.4M tokens.
+  The cap is checked at the round barrier on the sync path (alongside the other
+  budgets) and per-rollout on the async path, stops with
+  `stop_reason="max_tokens"`, and reports the spend it actually incurred.
+
+  Tokens only reach the meter when the model adapter reports them, and the
+  adapters that do (`claude`, `openai_compatible`) take a `Usage` in their
+  constructor. The caller who built `LLMAgent(claude(usage=u))` had to pass
+  `usage=u` **again** to `evolve()` for the meter — and with it `max_tokens`,
+  the `tokens=` column on every round, and `status` — to see the same numbers.
+  Forgetting the second thread made the run report `tokens=0` while the bill
+  went to `u`, an object only the caller held, and a token budget silently
+  never fired. `evolve()` now adopts the agent's own `usage` when the caller
+  did not pass one; an explicit `usage=` still wins, and a bare
+  `run`/`propose` pair still reports zero (the honest reading, not an error).
+
+  `RoundInfo.tokens` carries the cumulative spend to `on_round` (and so to
+  `rounds.jsonl`), `RunStatus.tokens` lands it in `status.json`, and the CLI
+  status line shows `tok=N` when the run has any.
+
+- **`BudgetGovernor`: graceful degradation before the token wall.**
+  `max_tokens` is a brake: when the spend reaches it the run stops. A brake is
+  the floor of cost control, not its ceiling. The last 10% of a token budget is
+  the most expensive part to waste — the search has paid for its exploration,
+  and a round dispatched there may never finish. The governor degrades before
+  the wall on both paths (sync and async):
+
+  - at 75% of the budget (``soft_floor``), stop building fusion tournaments.
+    The tournament is an extra held-out sweep of every survivor plus the fusion
+    — pure ranking spend, and the ranking can survive without it for the last
+    few rounds. The aggregator acceptance gate runs unchanged.
+  - at 90% (``hard_floor``), stop the self-verify rollout. That rollout doubles
+    the cost of every proposal for a delta the acceptance test folds in as a
+    tie-breaker weight; skipping it costs ranking precision on the advantage
+    signal and nothing on the commit gates.
+  - the projection at the round barrier (sync) asks whether the *next* round
+    fits the remaining budget; if it does not, the run ends with a clean merge
+    at the last round it fully paid for.
+
+  All of this is inert without `max_tokens`. `EvolutionResult.budget` carries
+  the governor's summary (spent, remaining, whether degradation fired) so a
+  caller can tell "the run finished because its budget ran out, degraded" from
+  "it converged, at full quality".
+
+- **`SelectionContext.budget_remaining` + `CostEfficient`: spend the budget, don't just count it.**
+  The o1 test-time-scaling decision, as a search parameter. `SelectionContext`
+  gains `budget_remaining` (the unspent fraction, `1.0` with no ceiling), and
+  `Candidate` gains `cost` (`None` = unknown, never zero — the same distinction
+  `score` and `prior` make). `CostEfficient` is `FlatPuct` with two additions:
+
+  - the **exploration** term is divided by cost, so a speculative expansion of an
+    expensive candidate must beat one of a cheap candidate at the same rank. The
+    **exploitation** term is left alone: charging cost against a grounded pick
+    would bias the search against complex solutions (longer artifacts cost more
+    to expand) in favour of short ones, which is not a quality judgment and must
+    not be smuggled in as one;
+  - the exploration bonus **anneals by `budget_remaining`**, so a run explores
+    while it has budget to exploit what it finds and exploits once it does not —
+    what an anytime search has to do, and the difference between spending a
+    budget and allocating it.
+
+  `cost_exponent=0` is `FlatPuct` to the floating-point bit (tested), so the
+  mechanism cannot change a cost-blind run; uniform costs are unchanged too.
+  `anneal=False` is the ablation that separates "cost-aware" from "budget-aware".
+  The population layer fills `Candidate.cost` with a deterministic content-size
+  proxy (the prompt dominates the input tokens, and size is attributable to one
+  candidate without racing a shared meter) and the engine feeds
+  `budget_remaining` from the governor each round, on both sync and async paths.
+
+- **`evolve(stop_on_diminishing_returns=True)`: stop when the search stops
+  paying for itself.** `max_tokens` is a ceiling; the economic question is
+  whether to *spend* it, and the answer is to keep buying compute while it
+  still returns quality and stop when it does not — even with budget left. The
+  governor measures the run's own return per token (`Δreward / Δtokens` per
+  round, from the same reward and meter the run already has) and stops when the
+  recent rate has fallen to `efficiency_floor` (default a quarter) of the run's
+  *peak* rate. Self-calibrating: it compares the run against itself, so there
+  is no absolute rate to guess — a reward is in `[0, 1]`, a token count is in
+  the millions, and their quotient has no interpretable scale. Off by default,
+  because a run whose reward only rises late would be cut short by it, and
+  because it needs `max_tokens`. Stops with
+  `stop_reason="diminishing_returns"`. A run that never improved has no peak to
+  decline *from*, so this stays quiet and the patience counter handles it.
+
+- **`baselines.Budget(tokens=...)`: the A/B framework can hold cost fixed.**
+  The module's own argument is that a budget in one unit is not a comparison —
+  "matched on rollouts alone, an arm that asks for more proposals per rollout
+  spends more model and the table still says equal budget." That argument was
+  missing the unit cost is measured in: two arms at equal rollouts and equal
+  calls can differ 10x in tokens when one uses a reasoning model, and the table
+  had no column that would show it. `Budget` gains `tokens` (split like the
+  others), `Workload._evolve` passes it to `evolve(max_tokens=)`,
+  `compare(fixed="tokens")` is a valid unit, `ArmResult.tokens` is the measured
+  sum, and the markdown table gains a token column that reads `—` (not `0`)
+  when the actor reported none. A comparison that fixes tokens is the only one
+  that has shown an arm to be more *efficient* rather than merely given more
+  model.
+
 - **`evolve(checkpointing=True)`: the search survives a process restart.**
   `repo_path` already resumed the *artifact* -- the ledger's whole job -- but
   the aggregator's search state is only ever in memory, so a resume re-seeded
@@ -22,6 +286,24 @@ All notable changes to AgentDescent are documented here. The format follows
   set up for.
 
 ### Fixed
+
+- `agentdescent init selection --kind policy_slot` now finishes successfully and
+  explains how to provide the `data.problems` ref and its import allowlist.
+  It previously wrote the starter spec and then crashed looking for `data.path`,
+  which policy slots do not use. The clean-wheel smoke check now exercises this
+  installed command as well as the offline demo and MCP server.
+
+- **Onboarding, published-version guidance and CI support coverage.** Lead with
+  the packaged offline demo on current `main`, distinguish it from the v0.5.0
+  source-example path, name NumPy as a runtime dependency, exercise Python 3.10
+  in CI and strict-build docs on pull requests with read-only build permissions
+  and Pages/OIDC permissions limited to the guarded deploy job.
+
+- **Host setup now stops when the package install fails, before changing host
+  configuration.** Isolated installer tests cover checkout and PyPI failures.
+  CI and publishing now install the built wheel outside the checkout and smoke
+  test its version, bundled skill and hooks resources, temporary host install,
+  offline CLI demo, and MCP stdio behavior with a bounded session timeout.
 
 - **Checkpoints are excluded from the ledger's index on every open, not only
   at genesis.** `Ledger._commit` runs `git add -A`. A committed
@@ -760,10 +1042,10 @@ All notable changes to AgentDescent are documented here. The format follows
   the scorer is biased. Reading it as ground truth is what let the docs claim the
   loop audits itself against something outside itself, which it does not.
 
-  Both old names still work, once, with a `DeprecationWarning`, and are removed
-  in 0.7. `VerifierProtocol` declares `full_eval`; the engine reads a custom
+  Both old names still work; the `oracle_eval` compatibility path emits a
+  `DeprecationWarning`. Both aliases are scheduled for removal in 0.7. `VerifierProtocol` declares `full_eval`; the engine reads a custom
   verifier through `verifier.full_eval_of` / `verifier.shares_eval_counts`, which
-  accept either spelling -- so a verifier written against the pre-0.6 page keeps
+  accept either spelling -- so a verifier written against the pre-0.5.1 page keeps
   running instead of raising `AttributeError` in the middle of a merge. The
   `oracle_budget` argument, `VerifierBudget.oracle_calls_*` and the
   `oracle-rejected` merge outcome keep their names: they are the public spelling
@@ -4127,7 +4409,9 @@ First public release on PyPI as **`agentdescent`**.
   discrete-space `Aggregator`, staleness policies, DP/TP/PP parallelism, layered
   governance, and the provider-agnostic `agentdescent.agents` completion layer.
 
-[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.4.6...HEAD
+[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/Birfy/agentdescent/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/Birfy/agentdescent/compare/v0.4.6...v0.5.0
 [0.4.6]: https://github.com/Birfy/agentdescent/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/Birfy/agentdescent/compare/v0.4.2...v0.4.5
 [0.4.2]: https://github.com/Birfy/agentdescent/compare/v0.4.1...v0.4.2

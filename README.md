@@ -1,5 +1,9 @@
 # AgentDescent
 
+**[Website & interactive demo](https://birfy.github.io/agentdescent/)** ·
+[Get started](https://birfy.github.io/agentdescent/install/) ·
+[Documentation](https://birfy.github.io/agentdescent/docs/)
+
 > **Gradient descent — but the parameters are agents.** A parallel, asynchronous
 > framework for self-evolving agents (skills, prompts, harnesses) where **diffs
 > are the gradients** and **the aggregator is the optimizer**.
@@ -63,38 +67,56 @@ The figure is the paper's, rendered from its TikZ source by
 [`tools/gen_architecture_figure.py`](tools/gen_architecture_figure.py) so it
 cannot drift from what the paper shows.
 
-## Install and run something in 30 seconds
+## Install and run the offline demo
+
+These instructions target **0.5.1**. Once that version is published:
 
 ```bash
-pip install agentdescent
+pip install "agentdescent>=0.5.1"
+agentdescent demo
 ```
 
-The core engine has **zero required dependencies** and needs only Python ≥ 3.9.
-The examples are research artifacts kept outside the installed package — they
-would otherwise squat the top-level `examples` name — so **clone the repo** to
-run them:
+Before publication, or when developing from source, install your checkout:
 
 ```bash
 git clone https://github.com/Birfy/agentdescent && cd agentdescent
-pip install -e ".[dev]"
-python -m examples.run_demo      # no API key, no network
+pip install -e .
+agentdescent demo
 ```
 
-![A terminal recording of python -m examples.run_demo: the evolution loop runs to
-completion in under half a second, printing a per-round table of held-out
-accuracy and the aggregator's commit, fused, stale and conflict
-counters.](https://raw.githubusercontent.com/Birfy/agentdescent/main/docs/assets/demo.svg)
+The library supports Python ≥ 3.9 and installs NumPy for its
+prediction-powered audit estimator. The packaged demo runs the offline
+evolution loop without a model API key and ends with output like:
 
-That is the whole run — no API key, no network, **under half a second**. Three
-rounds commit, then the gate stops accepting because there is nothing left to
-improve; `commit`, `fused`, `stale` and `confl` are the aggregator's own
-counters, and every run prints them.
+```
+held-out reward: 1.000 outcomes: {'committed': 1}
+what it learned: rules.md -> 'COLUMN: amount'
+```
+
+Research examples are outside the wheel. To run the
+`python -m examples.run_demo` comparison, clone the repo and follow
+[install and first run](docs/install.md).
+The library includes [`evolve()`](docs/evolution.md),
+[`DirectoryStrategy`](docs/directory-evolution.md), and its algorithm ports.
 
 ## Quickstart — a dataset to an evolved skill
 
 One entry point, `evolve()`, and three building blocks that turn a dataset into
 its arguments. The decisions that are actually yours — your data, how to score
 it, which model — are the ones you still make.
+
+**Set your key first.** Credentials are read from the environment at call time —
+never from code, arguments, or a file the repo owns — and the base URL is what
+picks the provider:
+
+```bash
+export OPENAI_BASE_URL=https://api.deepseek.com   # or GLM, a local vLLM, OpenAI itself
+export OPENAI_API_KEY=sk-...                      # your key for *that* endpoint
+```
+
+`agentdescent doctor` reports what a machine has; the demo above and `pytest -q`
+need none of it.
+[Every provider, with its base URL →](https://birfy.github.io/agentdescent/agents/#configuring-your-provider-and-key)
 
 ```python
 from agentdescent import SingleSlot, evolve, openai_compatible, reflector, scorer, tasks_from
@@ -160,6 +182,8 @@ The same engine as a **plugin**. A shared skill teaches the host when to reach
 for it, an MCP server exposes `doctor / plan / start / status / show / apply /
 cancel / resume`, and the CLI mirrors them, so a run started from an agent can
 be inspected from a shell.
+
+From the current `main` checkout:
 
 ```bash
 bash scripts/setup-hosts.sh   # installs it and wires up whichever agent CLIs you have

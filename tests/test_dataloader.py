@@ -186,3 +186,111 @@ def test_val_frac_round_trips_through_evolve():
         assert len(eng.train) == len(ds.train), (
             f"n={n}: engine train={len(eng.train)} but Dataset train={len(ds.train)}")
         assert len(eng.held_out) == len(ds.val)
+
+
+def test_modelscope_context_pairs_are_normalised_to_dict():
+    """The ModelScope HotpotQA mirror stores ``context`` as the original
+    ``[[title, [sentences]], ...]`` pairs; examples read it as the dict shape
+    the HuggingFace datasets-server yields. The loader must convert, once, so
+    GEPA's `_render_context` works unchanged on either source."""
+    pairs = [["Ed Wood (film)", ["sentence one.", " sentence two."]],
+             ["Scott Derrickson", ["Scott is an American director."]]]
+    out = dl._hotpotqa_context_to_dict(pairs)
+    assert out == {"title": ["Ed Wood (film)", "Scott Derrickson"],
+                   "sentences": [["sentence one.", " sentence two."],
+                                 ["Scott is an American director."]]}
+    # already-a-dict passes through untouched (the HF datasets-server shape)
+    already = {"title": ["x"], "sentences": [["y"]]}
+    assert dl._hotpotqa_context_to_dict(already) is already
+
+
+def test_modelscope_rows_are_cached(tmp_path, monkeypatch):
+    """`hf_rows_modelscope` fetches the ~46 MB raw file once and serves repeat
+    calls from cache; the HTTP round-trip is exercised without a network."""
+    monkeypatch.setattr(dl, "CACHE_ROOT", str(tmp_path))
+    n_fetch = {"n": 0}
+
+    def fake_read(url, timeout):
+        n_fetch["n"] += 1
+        return json.dumps([
+            {"question": "Q1", "answer": "A1",
+             "context": [["t1", ["s1"]]]},
+        ]).encode()
+
+    monkeypatch.setattr(dl, "_read_url", fake_read)
+    rows1 = dl.hf_rows_modelscope(limit=10)
+    rows2 = dl.hf_rows_modelscope(limit=10)      # served from cache
+    assert n_fetch["n"] == 1
+    assert len(rows1) == 1 and len(rows2) == 1
+    assert rows1[0]["context"] == {"title": ["t1"], "sentences": [["s1"]]}
+
+def test_modelscope_cache_false_bypasses_stale_cache(tmp_path, monkeypatch):
+    """``cache=False`` must not reuse a populated ModelScope cache entry.
+
+    A caller asking for fresh rows after a cached load previously still got the
+    old bytes because ``hf_rows_modelscope`` ignored its ``cache`` flag when
+    calling ``fetch_bytes`` (#229).
+    """
+    monkeypatch.setattr(dl, "CACHE_ROOT", str(tmp_path))
+    state = {"answer": "old"}
+    calls = []
+
+    def fake_read(url, timeout):
+        calls.append(url)
+        return json.dumps([
+            {"question": "Q", "answer": state["answer"],
+             "context": [["T", ["S"]]]},
+        ]).encode()
+
+    monkeypatch.setattr(dl, "_read_url", fake_read)
+    url = "https://example.invalid/hotpotqa.json"
+    first = dl.hf_rows_modelscope(url=url, limit=1, cache=True)
+    state["answer"] = "fresh"
+    bypass = dl.hf_rows_modelscope(url=url, limit=1, cache=False)
+    assert first[0]["answer"] == "old"
+    assert bypass[0]["answer"] == "fresh"
+    assert len(calls) == 2
+    # Bypass must not overwrite the on-disk entry (same contract as hf_rows).
+    cached_again = dl.hf_rows_modelscope(url=url, limit=1, cache=True)
+    assert cached_again[0]["answer"] == "old"
+    assert len(calls) == 2
+
+
+def test_modelscope_repeated_cache_false_sees_changing_responses(tmp_path, monkeypatch):
+    """Repeated uncached ModelScope calls observe each mocked response."""
+    monkeypatch.setattr(dl, "CACHE_ROOT", str(tmp_path))
+    answers = iter(["a", "b", "c"])
+    calls = []
+
+    def fake_read(url, timeout):
+        calls.append(url)
+        return json.dumps([
+            {"question": "Q", "answer": next(answers),
+             "context": [["T", ["S"]]]},
+        ]).encode()
+
+    monkeypatch.setattr(dl, "_read_url", fake_read)
+    url = "https://example.invalid/hotpotqa-repeat.json"
+    seen = [dl.hf_rows_modelscope(url=url, limit=1, cache=False)[0]["answer"]
+            for _ in range(3)]
+    assert seen == ["a", "b", "c"]
+    assert len(calls) == 3
+
+
+def test_fetch_bytes_cache_false_skips_read_and_write(tmp_path, monkeypatch):
+    """``fetch_bytes(..., cache=False)`` ignores and does not refresh the file."""
+    monkeypatch.setattr(dl, "CACHE_ROOT", str(tmp_path))
+    payloads = iter([b"first", b"second"])
+    n = {"n": 0}
+
+    def fake_read(url, timeout):
+        n["n"] += 1
+        return next(payloads)
+
+    monkeypatch.setattr(dl, "_read_url", fake_read)
+    assert dl.fetch_bytes("http://x/y", filename="y.bin") == b"first"
+    assert dl.fetch_bytes("http://x/y", filename="y.bin", cache=False) == b"second"
+    assert n["n"] == 2
+    assert dl.fetch_bytes("http://x/y", filename="y.bin") == b"first"
+    assert n["n"] == 2
+

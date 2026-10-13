@@ -1,136 +1,25 @@
-# Install and first run
+---
+description: Install AgentDescent in one command or with pip, connect Claude Code, Codex, OpenCode or DeepSeek Harness, and ask your agent to improve a skill.
+---
 
-## Install
+<div class="experience exp-quickstart" data-theme="light">
+  <nav class="exp-nav" aria-label="Main navigation"><a class="exp-brand" href="../"><span class="brand-mark">a<span>↘</span></span> agentdescent</a><div class="exp-nav-links"><a href="../">Overview</a><a class="nav-active" aria-current="page" href="./">Quickstart</a><a href="../#demo">Interactive demo</a><a href="../docs/">Docs</a><a class="nav-github" href="https://github.com/Birfy/agentdescent">GitHub ↗</a></div><button class="theme-toggle" type="button" aria-label="Switch color theme">◐ <span>Theme</span></button><details class="exp-mobile-menu"><summary>Menu <span>▾</span></summary><div><a href="../">Overview</a><a aria-current="page" href="./">Quickstart</a><a href="../#demo">Interactive demo</a><a href="../docs/">Docs</a><a href="https://github.com/Birfy/agentdescent">GitHub ↗</a></div></details></nav>
+  <main class="qs3">
+    <section class="qs3-hero"><div class="qs3-hero-content"><div class="qs3-eyebrow"><span class="pulse-dot"></span> AGENTDESCENT / QUICKSTART</div><h1>Start inside<br><em>your agent.</em></h1><p>The modular evolution engine from the homepage also works in Claude Code, Codex and other coding agents. Follow three short steps to connect it and review your first improvement.</p><div class="hero-ctas"><a class="exp-button primary" href="#connect">Start setup <span>↓</span></a><a class="exp-button ghost" href="../#demo">Try the agent demo <span>↗</span></a></div><div class="qs3-hero-meta">CLAUDE CODE <span>·</span> CODEX <span>·</span> OPENCODE <span>·</span> DEEPSEEK HARNESS</div></div><div class="hero-aside" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="orbit orbit-three"></div><div class="orbit-center">a<span>↘</span></div><div class="orbit-note note-one">install <b>01</b></div><div class="orbit-note note-two">connect <b>02</b></div><div class="orbit-note note-three">evolve() <b>03</b></div></div></section>
 
-```bash
-pip install agentdescent
-```
+    <section class="qs3-step" id="connect"><div class="qs3-step-head"><span>01 / INSTALL</span><h2>One command<br>to get set up.</h2><p>The script installs current <code>main</code> through pip (not a pinned release) and connects supported agents it finds on your PATH.</p></div><div class="qs3-install-card"><div class="qs3-tabbar" role="tablist" aria-label="Installation method"><button role="tab" aria-selected="true" class="active" data-install-mode="script">One-command setup</button><button role="tab" aria-selected="false" data-install-mode="pip">Install with pip</button></div><div class="qs3-terminal"><div class="qs3-terminal-head"><span>TERMINAL</span><button id="qs3-copy-install" class="exp-copy">Copy</button></div><pre id="qs3-install-command">curl -fsSL https://raw.githubusercontent.com/Birfy/agentdescent/main/scripts/install.sh | bash</pre></div><div class="qs3-install-foot"><span id="qs3-install-note">Installs AgentDescent and connects the agent CLIs already on your PATH.</span><a href="https://github.com/Birfy/agentdescent/blob/main/scripts/install.sh">Read the script ↗</a></div></div></section>
 
-The core engine has **zero required dependencies** and needs only Python ≥ 3.9.
-That gives you the whole library: [`evolve()`](evolution.md), the
-[aggregator](aggregator.md), the [agent layer](agents.md), the
-[data layer](dataloader.md), [directory evolution](directory-evolution.md).
+    <section class="qs3-step qs3-connect" id="agent"><div class="qs3-step-head"><span>02 / CONNECT</span><h2>Open your agent.</h2><p>Choose the agent you use. The command below shows how to launch or verify its AgentDescent integration.</p></div><div class="qs3-host-card"><div class="qs3-host-tabs" role="tablist" aria-label="Choose your agent"><button role="tab" aria-selected="true" class="active" data-host="claude">Claude Code</button><button role="tab" aria-selected="false" data-host="codex">Codex</button><button role="tab" aria-selected="false" data-host="opencode">OpenCode</button><button role="tab" aria-selected="false" data-host="dsh">DeepSeek Harness</button></div><div class="qs3-host-output"><span id="qs3-host-label">LAUNCH CLAUDE CODE</span><p id="qs3-host-help">The installer writes a local plugin directory. Launch Claude Code with it.</p><div class="qs3-terminal compact"><div class="qs3-terminal-head"><span>TERMINAL</span><button id="qs3-copy-host" class="exp-copy">Copy</button></div><pre id="qs3-host-command">claude --plugin-dir ~/.agentdescent/plugins/claude-code</pre></div></div></div></section>
 
-| extra | adds | for |
-|---|---|---|
-| `pip install -e ".[dev]"` | pytest | running the test suite |
-| `pip install -e ".[docs]"` | MkDocs Material | building this site |
-| `pip install anthropic` | the Claude SDK | [`claude(...)`](agents.md) |
-| `pip install openhands-ai` | OpenHands SDK (Python ≥ 3.12) | [`openhands(...)`](backends.md) |
+    <section class="qs3-step qs3-ask" id="ask"><div class="qs3-step-head"><span>03 / ASK</span><h2>Tell it what<br>to improve.</h2><p>Give your agent a target and examples. It shows an estimate before the run and a diff before applying changes.</p></div><div class="qs3-prompt"><div class="qs3-prompt-top"><span>PASTE INTO YOUR AGENT</span><button id="qs3-copy-prompt" class="exp-copy">Copy prompt</button></div><p id="qs3-prompt-text">Improve the skill at ~/.claude/skills/pdf-audit against eval/cases.jsonl. Show me the plan and estimated calls before starting. Show the diff before applying.</p><div class="qs3-prompt-foot"><span>Plan first</span><span>Review the diff</span><span>Apply with approval</span></div></div></section>
 
-Nothing else is needed for an OpenAI-compatible endpoint — GLM, DeepSeek, a local
-vLLM server — because [`openai_compatible`](agents.md) speaks HTTP directly.
-
-## The examples need a checkout
-
-They are research artifacts kept **outside** the installed package (they would
-otherwise squat the top-level `examples` name), so every `python -m examples.…`
-command needs a clone:
-
-```bash
-git clone https://github.com/Birfy/agentdescent && cd agentdescent
+    <section class="qs3-more"><h2>Good to know.</h2><details><summary>What about provider keys and cost?</summary><p>A model-backed run needs a configured provider key. Run <code>agentdescent doctor</code> to check your setup. Your agent shows the plan and estimated call count before starting. <code>agentdescent demo</code> runs offline without a key.</p></details><details id="source-examples"><summary>Can I explore the algorithm ports?</summary><p>Research examples are source-only and are not included in the wheel. After 0.5.1 is published, clone its matching tag:</p><pre>git clone --branch v0.5.1 https://github.com/Birfy/agentdescent
+cd agentdescent
 pip install -e ".[dev]"
-```
-
-## First run — no API key
-
-```bash
-python -m examples.run_demo
-```
-
-Runs the merge-based loop and a fork baseline on the same budget over the
-[reference domain](orchestrator.md), then prints the learning curve and the
-comparison. This is the framework's central claim, reproducible in seconds:
-
-```
-round  dev_acc   stable  commit  fused  stale  confl  oracle
-    0    0.828    0.000       1      1      0      0       0
-    3    1.000    0.000       1      0      0      1       0     ← a contradiction dropped
-    8    1.000    1.000       0      0      0      0       0     ← stable branch catches up
-
-AgentDescent (merge) held-out accuracy : 1.000
-Fork/archive best-fork accuracy        : 0.379
-merge advantage                        : +0.621
-```
-
-Two more that need nothing:
-
-```bash
-python -m examples.skill_dir_evolution    # evolve a skill DIRECTORY a real agent reads
-python -m examples.efficiency             # parallel scaling + async tail-hiding
-```
-
-The complete list — every demo, every algorithm port, and what each one prints —
-is in [run everything](usage.md#1-run-the-demos).
-
-## First real run — with a model
-
-Point the provider layer at whatever you have. Credentials are read from the
-environment at call time and never pass through code:
-
-```bash
-export OPENAI_BASE_URL=https://api.deepseek.com     # or GLM, vLLM, OpenAI itself
-export OPENAI_API_KEY=sk-...
-```
-
-```python
-from agentdescent import SingleSlot, evolve, openai_compatible, reflector, scorer, tasks_from
-from agentdescent.dataloader import hf_rows
-
-rows = hf_rows("openai/gsm8k", config="main", split="train", limit=64)
-model = openai_compatible(model="deepseek-v4-flash")
-
-result = evolve(tasks_from(rows, prompt="question", gold="answer"), scorer("last_number"),
-                run=lambda skill, task: model(f"{skill}\n\n{task.prompt}"),
-                propose=reflector(model),
-                strategy=SingleSlot(initial_value="You are a helpful assistant."),
-                rounds=8, n_workers=8, max_concurrency=8, held_out_frac=0.3)
-
-print(result.rendered)        # the skill it learned
-print(result.final_reward)    # held-out reward
-```
-
-For Claude, `pip install anthropic` and use `claude(model="claude-haiku-4-5")`
-instead — same call everywhere else. Full walkthrough:
-[quickstart](quickstart-skill.md).
-
-!!! tip "Inspect a port with `--dry-run`"
-    All nineteen print their configuration and return **with no model call and
-    no API key**. The eight benchmark-faithful ones return before touching data
-    as well; the eleven `MethodPolicy` ports build their policy first, so one on
-    a real benchmark downloads and caches its split during a dry run and says so.
-
-    ```bash
-    python -m examples.ace.ace_context_evolution --dry-run
-    python -m examples.gepa.gepa_prompt_evolution --dry-run
-    ```
-
-## Running the tests
-
-The suite is offline and deterministic — no network, no model API:
-
-```bash
-pytest -q
-```
-
-CI runs it on Python 3.9 / 3.11 / 3.12 for every push and PR.
-
-## Building the docs
-
-```bash
-pip install -e ".[docs]"
-mkdocs serve                    # live preview at http://127.0.0.1:8000
-mkdocs build --strict           # must pass with no warnings (CI enforces this)
-python -m tools.gen_api_docs    # regenerate the API reference after a signature change
-```
-
-## Where to go next
-
-| you want | go to |
-|---|---|
-| the shortest path from a dataset to a result | [Quickstart — a skill](quickstart-skill.md) |
-| to evolve a folder a real agent reads | [Quickstart — a directory](quickstart-directory.md) |
-| to understand why it is built this way | [Concepts](concepts.md) |
-| every knob on the loop | [The `evolve` method](evolution.md) |
-| a specific module | [Module map](modules.md) |
-| a signature | [API reference](api.md) |
+python -m examples.run_demo</pre><p>The tag is created at publication; before then, use your release-candidate checkout. All 20 algorithm ports print their configuration with <code>--dry-run</code> and make no model call. The eight benchmark-faithful ports return before loading data; the eleven <code>MethodPolicy</code> ports build their policy first, so a real-benchmark port may download and cache its split. See the <a href="../self-evolution-examples/">port catalog</a>.</p></details><details id="published-v050-installation-and-source-examples"><summary>Can I install from PyPI?</summary><p>Yes. <code>pip install agentdescent</code> installs the published stable release. Once 0.5.1 is published, use <code>pip install "agentdescent[mcp]&gt;=0.5.1"</code> for this release’s CLI and MCP tools. Python 3.9 supports the core package; MCP requires Python 3.10+. The one-command and pip tabs above install current <code>main</code>, not a pinned release. See the <a href="../plugin-quickstart/">plugin guide</a> for the release workflow.</p></details><details id="source-checkout"><summary>Can I work from a source checkout before publication?</summary><p>Clone main and install the MCP extra from that checkout (Python 3.10+):</p><pre>git clone --branch main https://github.com/Birfy/agentdescent
+cd agentdescent
+pip install -e ".[mcp]"</pre><p>This provides an editable checkout for the CLI, MCP tools and source-only examples. Use <code>pip install -e ".[dev]"</code> in the same checkout for development and the research examples.</p></details><details id="building-the-docs"><summary>How do I build these docs?</summary><p>From a checkout: <code>pip install -e ".[docs]"</code>, then <code>mkdocs serve</code> for a local preview or <code>mkdocs build --strict</code> for a site build.</p></details></section>
+    <section class="qs3-end"><div><span class="section-label">BEYOND THE QUICKSTART</span><h2>One path into a bigger framework.</h2><p>This agent workflow is a starting point. To evolve custom artifacts or plug in different algorithms, explore the same <code>evolve()</code> engine shown on the homepage.</p></div><a class="exp-button primary" href="../#framework">Explore the framework <span>↗</span></a></section>
+  </main>
+  <footer class="exp-footer"><a class="exp-brand" href="../"><span class="brand-mark">a<span>↘</span></span> agentdescent</a><span>Open source · MIT</span><div><a href="https://github.com/Birfy/agentdescent">GitHub ↗</a><a href="../plugins/">Plugin docs</a><a href="../results/">Results</a></div></footer>
+</div>

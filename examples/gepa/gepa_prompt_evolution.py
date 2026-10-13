@@ -409,7 +409,17 @@ def pareto_aggregator_factory(artifact_id: str = "gepa_prompt", seed: int = 0,
 # ===========================================================================
 
 
-def download_hotpotqa(limit: int) -> List[dict]:
+def download_hotpotqa(limit: int, source: str = "hf") -> List[dict]:
+    """HotpotQA validation rows, from HuggingFace or a ModelScope mirror.
+
+    ``source="hf"`` (default) uses the datasets-server; ``source="modelscope"``
+    fetches the same rows from ``OpenDataLab/HotpotQA`` on ModelScope, for
+    networks where the HuggingFace endpoint is unreachable but ModelScope is
+    up. Rows are identical either way (``context`` is the dict shape examples
+    read)."""
+    if source == "modelscope":
+        from agentdescent.dataloader import hf_rows_modelscope
+        return hf_rows_modelscope(limit=limit)
     dataset, split, config = HOTPOTQA
     return hf_rows(dataset, split, config=config, limit=limit)
 
@@ -464,9 +474,14 @@ def estimate_calls(rounds: int, workers: int, held_out: int) -> int:
     return rounds * (workers * 3 + held_out)
 
 
-def load_dataset(fetch: int, ratios=(0.5, 0.25, 0.25), seed: int = 0) -> Dataset:
-    """HotpotQA tasks split into train / val (D_pareto) / test."""
-    tasks = build_tasks(download_hotpotqa(fetch), limit=fetch, seed=seed)
+def load_dataset(fetch: int, ratios=(0.5, 0.25, 0.25), seed: int = 0,
+                 source: str = "hf") -> Dataset:
+    """HotpotQA tasks split into train / val (D_pareto) / test.
+
+    ``source`` is passed to :func:`download_hotpotqa` -- ``"hf"`` (default)
+    via the datasets-server, or ``"modelscope"`` for the ModelScope mirror."""
+    tasks = build_tasks(download_hotpotqa(fetch, source=source), limit=fetch,
+                        seed=seed)
     return split_dataset(tasks, ratios=ratios, seed=seed, name="HotpotQA")
 
 

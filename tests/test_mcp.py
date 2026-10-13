@@ -2,7 +2,9 @@
 
 import json
 import os
+import re
 import time
+from pathlib import Path
 
 import pytest
 
@@ -96,6 +98,17 @@ def test_resources_are_json(store, tmp_path):
     t = Tools(store)
     assert json.loads(t.runs_resource()) == []
     assert "error" in json.loads(t.rounds_resource("nope"))
+
+
+def test_standalone_mcp_guide_lists_every_registered_tool():
+    guide = (
+        Path(__file__).resolve().parents[1] / "docs" / "testing-the-plugins.md"
+    ).read_text()
+    expected = re.search(r"Expected tools: `([^`]+)`", guide)
+    assert expected is not None
+    documented = set(expected.group(1).split())
+    assert documented == set(TOOL_DESCRIPTIONS)
+    assert len(documented) == 15
 
 
 def test_every_tool_has_a_description_written_for_the_model():

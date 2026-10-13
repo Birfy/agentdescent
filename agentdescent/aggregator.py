@@ -24,7 +24,7 @@ on the accept path -- the diagrams used to draw it after the commit with a dotte
 "spot-check" arrow, which reads as advisory when it holds a veto.
 
 Note what this stage does *not* do. It re-reads the caller's own scorer over the
-whole held-out set (``full_eval``, called ``oracle_eval`` until 0.6), so it can
+whole held-out set (``full_eval``, called ``oracle_eval`` until 0.5.1), so it can
 catch a verdict that rested on too few tasks and cannot catch one that rested on a
 biased scorer -- the outcome name outlived the rename and overstates the check.
 :mod:`agentdescent.audit` is the second source.
@@ -138,6 +138,14 @@ class AggregatorConfig:
     #: two writers backing off by the same amount collide again on the same
     #: schedule.
     cas_backoff: float = 0.05
+    #: How many highest-priority queued audits the L-value consumer drains per
+    #: merge step. ``0`` (the default) keeps the old behaviour: the audit scheduler
+    #: computes priorities, ``force_oracle`` spends budget on a threshold gate, and
+    #: nothing spends it on the ranking. A positive value pops the heap after each
+    #: ``finish_step`` and runs ``full_eval`` on the candidates, updating trust --
+    #: the out-of-band audit process the design (section 5.3) calls for. The
+    #: scheduler's ``collect`` flag is forced on when this is set.
+    audit_drain_per_step: int = 0
     #: Rank candidates against their fusion on the cheap layer before putting one
     #: forward. **Off**, because the ranking is paid every round while the only
     #: decision it changes from the gate's is recoverable -- see
@@ -278,6 +286,11 @@ class MergeReport:
     #: Stable bucket for the same outcome, safe to count across rounds. ``reason``
     #: interpolates values ("P(delta>0)=0.42 <= 0.75"), so it makes a useless key.
     category: str = ""
+    #: How many diffs in this batch the trust region refused for size. Non-zero
+    #: on an ``oversized`` report, but also on a mixed batch whose category is
+    #: decided by the cards that *were* in range (or by staleness) -- which is
+    #: how an adaptive region still learns its cap was binding (#226).
+    oversized: int = 0
 
 
 @dataclass
@@ -322,6 +335,8 @@ class _Candidate:
     survived: int
     discarded: int
     conflicts: int
+    #: Diffs the trust region refused in this batch; carried onto the report.
+    oversized: int = 0
 
     #: Filled by `Aggregator._measure`. `None` until then, which is what makes a
     #: candidate that skipped the phase fail loudly rather than commit on zeros.
@@ -334,6 +349,69 @@ class _Candidate:
     def measured(self) -> bool:
         return self.base_counts is not None and self.cand_counts is not None
 
+
+def _allocator_context_from(c: "_Candidate", p_improve: Optional[float] = None,
+                            stable_distance: float = 0.0):
+    """Build an :class:`~agentdescent.allocator.AllocatorContext` from a candidate.
+
+    The context carries the **pre-spend features the worker decided on** --
+    advantage, diff size, blast radius -- so the model learns from exactly the
+    inputs its decisions were made on. Post-outcome signals (``p_improve``,
+    ``stable_distance``, the measured delta) are kept on the context for the
+    audit trail but never enter :meth:`AllocatorContext.features`.
+
+    **Which card is the candidate's origin depends on how it was chosen:**
+
+    * **Fused** (`c.fused`): the candidate is the union of the surviving
+      proposals, so its commit label attaches to the *first contributor's*
+      pre-spend vector -- the explicit attribution rule for fusions. The first
+      card is the one the tournament put forward, the same attribution the
+      acceptance gate uses when it folds `before_after_delta` back into the
+      posterior.
+    * **Not fused**: the tournament chose one single proposal, so the commit
+      label must attach to *that proposal's* card -- not an arbitrary first
+      card that may be a losing entrant. Labeling the first (losing) card as
+      committed teaches the model the wrong proposal succeeded and supplies no
+      observation for the actual winner.
+
+    Either way the vector is a worker's actual pre-spend input (advantage,
+    the card's own diff size, the artifact's blast radius) -- never a fused
+    union size, which is a post-merge artefact no worker decided on.
+    """
+    from .allocator import AllocatorContext
+
+    card = _attributable_card(c)
+    adv = getattr(card, "advantage", None)
+    # The worker decided on *this* card's diff, not the merged union.
+    size = card.diff.size() if card is not None and card.diff is not None else 0
+    return AllocatorContext(
+        before_after_delta=getattr(card, "before_after_delta", None),
+        advantage=adv,
+        size=size,
+        p_improve=p_improve,
+        stable_distance=stable_distance,
+        blast_radius=getattr(c.artifact, "blast_radius", 0.2),
+    )
+
+
+def _attributable_card(c: "_Candidate"):
+    """The evidence card a commit outcome should be attributed to.
+
+    Fusions: the first contributor (the card the tournament put forward).
+    Single winners: the card whose diff *is* the selected diff -- not the
+    first entrant, which may be a losing proposal. Falls back to the first
+    card when none matches (a custom fusion policy may return a diff outside
+    ``c.cards``), since there is then no better attribution available."""
+    if not c.cards:
+        return None
+    if getattr(c, "fused", False):
+        return c.cards[0]
+    selected = getattr(c, "diff", None)
+    for card in c.cards:
+        if card.diff is selected or getattr(card.diff, "diff_id", None) == \
+                getattr(selected, "diff_id", None):
+            return card
+    return c.cards[0]
 
 
 class EvidenceBuffer:
@@ -352,6 +430,10 @@ class EvidenceBuffer:
     def __init__(self) -> None:
         self._buckets: Dict[str, List[EvidenceCard]] = defaultdict(list)
         self._waited: Dict[str, int] = defaultdict(int)
+        #: Optional consumer of settled evidence, wired by the engine when a
+        #: sampler (e.g. :class:`~agentdescent.sampling.ReplaySampler`) wants to
+        #: learn from the pool. ``None`` keeps the old behaviour exactly.
+        self._settled_consumer: Optional[Callable[[EvidenceCard], None]] = None
         # (payload chars, card), oldest first -- see :meth:`settle` for the bound.
         self._settled: Deque[Tuple[int, EvidenceCard]] = deque()
         self._settled_chars = 0
@@ -391,9 +473,10 @@ class EvidenceBuffer:
 
         This is the structural advantage of artifacts over gradients (design
         doc, section 3.3): a stale gradient is simply lost, but a stale diff's
-        evidence survives. Nothing in the library consumes the pool yet -- a
-        fuller system would re-file the cards into the trajectory pool -- so
-        treat it as a **diagnostic ring**, not a queue.
+        evidence survives. Nothing in the library consumes the pool by default
+        -- treat it as a **diagnostic ring**, not a queue -- but an optional
+        consumer (:meth:`set_settled_consumer`) turns the pool into an
+        experience-replay buffer for the task sampler.
 
         It is bounded because it was not, and the unbounded version leaked
         precisely the payloads the trust region exists to reject: a runaway
@@ -407,12 +490,43 @@ class EvidenceBuffer:
                 cost = sum(len(str(v)) for v in card.diff.ops.values())
                 self._settled.append((cost, card))
                 self._settled_chars += cost
+                if self._settled_consumer is not None:
+                    self._settled_consumer(card)
             while self._settled and (
                 len(self._settled) > self.SETTLED_MAX_CARDS
                 or self._settled_chars > self.SETTLED_MAX_CHARS
             ):
                 cost, _ = self._settled.popleft()
                 self._settled_chars -= cost
+
+    def recent_settled(self, task: Any, n: int = 3) -> List[EvidenceCard]:
+        """The most recent N settled cards whose ``trajectory_refs`` mention ``task``.
+
+        Used by the engine to fill ``ProposalContext.rejected`` so a proposal
+        policy can see what was just discarded for this task.
+        """
+        task_id = getattr(task, "id", None)
+        if task_id is None:
+            return []
+        with self._lock:
+            matched: List[EvidenceCard] = []
+            for _, card in reversed(list(self._settled)):
+                if any(getattr(r, "id", None) == task_id
+                       for r in card.trajectory_refs):
+                    matched.append(card)
+                    if len(matched) >= n:
+                        break
+            return matched
+
+    def set_settled_consumer(self, consumer: Optional[Callable[[EvidenceCard], None]]) -> None:
+        """Subscribe a consumer to every card that is settled.
+
+        ``None`` (the default) keeps the old behaviour -- the pool stays a
+        diagnostic ring no one reads. The consumer is called under the buffer
+        lock, so it must not call back into the buffer.
+        """
+        with self._lock:
+            self._settled_consumer = consumer
 
     @property
     def settled(self) -> List[EvidenceCard]:
@@ -504,6 +618,11 @@ class Aggregator:
         #: better than one that counts a fraction of the run.
         self.meter = meter
         self.config = config or AggregatorConfig()
+        # Force the audit scheduler to collect when the L-value consumer is on:
+        # without this, submit() returns the priority without queueing, and
+        # _drain_audit_queue pops an empty heap.
+        if self.config.audit_drain_per_step > 0:
+            self.audit._collect = True
         # The decisions, as objects. Swapping one is the point; the defaults are
         # the code that used to be inline here, moved rather than rewritten.
         cfg = self.config
@@ -524,7 +643,16 @@ class Aggregator:
                        self.acceptance_policy, self.promotion_policy):
             install_policy(policy, verifier, cfg)
         self.buffer = EvidenceBuffer()
+        #: Optional value allocator (see :mod:`agentdescent.allocator`), wired
+        #: by the engine so the merge path can feed commit outcomes back into
+        #: it. ``None`` keeps the old behaviour; the aggregator never consults
+        #: the allocator for a decision (the worker does, through the budget
+        #: governor), it only reports what happened.
+        self.allocator: Optional[Any] = None
         self._posteriors: Dict[str, BetaPosterior] = defaultdict(BetaPosterior)
+        #: How many queued audits the L-value consumer drained and ran against
+        #: the oracle. Zero when ``audit_drain_per_step`` is 0 (the default).
+        self.audit_drained = 0
         # dev-branch survival counter for EMA-style promotion.
         # Artifacts this aggregator has seen, so `finalize` knows what to publish.
         # The survival *counter* belongs to the promotion policy; this is only the
@@ -610,6 +738,20 @@ class Aggregator:
     def ingest(self, card: EvidenceCard) -> None:
         self.buffer.add(card)
 
+    def set_settled_consumer(self, consumer: Optional[Callable[[EvidenceCard], None]]) -> None:
+        """Subscribe a consumer to the settled-evidence pool.
+
+        ``None`` keeps the old behaviour -- a diagnostic ring no one reads.
+        The consumer is called from the merger thread under the buffer lock.
+        """
+        self.buffer.set_settled_consumer(consumer)
+
+    def recent_settled(self, task: Any, n: int = 3) -> List[EvidenceCard]:
+        """The most recent N settled cards whose trajectory_refs mention task.
+
+        See ``Buffer.recent_settled``."""
+        return self.buffer.recent_settled(task, n)
+
     def step(self) -> List[MergeReport]:
         """Fire every artifact bucket that is ready and return per-artifact reports.
 
@@ -690,8 +832,9 @@ class Aggregator:
             # -- not from a second reading of the same decision. A trust region
             # that adapted to its own guess about what happened would be tuning
             # itself against a number nothing else in the run agrees with.
-            self._observe_trust_region(report.category)
+            self._observe_trust_region(self._trust_region_outcome(report))
         self._age_and_promote(reports)
+        self._drain_audit_queue(self.config.audit_drain_per_step)
         return reports
 
     # -- dual-branch EMA promotion (section 4.5) -----------------------------
@@ -704,6 +847,95 @@ class Aggregator:
         decision and "copy a branch without doing redundant git work" is not."""
         for promotion in self.promotion_policy.observe(reports):
             self._promote(promotion.artifact_id)
+
+    def _drain_audit_queue(self, max_per_step: int = 0) -> int:
+        """Pop the highest-priority queued audits and run them against the oracle.
+
+        This is the L-value consumer the design (section 5.3) calls for and the
+        docstring of :class:`~agentdescent.scheduler.AuditScheduler` says does not
+        exist: ``submit`` computes a priority for every merge, ``force_oracle``
+        spends budget on a threshold gate, and nothing spends it on the *ranking*
+        the priority model produces. This does: it pops the highest-priority items
+        the queue holds, runs ``full_eval`` on each candidate, and updates trust.
+
+        ``max_per_step=0`` (the default) drains nothing, which is the old
+        behaviour exactly -- the queue is built (when ``collect=True``) and never
+        read. A caller sets it through :class:`AggregatorConfig`.
+
+        Returns how many audits it ran. The budget is the verifier's own
+        ``oracle_calls_remaining``; when it is spent the drain stops early.
+
+        Budget is checked **before** pop: popping an item and then discovering
+        the budget is gone discards the highest-priority audit without running
+        it. A pair needs two ``full_eval`` calls (base + candidate); checking
+        ``can_spend(2)`` prevents the half-measured case where the first call
+        consumes the last budget and the second falls back to the cheap layer,
+        making trust compare measurements from different task sets.
+        """
+        if max_per_step <= 0 or not getattr(self.audit, "_collect", False):
+            return 0
+        n = 0
+        for _ in range(max_per_step):
+            if not self._verifier_can_spend(2):
+                break
+            item = self.audit.pop()
+            if item is None:
+                break
+            payload = item.payload
+            if not isinstance(payload, tuple) or len(payload) != 3:
+                continue                   # malformed: will never get better
+            artifact_id, base_state, candidate = payload
+            try:
+                cand_full = self.verifier.full_eval(candidate)
+                base_full = self.verifier.full_eval(base_state)
+            except Exception as exc:      # noqa: BLE001 - transient oracle failure
+                # Re-queue: a dead oracle is often a dead *endpoint* (a rate
+                # limit, a timeout), and dropping the highest-priority audit
+                # for a transient fault loses work the ranking already paid
+                # for. Only keep trying while the drain has budget to retry.
+                self._requeue(item)
+                if self.meter is not None:
+                    self.meter.add("audit_drain_oracle_errors")
+                continue
+            self.audit.update_trust(
+                artifact_id, (cand_full > base_full) == (
+                    self.verifier.learned_eval(candidate)[0]
+                    > self.verifier.learned_eval(base_state)[0]))
+            n += 1
+        self.audit_drained += n
+        return n
+
+    def _requeue(self, item) -> None:
+        """Put a popped audit item back with its original priority.
+
+        Uses :meth:`AuditScheduler.requeue` rather than ``submit`` to preserve
+        the priority the ranking already paid for. ``submit`` recomputes
+        priority from ``blast_radius * uncertainty / trust``, and trust may
+        have moved since the item was first submitted."""
+        try:
+            self.audit.requeue(item)
+        except Exception:  # noqa: BLE001 - never let bookkeeping kill the drain
+            pass
+
+    def _verifier_can_spend(self, n: int = 1) -> bool:
+        """Whether the verifier has at least ``n`` oracle calls left.
+
+        Read through ``getattr`` rather than ``hasattr`` + direct access: the
+        shipped :class:`~agentdescent.verifier.ThreeLayerVerifier` exposes
+        ``budget.can_spend()``, but :class:`~agentdescent.policies.
+        VerifierProtocol` does not declare ``budget``, and a custom verifier
+        that satisfies the protocol has no such attribute. ``getattr`` with a
+        default keeps the protocol intact -- a verifier with no budget is one
+        that can always spend, which is the behaviour ``force_oracle`` had
+        before this method existed.
+        """
+        budget = getattr(self.verifier, "budget", None)
+        if budget is None:
+            return True
+        remaining = getattr(budget, "oracle_calls_remaining", None)
+        if remaining is None:
+            return True
+        return remaining >= n
 
     def _promote(self, artifact_id: str) -> None:
         """Copy dev onto stable, skipping the git work when they already agree.
@@ -798,14 +1030,15 @@ class Aggregator:
         moves."""
         return getattr(self.promotion_policy, "survival", {})
 
-    def _apply_trust_region(self, cards):
+    def _apply_trust_region(self, cards, region=None):
         """Split cards into (within budget, oversized), settling the rejects.
 
         Oversized diffs used to be dropped *before* `considered` was computed and
         never settled, so a runaway reflector vanished from the report and from
         the evidence pool at once -- the most expensive failure to diagnose is
         the one that leaves no trace."""
-        region = self._trust_region()
+        if region is None:
+            region = self._trust_region()
 
         def within(card) -> bool:
             if card.diff.size() > region.ops:
@@ -832,6 +1065,24 @@ class Aggregator:
             return TrustRegion(ops=self.config.trust_region_ops,
                                chars=self.config.trust_region_chars)
         return policy.current
+
+    @staticmethod
+    def _trust_region_outcome(report: MergeReport) -> str:
+        """The outcome an adaptive region should learn from ``report``.
+
+        Usually its category. But a batch that mixes oversized diffs with stale
+        or in-range ones reports the category of the cards that got further, so
+        reading the category alone hides the size cap whenever any other card
+        is present -- one valid proposal per batch keeps the region stuck (#226).
+        A merge that refused oversized diffs and did not land is therefore told
+        as ``oversized``. A commit already widens, and a reversal must still
+        tighten, so both keep their category.
+        """
+        if report.oversized and report.category not in (
+                MergeOutcome.COMMITTED, MergeOutcome.ORACLE_REJECTED,
+                "rolled-back"):
+            return MergeOutcome.OVERSIZED.value
+        return report.category
 
     def _observe_trust_region(self, outcome: str) -> None:
         """Tell an adaptive region how the merge it sized turned out."""
@@ -870,7 +1121,7 @@ class Aggregator:
 """
         _, uncertainty = self.verifier.learned_eval(best_state)
         self.audit.submit(best_diff.diff_id, artifact_id, artifact.blast_radius,
-                          uncertainty, payload=best_diff)
+                          uncertainty, payload=(artifact_id, artifact, best_state))
         # Trust is "how often does the cheap layer agree with the full held-out
         # set", and it has to be measurable WITHOUT spending oracle budget --
         # otherwise it is circular. It was: `force_oracle` fires on
@@ -899,7 +1150,7 @@ class Aggregator:
             #
             # Read through the two helpers rather than by attribute: a verifier
             # is whatever the caller handed us, including one written against the
-            # pre-0.6 `oracle_eval` / `oracle_shares_full_set` names. Reading the
+            # pre-0.5.1 `oracle_eval` / `oracle_shares_full_set` names. Reading the
             # new name directly would have made an old custom verifier fail here,
             # mid-merge, several minutes into a run.
             if shares_eval_counts(self.verifier):
@@ -1016,7 +1267,8 @@ class Aggregator:
         # dropped *before* `considered` was computed and never settled, so they
         # vanished from both the report and the evidence pool -- silently.
         n_considered = len(cards)
-        cards, oversized = self._apply_trust_region(cards)
+        region = self._trust_region()
+        cards, oversized = self._apply_trust_region(cards, region)
 
         head = snap.version
         survivors, discarded = self._staleness_filter(artifact, head, cards)
@@ -1031,12 +1283,14 @@ class Aggregator:
                 return MergeReport(artifact_id, None, False, n_considered, 0,
                                    len(oversized), 0, 0.0, None,
                                    f"{len(oversized)} diff(s) outside the trust "
-                                   f"region ({self.config.trust_region_ops} ops / "
-                                   f"{self.config.trust_region_chars} chars)",
-                                   MergeOutcome.OVERSIZED)
+                                   f"region ({region.ops} ops / "
+                                   f"{region.chars} chars)",
+                                   MergeOutcome.OVERSIZED,
+                                   oversized=len(oversized))
             return MergeReport(artifact_id, None, False, n_considered, 0,
                                len(discarded) + len(oversized), 0, 0.0, None,
-                               "all stale / rejected", MergeOutcome.ALL_STALE)
+                               "all stale / rejected", MergeOutcome.ALL_STALE,
+                               oversized=len(oversized))
 
         kept_cards, conflicts = self._resolve_conflicts(artifact, survivors)
         kept_diffs = [c.diff for c in kept_cards]
@@ -1046,7 +1300,8 @@ class Aggregator:
             diff=best_diff, cards=kept_cards, survivor_cards=survivors,
             head=head, fused=fused,
             considered=n_considered, survived=len(survivors),
-            discarded=len(discarded), conflicts=conflicts)
+            discarded=len(discarded), conflicts=conflicts,
+            oversized=len(oversized))
 
     def _measure(self, c: "_Candidate") -> "_Candidate":
         """Score the base and the candidate. **Touches no aggregator state.**
@@ -1113,12 +1368,13 @@ class Aggregator:
         # the annealed threshold -- not a point estimate crossing a line.
         prior = self._posteriors[c.artifact_id]
         base_score, cand_score = c.base_cheap, c.cand_cheap
+        stable_distance = self._stable_distance(c.artifact_id, c.candidate)
         decision = self.acceptance_policy.accept(MergeContext(
             artifact=c.artifact, candidate=c.candidate, cards=c.cards,
             base_counts=c.base_counts, cand_counts=c.cand_counts,
             diff=c.diff, base_cheap=base_score, cand_cheap=cand_score,
             prior=prior, trust_radius=c.artifact.blast_radius,
-            stable_distance=self._stable_distance(c.artifact_id, c.candidate)))
+            stable_distance=stable_distance))
         p_improve = decision.p_improve
 
         # The full held-out rates. The regression guard below must use *these*
@@ -1134,14 +1390,31 @@ class Aggregator:
         def report(diff, version, reason, category) -> MergeReport:
             return MergeReport(c.artifact_id, diff, c.fused, c.considered,
                                c.survived, c.discarded, c.conflicts, p_improve,
-                               version, reason, category)
+                               version, reason, category,
+                               oversized=c.oversized)
+
+        # Report *every* measured decision to the value allocator exactly once:
+        # the label is "was this candidate worth the expensive evaluation it
+        # got?", and it is True only on a commit. Oracle rejection and
+        # acceptance rejection are negative labels too -- without them the model
+        # would learn only from commits and CAS conflicts, so a rejection-only
+        # run never left warm-up and a mixed run never learned which evaluated
+        # proposals fail.
+        def _observe_outcome(committed: bool) -> None:
+            if self.allocator is not None:
+                observe = getattr(self.allocator, "observe", None)
+                if callable(observe):
+                    observe(_allocator_context_from(
+                        c, p_improve, stable_distance=stable_distance), committed)
 
         rejected = self._audit(c.artifact, c.artifact_id, c.candidate, c.diff,
                                base_full, cand_full, base_score, cand_score, prior)
         if rejected:
+            _observe_outcome(False)
             return report(None, None, "oracle rejected", MergeOutcome.ORACLE_REJECTED)
 
         if not decision.accept:
+            _observe_outcome(False)
             prior.observe_delta(decision.observed_delta)
             return report(None, None, decision.detail,
                           MergeOutcome(decision.category))
@@ -1149,7 +1422,9 @@ class Aggregator:
         # -- commit (section 4.1): CAS on dev --------------------------------
         new_version = self._commit_with_retry(c.artifact_id, c.candidate, c.diff,
                                               c.head)
-        if new_version is None:
+        committed = new_version is not None
+        _observe_outcome(committed)
+        if not committed:
             self.buffer.settle(c.survivor_cards)
             return report(None, None, "CAS conflict", MergeOutcome.CAS_CONFLICT)
 

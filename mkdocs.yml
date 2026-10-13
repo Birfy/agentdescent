@@ -24,6 +24,9 @@ plugins:
 
 theme:
   name: material
+  custom_dir: site_overrides
+  logo: assets/mark.svg
+  font: false
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -49,6 +52,9 @@ theme:
 
 nav:
   - Home: index.md
+  # Keep the demo reachable in Material's mobile drawer when header links hide.
+  - Interactive demo: https://birfy.github.io/agentdescent/#demo
+  - Documentation: docs.md
   - Getting started:
     - Install and first run: install.md
     - Quickstart — dataset to skill: quickstart-skill.md
@@ -83,6 +89,7 @@ nav:
     - Sandboxes: sandboxes.md
     - Async — no round barrier: async.md
     - Duration-aware scheduling: duration-scheduling.md
+    - Budget allocation: budget.md
   - The decision plane (policies):
     - Choosing policies: policies.md
     - Using the slots — a guide: policy-guide.md
@@ -130,6 +137,7 @@ nav:
     - SICA — self-edit: algo-sica.md
     - Gödel Agent — self-modification: algo-godel-agent.md
     - Genesis — persistent recursive worlds: algo-genesis.md
+    - RRSI — regularized harness selection: algo-rrsi.md
   - Design records:
     - Evolving a directory: design-directory-evolution.md
     - Plugin for DSH, Claude Code, Codex and other agents: plugin-design.md
@@ -137,6 +145,7 @@ nav:
 
 markdown_extensions:
   - admonition
+  - meta
   - attr_list
   - md_in_html
   - tables
@@ -152,6 +161,13 @@ markdown_extensions:
         - name: mermaid
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
+
+extra_css:
+  - assets/experience.css
+  - assets/quickstart.css
+  - assets/docs-theme.css
+extra_javascript:
+  - assets/experience.js
 
 extra:
   social:

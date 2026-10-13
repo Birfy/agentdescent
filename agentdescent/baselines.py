@@ -114,6 +114,16 @@ class Budget:
     budget"; matched on calls alone, an arm with a cheaper proposer buys more
     rollouts. Neither is derivable from the other -- a rollout that solves its
     task never proposes at all.
+
+    ``tokens`` is the third unit, and the one that maps to the bill. It is
+    ``None`` by default because it is only measurable when the actor reports
+    token counts (an adapter built with ``claude(usage=u)``, and the same
+    ``u`` threaded to the run); a comparison between two API models should set
+    it, and a comparison between two wrappers around one opaque CLI cannot.
+    When it is set, ``evolve``'s ``max_tokens`` enforces it and the governor's
+    degradation applies -- so an arm at a token budget spends the *same* money
+    as its siblings, which neither ``rollouts`` nor ``calls`` can promise
+    across arms that differ in how much the model thinks per call.
     """
 
     rollouts: int
@@ -121,13 +131,19 @@ class Budget:
     #: arm shares one actor and the ratio is stable. Set it as soon as arms
     #: differ in how often they propose.
     calls: Optional[int] = None
+    #: ``None`` means "do not bound tokens". Set it when the actor reports them
+    #: -- it is the unit cost is measured in, and an arm that wins at equal
+    #: tokens is the only thing that has been shown to be more *efficient*
+    #: rather than merely given more model.
+    tokens: Optional[int] = None
 
     def split(self, ways: int) -> "Budget":
         """The share of this budget one of ``ways`` independent runs may spend."""
         if ways < 1:
             raise ValueError(f"cannot split a budget {ways} ways")
         return Budget(rollouts=self.rollouts // ways,
-                      calls=None if self.calls is None else self.calls // ways)
+                      calls=None if self.calls is None else self.calls // ways,
+                      tokens=None if self.tokens is None else self.tokens // ways)
 
 
 @dataclass(frozen=True)
@@ -172,6 +188,7 @@ class Workload:
             self.tasks, self.reward, seed=seed, n_workers=n_workers,
             max_concurrency=kwargs.pop("max_concurrency", n_workers),
             max_rollouts=budget.rollouts, max_calls=budget.calls,
+            max_tokens=budget.tokens,
             usage=usage, **kwargs)
 
 
@@ -230,8 +247,7 @@ class ArmResult:
     rollouts: int
     calls: int
     prompt_tokens: int
-    completion_tokens: int
-    #: Sum of every run in the arm. For fork this is what it cost, not what it
+    completion_tokens: int    #: Sum of every run in the arm. For fork this is what it cost, not what it
     #: would take: N forks are independent and run concurrently given N workers,
     #: which is why `wallclock_parallel` exists beside it.
     wallclock: float
@@ -261,6 +277,17 @@ class ArmResult:
     #: the same mechanism would be absurd. Empty for the arms that cannot fuse,
     #: which is itself the right answer for them.
     fusion: Optional["FusionStats"] = None
+
+    @property
+    def tokens(self) -> int:
+        """Total tokens the arm spent (prompt + completion), as measured.
+
+        A property rather than a field, so it is always the sum of the two
+        counts beside it and cannot drift from them. Zero when the actor
+        reported none -- which is why a comparison on ``fixed="tokens"`` must
+        check that the arms actually reported before reading the column (see
+        :func:`compare`)."""
+        return self.prompt_tokens + self.completion_tokens
 
 
 def _tally(arm: str, seed: int, width: int, runs: Sequence[EvolutionResult],
@@ -406,7 +433,10 @@ class Comparison:
     """Several seeds of several arms, and whether they are comparable at all."""
 
     arms: Dict[str, List[ArmResult]]
-    #: The unit the comparison holds fixed: ``"rollouts"`` or ``"calls"``.
+    #: The unit the comparison holds fixed: ``"rollouts"``, ``"calls"`` or
+    #: ``"tokens"``. Tokens is the unit cost is measured in, so it is the one to
+    #: fix when the actor reports them; it is not the default only because it
+    #: needs reporting the other two do not.
     fixed: str = "rollouts"
     #: Arms whose spend in the **fixed** unit drifted from the median by more
     #: than the tolerance, as ``(arm, unit, spend, median)``. Non-empty means the
@@ -478,24 +508,33 @@ def compare(results: Sequence[ArmResult], *, fixed: str = "rollouts",
             tolerance: float = 0.1) -> Comparison:
     """Group arm results by arm and check what the comparison actually held fixed.
 
-    ``fixed`` names the unit the budget was set in. Drift there goes to
-    ``unequal`` and invalidates the comparison; divergence in the other unit goes
-    to ``confounded``, which is a caveat rather than a defect -- see the module
-    docstring for why it cannot be designed away.
+    ``fixed`` names the unit the budget was set in -- ``"rollouts"``,
+    ``"calls"``, or ``"tokens"``. Drift in the fixed unit goes to ``unequal``
+    and invalidates the comparison; divergence in the other units goes to
+    ``confounded``, which is a caveat rather than a defect -- see the module
+    docstring for why they cannot all be equalised by design.
 
     ``tolerance`` is a fraction of the median spend. The default allows the
     barrier overshoot -- an arm can end up to one round past its bound, and a
     wide arm's round is wide -- while still catching an arm that ran on twice
     the model.
     """
-    if fixed not in ("rollouts", "calls"):
-        raise ValueError(f"fixed must be 'rollouts' or 'calls', not {fixed!r}")
+    if fixed not in ("rollouts", "calls", "tokens"):
+        raise ValueError(
+            f"fixed must be 'rollouts', 'calls' or 'tokens', not {fixed!r}")
     by_arm: Dict[str, List[ArmResult]] = {}
     for r in results:
         by_arm.setdefault(r.arm, []).append(r)
 
     comparison = Comparison(arms=by_arm, fixed=fixed, tolerance=tolerance)
-    for unit in ("rollouts", "calls"):
+    if not by_arm:
+        # No arms, nothing to check. Returning an empty comparison rather than
+        # raising keeps a sweep that produced nothing from crashing the caller
+        # that is about to report it. (`statistics.median([])` raised
+        # `StatisticsError`, a `ValueError`, which a caller validating the
+        # `fixed` argument caught by accident.)
+        return comparison
+    for unit in ("rollouts", "calls", "tokens"):
         spends = {arm: statistics.median([getattr(r, unit) for r in group])
                   for arm, group in by_arm.items()}
         median = statistics.median(list(spends.values()))
@@ -510,9 +549,9 @@ def compare(results: Sequence[ArmResult], *, fixed: str = "rollouts",
 
 def to_markdown(comparison: Comparison) -> str:
     """A table whose caption cannot claim more than the numbers support."""
-    lines = ["| arm | seeds | rollouts | calls | dev | test (min/med/max) | "
-             "fork oracle |",
-             "|---|---|---|---|---|---|---|"]
+    lines = ["| arm | seeds | rollouts | calls | tokens | dev | "
+             "test (min/med/max) | fork oracle |",
+             "|---|---|---|---|---|---|---|---|"]
     for arm in sorted(comparison.arms):
         group = comparison.arms[arm]
         spread = comparison.spread(arm)
@@ -525,10 +564,16 @@ def to_markdown(comparison: Comparison) -> str:
                    f"{spread[0]:.3f} / {spread[1]:.3f} / {spread[2]:.3f}")
         seeds = (f"{len(group)}" if comparison.scored(arm) == len(group)
                  else f"{comparison.scored(arm)}/{len(group)}")
+        # Tokens read "—" when the actor reported none. That is not zero spend,
+        # it is an unreported unit -- and a `0` in the column would read as
+        # "spent nothing", which is the one thing it cannot be.
+        toks = [r.tokens for r in group]
+        token_col = f"{statistics.median(toks):.0f}" if any(toks) else "—"
         lines.append(
             f"| {arm} | {seeds} | "
             f"{statistics.median([r.rollouts for r in group]):.0f} | "
             f"{statistics.median([r.calls for r in group]):.0f} | "
+            f"{token_col} | "
             f"{statistics.median([r.dev_reward for r in group]):.3f} | "
             f"{quality} | {oracle} |")
 

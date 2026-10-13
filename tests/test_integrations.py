@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -59,7 +60,7 @@ def test_install_dsh_writes_skill_hooks_and_patch(tmp_path, monkeypatch):
     assert skill.exists() and (skill.parent / "hooks.json").exists()
     patch = _read(tmp_path / ".dsh" / "cordis.patch.yml")
     assert "name: '@deepseek-ai/dsh-mcp-client'" in patch
-    assert "serverName: agentdescent" in patch and "args: [\"mcp\"]" in patch
+    assert "serverName: agentdescent" in patch and 'args: ["-m", "agentdescent.cli", "mcp"]' in patch
     for key in DSH_FORWARDED_KEYS:
         # Each key is forwarded past dsh's scrubbing -- but as part of one
         # filtered !!js expression, never as its own entry: unset, it would be
@@ -105,7 +106,7 @@ def test_install_claude_code_renders_a_loadable_plugin_dir(tmp_path):
     dest = tmp_path / ".agentdescent" / "plugins" / "claude-code"
     manifest = json.loads(_read(dest / ".claude-plugin" / "plugin.json"))
     assert manifest["name"] == "agentdescent" and manifest["version"]
-    assert json.loads(_read(dest / ".mcp.json"))["mcpServers"]["agentdescent"]["args"] == ["mcp"]
+    assert json.loads(_read(dest / ".mcp.json"))["mcpServers"]["agentdescent"]["args"] == ["-m", "agentdescent.cli", "mcp"]
     hooks = json.loads(_read(dest / "hooks" / "hooks.json"))
     assert "SessionStart" in hooks["hooks"]
     assert (dest / "skills" / "agentdescent" / "SKILL.md").exists()
@@ -121,7 +122,8 @@ def test_install_opencode_writes_the_shape_opencode_itself_writes(tmp_path, monk
     assert (root / "skill" / "agentdescent" / "SKILL.md").exists()
     cfg = json.loads(_read(root / "opencode.jsonc"))
     assert cfg["mcp"]["agentdescent"] == {"type": "local",
-                                          "command": ["agentdescent", "mcp"]}
+                                          "command": [os.path.abspath(sys.executable),
+                                                      "-m", "agentdescent.cli", "mcp"]}
     assert cfg["$schema"].startswith("https://opencode.ai")
     # merging keeps what was already there, and is idempotent
     cfg["model"] = "anthropic/claude"
@@ -738,3 +740,234 @@ def test_the_skill_says_how_to_choose_an_agent():
     assert "Never a CLI coding" in text          # for kind: text
     assert "Never invent a model name" in text   # it guessed gpt-4o-mini
     assert "Anthropic SDK" in text               # `claude` is not `claude_code`
+
+
+@pytest.mark.parametrize("host", ["codex", "opencode"])
+def test_install_repairs_only_stock_path_dependent_entry(tmp_path, monkeypatch, host):
+    from agentdescent.integrations import codex_config_block, opencode_mcp_entry
+
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    if host == "codex":
+        path = tmp_path / ".codex" / "config.toml"
+        original = 'model = "keep"\n' + codex_config_block()
+    else:
+        path = tmp_path / ".config" / "opencode" / "opencode.jsonc"
+        original = json.dumps({"model": "keep", "mcp": {"agentdescent": opencode_mcp_entry()}})
+    path.parent.mkdir(parents=True)
+    path.write_text(original)
+    install(host, home=str(tmp_path), dry_run=True)
+    assert path.read_text() == original
+    install(host, home=str(tmp_path))
+    repaired = path.read_text()
+    assert "agentdescent.cli" in repaired and "keep" in repaired
+    install(host, home=str(tmp_path))
+    assert path.read_text() == repaired
+
+
+@pytest.mark.parametrize("host", ["codex", "opencode"])
+def test_install_preserves_custom_mcp_launcher(tmp_path, monkeypatch, host):
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    if host == "codex":
+        path = tmp_path / ".codex" / "config.toml"
+        original = '[mcp_servers.agentdescent]\ncommand = "my-wrapper"\nargs = ["mcp"]\n'
+    else:
+        path = tmp_path / ".config" / "opencode" / "opencode.jsonc"
+        original = json.dumps({"mcp": {"agentdescent": {"type": "local", "command": ["my-wrapper"]}}})
+    path.parent.mkdir(parents=True)
+    path.write_text(original)
+    install(host, home=str(tmp_path))
+    assert path.read_text() == original
+
+
+@pytest.mark.parametrize("executable", [
+    "/opt/Agent Tools/O'Brien/🐍/bin/python",
+    r"C:\Users\Agent Tools\python.exe",
+])
+def test_launcher_paths_round_trip_in_host_formats(executable):
+    import re
+    import shlex
+    import yaml
+    from agentdescent.integrations import (
+        codex_config_block, dsh_patch_block, hooks_text, mcp_manifest, opencode_mcp_entry,
+    )
+
+    launcher = [executable, "-m", "agentdescent.cli"]
+    expected = launcher + ["mcp"]
+    manifest = mcp_manifest(launcher)["mcpServers"]["agentdescent"]
+    assert [manifest["command"], *manifest["args"]] == expected
+    assert opencode_mcp_entry(launcher)["command"] == expected
+    doc = yaml.safe_load(dsh_patch_block(launcher).replace("!!js ", ""))
+    config = doc[0]["insert"][0]["config"]
+    assert [config["command"], *config["args"]] == expected
+    block = codex_config_block(launcher)
+    # TOML's basic strings share JSON's escaping for these path characters.
+    assert json.loads(re.search(r'^command = (.+)$', block, re.M).group(1)) == executable
+    if sys.version_info >= (3, 11):
+        import tomllib
+        config = tomllib.loads(block)["mcp_servers"]["agentdescent"]
+        assert [config["command"], *config["args"]] == expected
+    if os.name != "nt":
+        hook = json.loads(hooks_text(launcher))["hooks"]["SessionStart"][0]["hooks"][0]
+        assert shlex.split(hook["command"].removesuffix(" 2>/dev/null || true")) == (
+            launcher + ["status", "--brief"]
+        )
+
+
+@pytest.mark.parametrize("custom", [
+    'env = { PATH = "/custom/wrapper/bin" }\n',
+    '\n[mcp_servers.agentdescent.env]\nPATH = "/custom/wrapper/bin"\n',
+])
+def test_install_preserves_stock_codex_command_with_custom_fields(tmp_path, monkeypatch, custom):
+    from agentdescent.integrations import codex_config_block
+
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    path = tmp_path / ".codex" / "config.toml"
+    path.parent.mkdir()
+    original = codex_config_block() + custom
+    path.write_text(original)
+    install("codex", home=str(tmp_path))
+    assert path.read_text() == original
+
+
+def test_windows_hook_uses_the_existing_posix_shell_contract(monkeypatch):
+    import shlex
+    from agentdescent import integrations
+
+    launcher = [r"C:\Users\Alice\Python\python.exe", "-m", "agentdescent.cli"]
+    monkeypatch.setattr(integrations.os, "name", "nt")
+    hook = json.loads(integrations.hooks_text(launcher))["hooks"]["SessionStart"][0]["hooks"][0]
+    assert shlex.split(hook["command"].removesuffix(" 2>/dev/null || true")) == (
+        launcher + ["status", "--brief"]
+    )
+
+
+@pytest.mark.parametrize("host", ["codex", "opencode", "claude-code", "dsh"])
+def test_reinstall_refreshes_stock_pinned_interpreter(tmp_path, monkeypatch, host):
+    """Replacing an environment must repair our generated launcher, not keep
+    an executable that disappeared. A dry-run must still leave files alone."""
+    import re
+    import shlex
+    import yaml
+
+    for name in ("CODEX_HOME", "XDG_CONFIG_HOME", "DSH_HOME"):
+        monkeypatch.delenv(name, raising=False)
+    old = tmp_path / "old env" / "python"
+    new = tmp_path / "new env" / "python"
+    for executable in (old, new):
+        executable.parent.mkdir()
+        executable.write_text("temporary interpreter placeholder")
+    home = tmp_path / "home"
+    with monkeypatch.context() as scoped:
+        scoped.setattr(sys, "executable", str(old))
+        install(host, home=str(home))
+    before = {p: p.read_bytes() for p in home.rglob("*") if p.is_file()}
+    monkeypatch.setattr(sys, "executable", str(new))
+    install(host, home=str(home), dry_run=True)
+    assert {p: p.read_bytes() for p in home.rglob("*") if p.is_file()} == before
+    old.unlink()
+    install(host, home=str(home))
+    if host == "codex":
+        text = (home / ".codex/config.toml").read_text()
+        argv = [json.loads(re.search(r'^command = (.+)$', text, re.M).group(1)),
+                *json.loads(re.search(r'^args = (.+)$', text, re.M).group(1))]
+    elif host == "opencode":
+        data = json.loads((home / ".config/opencode/opencode.jsonc").read_text())
+        argv = data["mcp"]["agentdescent"]["command"]
+    elif host == "claude-code":
+        data = json.loads((home / ".agentdescent/plugins/claude-code/.mcp.json").read_text())
+        entry = data["mcpServers"]["agentdescent"]
+        argv = [entry["command"], *entry["args"]]
+    else:
+        text = (home / ".dsh/cordis.patch.yml").read_text()
+        entry = yaml.safe_load(text.replace("!!js ", ""))[0]["insert"][0]["config"]
+        argv = [entry["command"], *entry["args"]]
+    assert argv == [str(new), "-m", "agentdescent.cli", "mcp"]
+    # DSH and Claude install session hooks too; these already refresh, and
+    # must continue to agree with the MCP interpreter after an environment move.
+    for path in home.rglob("hooks.json"):
+        data = json.loads(path.read_text())
+        hook = data["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+        assert shlex.split(hook.removesuffix(" 2>/dev/null || true")) == [
+            str(new), "-m", "agentdescent.cli", "status", "--brief"]
+    repaired = {p: p.read_bytes() for p in home.rglob("*") if p.is_file()}
+    install(host, home=str(home))
+    assert {p: p.read_bytes() for p in home.rglob("*") if p.is_file()} == repaired
+
+
+@pytest.mark.parametrize("custom", [
+    'env = { MODE = "custom" }\n',
+    '\n[mcp_servers.agentdescent.env]\nMODE = "custom"\n',
+    'startup_timeout_sec = 90\n',
+    '\n[mcp_servers.other]\ncommand = "keep"\n',
+])
+def test_reinstall_preserves_customized_pinned_codex_entry(tmp_path, monkeypatch, custom):
+    from agentdescent.integrations import codex_config_block
+
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    path = tmp_path / ".codex/config.toml"
+    path.parent.mkdir()
+    original = codex_config_block(["/old/python", "-m", "agentdescent.cli"]) + custom
+    path.write_text(original)
+    monkeypatch.setattr(sys, "executable", "/new/python")
+    install("codex", home=str(tmp_path))
+    assert path.read_text() == original
+
+
+@pytest.mark.parametrize("change", [
+    {"environment": {"MODE": "custom"}},
+    {"enabled": False},
+    {"command": ["/old/python", "-m", "agentdescent.cli", "mcp", "--custom"]},
+    {"command": ["/custom/wrapper"]},
+    {"command": ["relative/python", "-m", "agentdescent.cli", "mcp"]},
+])
+def test_reinstall_preserves_customized_pinned_opencode_entry(tmp_path, monkeypatch, change):
+    from agentdescent.integrations import opencode_mcp_entry
+
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    path = tmp_path / ".config/opencode/opencode.jsonc"
+    path.parent.mkdir(parents=True)
+    entry = opencode_mcp_entry(["/old/python", "-m", "agentdescent.cli"])
+    entry.update(change)
+    original = json.dumps({"mcp": {"agentdescent": entry}, "model": "keep"})
+    path.write_text(original)
+    monkeypatch.setattr(sys, "executable", "/new/python")
+    install("opencode", home=str(tmp_path))
+    assert path.read_text() == original
+
+
+@pytest.mark.parametrize("host", ["codex", "opencode"])
+@pytest.mark.parametrize("old,refresh", [
+    ("/old/python", True), ("/old/python3", True),
+    ("/old/python3.9", True), (r"C:\old\pythonw.exe", True),
+    (r"C:\old\pypy3.exe", True),
+    ("/opt/company/mcp-wrapper", False),
+    (r"C:\company\mcp-wrapper.exe", False),
+    ("/old/renamed-interpreter", False), ("relative/python", False),
+])
+def test_reinstall_distinguishes_pinned_python_from_custom_launchers(
+        tmp_path, monkeypatch, host, old, refresh):
+    from agentdescent.integrations import codex_config_block, opencode_mcp_entry
+
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    launcher = [old, "-m", "agentdescent.cli"]
+    if host == "codex":
+        path = tmp_path / ".codex/config.toml"
+        original = codex_config_block(launcher)
+        expected = codex_config_block(["/new/python", "-m", "agentdescent.cli"])
+    else:
+        path = tmp_path / ".config/opencode/opencode.jsonc"
+        original = json.dumps({"mcp": {"agentdescent": opencode_mcp_entry(launcher)}})
+    path.parent.mkdir(parents=True)
+    path.write_text(original)
+    monkeypatch.setattr(sys, "executable", "/new/python")
+    install(host, home=str(tmp_path))
+    if not refresh:
+        assert path.read_text() == original
+    elif host == "codex":
+        assert path.read_text() == expected
+    else:
+        assert json.loads(path.read_text())["mcp"]["agentdescent"]["command"] == [
+            "/new/python", "-m", "agentdescent.cli", "mcp"]

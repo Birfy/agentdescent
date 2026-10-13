@@ -13,8 +13,8 @@ The whole surface is small:
   ``urllib`` (no ``datasets`` dependency);
 * :func:`hf_feature_names` -- the label vocabulary of a ClassLabel feature
   (e.g. FiNER's XBRL tag names);
-* :func:`fetch_text` / :func:`fetch_bytes` -- a cached raw-URL fetch (for data
-  hosted as plain files on GitHub, etc.);
+* :func:`fetch_text` / :func:`fetch_bytes` -- a raw-URL fetch with optional
+  on-disk cache (for data hosted as plain files on GitHub, etc.);
 * :func:`load_gated_hf` -- a best-effort loader for **gated** datasets via a lazy
   ``datasets`` import + an ``HF_TOKEN``; returns ``None`` if unavailable.
 
@@ -186,23 +186,36 @@ def _read_url(url: str, timeout: float) -> bytes:
 
 
 def fetch_bytes(url: str, *, cache_subdir: str = "raw", filename: Optional[str] = None,
-                timeout: float = 60.0) -> bytes:
-    """Fetch a raw URL, caching the bytes on disk (keyed by ``filename``)."""
+                timeout: float = 60.0, cache: bool = True) -> bytes:
+    """Fetch a raw URL, optionally caching the bytes on disk (keyed by ``filename``).
+
+    With ``cache=True`` (default), an existing cache entry is returned and a miss
+    is written after the download. With ``cache=False``, an existing cache entry
+    is ignored and the response is not written — matching :func:`hf_rows` /
+    ``_rows_payload`` bypass semantics.
+    """
     filename = filename or _slug(url)[-180:]
     path = cache_path(cache_subdir, filename)
-    if not os.path.exists(path):
-        data = _read_url(url, timeout)
+    if cache and os.path.exists(path):
+        with open(path, "rb") as f:
+            return f.read()
+    data = _read_url(url, timeout)
+    if cache:
         with open(path, "wb") as f:
             f.write(data)
-    with open(path, "rb") as f:
-        return f.read()
+    return data
 
 
 def fetch_text(url: str, *, cache_subdir: str = "raw", filename: Optional[str] = None,
-               timeout: float = 60.0, encoding: str = "utf-8") -> str:
-    """Fetch a raw URL as decoded text, cached on disk."""
+               timeout: float = 60.0, encoding: str = "utf-8",
+               cache: bool = True) -> str:
+    """Fetch a raw URL as decoded text, optionally cached on disk.
+
+    ``cache`` has the same meaning as in :func:`fetch_bytes`: ``False`` bypasses
+    and does not refresh the on-disk entry.
+    """
     return fetch_bytes(url, cache_subdir=cache_subdir, filename=filename,
-                       timeout=timeout).decode(encoding, errors="ignore")
+                       timeout=timeout, cache=cache).decode(encoding, errors="ignore")
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +269,65 @@ def hf_feature_names(dataset: str, split: str, feature: str, *,
                 return t["feature"]["names"]
             return t["names"]
     raise KeyError(f"feature {feature!r} not found in {dataset}")
+
+
+# ---------------------------------------------------------------------------
+# ModelScope mirror (for datasets whose HuggingFace endpoint is unreachable)
+# ---------------------------------------------------------------------------
+
+#: A ModelScope-hosted copy of HotpotQA, fetched as a plain JSON file. The
+#: HuggingFace datasets-server can be unreachable from some networks while
+#: ModelScope stays up, so :func:`hf_rows_modelscope` is the fallback that
+#: loads the *same* rows from a different mirror.
+MODELSCOPE_HOTPOTQA_URL = (
+    "https://www.modelscope.cn/api/v1/datasets/OpenDataLab/HotpotQA/repo"
+    "?Revision=master&FilePath=raw%2Fhotpot_dev_distractor_v1.json"
+)
+
+
+def _hotpotqa_context_to_dict(context) -> dict:
+    """Normalise a HotpotQA ``context`` to the dict shape the engine expects.
+
+    The HuggingFace datasets-server already yields ``{"title": [...],
+    "sentences": [[...], ...]}``; the raw JSON mirror yields the original
+    ``[[title, [sentence, ...]], ...]`` pairs. Callers (GEPA's
+    ``_render_context``) read ``context["title"]`` and ``context["sentences"]``,
+    so the pairs are converted here, once, at load time.
+    """
+    if isinstance(context, dict):
+        return context
+    titles, sents = [], []
+    for title, sentences in context:
+        titles.append(title)
+        sents.append(list(sentences))
+    return {"title": titles, "sentences": sents}
+
+
+def hf_rows_modelscope(url: str = MODELSCOPE_HOTPOTQA_URL, *,
+                       limit: int = 100, cache: bool = True,
+                       timeout: float = 60.0) -> List[dict]:
+    """Load HotpotQA rows from a ModelScope mirror (plain JSON file).
+
+    Equivalent to :func:`hf_rows` for the ``hotpotqa/hotpot_qa`` validation
+    split, but via a ModelScope-hosted raw file instead of the HuggingFace
+    datasets-server -- for networks where one reachable mirror and not the
+    other. Rows are the same fields (``context`` / ``question`` / ``answer``),
+    with ``context`` normalised to the ``{"title": ..., "sentences": ...}``
+    dict the examples read.
+
+    With ``cache=True`` (default), responses live under
+    ``~/.cache/agentdescent/modelscope/`` keyed by the URL so a repeat call
+    does not re-download the ~46 MB file. With ``cache=False``, any existing
+    cache entry is ignored and the fresh response is not written back — the
+    same bypass contract as :func:`hf_rows`.
+    """
+    data = fetch_bytes(url, cache_subdir="modelscope", timeout=timeout,
+                       cache=cache)
+    rows = json.loads(data)
+    out: List[dict] = []
+    for r in rows[:limit]:
+        out.append({**r, "context": _hotpotqa_context_to_dict(r.get("context", []))})
+    return out
 
 
 # ---------------------------------------------------------------------------

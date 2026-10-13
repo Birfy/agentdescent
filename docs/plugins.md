@@ -11,12 +11,24 @@ The design record — why it is shaped this way and what was considered — is
 
 ## Install
 
+For 0.5.1, once published:
+
 ```bash
-pip install "agentdescent[mcp]"        # the CLI works without [mcp]; the MCP server needs it (and Python >= 3.10)
+pip install "agentdescent[mcp]>=0.5.1"                 # the MCP server needs this extra (and Python >= 3.10)
 agentdescent demo                      # a complete evolution, offline, no key
 agentdescent doctor                    # which agent CLIs, keys and optional pieces are here
 agentdescent install dsh               # or: claude-code, codex, opencode
 ```
+
+Before publication, clone the repository as described in
+[install and first run](install.md), then install the MCP extra from that checkout:
+
+```bash
+pip install -e ".[mcp]"
+```
+
+Research demos beyond `agentdescent demo` use the
+[source examples](install.md#source-examples).
 
 The MCP SDK requires Python >= 3.10; AgentDescent supports 3.9. On 3.9 the
 extra installs nothing and the tool surface is unavailable — the CLI verbs are
@@ -487,3 +499,12 @@ result = comp.run()            # == evolve(comp.tasks, comp.reward, **comp.kwarg
 * [Using the policy slots](policy-guide.md) — what the `policies` block can name
 * [Sandboxes](sandboxes.md) — the container provider the `plugin` kind wants
 * [Design record](plugin-design.md) — why it is built this way
+
+### Fixing input-file errors
+
+`agentdescent plan <spec.json>` reports input errors and exits with status 2.
+Spec-file read errors appear on stderr; dataset validation errors appear in the
+plan response (`ok: false`). For malformed spec or dataset JSON, the diagnostic names the file,
+line and column to edit. JSONL line numbers count physical lines, including
+blank lines. Files must be readable UTF-8; a spec must be a JSON object. Fix
+the named input, then rerun `plan` before starting an evolution.

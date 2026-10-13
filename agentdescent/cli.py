@@ -64,9 +64,10 @@ def _status_line(st: runstore.RunStatus) -> str:
     reward = "" if st.best_reward is None else f" best={st.best_reward:.3f}"
     rounds = f"{st.round}/{st.rounds}" if st.rounds else f"{st.round}"
     usd = "" if st.usd is None else f" ${st.usd:.2f}"
+    tok = f" tok={st.tokens:,}" if st.tokens else ""
     tail = f" [{st.stop_reason}]" if st.stop_reason else ""
     err = f" error: {st.error}" if st.error else ""
-    return (f"{st.run_id}  {st.state:<9} round {rounds:<6} calls={st.calls}{reward}{usd}"
+    return (f"{st.run_id}  {st.state:<9} round {rounds:<6} calls={st.calls}{tok}{reward}{usd}"
             f"  {st.kind or '?'}:{st.target or '?'}{tail}{err}")
 
 
@@ -280,11 +281,17 @@ def cmd_init(a: argparse.Namespace) -> int:
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(spec, fh, indent=2)
     print(f"wrote {out}")
-    data = spec["data"]["path"]
-    if not os.path.exists(os.path.expanduser(data)):
-        print(f"next: create {data} -- one JSON object per line, "
-              '{"prompt": "...", "gold": "..."}')
-        print("      (`agentdescent demo` runs a complete example, offline, to copy from)")
+    if spec["kind"] == "policy_slot":
+        problems = spec["data"]["problems"]
+        print(f"next: provide {problems} -- a zero-argument builder "
+              "returning a mapping of inner problems")
+        print("      make its module importable and include its package in the spec's allow list")
+    else:
+        data = spec["data"]["path"]
+        if not os.path.exists(os.path.expanduser(data)):
+            print(f"next: create {data} -- one JSON object per line, "
+                  '{"prompt": "...", "gold": "..."}')
+            print("      (`agentdescent demo` runs a complete example, offline, to copy from)")
     print(f"then: agentdescent plan {out}")
     return 0
 
@@ -784,7 +791,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("path")
     s.add_argument("--kind", choices=("text", "skill_dir", "agent_dir", "agent_code",
                                   "plugin", "policy_slot"))
-    s.add_argument("--data", help="cases file to point the spec at")
+    s.add_argument("--data", help="cases file, or a module:attribute problems ref for policy_slot")
     s.add_argument("--agent", default="claude_code", help="worker agent short name")
     s.add_argument("--out", help="where to write the spec")
     s.set_defaults(fn=cmd_init)

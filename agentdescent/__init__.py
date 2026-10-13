@@ -45,11 +45,13 @@ from .advantage import (
 )
 from .defaults import DefaultConflict, DefaultFusion
 from .fusion import KeepContradictions, ReflectiveFusion, reflective_merge
-from .sampling import DifficultyWeighted, RoundRobin, TaskSampler
+from .sampling import DifficultyWeighted, ReplaySampler, RoundRobin, TaskSampler
+from .replay import ReplayAwareProposal
 from .selection import (
     Archive,
     Beam,
     Candidate,
+    CostEfficient,
     MCTS,
     MultiHeadUnsupported,
     ParetoFrontier,
@@ -119,6 +121,13 @@ from .checkpoint import (
     restore_early_stop,
     clear_checkpoints,
     list_checkpoints,
+)
+from .budget import BudgetGovernor, CallBudget, budgeted_completion
+from .allocator import (
+    AllocatorContext,
+    AllocatorPolicy,
+    LearningValueModel,
+    ValueBudgetAllocator,
 )
 from .executor import Executor, Result, ThreadExecutor
 from .sandbox import LocalWorkspaceSandbox, SandboxPool, WorkspaceProvider
@@ -208,7 +217,7 @@ from .parallel import (
     shard_round_robin,
 )
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 __all__ = [
     "Contract",
@@ -256,6 +265,7 @@ __all__ = [
     "Beam",
     "ParetoFrontier",
     "Archive",
+    "CostEfficient",
     "MCTS",
     "MultiHeadUnsupported",
     "pareto_front",
@@ -440,4 +450,13 @@ __all__ = [
     "resolve_from_mapping",
     "verifier_fingerprint",
     "residual_bias",
+    # the cost-aware search layer
+    "BudgetGovernor",
+    "CallBudget",
+    "budgeted_completion",
+    # value-directed budget allocation
+    "AllocatorContext",
+    "AllocatorPolicy",
+    "LearningValueModel",
+    "ValueBudgetAllocator",
 ]

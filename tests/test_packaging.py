@@ -10,6 +10,8 @@ who follows the install instructions, so the docs must say a checkout is needed.
 import pathlib
 import re
 
+import pytest
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
@@ -24,16 +26,63 @@ def test_packaging_only_ships_the_library():
         "shipping a top-level `examples` package would collide with other projects"
 
 
+def _assert_example_checkout_caveat(readme):
+    """Validate the first shell install command and its source-example caveat."""
+    install_at = None
+    # Inspect shell blocks, not a quoted command in explanatory prose. The first
+    # pip install is onboarding: a later correct command cannot excuse a typo.
+    for block in re.finditer(r"```(?:bash|sh)\n(.*?)```", readme, re.DOTALL):
+        install = re.search(r"(?m)^pip install[^\n]*$", block.group(1))
+        if install:
+            package = (r"agentdescent(?:\[[A-Za-z0-9_,.-]+\])?"
+                       r"(?:(?:===|==|!=|~=|>=|<=|>|<)[A-Za-z0-9.*+_-]+"
+                       r"(?:,(?:===|==|!=|~=|>=|<=|>|<)[A-Za-z0-9.*+_-]+)*)?")
+            bare = r"agentdescent(?:\[[A-Za-z0-9_,.-]+\])?(?:==[A-Za-z0-9.*+_-]+)?"
+            command = rf"pip install (?:\"{package}\"|'{package}'|{bare})[ \t]*"
+            assert re.fullmatch(command, install.group()), \
+                "onboarding must install agentdescent; quote shell version constraints"
+            install_at = block.start(1) + install.start()
+            break
+    assert install_at is not None, "the README must show a shell pip install command"
+    assert "python -m examples" in readme, "premise: the README advertises examples"
+    nearby = readme[install_at:install_at + 1200].lower()
+    caveat_at = nearby.find("examples are outside the wheel")
+    assert caveat_at >= 0, "explain beside the install that examples are source-only"
+    assert "clone the repo" in nearby[caveat_at:], \
+        "the source-example checkout instruction belongs beside the install"
+
+
 def test_readme_tells_pip_users_the_examples_need_a_checkout():
-    readme = (ROOT / "README.md").read_text()
-    assert "python -m examples" in readme, "premise: the README does advertise them"
-    lowered = readme.lower()
-    assert "clone" in lowered, "the README must say a checkout is required"
-    # the explanation must sit near the install instructions, not buried at the end
-    install_at = readme.index("pip install agentdescent")
-    clone_at = lowered.index("clone the repo")
-    assert 0 < clone_at - install_at < 1200, \
-        "the checkout caveat belongs beside the install instructions"
+    _assert_example_checkout_caveat((ROOT / "README.md").read_text())
+
+
+@pytest.mark.parametrize("requirement", [
+    "agentdescent", "agentdescent==0.5.1", '\"agentdescent>=0.5.1\"',
+    "'agentdescent[mcp]>=0.5.1,<0.6'",
+])
+def test_checkout_guard_accepts_supported_install_syntax(requirement):
+    _assert_example_checkout_caveat(
+        f"```bash\npip install {requirement}\n```\n"
+        "Research examples are outside the wheel. To run python -m examples.run_demo, "
+        "clone the repo.")
+
+
+@pytest.mark.parametrize("readme", [
+    # No caveat; a clone elsewhere does not explain the source-only examples.
+    "```bash\npip install agentdescent\n```\nclone the repo; python -m examples.run_demo",
+    # A valid-looking command for a different package cannot satisfy onboarding.
+    "```bash\npip install agentdescent-other\n```\n"
+    "Examples are outside the wheel; clone the repo; python -m examples.run_demo",
+    # Shell redirection is not a version constraint unless quoted.
+    "```bash\npip install agentdescent>=0.5.1\n```\n"
+    "Examples are outside the wheel; clone the repo; python -m examples.run_demo",
+    # A caveat too far from the install still fails the positioning invariant.
+    "```bash\npip install agentdescent\n```\n" + "x" * 1200 +
+    "Examples are outside the wheel; clone the repo; python -m examples.run_demo",
+])
+def test_checkout_guard_rejects_missing_or_misleading_onboarding(readme):
+    with pytest.raises(AssertionError):
+        _assert_example_checkout_caveat(readme)
 
 
 def test_usage_guide_repeats_the_caveat_before_the_demos():

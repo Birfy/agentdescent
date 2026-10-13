@@ -78,6 +78,7 @@ class MeterSnapshot:
     redispatched: int = 0
     duplicates_dropped: int = 0
     cas_conflicts: int = 0
+    audit_drain_oracle_errors: int = 0
     sandbox_wait_s: float = 0.0
     sandbox_setup_s: float = 0.0
     sandboxes_created: int = 0
@@ -96,6 +97,7 @@ _COUNTERS = frozenset({
     "cache_hits", "cache_misses", "cache_inflight_joins",
     "stale_considered", "stale_discarded",
     "redispatched", "duplicates_dropped", "cas_conflicts",
+    "audit_drain_oracle_errors",
     "sandbox_wait_s", "sandbox_setup_s", "sandboxes_created",
     "sandboxes_reused", "sandbox_failures", "env_mismatch",
 })
@@ -203,6 +205,10 @@ class Meter:
     #: writer, by construction; non-zero is how much contention a multi-writer
     #: configuration is actually producing.
     cas_conflicts: int = 0
+    #: Transient oracle failures the L-value consumer hit while draining the
+    #: audit queue -- rate limits, timeouts. The audit was requeued, not dropped,
+    #: so this is how many retries happened, not how many audits were lost.
+    audit_drain_oracle_errors: int = 0
 
     #: Sandbox accounting. Zero on the default single-workspace path; filled once
     #: the sandbox pool exists. Kept here from the start so the result schema
@@ -291,6 +297,7 @@ class Meter:
                 redispatched=self.redispatched,
                 duplicates_dropped=self.duplicates_dropped,
                 cas_conflicts=self.cas_conflicts,
+                audit_drain_oracle_errors=self.audit_drain_oracle_errors,
                 sandbox_wait_s=self.sandbox_wait_s,
                 sandbox_setup_s=self.sandbox_setup_s,
                 sandboxes_created=self.sandboxes_created,

@@ -16,7 +16,11 @@ and a test checks it has not drifted.
 from __future__ import annotations
 
 import json
+import ntpath
 import os
+import re
+import shlex
+import sys
 from typing import Callable, Dict, List, Optional
 
 __all__ = ["HOSTS", "install", "render_claude_plugin", "render_dsh_plugin",
@@ -38,9 +42,19 @@ def skill_text() -> str:
         return fh.read()
 
 
-def hooks_text() -> str:
+def hooks_text(launcher: Optional[List[str]] = None) -> str:
     with open(os.path.join(_HERE, "hooks.json"), encoding="utf-8") as fh:
-        return fh.read()
+        text = fh.read()
+    if launcher is None:
+        return text
+    hooks = json.loads(text)
+    # Hooks are shell commands, unlike the argv arrays used for MCP.
+    # The shipped hook uses POSIX redirection, including Git Bash on Windows.
+    command = " ".join(shlex.quote(arg) for arg in launcher)
+    for group in hooks["hooks"]["SessionStart"]:
+        for hook in group["hooks"]:
+            hook["command"] = command + hook["command"][len(MCP_COMMAND):]
+    return json.dumps(hooks, indent=2) + "\n"
 
 
 def _skill_frontmatter() -> Dict[str, str]:
@@ -85,8 +99,9 @@ def _version() -> str:
 
 
 class _Writer:
-    def __init__(self, dry_run: bool) -> None:
+    def __init__(self, dry_run: bool, launcher: Optional[List[str]] = None) -> None:
         self.dry_run = dry_run
+        self.launcher = launcher or [MCP_COMMAND]
         self.lines: List[str] = []
 
     def write(self, path: str, text: str) -> None:
@@ -98,11 +113,20 @@ class _Writer:
                 fh.write(text)
         self.lines.append(f"{verb} {path}")
 
-    def append_unless(self, path: str, marker: str, block: str, *, what: str) -> None:
+    def append_unless(self, path: str, marker: str, block: str, *, what: str,
+                      previous: Optional[Callable[[str], Optional[str]]] = None) -> None:
         current = ""
         if os.path.exists(path):
             with open(path, encoding="utf-8") as fh:
                 current = fh.read()
+        old_block = previous(current) if previous else None
+        if old_block and old_block in current:
+            tail = current.split(old_block, 1)[1].lstrip()
+            # Old installs appended this block last. Only repair that exact
+            # shape; extra fields or nested tables may customize the launcher.
+            if not tail:
+                self.write(path, current.replace(old_block, block, 1))
+                return
         if marker in current:
             self.lines.append(f"kept {path} ({what} already present)")
             return
@@ -197,7 +221,7 @@ def _dsh_env_expression() -> str:
             "}).filter(([, v]) => v != null))'")
 
 
-def dsh_patch_block() -> str:
+def dsh_patch_block(launcher: Optional[List[str]] = None) -> str:
     """The two ``cordis.patch.yml`` rows: the MCP server and the hooks bridge.
 
     Wrapped in ``- insert:`` because a dsh patch file **overrides existing rows
@@ -223,6 +247,7 @@ def dsh_patch_block() -> str:
     undefined values that are the actual problem.) Reproduced and fixed against
     dsh 0.1.2-rc.1 with no provider keys in the environment.
     """
+    launcher = launcher or [MCP_COMMAND]
     env = "          " + _dsh_env_expression()
     return (
         "# `insert` adds rows; a bare row would be read as an override by id.\n"
@@ -232,8 +257,8 @@ def dsh_patch_block() -> str:
         "      config:\n"
         f"        serverName: {MCP_COMMAND}\n"
         "        transport: stdio\n"
-        f"        command: {MCP_COMMAND}\n"
-        f"        args: {json.dumps(MCP_ARGS)}\n"
+        f"        command: {json.dumps(launcher[0], ensure_ascii=False)}\n"
+        f"        args: {json.dumps(launcher[1:] + MCP_ARGS)}\n"
         "        toolCallTimeoutMs: 120000\n"
         "        env:\n"
         "          # dsh scrubs KEY|PASSWORD|SECRET|TOKEN from the ambient env\n"
@@ -249,9 +274,9 @@ def install_dsh(home: str, w: _Writer) -> None:
     dsh_home = os.environ.get("DSH_HOME") or os.path.join(home, ".dsh")
     skill_dir = os.path.join(dsh_home, "skills", "agentdescent")
     w.write(os.path.join(skill_dir, "SKILL.md"), skill_text())
-    w.write(os.path.join(skill_dir, "hooks.json"), hooks_text())
+    w.write(os.path.join(skill_dir, "hooks.json"), hooks_text(w.launcher))
     w.sync_block(os.path.join(dsh_home, "cordis.patch.yml"),
-                 DSH_BLOCK_START, DSH_BLOCK_END, dsh_patch_block(),
+                 DSH_BLOCK_START, DSH_BLOCK_END, dsh_patch_block(w.launcher),
                  what="mcp-client + hooks entries")
     w.note(f"forwarded into the MCP server env: {', '.join(DSH_FORWARDED_KEYS)}")
     w.note("verify: dsh --profile web --dump-config | grep -n agentdescent")
@@ -288,8 +313,10 @@ def marketplace_manifest(source: str = "./integrations/claude-code") -> Dict[str
     }
 
 
-def mcp_manifest() -> Dict[str, object]:
-    return {"mcpServers": {"agentdescent": {"command": MCP_COMMAND, "args": MCP_ARGS}}}
+def mcp_manifest(launcher: Optional[List[str]] = None) -> Dict[str, object]:
+    launcher = launcher or [MCP_COMMAND]
+    return {"mcpServers": {"agentdescent": {
+        "command": launcher[0], "args": launcher[1:] + MCP_ARGS}}}
 
 
 EVOLVE_COMMAND = """---
@@ -310,8 +337,9 @@ def render_claude_plugin(dest: str, w: Optional[_Writer] = None) -> List[str]:
             json.dumps(plugin_manifest(), indent=2) + "\n")
     w.write(os.path.join(dest, "skills", "agentdescent", "SKILL.md"), skill_text())
     w.write(os.path.join(dest, "commands", "evolve.md"), EVOLVE_COMMAND)
-    w.write(os.path.join(dest, ".mcp.json"), json.dumps(mcp_manifest(), indent=2) + "\n")
-    w.write(os.path.join(dest, "hooks", "hooks.json"), hooks_text())
+    w.write(os.path.join(dest, ".mcp.json"), json.dumps(mcp_manifest(w.launcher), indent=2) + "\n")
+    w.write(os.path.join(dest, "hooks", "hooks.json"),
+            hooks_text(w.launcher) if w.launcher != [MCP_COMMAND] else hooks_text())
     return w.lines
 
 
@@ -328,18 +356,63 @@ def install_claude_code(home: str, w: _Writer) -> None:
 # ---------------------------------------------------------------------------
 
 
-def codex_config_block() -> str:
+def codex_config_block(launcher: Optional[List[str]] = None) -> str:
+    launcher = launcher or [MCP_COMMAND]
     return ("\n# --- agentdescent (written by `agentdescent install codex`) ---\n"
             "[mcp_servers.agentdescent]\n"
-            f'command = "{MCP_COMMAND}"\n'
-            f"args = {json.dumps(MCP_ARGS)}\n")
+            f"command = {json.dumps(launcher[0], ensure_ascii=False)}\n"
+            f"args = {json.dumps(launcher[1:] + MCP_ARGS)}\n")
+
+
+def _stock_mcp_argv(command: object) -> bool:
+    """Recognize only the complete argv shape emitted by this installer.
+
+    An absolute conventional Python interpreter with the exact module invocation
+    is a pinned stock launcher, even after its environment disappears. Unknown
+    executable names, extra arguments and relative paths remain user-owned.
+    """
+    if command == [MCP_COMMAND, *MCP_ARGS]:
+        return True
+    return (isinstance(command, list) and len(command) == 4
+            and isinstance(command[0], str)
+            and (os.path.isabs(command[0]) or ntpath.isabs(command[0]))
+            and re.fullmatch(r"(?:pythonw?|pypy)(?:[0-9]+(?:\.[0-9]+)*)?(?:\.exe)?",
+                             ntpath.basename(command[0]), re.IGNORECASE) is not None
+            and command[1:] == ["-m", "agentdescent.cli", *MCP_ARGS])
+
+
+def _stock_codex_block(current: str) -> Optional[str]:
+    """Find an untouched installer-owned final block, legacy or pinned.
+
+    Match our marker and exact serialization, not merely a TOML table name.
+    In particular, inline fields and nested env tables must not be overwritten.
+    """
+    marker = "\n# --- agentdescent (written by `agentdescent install codex`) ---\n"
+    if current.count(marker) != 1 or current.count("[mcp_servers.agentdescent]") != 1:
+        return None
+    previous = current[current.index(marker):]
+    lines = previous.rstrip().splitlines()
+    if (len(lines) != 5 or lines[2] != "[mcp_servers.agentdescent]"
+            or not lines[3].startswith("command = ")
+            or not lines[4].startswith("args = ")):
+        return None
+    try:
+        command = json.loads(lines[3][len("command = "):])
+        args = json.loads(lines[4][len("args = "):])
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(args, list) or not _stock_mcp_argv([command, *args]):
+        return None
+    launcher = [command, *args[:-len(MCP_ARGS)]]
+    return previous if previous.rstrip() == codex_config_block(launcher).rstrip() else None
 
 
 def install_codex(home: str, w: _Writer) -> None:
     codex_home = os.environ.get("CODEX_HOME") or os.path.join(home, ".codex")
     w.write(os.path.join(codex_home, "skills", "agentdescent", "SKILL.md"), skill_text())
     w.append_unless(os.path.join(codex_home, "config.toml"), "[mcp_servers.agentdescent]",
-                    codex_config_block(), what="mcp_servers entry")
+                    codex_config_block(w.launcher), what="mcp_servers entry",
+                    previous=_stock_codex_block)
     w.note("Codex has no hooks; add `run agentdescent status --brief at the start of a "
            "session` to AGENTS.md if you want in-progress runs surfaced.")
     # Codex reads the same plugin format as Claude Code, and installing the
@@ -355,14 +428,14 @@ def install_codex(home: str, w: _Writer) -> None:
 # ---------------------------------------------------------------------------
 
 
-def opencode_mcp_entry() -> Dict[str, object]:
+def opencode_mcp_entry(launcher: Optional[List[str]] = None) -> Dict[str, object]:
     """The ``mcp`` entry, in the shape ``opencode mcp add`` itself writes.
 
     Verified by running ``opencode mcp add agentdescent -- agentdescent mcp``
     against opencode 1.18 and reading the file back: ``type: "local"``, the
     command as one array (not command + args), and ``environment`` for env vars.
     """
-    return {"type": "local", "command": [MCP_COMMAND, *MCP_ARGS]}
+    return {"type": "local", "command": [*(launcher or [MCP_COMMAND]), *MCP_ARGS]}
 
 
 def install_opencode(home: str, w: _Writer) -> None:
@@ -384,14 +457,17 @@ def install_opencode(home: str, w: _Writer) -> None:
             # would corrupt the file, so say what to add instead of guessing.
             w.note("NOTE: could not parse opencode.jsonc (comments?); add this "
                    "under \"mcp\" yourself: "
-                   + json.dumps({"agentdescent": opencode_mcp_entry()}))
+                   + json.dumps({"agentdescent": opencode_mcp_entry(w.launcher)}))
             return
-    if (current.get("mcp") or {}).get("agentdescent"):
+    existing = (current.get("mcp") or {}).get("agentdescent")
+    stock = (isinstance(existing, dict) and set(existing) == {"type", "command"}
+             and existing["type"] == "local" and _stock_mcp_argv(existing["command"]))
+    if existing and not stock:
         w.lines.append(f"kept {path} (mcp entry already present)")
         return
     merged = dict(current)
     merged.setdefault("$schema", "https://opencode.ai/config.json")
-    merged["mcp"] = {**(current.get("mcp") or {}), "agentdescent": opencode_mcp_entry()}
+    merged["mcp"] = {**(current.get("mcp") or {}), "agentdescent": opencode_mcp_entry(w.launcher)}
     w.write(path, json.dumps(merged, indent=2) + "\n")
     w.note("verify: opencode mcp list")
 
@@ -724,7 +800,10 @@ def install(host: str, *, dry_run: bool = False, home: Optional[str] = None) -> 
     """Wire ``host`` up. Returns the lines to print: what was written or kept."""
     if host not in HOSTS:
         raise ValueError(f"unknown host {host!r}; choose from {sorted(HOSTS)}")
-    w = _Writer(dry_run)
+    # Bind machine-local configuration to this installation, not the host's
+    # future PATH. Do not resolve symlinks: a venv's Python must stay in its
+    # venv. Portable render_* templates deliberately keep the bare command.
+    w = _Writer(dry_run, [os.path.abspath(sys.executable), "-m", "agentdescent.cli"])
     HOSTS[host](os.path.expanduser(home or "~"), w)
     # Imported here, not at module scope: `cli` reaches into this module from
     # `cmd_install`, and the reason for a missing SDK belongs in one place.
