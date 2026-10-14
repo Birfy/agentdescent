@@ -194,6 +194,30 @@ def test_a_hostile_artifact_id_cannot_escape_the_root(tmp_path):
     assert not os.path.exists(os.path.join(str(tmp_path), "..", "..", "etc"))
 
 
+def test_a_colon_in_artifact_id_still_round_trips_through_get(tmp_path):
+    """trace_id is ``"<artifact_id>:<hex>"``; a colon inside the id must not
+    break ``get`` / ``path_for``. ``evolve()`` itself forbids colons, but the
+    store is a public API and namespaced ids are otherwise legal."""
+    store = TrajectoryStore(str(tmp_path))
+    trace = _record(store, artifact_id="ns:skills")
+    assert trace is not None
+    assert trace.startswith("ns:skills:")
+    assert trace.count(":") >= 2
+    back = store.get(trace)
+    assert back is not None
+    assert back.artifact_id == "ns:skills"
+    assert back.trace_id == trace
+    path = store.path_for(trace)
+    assert path is not None
+    assert os.path.normpath(path).startswith(os.path.normpath(str(tmp_path)))
+    assert os.path.isfile(path)
+    # multi-colon still resolves to the trailing hex key
+    deeper = _record(store, artifact_id="org:team:bot", task_id="t2",
+                     rendered="other render")
+    assert store.get(deeper) is not None
+    assert store.get(deeper).artifact_id == "org:team:bot"
+
+
 def test_get_and_path_for_reject_unknown_ids(tmp_path):
     store = TrajectoryStore(str(tmp_path))
     assert store.get("not-a-trace") is None

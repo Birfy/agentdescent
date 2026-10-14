@@ -258,6 +258,18 @@ class ReflectiveFusion:
             if merged is None:
                 return None
             ops[key] = merged
+        # The synthesised values never went through the strategy's `to_diff`,
+        # so a structural gate there (FileTree validators: e.g. a skill's
+        # SKILL.md frontmatter) has not seen them. Ask the strategy directly; a
+        # rejection is the same "fall back to ranking" signal as a failed merge.
+        strategy = getattr(artifact, "_strategy", None) or getattr(artifact, "strategy", None)
+        check = getattr(strategy, "check_candidate", None)
+        if callable(check):
+            try:
+                if check(state, ops) is not None:
+                    return None
+            except Exception:  # noqa: BLE001 - an unverifiable merge is refused
+                return None
         return Diff(
             diff_id=f"synth({'+'.join(sorted(d.diff_id for d in diffs))})",
             target=diffs[0].target, ops=ops,
