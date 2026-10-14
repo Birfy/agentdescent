@@ -11,6 +11,7 @@ concurrency are worth pinning:
 """
 
 import json
+from pathlib import Path
 import threading
 import time
 
@@ -203,3 +204,61 @@ def test_a_run_can_be_given_a_shared_cache(tmp_path):
     assert first.final_reward == second.final_reward
     # the second run found the first one's evaluations already on disk
     assert second.cache_hits > 0
+
+
+def test_a_failed_replace_does_not_leave_an_orphan_tmp(tmp_path, monkeypatch):
+    """OSError on rename used to swallow the error but leave path.{pid}.tmp (#263)."""
+    import os
+    cache = FileCache(str(tmp_path))
+    key = cache_key("r", "t", "")
+    real_replace = os.replace
+
+    def boom(src, dst):
+        raise OSError("cross-device")
+
+    monkeypatch.setattr(os, "replace", boom)
+    assert cache.get_or_eval(key, lambda: 1.25) == 1.25
+    monkeypatch.setattr(os, "replace", real_replace)
+    leftovers = [p.name for p in tmp_path.iterdir() if ".tmp" in p.name]
+    assert leftovers == [], leftovers
+    # And the paid answer is still returned even though nothing landed on disk.
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_non_finite_score_is_returned_but_not_written(tmp_path):
+    """NaN/inf must not poison the on-disk cache as non-JSON tokens (#263)."""
+    cache = FileCache(str(tmp_path))
+    key = cache_key("r", "nan", "")
+    out = cache.get_or_eval(key, lambda: float("nan"))
+    assert out != out  # NaN
+    assert list(tmp_path.iterdir()) == []
+    # A later finite measurement for the same key still computes (no stale NaN hit).
+    calls = {"n": 0}
+
+    def finite():
+        calls["n"] += 1
+        return 0.5
+
+    # Same process MemoryCache already holds NaN for this key — use a fresh
+    # FileCache so we only exercise the disk path.
+    fresh = FileCache(str(tmp_path))
+    assert fresh.get_or_eval(key, finite) == 0.5
+    assert calls["n"] == 1
+    raw = (tmp_path / Path(fresh._path(key)).name).read_text(encoding="utf-8")
+    assert "NaN" not in raw and json.loads(raw)["value"] == 0.5
+
+
+def test_a_write_encode_failure_does_not_fail_the_run(tmp_path, monkeypatch):
+    """TypeError/ValueError from json.dump must be dropped like OSError (#263)."""
+    import agentdescent.evalcache as ec
+    cache = FileCache(str(tmp_path))
+    key = cache_key("r", "t", "")
+    real_dump = json.dump
+
+    def boom(*args, **kwargs):
+        raise TypeError("unencodable")
+
+    monkeypatch.setattr(ec.json, "dump", boom)
+    assert cache.get_or_eval(key, lambda: 0.875) == 0.875
+    monkeypatch.setattr(ec.json, "dump", real_dump)
+    assert [p.name for p in tmp_path.iterdir() if ".tmp" in p.name] == []

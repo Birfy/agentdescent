@@ -28,6 +28,7 @@ rationale) re-evaluate the whole held-out set because a label changed.
 from __future__ import annotations
 
 import json
+import math
 import os
 import threading
 from typing import Any, Callable, Dict, Optional, Protocol, Tuple, runtime_checkable
@@ -175,15 +176,33 @@ class FileCache:
             # Write to a sibling and rename: a reader must never see half a file,
             # and on POSIX rename is atomic. A cache that cannot be written is
             # still a correct cache, so failures here are dropped rather than
-            # failing a run that has already paid for the answer.
+            # failing a run that has already paid for the answer. Non-finite
+            # scores are skipped entirely: ``NaN``/``Infinity`` are not portable
+            # JSON, and a cache hit must be a real finite measurement.
+            try:
+                finite = float(value)
+            except (TypeError, ValueError):
+                return value
+            if not math.isfinite(finite):
+                return value
+            tmp: Optional[str] = None
             try:
                 tmp = f"{path}.{os.getpid()}.tmp"
                 with open(tmp, "w", encoding="utf-8") as fh:
                     json.dump({"key": list(key) if isinstance(key, tuple) else key,
-                               "value": value}, fh, default=str)
+                               "value": finite}, fh, allow_nan=False)
                 os.replace(tmp, path)
-            except OSError:
+            except (OSError, TypeError, ValueError):
                 pass
+            finally:
+                # A failed rename (or an encode refusal) must not leave a sibling
+                # behind -- same hygiene as TrajectoryStore.record().
+                if tmp is not None:
+                    try:
+                        if os.path.exists(tmp):
+                            os.remove(tmp)
+                    except OSError:
+                        pass
             return value
 
         return self._memory.get_or_eval(key, from_disk_or_compute)
