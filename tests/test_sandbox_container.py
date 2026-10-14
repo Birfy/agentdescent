@@ -296,6 +296,9 @@ def test_podman_wildcard_allowlist_names_are_rejected(monkeypatch):
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAexample")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "secret-should-not-cross")
     monkeypatch.setenv("AD_OK", "fine")
+    # The old forwarding path only emitted names that are *set* on the host,
+    # so the literal key `AWS_*` must exist for this to discriminate.
+    monkeypatch.setenv("AWS_*", "marker")
     cmd = command_for(SandboxSpec(env_allowlist=("AWS_*", "AD_OK")))
     env_args = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--env"]
     assert env_args == ["AD_OK"]
