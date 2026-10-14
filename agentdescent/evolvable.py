@@ -182,6 +182,17 @@ class EvidenceCard:
     #: the cheap re-verification silently becomes a no-op, and a diff that makes
     #: the artifact worse survives it.
     trajectory_refs: List[Any] = field(default_factory=list)
+    #: The ``trace_id``s of the rollout trajectories that justify this diff,
+    #: when a :class:`~agentdescent.trajectory.TrajectoryStore` was attached to
+    #: the run. Each is ``"<artifact_id>:<sha256(identity)>"``, stable across
+    #: processes, and resolvable through the store. Unlike ``trajectory_refs``,
+    #: which carries the *Task objects* the artifact's ``evidence_eval`` can
+    #: score, these point at the persisted *records* of those rollouts -- the
+    #: inputs, outputs and rewards, durable after the run. The producers
+    #: (``evolve``'s and ``async_evolve``'s worker loops) populate this only
+    #: when recording is on; a run without a store carries an empty tuple, so a
+    #: consumer can tell "recording was off" from "no rollouts were kept".
+    trace_ids: Tuple[str, ...] = field(default_factory=tuple)
     # `version_annotations: List[VersionVector]` used to sit here, described as
     # "per-turn version annotations, used when the ledger hot-updates
     # mid-rollout". Nothing ever wrote one and nothing ever read one -- not a

@@ -59,6 +59,11 @@ EvolutionResult(
     cas_conflicts: int = 0,
     cache_hits: int = 0,
     cache_misses: int = 0,
+    trajectories_recorded: int = 0,
+    trajectories_dedup: int = 0,
+    trajectory_write_seconds: float = 0.0,
+    trajectory_write_failures: int = 0,
+    trajectories_path: Optional[str] = None,
     sandbox_wait_s: float = 0.0,
     sandbox_setup_s: float = 0.0,
     sandboxes_created: int = 0,
@@ -247,7 +252,9 @@ evolve(
     verbose: bool = False,
     usage: Optional[Usage] = None,
     policies: Optional['Policies'] = None,
-    allocator: Optional[Any] = None
+    allocator: Optional[Any] = None,
+    record_trajectories: bool = False,
+    trajectory_store: Optional['TrajectoryStore'] = None
 ) -> EvolutionResult
 ```
 
@@ -304,6 +311,8 @@ evolve(
 | `usage` | `Optional[Usage]` | `None` | Share one `Usage` with your model adapters (`claude(usage=u)`, `openai_compatible(usage=u)`) and the result's token counts become real. Without it the run still reports calls, seconds and failures -- `run` is `(rendered, task) -> str`, so an opaque actor has no way to surface tokens, and inventing a number would be worse than reporting zero. |
 | `policies` | `Optional['Policies']` | `None` | Bundle of replaceable pieces (`Policies`). Every field defaults to `None` meaning "current behaviour", so `Policies()` and passing nothing are the same run. The individual keyword arguments -- `task_sampler`, `staleness_policy`, `aggregator_factory` -- are shortcuts onto its fields and keep working; an explicit argument wins over a bundle default rather than being silently ignored. Fields whose implementations have not landed yet raise rather than being accepted and ignored: a caller who passes a custom acceptance rule and sees a finished run would reasonably conclude it ran. New capabilities go here rather than adding another parameter to a function that already has thirty-five. |
 | `allocator` | `Optional[Any]` | `None` | Value-directed budget allocation (see `allocator`). `None` (the default) is the old behaviour exactly: optional spend (fusion tournaments, the self-verify rollout) degrades against the global `soft_floor` / `hard_floor` thresholds as the token budget runs out, every candidate treated alike. Pass a `ValueBudgetAllocator` (or any object with `decide(ctx) -> AllocateDecision` and `observe(ctx, committed)`) and, once the budget is tight, the self-verify rollout is spent only on candidates the allocator's value model expects to commit; the merge path reports every outcome back so the model learns. Requires `max_tokens` to be set (the allocator decides how the budget is spent; `max_tokens` is what exists to spend). Counterfactual exploration re-measures candidates the model judged unworthy, so a biased value model is corrected rather than reinforced. |
+| `record_trajectories` | `bool` | `False` | Persist every rollout and gate evaluation as a `Trajectory` under `<repo_path>/trajectories/` -- what the run provider saw, what it returned, what that earned, against which artifact version and environment. Off by default: a throwaway repo's records die with it, so the write cost is pure overhead there, and recording is a deliberate choice about keeping a run's evidence. The store is the durable base every learning-type increment reads -- process-supervised reflection, offline re-weighting, audit replay -- and it is what an `EvidenceCard.trace_ids` entry points at. Pass `trajectory_store=` with a store you built to control where records land instead. |
+| `trajectory_store` | `Optional['TrajectoryStore']` | `None` | An explicit `TrajectoryStore` to record into. Pass one to control where records land (a shared store, a custom root, a custom privacy configuration) without going through the `<repo_path>/trajectories/` default. The explicit store wins over `record_trajectories`; `None` + `record_trajectories` builds the default store. |
 
 ### `reflector(...)`
 
@@ -992,6 +1001,7 @@ EvidenceCard(
     touched: List[str],
     before_after_delta: float = 0.0,
     trajectory_refs: List[Any] = <factory>,
+    trace_ids: Tuple[str, ...] = <factory>,
     advantage: Optional[float] = None,
     cost_tokens: int = 0,
     cost_wallclock: float = 0.0,
@@ -3171,7 +3181,9 @@ async_evolve(
     verbose: bool = False,
     usage: Optional[Usage] = None,
     policies: Optional['Policies'] = None,
-    allocator: Optional[Any] = None
+    allocator: Optional[Any] = None,
+    record_trajectories: bool = False,
+    trajectory_store: Optional[Any] = None
 ) -> EvolutionResult
 ```
 
@@ -3227,6 +3239,8 @@ async_evolve(
 | `usage` | `Optional[Usage]` | `None` | Share one `Usage` with your model adapters (`claude(usage=u)`, `openai_compatible(usage=u)`) and the result's token counts become real. Without it the run still reports calls, seconds and failures -- `run` is `(rendered, task) -> str`, so an opaque actor has no way to surface tokens, and inventing a number would be worse than reporting zero. |
 | `policies` | `Optional['Policies']` | `None` | Bundle of replaceable pieces (`Policies`). Every field defaults to `None` meaning "current behaviour", so `Policies()` and passing nothing are the same run. The individual keyword arguments -- `task_sampler`, `staleness_policy`, `aggregator_factory` -- are shortcuts onto its fields and keep working; an explicit argument wins over a bundle default rather than being silently ignored. Fields whose implementations have not landed yet raise rather than being accepted and ignored: a caller who passes a custom acceptance rule and sees a finished run would reasonably conclude it ran. New capabilities go here rather than adding another parameter to a function that already has thirty-five. |
 | `allocator` | `Optional[Any]` | `None` | Exactly as in `evolve`: value-directed budget allocation (see `allocator`). `None` (the default) is the old behaviour exactly. Pass a value allocator and, once the token budget is tight, the self-verify rollout is spent only on candidates the allocator expects to commit; the merger reports every outcome back so it learns. Requires `max_tokens`. Counterfactual exploration corrects a biased value model rather than reinforcing it. |
+| `record_trajectories` | `bool` | `False` | Exactly as in `evolve`: persist every rollout and gate evaluation as a `Trajectory` under `<repo_path>/trajectories/`. Off by default; pass `trajectory_store=` to control where records land. |
+| `trajectory_store` | `Optional[Any]` | `None` | An explicit `TrajectoryStore` to record into. `None` + `record_trajectories` builds the default store at `<repo_path>/trajectories`. |
 
 ---
 

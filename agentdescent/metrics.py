@@ -79,6 +79,10 @@ class MeterSnapshot:
     duplicates_dropped: int = 0
     cas_conflicts: int = 0
     audit_drain_oracle_errors: int = 0
+    trajectories_recorded: int = 0
+    trajectories_dedup: int = 0
+    trajectory_write_seconds: float = 0.0
+    trajectory_write_failures: int = 0
     sandbox_wait_s: float = 0.0
     sandbox_setup_s: float = 0.0
     sandboxes_created: int = 0
@@ -98,6 +102,8 @@ _COUNTERS = frozenset({
     "stale_considered", "stale_discarded",
     "redispatched", "duplicates_dropped", "cas_conflicts",
     "audit_drain_oracle_errors",
+    "trajectories_recorded", "trajectories_dedup",
+    "trajectory_write_seconds", "trajectory_write_failures",
     "sandbox_wait_s", "sandbox_setup_s", "sandboxes_created",
     "sandboxes_reused", "sandbox_failures", "env_mismatch",
 })
@@ -210,6 +216,14 @@ class Meter:
     #: so this is how many retries happened, not how many audits were lost.
     audit_drain_oracle_errors: int = 0
 
+    #: Rollout-trajectory records: written, skipped as duplicates, and lost to
+    #: a filesystem failure. A run without a trajectory store reports zeros,
+    #: which is the honest reading "recording was off", not "nothing happened".
+    trajectories_recorded: int = 0
+    trajectories_dedup: int = 0
+    trajectory_write_seconds: float = 0.0
+    trajectory_write_failures: int = 0
+
     #: Sandbox accounting. Zero on the default single-workspace path; filled once
     #: the sandbox pool exists. Kept here from the start so the result schema
     #: does not change again when it does.
@@ -298,6 +312,10 @@ class Meter:
                 duplicates_dropped=self.duplicates_dropped,
                 cas_conflicts=self.cas_conflicts,
                 audit_drain_oracle_errors=self.audit_drain_oracle_errors,
+                trajectories_recorded=self.trajectories_recorded,
+                trajectories_dedup=self.trajectories_dedup,
+                trajectory_write_seconds=self.trajectory_write_seconds,
+                trajectory_write_failures=self.trajectory_write_failures,
                 sandbox_wait_s=self.sandbox_wait_s,
                 sandbox_setup_s=self.sandbox_setup_s,
                 sandboxes_created=self.sandboxes_created,

@@ -266,15 +266,21 @@ class Ledger:
         self._exclude_non_ledger_files()
 
     def _exclude_non_ledger_files(self) -> None:
-        """Keep `checkpoints/` out of the index, on every repo we open.
+        """Keep `checkpoints/` and `trajectories/` out of the index.
 
-        Checkpoints are per-process diagnostics, not ledger state: they live in
-        the working tree, and `_commit` runs `git add -A`. Committed, they break
-        the ledger in two ways. A branch switch *deletes* them -- a dev-only file
-        does not exist on stable -- so a resume finds nothing. Worse, the next
-        round rewrites the now-tracked file, and `checkout` refuses to clobber a
-        modified tracked file: every `snapshot(STABLE)` and `promote_to_stable`
-        after that dies with "local changes would be overwritten".
+        Both are per-process *derived* data, not ledger state: they live in the
+        working tree, and `_commit` runs `git add -A`. Committed, they break
+        the ledger in two ways. A branch switch *deletes* them -- a dev-only
+        file does not exist on stable -- so a resume finds nothing. Worse, the
+        next round rewrites the now-tracked file, and `checkout` refuses to
+        clobber a modified tracked file: every `snapshot(STABLE)` and
+        `promote_to_stable` after that dies with "local changes would be
+        overwritten".
+
+        ``trajectories/`` is the :mod:`~agentdescent.trajectory` store's home
+        when the engine records rollouts. Rollouts are derived data too, and
+        the same argument applies verbatim: a branch switch must not delete the
+        run's evidence, and a rewrite must not break a checkout.
 
         The exclusion goes in `.git/info/exclude`, not a working-tree
         `.gitignore`, for the reason the repo lock lives in `.git/` too: that
@@ -287,26 +293,30 @@ class Ledger:
         Written on **every** `__init__`, not just at genesis: a ledger created
         by an earlier version already has its `.git/`, so an init-only write
         would skip precisely the long-lived repos a resume exists for.
-        (The name mirrors `checkpoint.CHECKPOINT_DIR`; spelled out here to keep
-        the ledger free of that import.)
+        (The names mirror `checkpoint.CHECKPOINT_DIR` and the trajectory
+        store's home; spelled out here to keep the ledger free of those
+        imports.)
         """
-        rule = "checkpoints/"
         path = os.path.join(self.repo_path, ".git", "info", "exclude")
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             try:
                 with open(path) as f:
-                    lines = f.read().splitlines()
+                    existing = set(f.read().splitlines())
             except FileNotFoundError:
-                lines = []
-            if rule in lines:
+                existing = set()
+            missing = [rule for rule in ("checkpoints/", "trajectories/")
+                       if rule not in existing]
+            if not missing:
                 return
             with open(path, "a") as f:
-                f.write(f"{rule}\n")
+                for rule in missing:
+                    f.write(f"{rule}\n")
         except OSError:
             # A read-only or otherwise hostile `.git/` is not a reason to
-            # refuse the ledger: nothing writes checkpoints unless the caller
-            # turned them on, and that path degrades on its own.
+            # refuse the ledger: nothing writes checkpoints or trajectories
+            # unless the caller turned them on, and those paths degrade on
+            # their own.
             pass
 
     # -- low-level version bookkeeping ---------------------------------------
