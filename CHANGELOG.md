@@ -15,7 +15,12 @@ All notable changes to AgentDescent are documented here. The format follows
   New `agentdescent.skillspec` (`validate_skill_tree`, `SkillTreeValidator`,
   dependency-free) and a general `FileTree(validators=...)` hook. Skipped with
   a note when the initial skill does not pass; opt out with
-  `validate_skill: false`.
+  `validate_skill: false`. The gate also covers model-written merges:
+  `ReflectiveFusion` asks the strategy's new `FileTree.check_candidate` before
+  returning a synthesised union, and a refused one falls back to ranking. Header
+  values a YAML loader would refuse (unterminated quotes, `[...]` / `{...}`,
+  unquoted `: `) are `frontmatter-malformed`; a BOM and inline `# comments` are
+  tolerated.
 
 - Add the RRSI cosine-annealed L0 edit-budget schedule (`examples/rrsi/schedule.py`)
   adapted from the pinned Google release, with endpoint / float-guard / bound

@@ -109,7 +109,8 @@ strategy = FileTree(tree, validators=[skill_tree_validator(root_name="pdf-audit"
 ```
 
 A `kind: "skill_dir"` spec wires this in by default (opt out with
-`validate_skill: false`).
+`validate_skill: false`). The same check runs on a contested `SKILL.md` that
+the reflective merge model rewrote, so a merged value never skips it.
 
 ## 4. Staging the task's own inputs
 

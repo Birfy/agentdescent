@@ -899,6 +899,16 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
                 # the staging name (it allows uppercase, `_` and `.`).
                 root_name = (parse_skill_frontmatter(tree[SKILL_FILE]) or {}).get("name")
                 validators.append(SkillTreeValidator(root_name))
+                # A note, not a gate: the staging directory is often named
+                # differently from where the skill is installed. But a host
+                # that keys skills by directory will not load it under this one.
+                dirname = os.path.basename(os.path.normpath(str(spec.target)))
+                if root_name and dirname and dirname != root_name:
+                    notes.append(
+                        f"kind='skill_dir': SKILL.md name {root_name!r} differs from "
+                        f"the target directory {dirname!r}; the Agent Skills spec "
+                        f"requires them to match, so install the result as "
+                        f"{root_name}/ (the gate keeps the name stable).")
         strategy = FileTree(tree, editable=list(spec.editable), frozen=frozen,
                             max_files_per_diff=spec.max_files_per_diff,
                             max_file_bytes=tspec.max_file_bytes,

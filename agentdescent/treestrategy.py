@@ -233,7 +233,7 @@ class FileTree:
                 ops[path] = content
         if not ops or len(ops) > self.max_files_per_diff:
             return None
-        if self.validators and self._structurally_rejected(state, ops):
+        if self.validators and self.check_candidate(state, ops) is not None:
             return None
         fingerprint = stable_hash(tuple(sorted((k, v) for k, v in ops.items())))
         return Diff(diff_id=f"{author}:{fingerprint & 0xFFFFFFFF:08x}:{base_version}",
@@ -241,21 +241,32 @@ class FileTree:
 
     # -- helpers ------------------------------------------------------------
 
-    def _structurally_rejected(self, state: Mapping[str, str],
-                               ops: Mapping[str, Optional[str]]) -> bool:
+    def check_candidate(self, state: Mapping[str, str],
+                        ops: Mapping[str, Optional[str]]) -> Optional[str]:
+        """Run :attr:`validators` on ``state`` with ``ops`` applied.
+
+        Returns ``None`` when the candidate tree passes (or there are no
+        validators), else the first rejection reason, which is also counted in
+        :attr:`structural_rejections`. :meth:`to_diff` calls this for every
+        worker proposal; a merge policy that builds a :class:`Diff` itself --
+        :class:`~agentdescent.fusion.ReflectiveFusion` synthesising a contested
+        value -- calls it too, so a model-written merge cannot bypass the gate.
+        """
+        if not self.validators:
+            return None
         candidate = dict(state)
         for path, content in ops.items():
             if content is None:
                 candidate.pop(path, None)
             else:
                 candidate[path] = content
-        for check in self.validators:
-            reason = check(candidate)
+        for validator in self.validators:
+            reason = validator(candidate)
             if reason:
                 with self._rejections_lock:
                     self.structural_rejections[str(reason)] += 1
-                return True
-        return False
+                return str(reason)
+        return None
 
     def writable(self, path: str) -> bool:
         """May the loop write this path? ``frozen`` beats ``editable``."""

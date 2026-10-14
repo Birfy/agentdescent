@@ -198,3 +198,121 @@ def test_validate_skill_false_opts_out(tmp_path):
     assert not any("structural gate" in n for n in comp.notes)
     assert spec.to_dict()["validate_skill"] is False
     assert EvolveSpec.from_dict(spec.to_dict()).validate_skill is False
+
+
+# ---------------------------------------------------------------------------
+# Header shapes a YAML loader would refuse, and ones it would accept
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("line", [
+    'description: "never closed',
+    "description: 'never closed",
+    "description: [a, b]",
+    "description: {a: b}",
+    "description: Use when: the user asks",
+    "description: Use when:",
+    'name: "pdf-audit',
+])
+def test_frontmatter_a_yaml_loader_would_refuse_is_malformed(line):
+    key = line.split(":", 1)[0]
+    lines = {"name": "name: pdf-audit", "description": "description: Audit PDFs."}
+    lines[key] = line
+    text = "---\n" + lines["name"] + "\n" + lines["description"] + "\n---\nBody\n"
+    assert "frontmatter-malformed" in validate_skill_tree({"SKILL.md": text})
+
+
+@pytest.mark.parametrize("text", [
+    "---\nname: pdf-audit  # main\ndescription: Audit PDFs.\n---\n",
+    '---\nname: pdf-audit\ndescription: "Use when: auditing"  # quoted\n---\n',
+    "---\nname: pdf-audit\ndescription: >\n  Use when: folded is fine\n---\n",
+    "\ufeff---\nname: pdf-audit\ndescription: Audit PDFs.\n---\n",
+    "---\nname: pdf-audit\ndescription: Audit PDFs # and say why\n---\n",
+])
+def test_comments_bom_and_quoted_colons_are_accepted(text):
+    assert validate_skill_tree({"SKILL.md": text}, root_name="pdf-audit") == []
+
+
+def test_every_shipped_skill_md_still_validates():
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    found = []
+    for base, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if not d.startswith(".") and d != "node_modules"]
+        if "SKILL.md" in files:
+            with open(os.path.join(base, "SKILL.md"), encoding="utf-8") as fh:
+                found.append((base, validate_skill_tree({"SKILL.md": fh.read()})))
+    assert [f for f in found if f[1]] == []
+
+
+# ---------------------------------------------------------------------------
+# The model-merge path (ReflectiveFusion) goes through the same gate
+# ---------------------------------------------------------------------------
+
+
+_SHOUT = "---\nname: shout-skill\ndescription: Shout things.\n---\n"
+
+
+def _contested_skill_merge(tmp_path, merged_text):
+    from agentdescent.evolution import EvolvingArtifact
+    from agentdescent.fusion import ReflectiveFusion
+
+    spec = _dir_spec(str(tmp_path))
+    _write_skill_md(spec, _SHOUT + "Body\n")
+    comp = compose(spec)
+    assert isinstance(comp.kwargs["policies"].fusion, ReflectiveFusion)
+    ft = comp.kwargs["strategy"]
+    st = ft.initial()
+    d1 = _edit(ft, st, {"path": "SKILL.md", "content": _SHOUT + "Body A\n"})
+    d2 = _edit(ft, st, {"path": "SKILL.md", "content": _SHOUT + "Body B\n"})
+    assert d1 is not None and d2 is not None
+    fusion = ReflectiveFusion(lambda prompt: merged_text)
+    art = EvolvingArtifact("a", state=st, strategy=ft)
+    return ft, fusion, art, [d1, d2]
+
+
+def test_a_synthesised_skill_md_that_drops_the_frontmatter_is_refused(tmp_path):
+    ft, fusion, art, diffs = _contested_skill_merge(
+        tmp_path, "Merged body: shout louder, no frontmatter")
+    assert fusion._union_of(art, diffs) is None
+    assert ft.structural_rejections["skill-no-frontmatter"] == 1
+
+
+def test_a_refused_synthesis_falls_back_to_ranking_and_never_commits_it(tmp_path):
+    ft, fusion, art, diffs = _contested_skill_merge(
+        tmp_path, "Merged body: shout louder, no frontmatter")
+
+    class _Verifier:
+        def cheap_eval(self, candidate):
+            return 1.0 if "Body B" in candidate.state.get("SKILL.md", "") else 0.5
+
+    fusion.bind(_Verifier())
+    chosen, applied, fused = fusion.select(art, diffs)
+    assert fusion.trials[-1].reason == "synthesis-failed"
+    assert chosen in diffs and not fused
+    assert validate_skill_tree(applied.state, root_name="shout-skill") == []
+
+
+def test_a_valid_synthesised_skill_md_still_merges(tmp_path):
+    ft, fusion, art, diffs = _contested_skill_merge(tmp_path, _SHOUT + "Body A and B\n")
+    union = fusion._union_of(art, diffs)
+    assert union is not None and union.ops == {"SKILL.md": _SHOUT + "Body A and B"}
+    assert not ft.structural_rejections
+
+
+def test_check_candidate_reports_the_reason_and_counts_it():
+    ft = FileTree({"SKILL.md": _VALID}, validators=[SkillTreeValidator("pdf-audit")])
+    assert ft.check_candidate(ft.initial(), {"references/a.md": "x"}) is None
+    assert ft.check_candidate(ft.initial(), {"SKILL.md": None}) == "skill-missing-skill-md"
+    assert ft.structural_rejections == {"skill-missing-skill-md": 1}
+    assert FileTree({"SKILL.md": "x"}).check_candidate({}, {"SKILL.md": None}) is None
+
+
+def test_a_name_that_differs_from_the_target_directory_gets_a_note(tmp_path):
+    spec = _dir_spec(str(tmp_path))
+    dirname = os.path.basename(os.path.normpath(spec.target))
+    _write_skill_md(spec, "---\nname: other-name\ndescription: Shout things.\n---\nBody\n")
+    notes = compose(spec).notes
+    assert any("'other-name'" in n and repr(dirname) in n for n in notes)
+    _write_skill_md(spec, f"---\nname: {dirname}\ndescription: Shout things.\n---\nBody\n")
+    if validate_skill_tree({"SKILL.md": f"---\nname: {dirname}\ndescription: d\n---\n"}) == []:
+        assert not any("differs from the target directory" in n for n in compose(spec).notes)
