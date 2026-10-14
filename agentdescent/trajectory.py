@@ -37,10 +37,11 @@ ledger would break:
 
 **Privacy is a knob, not an accident.** The store records the boundary of a
 rollout -- what the agent saw, what it said, what that earned -- because those
-are the fields process supervision and offline learning need. Event *detail*
-text (a model's internal reasoning, a tool payload) is only stored when
-``AGENTDESCENT_RECORD_TEXT=1`` or ``record_text=True`` is set; the default
-record is metadata, not a transcript.
+are the fields process supervision and offline learning need. The boundary
+(``rendered``, ``output``, ``reward``) is **always written when recording is
+on**; ``AGENTDESCENT_RECORD_TEXT`` (or ``record_text=True``) only adds event
+*detail* text -- a model's internal reasoning, a tool payload -- which is
+metadata otherwise, never a transcript.
 
 **A failed write must never fail a rollout.** The store is diagnostics on the
 hot path. A full disk, a read-only ``repo_path`` or a hostile directory
@@ -239,17 +240,26 @@ def _truthy(value: Optional[bool], default: bool) -> bool:
 class TrajectoryStore:
     """Durable, content-addressed, thread-safe rollout records.
 
-    One JSON file per trajectory under ``<root>/<artifact_id>/<key>.json``,
-    where ``key`` is the identity hash. Writing is: check the file, write a
+    One JSON file per trajectory under ``<root>/<key>.json``, in a **flat**
+    namespace keyed only by the identity hash -- the artifact id is metadata on
+    the record, never part of the path (that is also what keeps a hostile id
+    from escaping the root). Writing is: check the file, write a
     uniquely-named sibling, ``os.replace`` over the target -- a reader never
-    sees half a file, and two threads racing the same identity produce
-    identical content so the loser's rename is harmless. Everything that can
-    fail with a filesystem is caught and counted rather than raised.
+    sees half a file. The exists-check + write pair runs under a per-process
+    lock, so within this process the accounting is exact: N racing writers of
+    one identity count 1 recorded and N-1 deduped. Across processes the pair is
+    still racy (there is no inter-process lock, the same reasoning as
+    ``FileCache``), and two processes racing the same identity produce
+    byte-identical files, so the outcome stays correct whatever the counters
+    say. Everything that can fail with a filesystem is caught and counted
+    rather than raised.
 
-    ``record_text=False`` (the default, and the env var's default) drops event
-    ``detail`` text; the boundary fields -- rendered, output, reward -- are the
-    record, not the transcript. Set it (or ``AGENTDESCENT_RECORD_TEXT=1``) to
-    also keep event detail.
+    **Privacy is a knob, not an accident.** ``record_text=False`` (the default,
+    and the env var's default) drops event ``detail`` text; the boundary fields
+    -- rendered, output, reward -- are the record, not the transcript, and are
+    **always written when recording is on** (``AGENTDESCENT_RECORD_TEXT`` only
+    ever gates event detail, never the boundary). Set it (or
+    ``AGENTDESCENT_RECORD_TEXT=1``) to also keep event detail.
     """
 
     def __init__(
@@ -298,46 +308,51 @@ class TrajectoryStore:
         it is returned, so nothing downstream depends on the file having
         landed).
 
-        Thread-safe. The exists-then-write pair is not atomic (the file system
-        has no compare-and-swap for existence), but two racing writers of the
-        same identity produce byte-identical files, so the outcome is correct
-        whichever rename lands last.
+        Thread-safe, and the exists-check + write pair runs under
+        ``self._lock``, so two threads in this process racing the same identity
+        cannot both pass the check: one writes, the rest dedupe, and the
+        counters say exactly that. The lock is only per-process; two *processes*
+        racing the same identity can still both write (identical bytes, so the
+        outcome is correct), and the counters for that cross-process race may
+        over-count recorded -- the trade-off of having no inter-process broker.
         """
-        key = trajectory_key(
-            trajectory.rendered, trajectory.task_id, trajectory.env_fingerprint)
-        path = self._path(key)
-        if os.path.exists(path):
-            self._count("trajectories_dedup")
-            return None
-        payload = self._prepare(trajectory, key)
-        t0 = time.time()
-        tmp: Optional[str] = None
-        try:
-            # A sibling named per-thread: two threads in one process would
-            # otherwise write the same tmp file and a torn rename could land a
-            # partial record. Unique tmp keeps every write whole.
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
-            with open(tmp, "w", encoding="utf-8") as fh:
-                json.dump(payload.to_dict(), fh, sort_keys=True,
-                          default=str, allow_nan=False)
-            os.replace(tmp, path)
-            self._count("trajectories_recorded")
-            self._count("trajectory_write_seconds", time.time() - t0)
-            return payload.trace_id
-        except OSError:
-            self._count("trajectory_write_failures")
-            return None
-        finally:
-            # A failed rename (target directory vanished, cross-device move)
-            # leaves the tmp behind; clean it, but never at the cost of the
-            # record's own error path.
-            if tmp is not None:
-                try:
-                    if os.path.exists(tmp):
-                        os.remove(tmp)
-                except OSError:
-                    pass
+        with self._lock:
+            key = trajectory_key(
+                trajectory.rendered, trajectory.task_id,
+                trajectory.env_fingerprint)
+            path = self._path(key)
+            if os.path.exists(path):
+                self._count("trajectories_dedup")
+                return None
+            payload = self._prepare(trajectory, key)
+            t0 = time.time()
+            tmp: Optional[str] = None
+            try:
+                # A sibling named per-thread: two threads in one process would
+                # otherwise write the same tmp file and a torn rename could land
+                # a partial record. Unique tmp keeps every write whole.
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+                with open(tmp, "w", encoding="utf-8") as fh:
+                    json.dump(payload.to_dict(), fh, sort_keys=True,
+                              default=str, allow_nan=False)
+                os.replace(tmp, path)
+                self._count("trajectories_recorded")
+                self._count("trajectory_write_seconds", time.time() - t0)
+                return payload.trace_id
+            except OSError:
+                self._count("trajectory_write_failures")
+                return None
+            finally:
+                # A failed rename (target directory vanished, cross-device move)
+                # leaves the tmp behind; clean it, but never at the cost of the
+                # record's own error path.
+                if tmp is not None:
+                    try:
+                        if os.path.exists(tmp):
+                            os.remove(tmp)
+                    except OSError:
+                        pass
 
     def _prepare(self, trajectory: Trajectory, key: str) -> Trajectory:
         """Enforce the store's caps and privacy before writing.

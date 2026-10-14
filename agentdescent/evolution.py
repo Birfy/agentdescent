@@ -910,7 +910,8 @@ def undescribable_actor(which: str = "run"):
         "docs/execution.md).")
 
 
-def _spec_for(engine: "_Engine", artifact, task: Task):
+def _spec_for(engine: "_Engine", artifact, task: Task,
+              rendered: Optional[str] = None):
     """Describe one rollout, as completely as `evolve()`'s arguments allow.
 
     Everything the far side needs is here except the two things `evolve()` was
@@ -918,12 +919,15 @@ def _spec_for(engine: "_Engine", artifact, task: Task):
     resolved, rather than as a plausible-looking default: a spec that quietly
     names *some* actor turns "this executor cannot be driven from `evolve()`"
     into a finished run measuring the wrong thing.
-    """
+
+    ``rendered`` may be passed in so the worker records exactly the string the
+    executor ships, instead of rendering twice for the same snapshot."""
     from .policies import SandboxSpec
     from .workspec import Ref, RolloutSpec
 
     return RolloutSpec(
-        rendered=artifact.render(), task=task,
+        rendered=artifact.render() if rendered is None else rendered,
+        task=task,
         run=Ref("agentdescent.evolution:undescribable_actor", {"which": "run"}),
         reward=Ref("agentdescent.evolution:undescribable_actor", {"which": "reward"}),
         sandbox=engine.sandbox_spec or SandboxSpec())
@@ -3275,7 +3279,8 @@ def evolve(
             # The rollout is the part that can move elsewhere. Everything around
             # it -- which task, what the output implies, who is told about it --
             # reads or writes state that has to stay in this process.
-            outcome = eng.executor.rollout(_spec_for(eng, mine, task))
+            rendered = mine.render()
+            outcome = eng.executor.rollout(_spec_for(eng, mine, task, rendered))
             if not outcome.ok:
                 raise _rollout_failure(outcome)
             output = outcome.output
@@ -3287,7 +3292,7 @@ def evolve(
             # is off (or the write deduped/failed) -- that empty is what the
             # card's trace_ids below will carry.
             trace = eng._record_rollout(
-                artifact_id=artifact_id, rendered=mine.render(), task=task,
+                artifact_id=artifact_id, rendered=rendered, task=task,
                 base_version={artifact_id: mine_v}, purpose="rollout",
                 output=output, reward=score, wallclock=outcome.seconds,
                 worker_id=f"w{unit.worker}", lease_id=outcome.lease_id)
@@ -3359,18 +3364,23 @@ def evolve(
             if self_verify and governor.candidate_worth(_allocator_context(
                     diff, adv, score, getattr(mine, "blast_radius", 0.2))):
                 t_self = time.time()
-                after = _checked_reward(
-                    reward(task, run(mine.apply(diff).render(), task)), task)
+                # The candidate's render is computed once and used for both the
+                # rollout and the record, so the trajectory and the measurement
+                # agree by construction.
+                rendered_after = mine.apply(diff).render()
+                after_output = run(rendered_after, task)
+                after = _checked_reward(reward(task, after_output), task)
                 delta = after - score
                 # The self-verify re-run is itself evidence: it is the first
                 # measurement of the *candidate*, against the same task, and a
                 # learning consumer reads it exactly because it predates the
-                # gate's own (cheaper) view.
+                # gate's own (cheaper) view. The boundary record carries the
+                # provider's output, not just the score -- the same contract as
+                # the rollout path.
                 self_trace = eng._record_rollout(
-                    artifact_id=artifact_id,
-                    rendered=mine.apply(diff).render(), task=task,
+                    artifact_id=artifact_id, rendered=rendered_after, task=task,
                     base_version={artifact_id: mine_v}, purpose="self_verify",
-                    output=None, reward=after, wallclock=time.time() - t_self,
+                    output=after_output, reward=after, wallclock=time.time() - t_self,
                     worker_id=f"w{unit.worker}")
             else:
                 delta = 0.0

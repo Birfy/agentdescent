@@ -131,11 +131,14 @@ def test_concurrent_writers_of_one_identity_land_one_file(tmp_path):
     for t in threads:
         t.join()
     assert store.count() == 1
-    # threads that lost the race dedupe (None); the winners all agree on one id
+    # The exists-check + write pair is locked, so exactly one writer records
+    # and the rest dedupe -- the counters say precisely that, not "n writes
+    # happened and one file survived".
     written = {r for r in results if r is not None}
     assert len(written) == 1
     s = meter.snapshot()
-    assert s.trajectories_recorded + s.trajectories_dedup == n
+    assert s.trajectories_recorded == 1
+    assert s.trajectories_dedup == n - 1
     assert s.trajectory_write_failures == 0
     back = store.get(next(iter(written)))
     assert back is not None and back.rendered == "shared"
@@ -325,6 +328,11 @@ def test_evolve_records_gate_evals_and_self_verify(tmp_path):
     store = TrajectoryStore(result.trajectories_path)
     purposes = {r.purpose for r in store.iter_records()}
     assert purposes >= {PURPOSE_ROLLOUT, PURPOSE_EVAL, PURPOSE_SELF_VERIFY}
+    # The self-verify boundary record carries the provider's output -- the same
+    # contract as the rollout path -- so offline consumers see the candidate's
+    # answer, not just the score it earned.
+    for rec in store.iter_records(purpose=PURPOSE_SELF_VERIFY):
+        assert rec.output is not None
 
 
 def test_trajectories_are_off_by_default(tmp_path):

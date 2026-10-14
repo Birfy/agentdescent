@@ -746,7 +746,10 @@ def async_evolve(
             predicted = estimator.estimate(cost) if estimator is not None else 0.0
             t_start = time.time()
             try:
-                output = eng.run(artifact.render(), task)
+                # Render once: the same string feeds the provider, the sampler
+                # and the trajectory record, so all three agree by construction.
+                rendered = artifact.render()
+                output = eng.run(rendered, task)
                 score = _checked_reward(eng.reward(task, output), task)
                 eng.meter.add("rollouts")
                 eng.meter.add("rollout_seconds", time.time() - t_start)
@@ -755,7 +758,7 @@ def async_evolve(
                 # recording is off / deduped / the write failed -- that empty is
                 # what the card's trace_ids carry.
                 trace = eng._record_rollout(
-                    artifact_id=eng.artifact_id, rendered=artifact.render(),
+                    artifact_id=eng.artifact_id, rendered=rendered,
                     task=task, base_version={eng.artifact_id: base_v},
                     purpose="rollout", output=output, reward=score,
                     wallclock=time.time() - t_start, worker_id=f"w{wid}")
@@ -787,14 +790,19 @@ def async_evolve(
                                         diff, adv,
                                         getattr(artifact, "blast_radius", 0.2))):
                                 t_self = time.time()
+                                # The candidate's render is computed once for
+                                # both the rollout and the record, so the
+                                # trajectory and the measurement agree.
+                                rendered_after = artifact.apply(diff).render()
+                                after_output = eng.run(rendered_after, task)
                                 after = _checked_reward(
-                                    eng.reward(task, eng.run(artifact.apply(diff).render(), task)), task)
+                                    eng.reward(task, after_output), task)
                                 delta = after - score
                                 self_trace = eng._record_rollout(
                                     artifact_id=eng.artifact_id,
-                                    rendered=artifact.apply(diff).render(),
+                                    rendered=rendered_after,
                                     task=task, base_version={eng.artifact_id: base_v},
-                                    purpose="self_verify", output=None,
+                                    purpose="self_verify", output=after_output,
                                     reward=after, wallclock=time.time() - t_self,
                                     worker_id=f"w{wid}")
                             else:
