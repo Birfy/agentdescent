@@ -6,6 +6,10 @@ fetch_text are exercised without a network.
 
 import json
 import os
+import subprocess
+import sys
+
+import pytest
 
 from agentdescent import dataloader as dl
 
@@ -348,7 +352,6 @@ def test_a_torn_modelscope_entry_is_refetched_and_replaced(tmp_path, monkeypatch
 
 
 def test_a_non_json_response_raises_and_is_never_cached(tmp_path, monkeypatch):
-    import pytest
     monkeypatch.setattr(dl, "CACHE_ROOT", str(tmp_path))
     fake, calls = _counting_reader(b"<html>502 Bad Gateway</html>")
     monkeypatch.setattr(dl, "_read_url", fake)
@@ -360,7 +363,6 @@ def test_a_non_json_response_raises_and_is_never_cached(tmp_path, monkeypatch):
 
 
 def test_a_failed_cache_write_leaves_no_temp_file(tmp_path, monkeypatch):
-    import pytest
     monkeypatch.setattr(dl, "CACHE_ROOT", str(tmp_path))
     monkeypatch.setattr(dl, "_read_url", lambda url, timeout: b"payload")
 
@@ -377,8 +379,6 @@ def test_a_cache_hit_does_not_depend_on_the_locale_encoding(tmp_path):
     """The first call parses bytes; the cached call used text-mode ``open()``,
     which decodes with the locale codec (cp1252 on Windows) and failed on
     non-ASCII rows. Simulated with an ASCII locale and UTF-8 mode off."""
-    import subprocess
-    import sys
     script = (
         "import json, sys\n"
         "from agentdescent import dataloader as dl\n"
@@ -399,3 +399,13 @@ def test_a_cache_hit_does_not_depend_on_the_locale_encoding(tmp_path):
                           env=env, capture_output=True, text=True, timeout=60)
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == "'\\u65e5\\u672c\\u8a9e'"
+
+
+def test_an_entry_name_near_name_max_still_caches(tmp_path, monkeypatch):
+    """The temp file is a short sibling, so a 250-byte entry name that the
+    filesystem accepts is not broken by the atomic write's suffix."""
+    monkeypatch.setattr(dl, "CACHE_ROOT", str(tmp_path))
+    monkeypatch.setattr(dl, "_read_url", lambda url, timeout: b"payload")
+    name = "n" * 250
+    assert dl.fetch_bytes("http://x/y", filename=name) == b"payload"
+    assert [os.path.basename(p) for p in _cache_files(tmp_path)] == [name]

@@ -29,7 +29,7 @@ import os
 import warnings
 import random
 import re
-import threading
+import tempfile
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -216,9 +216,12 @@ def _write_cache(path: str, data: bytes) -> None:
     full disk -- and a concurrent reader could see a half-written one -- and
     since a cache hit is just ``os.path.exists``, that file was served forever.
     """
-    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+    # A short unique sibling, not `path + suffix`: an entry name near NAME_MAX
+    # (255 bytes on most filesystems) must not fail only because of the temp.
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path) or ".", prefix=".ad-",
+                               suffix=".tmp")
     try:
-        with open(tmp, "wb") as f:
+        with os.fdopen(fd, "wb") as f:
             f.write(data)
         os.replace(tmp, path)
     except BaseException:
