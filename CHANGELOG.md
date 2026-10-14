@@ -8,6 +8,21 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- `kind="skill_dir"` now gates candidates structurally before any rollout
+  (#246): a diff that deletes `SKILL.md`, drops its frontmatter, or breaks the
+  Agent Skills `name` / `description` / `compatibility` rules (or renames the
+  skill) is rejected and counted in `FileTree.structural_rejections` by reason.
+  New `agentdescent.skillspec` (`validate_skill_tree`, `SkillTreeValidator`,
+  dependency-free) and a general `FileTree(validators=...)` hook. Skipped with
+  a note when the initial skill does not pass; opt out with
+  `validate_skill: false`. The gate also covers model-written merges:
+  `ReflectiveFusion` asks the strategy's new `FileTree.check_candidate` before
+  returning a synthesised union, and a refused one falls back to ranking. Header
+  values a YAML loader would refuse or read as non-text (unterminated quotes,
+  invalid `\` escapes, text after a closing quote, `[...]` / `{...}`, unquoted
+  `: `, reserved first characters, and plain `null` / `true` / number / date
+  values) are `frontmatter-malformed`; a BOM and inline `# comments` (even ones
+  containing a colon) are tolerated.
 - `Diff.rationale` carries the FileTree reflector's reason into the ledger
   commit message and the ReplayAwareProposal rejected-evidence note (#247).
   `parse_proposal` returns edits plus rationale; `parse_edits` stays a thin
@@ -56,6 +71,11 @@ All notable changes to AgentDescent are documented here. The format follows
   already-paid rollout `ATTEMPTS` times before failing the gate.
 
 - `TrajectoryStore.get` / `path_for` round-trip `trace_id`s whose `artifact_id` contains a colon by parsing with `rsplit(":", 1)` (#257). The key is always a hex digest; a leading split treated a namespaced id as part of the key and returned ``None`` for a record that was on disk.
+
+- `dataloader` cache entries are written atomically (temp file + `os.replace`),
+  read back as bytes instead of locale-decoded text, and refetched when they do
+  not parse; a fresh non-JSON response is parsed before caching so it can no
+  longer poison `hf_rows` / `hf_rows_modelscope` (#255).
 
 - Container sandbox allowlisted env vars are forwarded as `--env NAME` so
   credential values no longer appear on the `docker`/`podman` argv (`ps`)

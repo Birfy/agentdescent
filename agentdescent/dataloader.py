@@ -29,6 +29,7 @@ import os
 import warnings
 import random
 import re
+import tempfile
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -194,16 +195,41 @@ def fetch_bytes(url: str, *, cache_subdir: str = "raw", filename: Optional[str] 
     is ignored and the response is not written — matching :func:`hf_rows` /
     ``_rows_payload`` bypass semantics.
     """
-    filename = filename or _slug(url)[-180:]
-    path = cache_path(cache_subdir, filename)
+    path = _raw_cache_path(url, cache_subdir, filename)
     if cache and os.path.exists(path):
         with open(path, "rb") as f:
             return f.read()
     data = _read_url(url, timeout)
     if cache:
-        with open(path, "wb") as f:
-            f.write(data)
+        _write_cache(path, data)
     return data
+
+
+def _raw_cache_path(url: str, cache_subdir: str, filename: Optional[str]) -> str:
+    return cache_path(cache_subdir, filename or _slug(url)[-180:])
+
+
+def _write_cache(path: str, data: bytes) -> None:
+    """Write a cache entry atomically: readers see the whole response or none.
+
+    Writing straight into ``path`` left a truncated file after Ctrl-C, OOM or a
+    full disk -- and a concurrent reader could see a half-written one -- and
+    since a cache hit is just ``os.path.exists``, that file was served forever.
+    """
+    # A short unique sibling, not `path + suffix`: an entry name near NAME_MAX
+    # (255 bytes on most filesystems) must not fail only because of the temp.
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path) or ".", prefix=".ad-",
+                               suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def fetch_text(url: str, *, cache_subdir: str = "raw", filename: Optional[str] = None,
@@ -227,15 +253,36 @@ def _rows_payload(dataset: str, config: str, split: str, offset: int, length: in
                   *, cache: bool, timeout: float) -> dict:
     subdir = os.path.join("hf", _slug(dataset))
     fname = f"{_slug(config)}_{split}_{offset}_{length}.json"
-    path = cache_path(subdir, fname)
+    return _cached_json(cache_path(subdir, fname),
+                        rows_url(dataset, config, split, offset, length),
+                        cache=cache, timeout=timeout)
+
+
+def _cached_json(path: str, url: str, *, cache: bool, timeout: float) -> Any:
+    """``url``'s JSON body, served from / stored at the cache entry ``path``.
+
+    * The entry is read as bytes: it holds the server's raw UTF-8, and a
+      text-mode ``open()`` decodes with the locale's codec (cp1252 / cp936 on
+      Windows), so a cache hit used to fail on text the first call returned.
+    * An entry that does not parse (torn by an interrupted write, or a non-JSON
+      body cached by an older version) is refetched and replaced, not raised on
+      forever.
+    * A fresh response is parsed *before* it is cached, so a non-JSON body
+      raises and never reaches the cache.
+    * ``cache=False`` neither reads nor writes the entry.
+    """
     if cache and os.path.exists(path):
-        with open(path) as f:
-            return json.load(f)
-    data = _read_url(rows_url(dataset, config, split, offset, length), timeout)
+        with open(path, "rb") as f:
+            cached = f.read()
+        try:
+            return json.loads(cached)
+        except ValueError:
+            pass
+    data = _read_url(url, timeout)
+    payload = json.loads(data)
     if cache:
-        with open(path, "wb") as f:
-            f.write(data)
-    return json.loads(data)
+        _write_cache(path, data)
+    return payload
 
 
 def hf_rows(dataset: str, split: str, *, config: str = "default", limit: int = 100,
@@ -321,9 +368,8 @@ def hf_rows_modelscope(url: str = MODELSCOPE_HOTPOTQA_URL, *,
     cache entry is ignored and the fresh response is not written back — the
     same bypass contract as :func:`hf_rows`.
     """
-    data = fetch_bytes(url, cache_subdir="modelscope", timeout=timeout,
-                       cache=cache)
-    rows = json.loads(data)
+    rows = _cached_json(_raw_cache_path(url, "modelscope", None), url,
+                        cache=cache, timeout=timeout)
     out: List[dict] = []
     for r in rows[:limit]:
         out.append({**r, "context": _hotpotqa_context_to_dict(r.get("context", []))})

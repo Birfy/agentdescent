@@ -828,12 +828,14 @@ FileTree(
     frozen: Sequence[str] = (),
     max_files_per_diff: int = 2,
     max_file_bytes: int = 28000,
-    planned_paths: Sequence[str] = ()
+    planned_paths: Sequence[str] = (),
+    validators: Sequence[Callable[[Mapping[str, str]], Optional[str]]] = ()
 ) -> None
 ```
 
 | method | what it does |
 |---|---|
+| `check_candidate(state: Mapping[str, str], ops: Mapping[str, Optional[str]]) -> Optional[str]` | Run `validators` on `state` with `ops` applied. |
 | `frozen_files(source: Mapping[str, str]) -> Dict[str, str]` | The pristine content of every frozen path, for the runner's overlay. |
 | `keys() -> Sequence[str]` | The declared key space, for `TensorParallel`. |
 | `writable(path: str) -> bool` | May the loop write this path? `frozen` beats `editable`. |
@@ -3068,6 +3070,7 @@ EvolveSpec(
     editable: Sequence[str] = ('**',),
     frozen: Sequence[str] = (),
     max_files_per_diff: int = 2,
+    validate_skill: bool = True,
     entrypoint: Sequence[str] = (),
     setup_cmd: Sequence[str] = (),
     test_cmd: Sequence[str] = ('python', '-m', 'pytest', '-q'),
