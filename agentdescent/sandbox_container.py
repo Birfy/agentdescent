@@ -263,13 +263,19 @@ class ContainerProvider:
         if spec.cpu:
             cmd += ["--cpus", str(spec.cpu)]
 
-        # Names only ever leave the host; values are read here and passed one at a
-        # time. Nothing bulk (`--env-file`, `--env` without a value) is used, so a
-        # variable that is not on the list cannot arrive by accident.
+        # Allowlisted names only; never `--env-file` or a dump of the host env.
+        # Forward by name (`--env NAME`) so credential values never land on the
+        # argv (visible in `ps`). Docker/Podman read each value from the client
+        # process environment at `run` time. Missing names are skipped so an
+        # unset allowlist entry does not create an empty container variable.
+        # Podman treats a valueless `--env NAME*` as "import every host var with
+        # that prefix", which would leak non-allowlisted credentials -- reject
+        # any allowlist entry that ends in `*` before forwarding.
         for name in spec.env_allowlist:
-            value = os.environ.get(name)
-            if value is not None:
-                cmd += ["--env", f"{name}={value}"]
+            if name.endswith("*"):
+                continue
+            if os.environ.get(name) is not None:
+                cmd += ["--env", name]
 
         image = spec.image or self.image
         # Idle forever; the work arrives via `exec`. `--init` above reaps whatever

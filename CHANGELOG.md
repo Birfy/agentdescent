@@ -21,6 +21,13 @@ All notable changes to AgentDescent are documented here. The format follows
   values a YAML loader would refuse (unterminated quotes, `[...]` / `{...}`,
   unquoted `: `) are `frontmatter-malformed`; a BOM and inline `# comments` are
   tolerated.
+- `Diff.rationale` carries the FileTree reflector's reason into the ledger
+  commit message and the ReplayAwareProposal rejected-evidence note (#247).
+  `parse_proposal` returns edits plus rationale; `parse_edits` stays a thin
+  wrapper. Fused/synth diffs concatenate parent rationales (deduped, capped).
+  Rationales never enter `diff_id`. Control characters (NUL included) and
+  lone surrogates are stripped from rationales so `git commit` cannot crash on
+  them, and `parse_proposal` is exported from the package root.
 
 - Add the RRSI cosine-annealed L0 edit-budget schedule (`examples/rrsi/schedule.py`)
   adapted from the pinned Google release, with endpoint / float-guard / bound
@@ -32,6 +39,13 @@ All notable changes to AgentDescent are documented here. The format follows
   `docs/algo-rrsi.md`.
 
 ### Fixed
+
+- Container sandbox allowlisted env vars are forwarded as `--env NAME` so
+  credential values no longer appear on the `docker`/`podman` argv (`ps`)
+  (#244). Non-allowlisted names and `--env-file` remain forbidden. Allowlist
+  entries ending in `*` are rejected before forwarding: Podman expands bare
+  `--env PREFIX*` to every matching host variable, which would leak
+  non-allowlisted credentials.
 
 - `CallBudget` default floor is capped at `base`, so a configured ceiling below
   256 can no longer be silently raised above what the caller agreed to (#234).

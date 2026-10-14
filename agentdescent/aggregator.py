@@ -42,7 +42,8 @@ from typing import (Any, Callable, Deque, Dict, List, Optional, Protocol, Tuple,
                     Union, runtime_checkable)
 
 from .evolvable import (
-    ContractError, Diff, EvidenceCard, Evolvable, VersionVector, vv_staleness,
+    ContractError, Diff, EvidenceCard, Evolvable, VersionVector,
+    combined_rationale, rationale_paragraph, vv_staleness,
 )
 from .defaults import (
     DefaultAcceptance, DefaultConflict, DefaultFusion, DefaultPromotion,
@@ -607,7 +608,23 @@ def fuse_diffs(diffs: List[Diff]) -> Diff:
     ids = "+".join(sorted(d.diff_id for d in diffs))
     breaking = any(d.contract_breaking for d in diffs)
     return Diff(diff_id=f"fused({ids})", target=diffs[0].target, ops=ops,
-                contract_breaking=breaking, author="aggregator")
+                contract_breaking=breaking, author="aggregator",
+                rationale=combined_rationale(diffs))
+
+
+def merge_commit_message(diff: Diff, artifact_id: str) -> str:
+    """Ledger commit subject (+ optional rationale body) for an accepted Diff.
+
+    Without a rationale this is exactly ``merge {diff_id} -> {artifact_id}`` —
+    the historical message every non-FileTree strategy still produces. With one,
+    the rationale is appended as a single-paragraph body so ``git log`` on the
+    ledger carries *why* the change landed.
+    """
+    subject = f"merge {diff.diff_id} -> {artifact_id}"
+    body = rationale_paragraph(getattr(diff, "rationale", "") or "")
+    if not body:
+        return subject
+    return f"{subject}\n\n{body}"
 
 
 def install_policy(policy: Any, verifier: Any, config: "AggregatorConfig") -> None:
@@ -1251,7 +1268,7 @@ class Aggregator:
             try:
                 _, new_version = self.ledger.commit(
                     candidate, base_vv, branch=branch,
-                    message=f"merge {diff.diff_id} -> {artifact_id}")
+                    message=merge_commit_message(diff, artifact_id))
                 return new_version
             except CASConflict:
                 if self.meter is not None:
