@@ -225,11 +225,18 @@ def trajectory_key(rendered: str, task_id: str, env_fingerprint: str = "") -> st
     identically share a trajectory even when their internal states differ --
     the exact property that makes the evaluation cache correct, and that makes
     re-running a rollout idempotent.
+
+    The parts are encoded **length-prefixed**, not separator-joined: a NUL (or
+    any other byte) inside one part must not be able to collide with the
+    boundary between two parts. ``('a\\x00b', 'c')`` and ``('a', 'b\\x00c')``
+    are different triples and must hash differently, which a shared-separator
+    stream cannot guarantee.
     """
     digest = hashlib.sha256()
     for part in (rendered, task_id, env_fingerprint):
-        digest.update(part.encode("utf-8", "replace"))
-        digest.update(b"\x00")           # a separator: no two joined parts collide
+        data = part.encode("utf-8", "replace")
+        digest.update(len(data).to_bytes(8, "big"))   # unambiguous framing
+        digest.update(data)
     return digest.hexdigest()
 
 

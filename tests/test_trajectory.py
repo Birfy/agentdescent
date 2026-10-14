@@ -100,6 +100,23 @@ def test_identity_is_the_cache_triple_and_dedupes(tmp_path):
     assert store.count() == 4
 
 
+def test_identity_is_unambiguous_for_embedded_nuls(tmp_path):
+    # The identity encodes three parts; a byte that can appear *inside* a part
+    # must never be able to double as a part boundary. These two triples differ
+    # only in which field holds the NUL, and must hash differently -- with a
+    # shared-separator encoding they would collide and the second trajectory
+    # would be silently treated as a duplicate of the first.
+    store = TrajectoryStore(str(tmp_path))
+    t1 = _record(store, rendered="a\x00b", task_id="c", env="")
+    t2 = _record(store, rendered="a", task_id="b\x00c", env="")
+    assert t1 is not None and t2 is not None
+    assert t1 != t2
+    assert store.count() == 2
+    # ordinary identical-input dedup still holds alongside
+    assert _record(store, rendered="a\x00b", task_id="c", env="") is None
+    assert store.count() == 2
+
+
 def test_dedupe_and_identity_are_across_artifacts_by_render(tmp_path):
     # Two artifact ids rendering identically are one evaluation -- the same
     # property the eval cache leans on, and what makes a re-run idempotent.
@@ -333,6 +350,12 @@ def test_evolve_records_gate_evals_and_self_verify(tmp_path):
     # answer, not just the score it earned.
     for rec in store.iter_records(purpose=PURPOSE_SELF_VERIFY):
         assert rec.output is not None
+    # Gate records carry the artifact version they measured -- a downstream
+    # gate/audit consumer must be able to attribute the measurement.
+    eval_recs = list(store.iter_records(purpose=PURPOSE_EVAL))
+    assert eval_recs, "expected gate records"
+    for rec in eval_recs:
+        assert rec.base_version, "gate record missing version attribution"
 
 
 def test_trajectories_are_off_by_default(tmp_path):
@@ -354,6 +377,29 @@ def test_explicit_store_wins_over_the_boolean(tmp_path):
     assert result.trajectories_path == str(tmp_path / "custom")
     assert not os.path.exists(str(tmp_path / "repo" / "trajectories"))
     assert custom.count() >= 1
+    # The engine attached its meter to the caller's store (which had none), so
+    # the run's result accounts for the writes exactly as it does for a store
+    # it built itself -- a run that recorded trajectories and reported zero
+    # would be indistinguishable from one that recorded nothing.
+    assert result.trajectories_recorded >= 1
+
+
+def test_explicit_store_with_its_own_meter_keeps_its_accounting(tmp_path):
+    # A shared store that outlives the run reports into its own totals; the
+    # engine must not clobber a caller-supplied meter. The run's result stays
+    # zero -- the caller chose where the accounting goes.
+    from agentdescent.metrics import Meter
+
+    own = Meter()
+    custom = TrajectoryStore(str(tmp_path / "custom"), meter=own)
+    run, reward, propose = _offline_actors()
+    result = evolve(_tasks(), reward, run=run, propose=propose, rounds=1,
+                    n_workers=2, repo_path=str(tmp_path / "repo"),
+                    trajectory_store=custom)
+    assert custom.count() >= 1
+    assert own.snapshot().trajectories_recorded >= 1
+    assert result.trajectories_recorded == 0
+    assert custom.meter is own          # the caller's meter was left in place
 
 
 def test_async_evolve_records_rollouts(tmp_path):

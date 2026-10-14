@@ -676,6 +676,13 @@ class _Runtime:
             artifact_id=artifact.id, task_id=task.id,
             env_fingerprint=self.env_fingerprint,
             rendered=rendered, purpose=PURPOSE_EVAL,
+            # Version attribution: the gate measured *this* artifact version,
+            # and a downstream gate/audit consumer has to know which one. The
+            # rollout records get the worker's base_version; the gate gets the
+            # artifact's own version, which is what the candidate being scored
+            # actually was.
+            base_version=json.dumps({artifact.id: artifact.version},
+                                    sort_keys=True),
             output=output, reward=value, cost_wallclock=wallclock))
 
 
@@ -2195,7 +2202,19 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     # `record_trajectories=True` alongside it would quietly record twice into
     # different homes.
     _traj_store = trajectory_store
-    if _traj_store is None and record_trajectories:
+    if _traj_store is not None:
+        # An explicit store may carry its own meter (a shared store outlives
+        # the run and reports into its own totals); leave one that is already
+        # set. Without one, attach the run's meter so `result` accounts for
+        # writes/dedup/failures exactly as it does for a store the engine
+        # builds -- a run that recorded three trajectories and reported zero
+        # recorded would be indistinguishable from one that recorded nothing.
+        if getattr(_traj_store, "meter", None) is None:
+            try:
+                _traj_store.meter = meter
+            except AttributeError:        # a store without a meter slot
+                pass
+    elif record_trajectories:
         from .trajectory import TrajectoryStore
         _traj_store = TrajectoryStore(os.path.join(repo, "trajectories"),
                                       meter=meter)
