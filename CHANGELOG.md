@@ -27,6 +27,11 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- `dataloader` cache entries are written atomically (temp file + `os.replace`),
+  read back as bytes instead of locale-decoded text, and refetched when they do
+  not parse; a fresh non-JSON response is parsed before caching so it can no
+  longer poison `hf_rows` / `hf_rows_modelscope` (#255).
+
 - Container sandbox allowlisted env vars are forwarded as `--env NAME` so
   credential values no longer appear on the `docker`/`podman` argv (`ps`)
   (#244). Non-allowlisted names and `--env-file` remain forbidden. Allowlist

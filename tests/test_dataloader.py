@@ -294,3 +294,108 @@ def test_fetch_bytes_cache_false_skips_read_and_write(tmp_path, monkeypatch):
     assert dl.fetch_bytes("http://x/y", filename="y.bin") == b"first"
     assert n["n"] == 2
 
+
+
+# ---------------------------------------------------------------------------
+# Cache robustness (#255): torn entries, non-JSON bodies, locale-free reads
+# ---------------------------------------------------------------------------
+
+
+def _cache_files(root):
+    return sorted(os.path.join(d, f) for d, _, fs in os.walk(root) for f in fs)
+
+
+def _counting_reader(body):
+    calls = {"n": 0}
+
+    def fake_read(url, timeout):
+        calls["n"] += 1
+        return body() if callable(body) else body
+
+    return fake_read, calls
+
+
+def test_a_torn_hf_rows_page_is_refetched_and_replaced(tmp_path, monkeypatch):
+    monkeypatch.setattr(dl, "CACHE_ROOT", str(tmp_path))
+    good = json.dumps(_fake_rows_payload(3)).encode()
+    fake, calls = _counting_reader(good)
+    monkeypatch.setattr(dl, "_read_url", fake)
+    dl.hf_rows("ds", "train", limit=3)
+    (path,) = _cache_files(tmp_path)
+    with open(path, "wb") as fh:
+        fh.write(good[:20])                       # interrupted write, old version
+    assert len(dl.hf_rows("ds", "train", limit=3)) == 3
+    assert calls["n"] == 2
+    with open(path, "rb") as fh:
+        assert fh.read() == good                  # entry repaired
+    assert len(dl.hf_rows("ds", "train", limit=3)) == 3
+    assert calls["n"] == 2                        # and served from cache again
+
+
+def test_a_torn_modelscope_entry_is_refetched_and_replaced(tmp_path, monkeypatch):
+    monkeypatch.setattr(dl, "CACHE_ROOT", str(tmp_path))
+    good = json.dumps([{"question": "Q", "answer": "A", "context": [["t", ["s"]]]}]).encode()
+    fake, calls = _counting_reader(good)
+    monkeypatch.setattr(dl, "_read_url", fake)
+    url = "https://example.invalid/hotpotqa.json"
+    dl.hf_rows_modelscope(url=url, limit=1)
+    (path,) = _cache_files(tmp_path)
+    with open(path, "wb") as fh:
+        fh.write(good[:10])
+    assert dl.hf_rows_modelscope(url=url, limit=1)[0]["answer"] == "A"
+    assert dl.hf_rows_modelscope(url=url, limit=1)[0]["answer"] == "A"
+    assert calls["n"] == 2
+
+
+def test_a_non_json_response_raises_and_is_never_cached(tmp_path, monkeypatch):
+    import pytest
+    monkeypatch.setattr(dl, "CACHE_ROOT", str(tmp_path))
+    fake, calls = _counting_reader(b"<html>502 Bad Gateway</html>")
+    monkeypatch.setattr(dl, "_read_url", fake)
+    with pytest.raises(ValueError):
+        dl.hf_rows("ds", "train", limit=3)
+    with pytest.raises(ValueError):
+        dl.hf_rows_modelscope(url="https://example.invalid/x.json", limit=1)
+    assert _cache_files(tmp_path) == []           # nothing poisoned, no temp left
+
+
+def test_a_failed_cache_write_leaves_no_temp_file(tmp_path, monkeypatch):
+    import pytest
+    monkeypatch.setattr(dl, "CACHE_ROOT", str(tmp_path))
+    monkeypatch.setattr(dl, "_read_url", lambda url, timeout: b"payload")
+
+    def boom(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(dl.os, "replace", boom)
+    with pytest.raises(OSError):
+        dl.fetch_bytes("http://x/y", filename="y.bin")
+    assert _cache_files(tmp_path) == []
+
+
+def test_a_cache_hit_does_not_depend_on_the_locale_encoding(tmp_path):
+    """The first call parses bytes; the cached call used text-mode ``open()``,
+    which decodes with the locale codec (cp1252 on Windows) and failed on
+    non-ASCII rows. Simulated with an ASCII locale and UTF-8 mode off."""
+    import subprocess
+    import sys
+    script = (
+        "import json, sys\n"
+        "from agentdescent import dataloader as dl\n"
+        "dl.CACHE_ROOT = sys.argv[1]\n"
+        "body = json.dumps({'rows': [{'row': {'q': '\\u65e5\\u672c\\u8a9e'}}]},"
+        " ensure_ascii=False).encode('utf-8')\n"
+        "dl._read_url = lambda url, timeout: body\n"
+        "a = dl.hf_rows('ds', 'train', limit=1)\n"
+        "b = dl.hf_rows('ds', 'train', limit=1)\n"
+        "assert a == b, (ascii(a), ascii(b))\n"
+        "print(ascii(b[0]['q']))\n"
+    )
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = dict(os.environ, PYTHONCOERCECLOCALE="0", LC_ALL="C", LANG="C",
+               PYTHONPATH=root + os.pathsep + os.environ.get("PYTHONPATH", ""))
+    env.pop("PYTHONUTF8", None)
+    proc = subprocess.run([sys.executable, "-X", "utf8=0", "-c", script, str(tmp_path)],
+                          env=env, capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "'\\u65e5\\u672c\\u8a9e'"
