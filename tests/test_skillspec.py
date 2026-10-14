@@ -316,3 +316,79 @@ def test_a_name_that_differs_from_the_target_directory_gets_a_note(tmp_path):
     _write_skill_md(spec, f"---\nname: {dirname}\ndescription: Shout things.\n---\nBody\n")
     if validate_skill_tree({"SKILL.md": f"---\nname: {dirname}\ndescription: d\n---\n"}) == []:
         assert not any("differs from the target directory" in n for n in compose(spec).notes)
+
+
+# ---------------------------------------------------------------------------
+# Scalar syntax and type: a header YAML would refuse, or load as non-text
+# ---------------------------------------------------------------------------
+
+
+_BAD_SCALARS = [
+    "null", "~", "Null", "true", "yes", "off", "123", "1.5", ".inf", "2024-01-02",
+    '"bad\\q"', '"\\xZZ"', "'it's'", '"a" b', "@x", "*alias", "!tag x", "- a",
+]
+
+
+@pytest.mark.parametrize("value", _BAD_SCALARS)
+def test_non_string_or_unscannable_scalars_are_malformed(value):
+    for key in ("name", "description"):
+        lines = {"name": "name: pdf-audit", "description": "description: Audit PDFs."}
+        lines[key] = f"{key}: {value}"
+        text = "---\n" + lines["name"] + "\n" + lines["description"] + "\n---\nBody\n"
+        assert "frontmatter-malformed" in validate_skill_tree({"SKILL.md": text}), (key, value)
+
+
+@pytest.mark.parametrize("value, decoded", [
+    ("Shout things. # Usage:", "Shout things."),
+    ('"ok\\n"', "ok\n"),
+    ('"caf\\u00e9"', "caf\u00e9"),
+    ("'it''s'", "it's"),
+    ('"a" # trailing comment', "a"),
+    ("a:b", "a:b"),
+    ("2024-1-1", "2024-1-1"),
+])
+def test_valid_string_scalars_are_accepted_and_decoded(value, decoded):
+    text = f"---\nname: pdf-audit\ndescription: {value}\n---\nBody\n"
+    assert validate_skill_tree({"SKILL.md": text}) == []
+    assert parse_skill_frontmatter(text)["description"] == decoded
+
+
+def test_a_bare_comment_value_is_an_empty_description():
+    text = "---\nname: pdf-audit\ndescription: # todo\n---\n"
+    assert validate_skill_tree({"SKILL.md": text}) == ["description-missing"]
+
+
+@pytest.mark.parametrize("value", _BAD_SCALARS + [
+    "Shout things. # Usage:", '"ok\\n"', "'it''s'", '"a" # c', "a:b", "plain text",
+    "Use when:", "a: b", "[a]", '"open',
+])
+def test_agrees_with_pyyaml_on_the_description_scalar(value):
+    yaml = pytest.importorskip("yaml")
+    text = f"---\nname: pdf-audit\ndescription: {value}\n---\n"
+    try:
+        loaded = yaml.safe_load(text.split("---")[1])["description"]
+        yaml_ok = isinstance(loaded, str) and bool(loaded.strip())
+    except yaml.YAMLError:
+        yaml_ok = False
+    assert (validate_skill_tree({"SKILL.md": text}) == []) is yaml_ok
+
+
+@pytest.mark.parametrize("header", [
+    "---\nname: shout-skill\ndescription: null\n---\n",
+    '---\nname: shout-skill\ndescription: "bad\\q"\n---\n',
+])
+def test_invalid_scalars_are_refused_in_diffs_and_synthesised_merges(tmp_path, header):
+    ft, fusion, art, diffs = _contested_skill_merge(tmp_path, header + "Merged body\n")
+    assert fusion._union_of(art, diffs) is None
+    assert _edit(ft, ft.initial(), {"path": "SKILL.md", "content": header + "Body\n"}) is None
+    assert ft.structural_rejections == {"skill-frontmatter-malformed": 2}
+
+
+def test_a_commented_initial_skill_keeps_its_gate(tmp_path):
+    spec = _dir_spec(str(tmp_path))
+    _write_skill_md(spec, "---\nname: shout-skill\ndescription: Shout things. # Usage:\n---\nBody\n")
+    comp = compose(spec)
+    ft = comp.kwargs["strategy"]
+    assert [repr(v) for v in ft.validators] == ["SkillTreeValidator(root_name='shout-skill')"]
+    assert not any("structural gate" in n for n in comp.notes)
+    assert _edit(ft, ft.initial(), {"path": "SKILL.md", "delete": True}) is None

@@ -42,9 +42,10 @@ SKILL_FILE = "SKILL.md"
 SKILL_RULES: Dict[str, str] = {
     "missing-skill-md": "SKILL.md must exist at the root of the skill directory",
     "no-frontmatter": "SKILL.md must start with a closed '---' YAML frontmatter block",
-    "frontmatter-malformed": "'name' / 'description' must be plain YAML strings: no "
-                             "unterminated quotes, no [list] or {mapping} values, "
-                             "and no unquoted ': ' inside a value",
+    "frontmatter-malformed": "'name' / 'description' must be YAML strings: no "
+                             "unterminated quotes or invalid escapes, no [list] or "
+                             "{mapping} values, no unquoted ': ' inside a value, and "
+                             "no unquoted null / true / number / date values",
     "name-missing": "frontmatter needs a non-empty 'name'",
     "name-invalid": "'name' must be 1-64 chars of lowercase letters, digits and "
                     "single hyphens, not starting or ending with a hyphen",
@@ -60,39 +61,121 @@ _BLOCK_SCALAR = re.compile(r"^[|>][+-]?\d*$")
 
 _INLINE_COMMENT = re.compile(r"\s+#.*$")
 
+#: Plain scalars YAML 1.1 (PyYAML's ``safe_load``, which most hosts use)
+#: resolves to something other than a string: null, booleans, ints, floats and
+#: dates. ``description: null`` loads as ``None``; ``name: 123`` as an int.
+_NON_STRING_PLAIN = re.compile(r"""^(?:
+    ~|null|Null|NULL
+  | yes|Yes|YES|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF
+  | [-+]?0b[01_]+ | [-+]?0x[0-9a-fA-F_]+ | [-+]?0[0-7_]+ | [-+]?(?:0|[1-9][0-9_]*)
+  | [-+]?[1-9][0-9_]*(?::[0-5]?[0-9])+
+  | [-+]?(?:[0-9][0-9_]*)\.[0-9_]*(?:[eE][-+]?[0-9]+)?
+  | [-+]?\.[0-9_]+(?:[eE][-+]?[0-9]+)?
+  | [-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*
+  | [-+]?\.(?:inf|Inf|INF) | \.(?:nan|NaN|NAN)
+  | [0-9]{4}-[0-9]{2}-[0-9]{2}
+  | [0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:[Tt]|[ \t]+)[0-9]{1,2}:[0-9]{2}:[0-9]{2}
+        (?:\.[0-9]*)?(?:[ \t]*(?:Z|[-+][0-9]{1,2}(?::[0-9]{2})?))?
+)$""", re.X)
 
-def _closed_quote(value: str) -> Optional[str]:
-    """The quoted scalar ``value`` without a trailing comment, if it is closed."""
-    for v in (value, _INLINE_COMMENT.sub("", value)):
-        if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"":
-            return v
-    return None
+#: Characters that cannot start a YAML plain scalar (reserved, alias, tag,
+#: directive), or that start a nested block collection when followed by space.
+_BAD_PLAIN_START = ("@", "`", "*", "%", "!", "- ", "? ", ": ")
+
+#: Single-character escapes a YAML double-quoted scalar allows.
+_DQ_ESCAPES = {"0": "\0", "a": "\a", "b": "\b", "t": "\t", "\t": "\t", "n": "\n",
+               "v": "\v", "f": "\f", "r": "\r", "e": "\x1b", " ": " ", '"': '"',
+               "/": "/", "\\": "\\", "N": "\x85", "_": "\xa0", "L": "\u2028",
+               "P": "\u2029"}
+_DQ_HEX = {"x": 2, "u": 4, "U": 8}
+
+
+def _scan_quoted(value: str) -> Optional[str]:
+    """Decode a one-line quoted scalar, or ``None`` if YAML would refuse it.
+
+    The closing quote must be followed by nothing or a ``# comment``. Inside
+    single quotes ``''`` is the only escape; inside double quotes only YAML's
+    escape set is valid (``"bad\\q"`` is a scanner error)."""
+    q = value[0]
+    out: List[str] = []
+    i = 1
+    while i < len(value):
+        c = value[i]
+        if q == "'" and c == "'":
+            if value[i + 1:i + 2] == "'":
+                out.append("'")
+                i += 2
+                continue
+            break
+        if q == '"' and c == '"':
+            break
+        if q == '"' and c == "\\":
+            e = value[i + 1:i + 2]
+            if e in _DQ_ESCAPES:
+                out.append(_DQ_ESCAPES[e])
+                i += 2
+                continue
+            if e in _DQ_HEX:
+                n = _DQ_HEX[e]
+                digits = value[i + 2:i + 2 + n]
+                if len(digits) != n or not re.fullmatch(r"[0-9a-fA-F]+", digits):
+                    return None
+                out.append(chr(int(digits, 16)) if int(digits, 16) <= 0x10FFFF else "")
+                i += 2 + n
+                continue
+            return None
+        out.append(c)
+        i += 1
+    else:
+        return None                        # never closed on this line
+    rest = value[i + 1:]
+    if rest and not re.fullmatch(r"\s+#.*", rest) and rest.strip():
+        return None                        # text after the closing quote
+    return "".join(out)
+
+
+def _plain(value: str) -> str:
+    """A plain scalar without its trailing comment (``# x`` alone is empty)."""
+    if value.startswith("#"):
+        return ""
+    return _INLINE_COMMENT.sub("", value).rstrip()
 
 
 def _unquote(value: str) -> str:
-    quoted = _closed_quote(value)
-    if quoted is not None:
-        return quoted[1:-1]
-    if value[:1] not in "'\"":
-        # A plain scalar ends at " #": `name: pdf-audit  # main` is `pdf-audit`.
-        value = _INLINE_COMMENT.sub("", value)
-    return value
+    if value and value[0] in "'\"":
+        decoded = _scan_quoted(value)
+        if decoded is not None:
+            return decoded
+        return value[1:]
+    # A plain scalar ends at " #": `name: pdf-audit  # main` is `pdf-audit`.
+    return _plain(value)
 
 
 def _malformed(value: str) -> bool:
     """Would a YAML parser refuse this first-line value, or read a non-string?
 
     Not a YAML parser: it catches the cheap, common ways a model-written header
-    stops loading in the host -- an unterminated quote, a flow ``[...]`` /
-    ``{...}`` value, and a plain scalar with ``": "`` in it (YAML reads that as
-    a nested mapping and errors)."""
+    stops loading in the host, or loads as something other than text -- an
+    unterminated quote or invalid ``\\`` escape, text after a closing quote, a
+    flow ``[...]`` / ``{...}`` value, a plain scalar with ``": "`` in it or a
+    trailing ``:`` (YAML reads that as a nested mapping and errors), a
+    reserved/alias/directive first character, and plain values YAML resolves to
+    null / bool / number / date. Colons and type checks look at the value with
+    its ``# comment`` removed, so ``Shout things. # Usage:`` is fine."""
     if not value:
         return False
     if value[0] in "'\"":
-        return _closed_quote(value) is None
+        return _scan_quoted(value) is None
     if value[0] in "[{":
         return True
-    return ": " in _INLINE_COMMENT.sub("", value) or value.endswith(":")
+    plain = _plain(value)
+    if not plain:
+        return False
+    if plain.startswith(_BAD_PLAIN_START) or plain in ("-", "?"):
+        return True
+    if ": " in plain or plain.endswith(":"):
+        return True
+    return bool(_NON_STRING_PLAIN.match(plain))
 
 
 def parse_skill_frontmatter(text: str) -> Optional[Dict[str, str]]:
