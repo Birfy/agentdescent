@@ -24,6 +24,7 @@ are pure so they can be unit-tested without a network.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import warnings
@@ -158,6 +159,18 @@ def _slug(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_")
 
 
+def _rows_cache_component(value: str) -> str:
+    """Bound a page-filename component without aliasing lossy conversions."""
+    slug = _slug(value)
+    if re.fullmatch(r"[A-Za-z0-9._-]*", value) and len(value) <= 48:
+        return value
+    # Retain the original identity when sanitizing or truncating. `~` is
+    # portable but absent from _slug's alphabet, so an ordinary split cannot
+    # impersonate a transformed component by spelling out its digest suffix.
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:32]
+    return f"{slug[:12]}~{digest}"
+
+
 def rows_url(dataset: str, config: str, split: str, offset: int, length: int) -> str:
     """Build the datasets-server ``/rows`` URL (pure)."""
     q = urllib.parse.urlencode({"dataset": dataset, "config": config,
@@ -252,7 +265,16 @@ def fetch_text(url: str, *, cache_subdir: str = "raw", filename: Optional[str] =
 def _rows_payload(dataset: str, config: str, split: str, offset: int, length: int,
                   *, cache: bool, timeout: float) -> dict:
     subdir = os.path.join("hf", _slug(dataset))
-    fname = f"{_slug(config)}_{split}_{offset}_{length}.json"
+    # Preserve existing short config slugs; only the filename is transformed,
+    # never the request. Ordinary filenames retain their existing cache hits.
+    parts = (_slug(config), split, str(offset), str(length))
+    components = tuple(_rows_cache_component(part) for part in parts)
+    # Legacy names always end in an integer length followed by `.json`.
+    # A suffix after that field prevents an old literal split from aliasing a
+    # transformed component. At least one component is <=45 bytes in this
+    # case, so the longer suffix still keeps the full basename <=200 bytes.
+    suffix = ".json" if components == parts else ".v2.json"
+    fname = "_".join(components) + suffix
     return _cached_json(cache_path(subdir, fname),
                         rows_url(dataset, config, split, offset, length),
                         cache=cache, timeout=timeout)

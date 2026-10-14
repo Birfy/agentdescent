@@ -63,6 +63,13 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- HuggingFace row-cache filenames sanitize split names and bound their
+  components (#261), keeping slash-containing and traversal-style splits in
+  one portable cache entry. Lossy conversions include a digest to distinguish
+  split names, and a versioned suffix prevents old raw-split cache entries
+  from aliasing the new names. Existing normal filenames and datasets-server
+  requests are unchanged.
+
 - `TrajectoryStore.get` / `path_for` round-trip `trace_id`s whose `artifact_id` contains a colon by parsing with `rsplit(":", 1)` (#257). The key is always a hex digest; a leading split treated a namespaced id as part of the key and returned ``None`` for a record that was on disk.
 
 - `dataloader` cache entries are written atomically (temp file + `os.replace`),
