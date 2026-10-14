@@ -58,7 +58,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from .evolvable import Diff, Evolvable
+from .evolvable import Diff, Evolvable, combined_rationale
 from .policies import FusionTrial
 
 __all__ = ["MERGE_PROMPT", "KeepContradictions", "ReflectiveFusion",
@@ -262,7 +262,8 @@ class ReflectiveFusion:
             diff_id=f"synth({'+'.join(sorted(d.diff_id for d in diffs))})",
             target=diffs[0].target, ops=ops,
             contract_breaking=any(d.contract_breaking for d in diffs),
-            author="aggregator")
+            author="aggregator",
+            rationale=combined_rationale(diffs))
 
     # -- the merge ----------------------------------------------------------
 

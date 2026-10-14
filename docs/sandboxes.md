@@ -153,7 +153,7 @@ Defaults are closed and opened one field at a time:
 |---|---|
 | `network` | `None`/`"none"` → `--network none`. Only `"inherit"` connects it |
 | `memory_mb` / `cpu` | `--memory` / `--cpus`; unset means no flag, not a default ceiling |
-| `env_allowlist` | variable **names**; values are read on the host and passed one at a time. Nothing is inherited in bulk |
+| `env_allowlist` | variable **names**; each set name is forwarded as `--env NAME` so values never land on the argv (`ps`). Nothing is inherited in bulk (`--env-file` stays forbidden) |
 | `image` | overrides the provider's image per rollout |
 
 Always on: read-only root with a writable `/work` and `/tmp`, `--cap-drop ALL`,

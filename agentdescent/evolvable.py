@@ -22,8 +22,9 @@ template, a harness module, or a learned verifier.  What evolves is decided by
 from __future__ import annotations
 
 import hashlib
+import unicodedata
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Tuple, runtime_checkable
+from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Sequence, Tuple, runtime_checkable
 
 
 class ContractError(Exception):
@@ -98,6 +99,12 @@ class Diff:
     domain (:mod:`agentdescent.domains.router`) it is a mapping of key -> value
     edits, but the aggregator never inspects it directly -- it always goes
     through the owning :class:`Evolvable`.
+
+    ``rationale`` is a short human-readable reason for the change (from a
+    FileTree reflector, or concatenated when diffs are fused). It is
+    metadata only: it must **not** enter ``diff_id`` / content fingerprints,
+    so dedup and the eval cache stay unchanged. Empty for strategies that
+    never produce one.
     """
 
     diff_id: str
@@ -105,11 +112,48 @@ class Diff:
     ops: Dict[str, Any] = field(default_factory=dict)
     contract_breaking: bool = False
     author: str = "unknown"  # which worker produced it
+    rationale: str = ""
 
     def size(self) -> int:
         """A crude "number of edited lines" proxy used by the trust-region
         cap (design doc, section 4.4)."""
         return len(self.ops)
+
+
+_RATIONALE_CAP = 500
+
+
+def rationale_paragraph(text: Any, *, cap: int = _RATIONALE_CAP) -> str:
+    """Collapse a rationale to a single paragraph, capped for commit messages.
+
+    Non-strings and blanks become ``""``. Whitespace (including newlines) is
+    folded so a ledger commit subject/body stays one paragraph. Control
+    characters (NUL included) become spaces and lone surrogates are dropped:
+    a reflector can legally emit ``"\\u0000"`` or ``"\\ud800"`` in JSON, and
+    either would crash ``git commit -m`` (``embedded null byte`` /
+    ``UnicodeEncodeError``) for an otherwise valid merge.
+    """
+    if not isinstance(text, str):
+        return ""
+    text = "".join(
+        " " if unicodedata.category(ch) == "Cc"
+        else "" if unicodedata.category(ch) == "Cs"
+        else ch
+        for ch in text)
+    one = " ".join(text.split())
+    if len(one) > cap:
+        one = one[:cap].rstrip()
+    return one
+
+
+def combined_rationale(diffs: Sequence["Diff"], *, cap: int = _RATIONALE_CAP) -> str:
+    """Deduped concatenation of parent rationales for a fused / synth Diff."""
+    parts: List[str] = []
+    for d in diffs:
+        r = rationale_paragraph(getattr(d, "rationale", "") or "", cap=cap)
+        if r and r not in parts:
+            parts.append(r)
+    return rationale_paragraph("; ".join(parts), cap=cap)
 
 
 @dataclass

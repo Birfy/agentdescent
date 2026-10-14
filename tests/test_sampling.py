@@ -382,6 +382,20 @@ def test_default_note_is_readable():
     assert "src/x.py" in note
     assert "{'a': 3}" in note
     assert "+0.250" in note
+    assert "rationale:" not in note  # no rationale on this card
+
+
+def test_default_note_includes_rejected_rationale():
+    from agentdescent.replay import _default_note
+    from agentdescent.evolvable import Diff, EvidenceCard
+    card = EvidenceCard(
+        diff=Diff(diff_id="d", target="a", ops={"SKILL.md": "body"}, author="w",
+                  rationale="  do not hard-code the gold  "),
+        base_version={"a": 1}, touched=["a"], before_after_delta=-0.1,
+        trajectory_refs=[])
+    note = _default_note(card)
+    assert "SKILL.md" in note
+    assert "rationale: do not hard-code the gold" in note
 
 # ---------------------------------------------------------------------------
 # Integration: ReplaySampler + aggregator (design doc, test 6)
