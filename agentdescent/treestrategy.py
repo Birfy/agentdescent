@@ -22,8 +22,10 @@ from __future__ import annotations
 
 import json
 import re
+import threading
+from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
 from .agents import Completion
 from .evolvable import Diff, stable_hash
@@ -170,9 +172,30 @@ class FileTree:
     #: violation by construction. Under DataParallel (the default) any editable
     #: path can be created without declaring it here.
     planned_paths: Sequence[str] = ()
+    #: Structural checks run on the *candidate* tree (``state`` with the diff's
+    #: ops applied) before a Diff is returned. Each takes the candidate mapping
+    #: and returns ``None`` when it is acceptable or a short reason string. A
+    #: rejected proposal yields ``None`` -- it is never measured -- and is
+    #: counted in :attr:`structural_rejections` under that reason rather than
+    #: silently swallowed. ``kind="skill_dir"`` wires in
+    #: :func:`~agentdescent.skillspec.skill_tree_validator` by default.
+    validators: Sequence[Callable[[Mapping[str, str]], Optional[str]]] = ()
+    #: Reason -> number of proposals a validator rejected.
+    structural_rejections: "Counter[str]" = field(
+        default_factory=Counter, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         self.initial_files = {safe_relpath(k): v for k, v in dict(self.initial_files).items()}
+        self._rejections_lock = threading.Lock()
+
+    def __getstate__(self) -> Dict[str, Any]:
+        state = dict(self.__dict__)
+        state.pop("_rejections_lock", None)
+        return state
+
+    def __setstate__(self, state: Dict[str, Any]) -> None:
+        self.__dict__.update(state)
+        self._rejections_lock = threading.Lock()
 
     # -- the Strategy protocol ---------------------------------------------
 
@@ -210,11 +233,29 @@ class FileTree:
                 ops[path] = content
         if not ops or len(ops) > self.max_files_per_diff:
             return None
+        if self.validators and self._structurally_rejected(state, ops):
+            return None
         fingerprint = stable_hash(tuple(sorted((k, v) for k, v in ops.items())))
         return Diff(diff_id=f"{author}:{fingerprint & 0xFFFFFFFF:08x}:{base_version}",
                     target=target, ops=dict(ops), author=author)
 
     # -- helpers ------------------------------------------------------------
+
+    def _structurally_rejected(self, state: Mapping[str, str],
+                               ops: Mapping[str, Optional[str]]) -> bool:
+        candidate = dict(state)
+        for path, content in ops.items():
+            if content is None:
+                candidate.pop(path, None)
+            else:
+                candidate[path] = content
+        for check in self.validators:
+            reason = check(candidate)
+            if reason:
+                with self._rejections_lock:
+                    self.structural_rejections[str(reason)] += 1
+                return True
+        return False
 
     def writable(self, path: str) -> bool:
         """May the loop write this path? ``frozen`` beats ``editable``."""

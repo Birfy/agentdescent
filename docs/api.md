@@ -819,7 +819,8 @@ FileTree(
     frozen: Sequence[str] = (),
     max_files_per_diff: int = 2,
     max_file_bytes: int = 28000,
-    planned_paths: Sequence[str] = ()
+    planned_paths: Sequence[str] = (),
+    validators: Sequence[Callable[[Mapping[str, str]], Optional[str]]] = ()
 ) -> None
 ```
 
@@ -3053,6 +3054,7 @@ EvolveSpec(
     editable: Sequence[str] = ('**',),
     frozen: Sequence[str] = (),
     max_files_per_diff: int = 2,
+    validate_skill: bool = True,
     entrypoint: Sequence[str] = (),
     setup_cmd: Sequence[str] = (),
     test_cmd: Sequence[str] = ('python', '-m', 'pytest', '-q'),

@@ -8,6 +8,15 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- `kind="skill_dir"` now gates candidates structurally before any rollout
+  (#246): a diff that deletes `SKILL.md`, drops its frontmatter, or breaks the
+  Agent Skills `name` / `description` / `compatibility` rules (or renames the
+  skill) is rejected and counted in `FileTree.structural_rejections` by reason.
+  New `agentdescent.skillspec` (`validate_skill_tree`, `SkillTreeValidator`,
+  dependency-free) and a general `FileTree(validators=...)` hook. Skipped with
+  a note when the initial skill does not pass; opt out with
+  `validate_skill: false`.
+
 - Add the RRSI cosine-annealed L0 edit-budget schedule (`examples/rrsi/schedule.py`)
   adapted from the pinned Google release, with endpoint / float-guard / bound
   regressions (#238). Still not an `evolve()` integration; see `docs/algo-rrsi.md`.

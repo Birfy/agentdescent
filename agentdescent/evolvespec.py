@@ -59,6 +59,7 @@ from .governance import HARNESS_BLAST_RADIUS, SKILL_BLAST_RADIUS
 from .policies import Policies
 from .rewards import command_scorer, scorer
 from .runners import code_runner, gated_reward, tree_runner
+from .skillspec import SKILL_FILE, SkillTreeValidator, parse_skill_frontmatter, validate_skill_tree
 from .staleness import get_policy
 from .treestrategy import FileTree, tree_reflector
 from .workspec import DEFAULT_ALLOWED_PREFIXES, Ref, RefError
@@ -197,6 +198,12 @@ class EvolveSpec:
     editable: Sequence[str] = ("**",)
     frozen: Sequence[str] = ()
     max_files_per_diff: int = 2
+    #: ``skill_dir`` only: reject, before any rollout, a candidate that deletes
+    #: ``SKILL.md`` or breaks its Agent Skills frontmatter (``name`` /
+    #: ``description`` rules, ``name`` kept stable). Skipped with a note when the
+    #: initial tree does not pass itself. ``false`` for a host that accepts a
+    #: looser format. See :mod:`agentdescent.skillspec`.
+    validate_skill: bool = True
     #: ``agent_code`` only.
     entrypoint: Sequence[str] = ()
     setup_cmd: Sequence[str] = ()
@@ -877,9 +884,25 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
                 raise SpecError(f"kind='plugin' needs host in {sorted(PLUGIN_FROZEN)}, "
                                 f"got {spec.host!r}")
             frozen = list(PLUGIN_FROZEN[spec.host]) + frozen
+        validators: List[Any] = []
+        if spec.kind == "skill_dir" and spec.validate_skill:
+            initial_errors = validate_skill_tree(tree)
+            if initial_errors:
+                notes.append(
+                    "kind='skill_dir': the initial tree is not a valid Agent Skill "
+                    f"({', '.join(initial_errors)}), so the SKILL.md structural gate "
+                    "is off for this run; fix the frontmatter to enable it, or set "
+                    "validate_skill: false to silence this.")
+            else:
+                # The *initial* name, not artifact_id(): the spec requires it to
+                # equal the installed directory name, and artifact_id() is only
+                # the staging name (it allows uppercase, `_` and `.`).
+                root_name = (parse_skill_frontmatter(tree[SKILL_FILE]) or {}).get("name")
+                validators.append(SkillTreeValidator(root_name))
         strategy = FileTree(tree, editable=list(spec.editable), frozen=frozen,
                             max_files_per_diff=spec.max_files_per_diff,
-                            max_file_bytes=tspec.max_file_bytes)
+                            max_file_bytes=tspec.max_file_bytes,
+                            validators=validators)
         overlay = strategy.frozen_files(tree)
         runner_common = dict(name=aid, overlay=overlay, workspace_root=workspace_root,
                              sandbox_pool=sandbox_pool)
