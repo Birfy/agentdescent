@@ -92,7 +92,7 @@ class _RaiseOnStr:
         raise TypeError("cannot stringify for status")
 
 
-def test_unencodable_status_write_leaves_no_orphan_tmp(store, tmp_path, monkeypatch):
+def test_unencodable_status_write_leaves_no_orphan_tmp(store, tmp_path):
     """A serializer refusal must not leave status.json.<uuid>.tmp behind (#267)."""
     _, spec = _spec_file(tmp_path)
     rd = runstore.create(spec.to_dict(), store=store)
