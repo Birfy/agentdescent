@@ -286,6 +286,26 @@ def test_an_allowlisted_variable_the_host_does_not_have_is_skipped(monkeypatch):
     assert "--env" not in cmd or "AD_MISSING" not in cmd
 
 
+def test_podman_wildcard_allowlist_names_are_rejected(monkeypatch):
+    """Podman expands bare `--env PREFIX*` to every matching host variable.
+
+    An allowlist entry ending in `*` must never be forwarded as `--env NAME`,
+    or credentials such as `AWS_SECRET_ACCESS_KEY` would cross despite not
+    being listed. Exact names still forward.
+    """
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAexample")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "secret-should-not-cross")
+    monkeypatch.setenv("AD_OK", "fine")
+    cmd = command_for(SandboxSpec(env_allowlist=("AWS_*", "AD_OK")))
+    env_args = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--env"]
+    assert env_args == ["AD_OK"]
+    joined = " ".join(cmd)
+    assert "AWS_*" not in joined
+    assert "AWS_ACCESS_KEY_ID" not in joined
+    assert "AWS_SECRET_ACCESS_KEY" not in joined
+    assert "secret-should-not-cross" not in joined
+
+
 # ---------------------------------------------------------------------------
 # Lifecycle
 # ---------------------------------------------------------------------------

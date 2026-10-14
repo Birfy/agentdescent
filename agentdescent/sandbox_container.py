@@ -268,7 +268,12 @@ class ContainerProvider:
         # argv (visible in `ps`). Docker/Podman read each value from the client
         # process environment at `run` time. Missing names are skipped so an
         # unset allowlist entry does not create an empty container variable.
+        # Podman treats a valueless `--env NAME*` as "import every host var with
+        # that prefix", which would leak non-allowlisted credentials -- reject
+        # any allowlist entry that ends in `*` before forwarding.
         for name in spec.env_allowlist:
+            if name.endswith("*"):
+                continue
             if os.environ.get(name) is not None:
                 cmd += ["--env", name]
 
