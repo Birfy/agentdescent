@@ -48,6 +48,8 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- `TrajectoryStore.get` / `path_for` round-trip `trace_id`s whose `artifact_id` contains a colon by parsing with `rsplit(":", 1)` (#257). The key is always a hex digest; a leading split treated a namespaced id as part of the key and returned ``None`` for a record that was on disk.
+
 - `dataloader` cache entries are written atomically (temp file + `os.replace`),
   read back as bytes instead of locale-decoded text, and refetched when they do
   not parse; a fresh non-JSON response is parsed before caching so it can no
