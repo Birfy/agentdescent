@@ -966,7 +966,8 @@ Diff(
     target: str,
     ops: Dict[str, Any] = <factory>,
     contract_breaking: bool = False,
-    author: str = 'unknown'
+    author: str = 'unknown',
+    rationale: str = ''
 ) -> None
 ```
 
