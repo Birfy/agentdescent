@@ -114,6 +114,18 @@ from .policies import (
     VerifierProtocol,
 )
 from .evalcache import CacheProtocol, FileCache, MemoryCache
+from .trajectory import (
+    PURPOSE_EVAL,
+    PURPOSE_PROBE,
+    PURPOSE_ROLLOUT,
+    PURPOSE_SELF_VERIFY,
+    PURPOSES,
+    RECORD_TEXT_ENV,
+    Trajectory,
+    TrajectoryEvent,
+    TrajectoryStore,
+    trajectory_key,
+)
 from .checkpoint import (
     save_checkpoint,
     load_checkpoint,
