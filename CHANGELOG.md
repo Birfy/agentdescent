@@ -31,6 +31,27 @@ All notable changes to AgentDescent are documented here. The format follows
   This is not yet an `evolve()` integration or full RRSI port; see
   `docs/algo-rrsi.md`.
 
+- **Rollout trajectory ledger.** `evolve(record_trajectories=True)` (and
+  `async_evolve`, and any spec through the `evolve` dict) now persists every
+  rollout, self-verify re-run and gate evaluation as a versioned `Trajectory`
+  under `<repo_path>/trajectories/` -- the exact rendered artifact text the run
+  provider saw, the task, the output, the reward, and the artifact version and
+  environment it all happened against. Records are content-addressed on the
+  same identity the evaluation cache keys on (`rendered`, `task`, environment),
+  so re-runs dedupe instead of piling up; the exists-check + write pair is
+  locked, so a single process's racing writers count exactly one record and
+  the rest as deduped. The boundary record (rendered, output, reward) is always
+  written when recording is on; event *detail* text is metadata unless
+  `AGENTDESCENT_RECORD_TEXT=1` or a store built with `record_text=True`. A
+  failed write is counted in the meter and never fails a rollout.
+  The store is the durable base the learning-type increments (process
+  supervision, offline re-weighting, audit replay) read; worker-produced
+  `EvidenceCard`s now carry the `trace_id`s of the records that justify them.
+  New counters: `trajectories_recorded`, `trajectories_dedup`,
+  `trajectory_write_seconds`, `trajectory_write_failures`; new
+  `EvolutionResult.trajectories_path`. Off by default -- a run without a store
+  reports zeros and behaves exactly as before.
+
 ### Fixed
 
 - Container sandbox allowlisted env vars are forwarded as `--env NAME` so
