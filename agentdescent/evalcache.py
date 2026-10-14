@@ -190,7 +190,7 @@ class FileCache:
                 tmp = f"{path}.{os.getpid()}.tmp"
                 with open(tmp, "w", encoding="utf-8") as fh:
                     json.dump({"key": list(key) if isinstance(key, tuple) else key,
-                               "value": finite}, fh, allow_nan=False)
+                               "value": finite}, fh, default=str, allow_nan=False)
                 os.replace(tmp, path)
             except (OSError, TypeError, ValueError):
                 pass

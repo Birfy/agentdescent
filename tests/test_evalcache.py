@@ -262,3 +262,25 @@ def test_a_write_encode_failure_does_not_fail_the_run(tmp_path, monkeypatch):
     assert cache.get_or_eval(key, lambda: 0.875) == 0.875
     monkeypatch.setattr(ec.json, "dump", real_dump)
     assert [p.name for p in tmp_path.iterdir() if ".tmp" in p.name] == []
+
+
+@pytest.mark.parametrize("key", [
+    ("run", Path("task"), "env"),
+    __import__("uuid").UUID(int=123),
+])
+def test_a_non_json_native_key_still_persists_across_instances(tmp_path, key):
+    """``_path()`` hashes keys with ``default=str``; the write must too, or a
+    Path/UUID key is silently never cached and every fresh FileCache re-pays
+    the evaluation (review on #264)."""
+    calls = {"n": 0}
+
+    def fn():
+        calls["n"] += 1
+        return 0.25
+
+    assert FileCache(str(tmp_path)).get_or_eval(key, fn) == 0.25
+    assert FileCache(str(tmp_path)).get_or_eval(key, fn) == 0.25
+    assert calls["n"] == 1
+    files = [p for p in tmp_path.iterdir() if p.suffix == ".json"]
+    assert len(files) == 1
+    assert json.loads(files[0].read_text(encoding="utf-8"))["value"] == 0.25
