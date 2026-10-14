@@ -249,7 +249,7 @@ class Ledger:
         A driver that owns a throwaway repo removes it when it returns, but a
         round abandoned on ``round_timeout`` leaves worker threads running that
         Python cannot cancel -- and one of those, finishing later, would commit
-        into the deleted directory and *recreate* it (``_dump_artifact`` calls
+        into the deleted directory and *recreate* it (``_write_all`` calls
         ``makedirs(exist_ok=True)``). Closing first turns that late write into an
         ordinary error inside the straggler's own thread, where the driver already
         absorbs it."""
