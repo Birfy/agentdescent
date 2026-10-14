@@ -442,11 +442,13 @@ class TrajectoryStore:
         files both read as ``None`` -- a corrupt record is indistinguishable
         from an absent one to anyone but the disk, and refusing loudly would
         make a bad file take a run down with it. Use :meth:`iter_records` if
-        you need to see which files are unreadable.
+        you need to see which files are unreadable. The id is split on the
+        *last* colon so an ``artifact_id`` that itself contains ``:`` still
+        round-trips (the key is always a hex digest).
         """
         if ":" not in trace_id:
             return None
-        artifact_id, key = trace_id.split(":", 1)
+        artifact_id, key = trace_id.rsplit(":", 1)
         if not (key and key.isalnum()):
             return None
         path = self._path(key)
@@ -512,7 +514,7 @@ class TrajectoryStore:
         """
         if ":" not in trace_id:
             return None
-        artifact_id, key = trace_id.split(":", 1)
+        artifact_id, key = trace_id.rsplit(":", 1)
         if not (key and key.isalnum()):
             return None
         return self._path(key)

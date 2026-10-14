@@ -48,6 +48,8 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- `TrajectoryStore.get` / `path_for` round-trip `trace_id`s whose `artifact_id` contains a colon by parsing with `rsplit(":", 1)` (#257). The key is always a hex digest; a leading split treated a namespaced id as part of the key and returned ``None`` for a record that was on disk.
+
 - Container sandbox allowlisted env vars are forwarded as `--env NAME` so
   credential values no longer appear on the `docker`/`podman` argv (`ps`)
   (#244). Non-allowlisted names and `--env-file` remain forbidden. Allowlist
