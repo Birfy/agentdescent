@@ -2209,11 +2209,16 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
         # writes/dedup/failures exactly as it does for a store the engine
         # builds -- a run that recorded three trajectories and reported zero
         # recorded would be indistinguishable from one that recorded nothing.
-        if getattr(_traj_store, "meter", None) is None:
-            try:
-                _traj_store.meter = meter
-            except AttributeError:        # a store without a meter slot
-                pass
+        #
+        # The attach distinguishes *engine-injected* meters from *caller-owned*
+        # ones, so reusing an unmetered store across runs swaps in this run's
+        # meter instead of mistaking the previous run's for a caller's (the
+        # review's meter-lifetime bug: run 2 reported zero while run 1's meter
+        # absorbed both runs' writes).
+        try:
+            _traj_store._attach_run_meter(meter)
+        except AttributeError:            # a store without a meter slot
+            pass
     elif record_trajectories:
         from .trajectory import TrajectoryStore
         _traj_store = TrajectoryStore(os.path.join(repo, "trajectories"),

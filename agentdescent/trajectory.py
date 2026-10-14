@@ -283,7 +283,16 @@ class TrajectoryStore:
         #: which the ledger excludes from its index; a caller may use any
         #: directory it owns.
         self.root = root
+        #: The meter writes/dedups/failures are counted into. ``None`` (the
+        #: default) means the *engine* owns the accounting: it installs the run's
+        #: own meter on the first use and swaps in a fresh one on each reuse, so
+        #: a store shared across runs reports each run's totals without leaking
+        #: into the previous run's meter. A caller-supplied ``meter=`` is left in
+        #: place forever (a shared store reports into its own totals); that is
+        #: what :attr:`_caller_meter` records, so the engine can tell the two
+        #: apart.
         self.meter = meter
+        self._caller_meter = meter is not None
         self._record_text = _truthy(
             record_text, os.environ.get(RECORD_TEXT_ENV) == "1")
         self._max_events = max(1, int(max_events))
@@ -291,6 +300,19 @@ class TrajectoryStore:
         self._max_rendered_chars = (None if max_rendered_chars is None
                                     else max(1, int(max_rendered_chars)))
         self._lock = threading.RLock()
+
+    def _attach_run_meter(self, meter) -> None:
+        """Install ``meter`` as the accounting target, unless the caller owns one.
+
+        The engine calls this with its run meter. A caller-supplied meter (``_caller_meter``
+        set at construction) is never replaced -- the caller asked for that store's
+        totals in that meter. An engine-attached meter, by contrast, is *run-scoped*:
+        the engine re-attaches a fresh meter on every run, so reusing an unmetered store
+        across two runs does not make the second run's writes land in the first run's
+        meter (review: run 1 installed its meter, run 2 mistook it for caller-owned and
+        reported zero while run 1's meter absorbed both runs)."""
+        if not self._caller_meter:
+            self.meter = meter
 
     # -- identity ------------------------------------------------------------
 

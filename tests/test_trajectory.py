@@ -402,6 +402,61 @@ def test_explicit_store_with_its_own_meter_keeps_its_accounting(tmp_path):
     assert custom.meter is own          # the caller's meter was left in place
 
 
+def _run_store_reuse_probe(tmp_path, *, asynchronous):
+    """The reviewer's meter-lifetime repro, parametrised over both drivers.
+
+    Reuse the same originally-unmetered store across two runs with *distinct*
+    task ids (so run 2's evaluations are not dedups of run 1's): each run must
+    report its own writes in its own result, and run 2's writes must not land
+    in run 1's meter -- run 1's meter is a private per-run object, never a
+    caller-owned one the engine must preserve."""
+    from agentdescent.async_evolve import async_evolve
+
+    run, reward, propose = _offline_actors()
+    custom = TrajectoryStore(str(tmp_path / "custom"))
+    assert custom._caller_meter is False
+
+    def once(label, repo):
+        tasks = [Task(id=f"{label}-{i}", prompt=f"{label} item {i}")
+                 for i in range(8)]
+        kw = dict(reward=reward, run=run, propose=propose, n_workers=2,
+                  repo_path=str(repo), trajectory_store=custom)
+        if asynchronous:
+            kw.update(max_seconds=1.5, self_verify=False)
+            return async_evolve(tasks, **kw)
+        return evolve(tasks, **kw, rounds=1)
+
+    repo1 = str(tmp_path / "repo1")
+    r1 = once("first", repo1)
+    assert r1.trajectories_recorded >= 1, "run 1 must report its own writes"
+    meter1 = custom.meter
+    assert meter1 is not None, "run 1 must attach its meter to the store"
+    recorded_in_meter1 = meter1.snapshot().trajectories_recorded
+
+    repo2 = str(tmp_path / "repo2")
+    r2 = once("second", repo2)
+    assert r2.trajectories_recorded >= 1, (
+        "run 2 must report its own writes, not zero")
+    meter2 = custom.meter
+    assert meter2 is not None and meter2 is not meter1, (
+        "run 2 must swap in its own meter, not reuse run 1's")
+    # Run 1's meter absorbed only run 1's writes -- run 2's are not in it.
+    assert meter1.snapshot().trajectories_recorded == recorded_in_meter1, (
+        "run 2's writes must not land in run 1's meter")
+    # The store's caller-owned flag stays False: the engine owns the accounting
+    # and swaps the meter per run.
+    assert custom._caller_meter is False
+    return r1, r2
+
+
+def test_reusing_an_unmetered_store_reports_each_run_s_accounting(tmp_path):
+    _run_store_reuse_probe(tmp_path, asynchronous=False)
+
+
+def test_reusing_an_unmetered_store_reports_each_async_run_s_accounting(tmp_path):
+    _run_store_reuse_probe(tmp_path, asynchronous=True)
+
+
 def test_async_evolve_records_rollouts(tmp_path):
     from agentdescent.async_evolve import async_evolve
 
