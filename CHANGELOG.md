@@ -19,6 +19,10 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- Container sandbox allowlisted env vars are forwarded as `--env NAME` so
+  credential values no longer appear on the `docker`/`podman` argv (`ps`)
+  (#244). Non-allowlisted names and `--env-file` remain forbidden.
+
 - `CallBudget` default floor is capped at `base`, so a configured ceiling below
   256 can no longer be silently raised above what the caller agreed to (#234).
   Explicit `floor > base` and non-positive `base`/`floor` raise `ValueError`.

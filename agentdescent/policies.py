@@ -390,7 +390,8 @@ class SandboxSpec:
     """What environment one rollout needs. Must survive JSON: it crosses processes.
 
     Note what is *not* here: any secret. ``env_allowlist`` carries variable
-    **names**, and the values are read inside the sandbox. A spec gets pickled,
+    **names** only; the container provider forwards each set name as
+    ``--env NAME`` so values never land on the argv. A spec gets pickled,
     logged, cached and written to a journal, so a spec that carried an API key
     would leak it into all four.
     """

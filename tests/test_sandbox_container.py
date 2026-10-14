@@ -237,27 +237,53 @@ def test_only_allowlisted_variables_cross(monkeypatch):
     monkeypatch.setenv("AD_ALLOWED", "yes")
     monkeypatch.setenv("AD_SECRET", "sk-do-not-copy-me")
     cmd = command_for(SandboxSpec(env_allowlist=("AD_ALLOWED",)))
-    assert "AD_ALLOWED=yes" in cmd
+    # By name only: the value is read by the engine from the client env.
+    assert "--env" in cmd
+    assert cmd[cmd.index("--env") + 1] == "AD_ALLOWED"
     joined = " ".join(cmd)
     assert "AD_SECRET" not in joined and "sk-do-not-copy-me" not in joined
+    assert "AD_ALLOWED=yes" not in joined
+
+
+def test_no_secret_value_reaches_the_container_argv(monkeypatch):
+    """Allowlisted credentials cross by name; values never land on the argv.
+
+    `ps` and every process listing would otherwise show the key for the life of
+    `docker run` / `podman run`. Non-allowlisted names still do not cross at all.
+    """
+    secret = "sk-super-secret-value-never-on-argv"
+    monkeypatch.setenv("AD_ALLOWED", secret)
+    monkeypatch.setenv("AD_OTHER", "also-secret")
+    cmd = command_for(SandboxSpec(env_allowlist=("AD_ALLOWED",)))
+    joined = " ".join(cmd)
+    assert secret not in joined
+    assert "also-secret" not in joined
+    assert "AD_OTHER" not in joined
+    # The allowlisted *name* is present as a bare `--env` argument.
+    env_args = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--env"]
+    assert env_args == ["AD_ALLOWED"]
+    assert all("=" not in a for a in env_args)
 
 
 def test_nothing_bulk_is_used_to_pass_the_environment(monkeypatch):
-    """`--env-file`, or `--env NAME` without a value, would let a variable arrive
-    without anyone having named it. The allowlist is only an allowlist if it is
-    the sole route in."""
+    """`--env-file` would let variables arrive without anyone having named them.
+
+    Named `--env NAME` forwards are still an allowlist: every name that crosses
+    was written in `env_allowlist`. What stays forbidden is bulk inheritance.
+    """
     monkeypatch.setenv("AD_SECRET", "sk-nope")
     cmd = command_for(SandboxSpec(env_allowlist=("AD_SECRET",)))
     assert "--env-file" not in cmd
-    for i, arg in enumerate(cmd):
-        if arg == "--env":
-            assert "=" in cmd[i + 1], "a valueless --env copies from the host"
+    env_args = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--env"]
+    assert env_args == ["AD_SECRET"]
+    assert "sk-nope" not in " ".join(cmd)
 
 
 def test_an_allowlisted_variable_the_host_does_not_have_is_skipped(monkeypatch):
     monkeypatch.delenv("AD_MISSING", raising=False)
     cmd = command_for(SandboxSpec(env_allowlist=("AD_MISSING",)))
-    assert not any(a.startswith("AD_MISSING") for a in cmd)
+    assert not any(a == "AD_MISSING" or a.startswith("AD_MISSING=") for a in cmd)
+    assert "--env" not in cmd or "AD_MISSING" not in cmd
 
 
 # ---------------------------------------------------------------------------
