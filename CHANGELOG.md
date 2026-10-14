@@ -8,6 +8,12 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- Add the RRSI component vocabulary (`examples/rrsi/components.py`) and per-edit
+  history `L_t` (`examples/rrsi/history.py`: yield, prune set, stall
+  exploration) adapted from the pinned Google release, with defensive handling
+  of non-finite measurements and torn JSONL lines (#252). Still not an
+  `evolve()` integration; see `docs/algo-rrsi.md`.
+
 - Add the RRSI cosine-annealed L0 edit-budget schedule (`examples/rrsi/schedule.py`)
   adapted from the pinned Google release, with endpoint / float-guard / bound
   regressions (#238). Still not an `evolve()` integration; see `docs/algo-rrsi.md`.
