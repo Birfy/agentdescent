@@ -46,6 +46,12 @@ components have generic evidence signals. A declared ``config`` /
 survives :func:`normalize` only when a *domain* signal backs it; without one
 the edit is reclassified (to ``prompt`` unless a structural signal matches).
 
+Defensive boundary (AgentDescent, not upstream parity): :func:`normalize`
+checks :func:`text_only` before the declaration, so a string-literal / comment
+only diff is always ``prompt``. Upstream keeps a declared structural tag when
+the prose happens to contain a signal word, which lets a text edit claim a
+reserved structural exploration slot.
+
 This module is an offline mechanism microport. It is not wired into
 ``evolve()``, a proposal policy, or a resumable run record.
 """
@@ -131,6 +137,10 @@ def normalize(declared: Optional[str], diff: str,
     """The component an edit is recorded under: the declaration if the diff
     backs it, else :func:`classify_diff`."""
     d = (declared or "").strip().lower()
+    if text_only(diff):
+        # Not upstream: a prose/comment-only edit that merely *mentions* e.g.
+        # ``SkillRegistry`` is a prompt edit, whatever it is declared as.
+        return "prompt"
     if d in K and has_evidence(d, diff, domain_signals):
         return d
     return classify_diff(diff, domain_signals)

@@ -63,6 +63,14 @@ def test_normalize_keeps_a_declaration_only_with_evidence():
     assert normalize(None, "+x = 1\n") == "prompt"
 
 
+def test_a_text_only_diff_cannot_keep_a_structural_declaration():
+    """Not upstream: prose that mentions ``SkillRegistry`` is still a prompt edit."""
+    diff = '--- a\n+++ b\n-    "Use the catalog"\n+    "Use the SkillRegistry"\n'
+    assert text_only(diff) and has_evidence("skill", diff)
+    assert normalize("skill", diff) == "prompt"
+    assert normalize("skill", "+reg = SkillRegistry()\n") == "skill"
+
+
 def test_a_non_structural_declaration_needs_a_domain_signal():
     """Upstream quirk, pinned: only structural components have generic signals."""
     diff = "+cfg.retries = 3\n"
@@ -146,6 +154,48 @@ def test_corruption_before_the_last_line_raises(tmp_path):
     path.write_text('{"t": 1}\nnot json\n{"t": 2}\n')
     with pytest.raises(ValueError, match=":2:"):
         History(path).records()
+
+
+def test_a_torn_tail_cut_inside_a_multibyte_character_is_ignored(tmp_path):
+    path = tmp_path / "h.jsonl"
+    h = History(path)
+    _cand(h, 1, [_edit(1, "skill", "技能")], 0.01)
+    line = json.dumps({"t": 2, "hypothesis": "中文假设"}, ensure_ascii=False).encode()
+    with open(path, "ab") as fh:
+        fh.write(line[: line.index("中".encode()) + 1])        # cut mid-character
+    assert [r["hypothesis"] for r in h.records()] == ["技能"]
+    _cand(h, 3, [_edit(3, "prompt", "提示")], 0.0)
+    assert [r["hypothesis"] for r in h.records()] == ["技能", "提示"]
+
+
+@pytest.mark.parametrize("bad_line", [b"\xe4\xb8", b"[]", b"3"])
+def test_invalid_utf8_or_non_object_before_the_last_line_raises(tmp_path, bad_line):
+    path = tmp_path / "h.jsonl"
+    path.write_bytes(b'{"t": 1}\n' + bad_line + b'\n{"t": 2}\n')
+    with pytest.raises(ValueError, match=":2: malformed history record"):
+        History(path).records()
+
+
+def test_numpy_scalars_are_accepted_as_measurements(tmp_path):
+    np = pytest.importorskip("numpy")
+    h = History(tmp_path / "h.jsonl")
+    h.append_candidate(1, "v", [_edit(1, "skill")], "ACCEPTED", np.float32(0.25),
+                       np.int64(3), True, np.float32(0.5), np.float64(10.0), None)
+    (rec,) = h.records()
+    assert rec["delta_S"] == 0.25 and rec["delta_C"] == 3.0 and rec["S"] == 0.5
+    with pytest.raises(ValueError):
+        _cand(h, 2, [_edit(2, "skill")], np.float32("nan"))
+
+
+def test_replace_round_keeps_the_file_mode(tmp_path):
+    import os
+    import stat
+    path = tmp_path / "h.jsonl"
+    h = History(path)
+    _cand(h, 1, [_edit(1, "skill")], 0.01)
+    os.chmod(path, 0o644)
+    h.replace_round(1)
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o644
 
 
 def test_replace_round_drops_that_rounds_edits_atomically(tmp_path):

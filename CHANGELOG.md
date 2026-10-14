@@ -11,7 +11,8 @@ All notable changes to AgentDescent are documented here. The format follows
 - Add the RRSI component vocabulary (`examples/rrsi/components.py`) and per-edit
   history `L_t` (`examples/rrsi/history.py`: yield, prune set, stall
   exploration) adapted from the pinned Google release, with defensive handling
-  of non-finite measurements and torn JSONL lines (#252). Still not an
+  of non-finite measurements and torn JSONL lines, including tails cut
+  inside a multibyte UTF-8 character (#252). Still not an
   `evolve()` integration; see `docs/algo-rrsi.md`.
 - `Diff.rationale` carries the FileTree reflector's reason into the ledger
   commit message and the ReplayAwareProposal rejected-evidence note (#247).

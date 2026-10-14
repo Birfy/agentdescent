@@ -88,8 +88,10 @@ out of the tried set \(T_t\) and the yield \(g_t\). From it:
 | Tried component with no record in the prune window | `g_t = -inf`, so it is in `B_t` | Preserved |
 | Candidate with no edits | One placeholder record (`C1`, no component, `bundle = 0`) | Preserved |
 | Non-finite `delta_S` / `delta_C` / `S` / `C` | Written as non-standard `NaN` / `Infinity` JSON | Rejected with `ValueError` |
-| Torn final JSONL line after a crash | `records()` raises; the next append extends the fragment | Ignored by `records()`, dropped by the next append; corruption elsewhere still raises |
-| `replace_round` rewrite | In-place `write_text` | Atomic temp file + `os.replace` |
+| Torn final JSONL line after a crash | `records()` raises; the next append extends the fragment | Ignored by `records()` (also when cut inside a multibyte UTF-8 character), dropped by the next append; invalid JSON / UTF-8 or a non-object line elsewhere raises `ValueError` with its line number |
+| `replace_round` rewrite | In-place `write_text` | Atomic temp file (fsynced, original file mode kept) + `os.replace` |
+| numpy scalar measurements (`np.float32`) | Written as-is | Accepted as any `numbers.Real` except `bool` |
+| Text-only diff (string literals / comments) declared structural, prose mentions a signal word | Declared tag kept | Recorded as `prompt` |
 
 None of these mechanisms is wired into `evolve()`, `aggregator_factory`, a
 proposal policy, or a resumable run record yet. There is no RRSI CLI,

@@ -57,10 +57,16 @@ Defensive boundaries (AgentDescent convention, not upstream parity):
 
 * Non-finite ``delta_S`` / ``delta_C`` / ``S`` / ``C`` are rejected; upstream
   would write a non-standard ``NaN`` into the JSONL.
-* A torn final line (a crash mid-append) is ignored by :meth:`History.records`
-  and dropped by the next append, so the log stays loadable. A malformed line
-  anywhere else still raises: that is corruption, not an interrupted write.
-* :meth:`History.replace_round` rewrites the file atomically.
+* A torn final line (a crash mid-append, including one cut inside a multibyte
+  UTF-8 character) is ignored by :meth:`History.records` and dropped by the
+  next append, so the log stays loadable. A malformed line anywhere else --
+  invalid JSON, invalid UTF-8, or a JSON value that is not an object -- raises
+  ``ValueError`` with its line number: that is corruption, not an interrupted
+  write.
+* :meth:`History.replace_round` rewrites the file atomically (fsynced, file
+  mode preserved).
+* Numeric fields accept any ``numbers.Real`` (numpy scalars included) except
+  ``bool``.
 
 This module is an offline mechanism microport. It is not wired into
 ``evolve()``, a proposal policy, or a resumable run record.
@@ -70,7 +76,9 @@ from __future__ import annotations
 
 import json
 import math
+import numbers
 import os
+import stat
 import tempfile
 import time
 from pathlib import Path
@@ -86,7 +94,8 @@ MEASURED_OUTCOMES = ("ACCEPTED", "REJECTED", "LOST")
 def _finite(name: str, value: Optional[float]) -> Optional[float]:
     if value is None:
         return None
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    # numbers.Real admits numpy scalars (np.float32 is not a float subclass).
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
         raise ValueError(f"{name} must be a number or None, got {value!r}")
     if not math.isfinite(value):
         raise ValueError(f"{name} must be finite, got {value!r}")
@@ -103,20 +112,25 @@ class History:
     def records(self) -> List[dict]:
         if not self.path.exists():
             return []
-        text = self.path.read_text(encoding="utf-8")
-        lines = text.split("\n")
-        torn = not text.endswith("\n")       # last element is an unterminated tail
+        # Split bytes before decoding: a crash can cut the tail inside a
+        # multibyte UTF-8 character, and that must read as a torn line too.
+        data = self.path.read_bytes()
+        lines = data.split(b"\n")
+        torn = not data.endswith(b"\n")     # last element is an unterminated tail
         out = []
-        for i, line in enumerate(lines):
-            line = line.strip()
-            if not line:
-                continue
+        for i, raw in enumerate(lines):
             try:
-                out.append(json.loads(line))
-            except json.JSONDecodeError as exc:
+                line = raw.decode("utf-8").strip()
+                if not line:
+                    continue
+                rec = json.loads(line)
+                if not isinstance(rec, dict):
+                    raise ValueError("not a JSON object")
+            except (UnicodeDecodeError, ValueError) as exc:   # JSONDecodeError too
                 if torn and i == len(lines) - 1:
                     break                    # interrupted append; not a record
                 raise ValueError(f"{self.path}:{i + 1}: malformed history record") from exc
+            out.append(rec)
         return out
 
     def _drop_torn_tail(self) -> None:
@@ -184,6 +198,10 @@ class History:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 fh.write(body)
+                fh.flush()
+                os.fsync(fh.fileno())
+            if self.path.exists():           # mkstemp is 0600; keep the file's mode
+                os.chmod(tmp, stat.S_IMODE(os.stat(self.path).st_mode))
             os.replace(tmp, self.path)
         except BaseException:
             try:
