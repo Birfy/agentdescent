@@ -8,6 +8,12 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- `Diff.rationale` carries the FileTree reflector's reason into the ledger
+  commit message and the ReplayAwareProposal rejected-evidence note (#247).
+  `parse_proposal` returns edits plus rationale; `parse_edits` stays a thin
+  wrapper. Fused/synth diffs concatenate parent rationales (deduped, capped).
+  Rationales never enter `diff_id`.
+
 - Add the RRSI cosine-annealed L0 edit-budget schedule (`examples/rrsi/schedule.py`)
   adapted from the pinned Google release, with endpoint / float-guard / bound
   regressions (#238). Still not an `evolve()` integration; see `docs/algo-rrsi.md`.

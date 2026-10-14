@@ -35,8 +35,14 @@ def _default_note(card: "EvidenceCard") -> str:
     paths = ", ".join(sorted(card.diff.ops)) or "(no paths)"
     delta = f"{card.before_after_delta:+.3f}"
     version = card.base_version
-    return (f"- touched `{paths}` against version `{version}`, "
+    line = (f"- touched `{paths}` against version `{version}`, "
             f"measured `{delta}` before this discard")
+    rationale = (getattr(card.diff, "rationale", "") or "").strip()
+    if rationale:
+        # One paragraph; keep the note scannable for the inner policy.
+        rationale = " ".join(rationale.split())
+        line += f"; rationale: {rationale}"
+    return line
 
 
 @dataclass
