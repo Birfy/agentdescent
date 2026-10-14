@@ -143,10 +143,29 @@ class RunStatus:
 
 
 def _write_json(path: str, payload: Any) -> None:
+    """Replace ``path`` atomically; leave no sibling ``*.tmp`` on failure.
+
+    Encode first so a serializer refusal never creates a file. Write the
+    bytes to a unique sibling and ``os.replace``; always remove the sibling
+    in ``finally`` so a dump/replace error (or a raised ``default=str``)
+    cannot leave an orphan for a host that globs the run directory.
+    """
+    # Encode before touching the filesystem — same contract as checkpoint /
+    # FileCache / Ledger writes. ``default=str`` keeps Path/UUID notes
+    # round-trippable; ``OSError`` from the write still propagates.
+    blob = json.dumps(payload, indent=2, ensure_ascii=False, default=str)
     tmp = f"{path}.{uuid.uuid4().hex}.tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, indent=2, ensure_ascii=False, default=str)
-    os.replace(tmp, path)
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(blob)
+        os.replace(tmp, path)
+    finally:
+        try:
+            os.remove(tmp)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
 
 
 def _read_json(path: str) -> Any:
