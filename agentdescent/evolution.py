@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import atexit
 import hashlib
+import json
 import math
 import os
 import re
@@ -607,6 +608,13 @@ class _Runtime:
     #: question.
     env_fingerprint: str = ""
 
+    #: Durable rollout-record store, when the run records trajectories. ``None``
+    #: (the default) is the untouched path exactly: every evaluation that used
+    #: to run still runs, and nothing is written. When set, every cache-miss
+    #: evaluation here (held-out scoring and each acceptance measurement) lands
+    #: in the store as a ``purpose="eval"`` record.
+    trajectory_store: Optional["TrajectoryStore"] = None
+
     #: Has this run already reported an evidence card with nothing to score?
     #: Lives here rather than on the artifact because artifacts are rebuilt from
     #: the ledger constantly, and rather than at module scope because "once" has
@@ -618,9 +626,14 @@ class _Runtime:
 
         def _measure() -> float:
             for attempt in range(self.ATTEMPTS):
+                t0 = time.time()
                 try:
-                    return _checked_reward(
-                        self.reward(task, self.run(artifact.render(), task)), task)
+                    rendered = artifact.render()
+                    output = self.run(rendered, task)
+                    value = _checked_reward(self.reward(task, output), task)
+                    self._record_eval(artifact, task, rendered, output, value,
+                                      time.time() - t0)
+                    return value
                 except ContractError:
                     raise            # a caller bug: retrying cannot help
                 except Exception:  # noqa: BLE001 - a backend transient
@@ -638,6 +651,32 @@ class _Runtime:
             # Includes hits (near-zero) on purpose: `eval_seconds` is what the
             # gate cost the run, and a hit costing nothing is the point.
             self.meter.add("eval_seconds", time.time() - t0)
+
+    def _record_eval(self, artifact: EvolvingArtifact, task: Task,
+                     rendered: str, output: str, value: float,
+                     wallclock: float) -> None:
+        """Persist one gate evaluation, when a store is attached.
+
+        Runs inside :meth:`eval_one`'s retry loop, on the successful attempt:
+        a rollout that was retried is recorded once, with the attempt that
+        actually produced the output. ``rendered`` is the exact text the run
+        provider was shown (computed once in ``_measure``, so the record and
+        the rollout agree by construction) and ``output`` is the *reward's*
+        input, which is the raw provider output -- the trajectory keeps the
+        same object the scorer saw, not a re-render.
+
+        Deliberately quiet: the store's own write is best-effort and a failure
+        is counted, never raised -- a full disk must not fail a gate that
+        already has its answer."""
+        store = self.trajectory_store
+        if store is None:
+            return
+        from .trajectory import PURPOSE_EVAL, Trajectory
+        store.record(Trajectory(
+            artifact_id=artifact.id, task_id=task.id,
+            env_fingerprint=self.env_fingerprint,
+            rendered=rendered, purpose=PURPOSE_EVAL,
+            output=output, reward=value, cost_wallclock=wallclock))
 
 
 # ---------------------------------------------------------------------------
@@ -1054,6 +1093,10 @@ def _cost_fields(meter: Meter) -> Dict[str, Any]:
         "cas_conflicts": m.cas_conflicts,
         "cache_hits": m.cache_hits,
         "cache_misses": m.cache_misses,
+        "trajectories_recorded": m.trajectories_recorded,
+        "trajectories_dedup": m.trajectories_dedup,
+        "trajectory_write_seconds": m.trajectory_write_seconds,
+        "trajectory_write_failures": m.trajectory_write_failures,
         "sandbox_wait_s": m.sandbox_wait_s,
         "sandbox_setup_s": m.sandbox_setup_s,
         "sandboxes_created": m.sandboxes_created,
@@ -1410,6 +1453,21 @@ class EvolutionResult:
     #: run has to report.
     cache_hits: int = 0
     cache_misses: int = 0
+    #: Rollout-trajectory records written, skipped as duplicates, lost to a
+    #: filesystem failure, and the seconds those writes took. A run without a
+    #: trajectory store reports zeros -- the honest reading "recording was
+    #: off". ``trajectories_dedup`` is the number of evaluations that were
+    #: already on disk, so the pair says how much unique evidence the run
+    #: actually produced.
+    trajectories_recorded: int = 0
+    trajectories_dedup: int = 0
+    trajectory_write_seconds: float = 0.0
+    trajectory_write_failures: int = 0
+    #: Where this run's trajectory records live, when recording was on:
+    #: ``<repo_path>/trajectories``. ``None`` when no store was attached --
+    #: reading the counters against it tells "recording was off" from "records
+    #: exist somewhere". Filled by the drivers from the engine's runtime.
+    trajectories_path: Optional[str] = None
     #: Sandbox accounting. Zero on the default single-workspace path: there is
     #: no pool to wait for and no image to warm. They exist here so that when a
     #: pool does appear, "8 workers only bought 2x" can be attributed to queueing
@@ -1800,6 +1858,34 @@ class _Engine:
     #: ``_prune_round_files`` a history that no longer sorts.
     checkpoint_round_base: int = 0
 
+    def _record_rollout(self, *, artifact_id: str, rendered: str, task: Task,
+                        base_version: VersionVector, purpose: str,
+                        output: Optional[str], reward: float, wallclock: float,
+                        worker_id: Optional[str] = None,
+                        lease_id: Optional[str] = None) -> Optional[str]:
+        """Persist one worker rollout, returning its ``trace_id`` or ``None``.
+
+        ``None`` means either no store is attached (recording off) or the
+        write deduped/failed -- all three are "nothing to point at", which is
+        exactly what an ``EvidenceCard.trace_ids`` entry wants: consumers read
+        the empty tuple as "recording was off or the record did not land",
+        never as "there was no rollout".
+
+        ``rendered`` is the exact text the provider saw (for the self-verify
+        path, the diff-applied render); ``base_version`` is the version vector
+        the worker held, stored JSON-encoded for attribution."""
+        store = self.runtime.trajectory_store
+        if store is None:
+            return None
+        from .trajectory import Trajectory
+        return store.record(Trajectory(
+            artifact_id=artifact_id, task_id=task.id,
+            env_fingerprint=self.runtime.env_fingerprint,
+            rendered=rendered, purpose=purpose,
+            base_version=json.dumps(base_version, sort_keys=True),
+            output=output, reward=reward, cost_wallclock=wallclock,
+            worker_id=worker_id, lease_id=lease_id))
+
     def record_round(self, *, index: int, reward: float, n_items: int,
                      reports: Sequence[Any],
                      history: List["RoundInfo"], early: "EarlyStop",
@@ -1936,7 +2022,9 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
                   ledger_impl: Optional[Any] = None,
                   policies_bundle: Optional[Policies] = None,
                   checkpointing: bool = False,
-                  allocator: Optional[Any] = None) -> _Engine:
+                  allocator: Optional[Any] = None,
+                  record_trajectories: bool = False,
+                  trajectory_store: Optional[Any] = None) -> _Engine:
     """Wire the ledger, runtime, verifier and aggregator (shared by
     :func:`evolve` and :func:`~agentdescent.async_evolve.async_evolve`)."""
     import tempfile
@@ -2094,6 +2182,20 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
         ledger, scratch = ledger_impl, None
     else:
         ledger = Ledger(repo, serialize, deserialize)
+    # Attach the trajectory store now that `repo` exists. The runtime was built
+    # above, before the repo's home was known; a store is built from the repo's
+    # own directory (``<repo>/trajectories``, excluded from the ledger index)
+    # when recording is on, or handed in whole when the caller owns one.
+    # Explicit `trajectory_store=` wins over the boolean: a caller who built a
+    # store somewhere else has already decided where records live, and
+    # `record_trajectories=True` alongside it would quietly record twice into
+    # different homes.
+    _traj_store = trajectory_store
+    if _traj_store is None and record_trajectories:
+        from .trajectory import TrajectoryStore
+        _traj_store = TrajectoryStore(os.path.join(repo, "trajectories"),
+                                      meter=meter)
+    runtime.trajectory_store = _traj_store
     # `register` is a no-op when the artifact already exists, which is what makes
     # re-using a repo_path resume the run -- but it also means a supplied
     # initial_state would be discarded without a word. Say so.
@@ -2418,6 +2520,25 @@ def evolve(
     #: default) is the old behaviour exactly -- optional spend degrades against
     #: the global floors, every candidate treated alike.
     allocator: Optional[Any] = None,
+    #: Persist every rollout and gate evaluation as a
+    #: :class:`~agentdescent.trajectory.Trajectory` under
+    #: ``<repo_path>/trajectories/`` -- what the run provider saw, what it
+    #: returned, what that earned, against which artifact version and
+    #: environment. Off by default: a throwaway repo's records die with it, so
+    #: the write cost is pure overhead there, and recording is a deliberate
+    #: choice about keeping a run's evidence. On by passing
+    #: ``trajectory_store=`` with a store you built (the explicit store wins
+    #: over the boolean). The store is the durable base every learning-type
+    #: increment reads -- process-supervised reflection, offline re-weighting,
+    #: audit replay -- and it is what an ``EvidenceCard.trace_ids`` entry
+    #: points at.
+    record_trajectories: bool = False,
+    #: An explicit :class:`~agentdescent.trajectory.TrajectoryStore` to record
+    #: into. Pass one to control where records land (a shared store, a custom
+    #: root, a custom privacy configuration) without going through the
+    #: ``<repo_path>/trajectories/`` default. ``None`` + ``record_trajectories``
+    #: builds the default store.
+    trajectory_store: Optional["TrajectoryStore"] = None,
 ) -> EvolutionResult:
     """Evolve an artifact. Provide either ``agent`` (with ``solve``/``propose``)
     or the ``run`` / ``propose`` callables directly.
@@ -2754,6 +2875,25 @@ def evolve(
         spent; ``max_tokens`` is what exists to spend). Counterfactual
         exploration re-measures candidates the model judged unworthy, so a
         biased value model is corrected rather than reinforced.
+    record_trajectories:
+        Persist every rollout and gate evaluation as a
+        :class:`~agentdescent.trajectory.Trajectory` under
+        ``<repo_path>/trajectories/`` -- what the run provider saw, what it
+        returned, what that earned, against which artifact version and
+        environment. Off by default: a throwaway repo's records die with it, so
+        the write cost is pure overhead there, and recording is a deliberate
+        choice about keeping a run's evidence. The store is the durable base
+        every learning-type increment reads -- process-supervised reflection,
+        offline re-weighting, audit replay -- and it is what an
+        ``EvidenceCard.trace_ids`` entry points at. Pass ``trajectory_store=``
+        with a store you built to control where records land instead.
+    trajectory_store:
+        An explicit :class:`~agentdescent.trajectory.TrajectoryStore` to record
+        into. Pass one to control where records land (a shared store, a custom
+        root, a custom privacy configuration) without going through the
+        ``<repo_path>/trajectories/`` default. The explicit store wins over
+        ``record_trajectories``; ``None`` + ``record_trajectories`` builds the
+        default store.
 
     Returns
     -------
@@ -2838,7 +2978,9 @@ def evolve(
             policies=policies, checkpointing=checkpointing,
             stop_on_diminishing_returns=stop_on_diminishing_returns,
             efficiency_floor=efficiency_floor,
-            call_budget=call_budget, allocator=allocator)
+            call_budget=call_budget, allocator=allocator,
+            record_trajectories=record_trajectories,
+            trajectory_store=trajectory_store)
 
     if pipelined_gate:
         # The mirror of the block above, and the same reasoning: a knob accepted
@@ -2898,7 +3040,8 @@ def evolve(
             shuffle=shuffle, seed=seed,
         usage=usage, verifier=_pol.verifier, ledger_impl=_pol.ledger,
         policies_bundle=_pol, checkpointing=checkpointing,
-        allocator=allocator)
+        allocator=allocator, record_trajectories=record_trajectories,
+        trajectory_store=trajectory_store)
     # Start the clock after the wiring, before the first unit of work: setup
     # is not what a time-to-quality number is asking about.
     eng.meter.start()
@@ -3137,6 +3280,17 @@ def evolve(
                 raise _rollout_failure(outcome)
             output = outcome.output
             score = _checked_reward(outcome.reward, task)
+            # Record the rollout before anything else can decide it does not
+            # matter: the trajectory is the run's evidence, and a rollout that
+            # turns out to be solved, stale or rejected is exactly the one a
+            # learning consumer wants to re-read. Returns None when recording
+            # is off (or the write deduped/failed) -- that empty is what the
+            # card's trace_ids below will carry.
+            trace = eng._record_rollout(
+                artifact_id=artifact_id, rendered=mine.render(), task=task,
+                base_version={artifact_id: mine_v}, purpose="rollout",
+                output=output, reward=score, wallclock=outcome.seconds,
+                worker_id=f"w{unit.worker}", lease_id=outcome.lease_id)
             sampler.record(task.id, score)               # learn which tasks carry signal
             # Observed here, before the solved-task early return: a *group* is
             # every rollout against this base and cluster, and one that only saw
@@ -3204,15 +3358,32 @@ def evolve(
             # :mod:`agentdescent.allocator`).
             if self_verify and governor.candidate_worth(_allocator_context(
                     diff, adv, score, getattr(mine, "blast_radius", 0.2))):
+                t_self = time.time()
                 after = _checked_reward(
                     reward(task, run(mine.apply(diff).render(), task)), task)
                 delta = after - score
+                # The self-verify re-run is itself evidence: it is the first
+                # measurement of the *candidate*, against the same task, and a
+                # learning consumer reads it exactly because it predates the
+                # gate's own (cheaper) view.
+                self_trace = eng._record_rollout(
+                    artifact_id=artifact_id,
+                    rendered=mine.apply(diff).render(), task=task,
+                    base_version={artifact_id: mine_v}, purpose="self_verify",
+                    output=None, reward=after, wallclock=time.time() - t_self,
+                    worker_id=f"w{unit.worker}")
             else:
                 delta = 0.0
+                self_trace = None
             aggregator.ingest(EvidenceCard(
                 diff=diff, base_version={artifact_id: mine_v}, touched=[artifact_id],
                 before_after_delta=delta, trajectory_refs=[task],
                 branch=mine_branch,
+                # The records that justify this card, when recording is on: the
+                # rollout that produced the diff and the self-verify re-run.
+                # Each entry is None-safe -- None means "recording off / dedupe /
+                # write failed", and a consumer reads the empty tuple that way.
+                trace_ids=tuple(t for t in (trace, self_trace) if t is not None),
                 # Recorded always, acted on by nobody unless a policy from
                 # `agentdescent.advantage` is installed. It is arithmetic over
                 # two numbers the round already has, and a signal that is only
@@ -3414,6 +3585,8 @@ def evolve(
                              stop_reason="error" if run_error else stop_reason,
                              fusion_trials=_fusion_trials(aggregator),
                              budget=governor.summary() if governor.active else None,
+                             trajectories_path=getattr(
+                                 eng.runtime.trajectory_store, "root", None),
                              **_cost_fields(eng.meter))
     eng.cleanup()
     result.replay = _replay_stats(sampler)

@@ -153,6 +153,14 @@ def async_evolve(
     #: default) is the old behaviour exactly -- optional spend degrades against
     #: the global floors, every candidate treated alike.
     allocator: Optional[Any] = None,
+    #: Persist every rollout and gate evaluation as a
+    #: :class:`~agentdescent.trajectory.Trajectory` under
+    #: ``<repo_path>/trajectories/``. See ``evolve()``; off by default.
+    record_trajectories: bool = False,
+    #: An explicit :class:`~agentdescent.trajectory.TrajectoryStore` to record
+    #: into. ``None`` + ``record_trajectories`` builds the default store at
+    #: ``<repo_path>/trajectories``.
+    trajectory_store: Optional[Any] = None,
 ) -> EvolutionResult:
     """Evolve an artifact **without a round barrier**.
 
@@ -393,6 +401,16 @@ def async_evolve(
         candidates the allocator expects to commit; the merger reports every
         outcome back so it learns. Requires ``max_tokens``. Counterfactual
         exploration corrects a biased value model rather than reinforcing it.
+    record_trajectories:
+        Exactly as in :func:`~agentdescent.evolution.evolve`: persist every
+        rollout and gate evaluation as a
+        :class:`~agentdescent.trajectory.Trajectory` under
+        ``<repo_path>/trajectories/``. Off by default; pass
+        ``trajectory_store=`` to control where records land.
+    trajectory_store:
+        An explicit :class:`~agentdescent.trajectory.TrajectoryStore` to record
+        into. ``None`` + ``record_trajectories`` builds the default store at
+        ``<repo_path>/trajectories``.
 
     Returns
     -------
@@ -438,7 +456,8 @@ def async_evolve(
         shuffle=shuffle, seed=seed,
         usage=usage, verifier=_pol.verifier, ledger_impl=_pol.ledger,
         policies_bundle=_pol, checkpointing=checkpointing,
-        allocator=allocator)
+        allocator=allocator, record_trajectories=record_trajectories,
+        trajectory_store=trajectory_store)
     eng.meter.start()
     # The cost-aware governor for the async path. The merger loop has no round
     # barrier, so the governor checks per sweep (after each merge, before the
@@ -731,6 +750,15 @@ def async_evolve(
                 score = _checked_reward(eng.reward(task, output), task)
                 eng.meter.add("rollouts")
                 eng.meter.add("rollout_seconds", time.time() - t_start)
+                # Record the rollout before anything downstream decides it does
+                # not matter: the trajectory is the run's evidence. None when
+                # recording is off / deduped / the write failed -- that empty is
+                # what the card's trace_ids carry.
+                trace = eng._record_rollout(
+                    artifact_id=eng.artifact_id, rendered=artifact.render(),
+                    task=task, base_version={eng.artifact_id: base_v},
+                    purpose="rollout", output=output, reward=score,
+                    wallclock=time.time() - t_start, worker_id=f"w{wid}")
                 sampler.record(task.id, score)     # learn which tasks carry signal
                 # Before the solved-task branch, for the same reason as on the
                 # synchronous path: a group that only saw the failures has no
@@ -758,16 +786,28 @@ def async_evolve(
                                     _async_allocator_context(
                                         diff, adv,
                                         getattr(artifact, "blast_radius", 0.2))):
+                                t_self = time.time()
                                 after = _checked_reward(
                                     eng.reward(task, eng.run(artifact.apply(diff).render(), task)), task)
                                 delta = after - score
+                                self_trace = eng._record_rollout(
+                                    artifact_id=eng.artifact_id,
+                                    rendered=artifact.apply(diff).render(),
+                                    task=task, base_version={eng.artifact_id: base_v},
+                                    purpose="self_verify", output=None,
+                                    reward=after, wallclock=time.time() - t_self,
+                                    worker_id=f"w{wid}")
                             else:
                                 delta = 0.0
+                                self_trace = None
                             card = EvidenceCard(
                                 diff=diff, base_version={eng.artifact_id: base_v},
                                 touched=[eng.artifact_id], before_after_delta=delta,
                                 trajectory_refs=[task],
                                 branch=worker_branch,
+                                trace_ids=tuple(
+                                    t for t in (trace, self_trace)
+                                    if t is not None),
                                 # Same signal as the synchronous path, and the
                                 # reason `GroupAdvantage` accumulates rather than
                                 # batching at a barrier: there is no barrier here,
@@ -1285,6 +1325,8 @@ def async_evolve(
                              stragglers=stragglers[0],
                              resumed=resumed_count[0],
                              fusion_trials=_fusion_trials(eng.aggregator),
+                             trajectories_path=getattr(
+                                 eng.runtime.trajectory_store, "root", None),
                              **_cost_fields(eng.meter))
     if gate_pool is not None:
         # `wait=False`: the merger has already blocked on every measurement it
