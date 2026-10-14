@@ -551,3 +551,70 @@ def test_eval_one_records_nothing_when_no_store(tmp_path):
     artifact = EvolvingArtifact("a", {"k": "v"}, strategy=AppendRules(),
                                 runtime=runtime)
     assert runtime.eval_one(artifact, Task(id="t1", prompt="p")) == 1.0
+
+
+# -- an unencodable record degrades the recording, never the rollout ----------
+
+
+class _Unprintable:
+    def __str__(self):
+        raise RuntimeError("no str for you")
+
+
+@pytest.mark.parametrize("output", [
+    {"logprob": float("nan")},          # allow_nan=False -> ValueError
+    {("a", "b"): 1},                    # non-string dict key -> TypeError
+    _Unprintable(),                     # default=str itself raises
+], ids=["nan-inside-output", "tuple-key", "str-raises"])
+def test_unencodable_record_is_counted_not_raised(tmp_path, output):
+    meter = Meter()
+    store = TrajectoryStore(str(tmp_path), meter=meter)
+    assert _record(store, output=output) is None
+    s = meter.snapshot()
+    assert s.trajectory_write_failures == 1
+    assert s.trajectories_recorded == 0
+    assert os.listdir(str(tmp_path)) == []          # no record, no orphan tmp
+    # The identity was never written, so a later encodable record still lands.
+    assert _record(store, output="fine") is not None
+    assert store.count() == 1
+
+
+def test_circular_output_is_counted_not_raised(tmp_path):
+    meter = Meter()
+    store = TrajectoryStore(str(tmp_path), meter=meter)
+    loop = []
+    loop.append(loop)
+    assert _record(store, output=loop) is None
+    assert meter.snapshot().trajectory_write_failures == 1
+    assert os.listdir(str(tmp_path)) == []
+
+
+def test_non_string_event_detail_is_counted_not_raised(tmp_path):
+    meter = Meter()
+    store = TrajectoryStore(str(tmp_path), meter=meter, record_text=True)
+    event = TrajectoryEvent("step", "run", detail=12345)   # not subscriptable
+    assert _record(store, events=(event,)) is None
+    assert meter.snapshot().trajectory_write_failures == 1
+
+
+def test_eval_one_does_not_rerun_a_rollout_whose_record_cannot_be_encoded(tmp_path):
+    """The gate already has its answer; the store failing to serialise the
+    output must not be mistaken for a backend transient and re-run the
+    rollout (or fail the gate)."""
+    meter = Meter()
+    store = TrajectoryStore(str(tmp_path), meter=meter)
+    calls = {"run": 0}
+
+    def run(rendered, task):
+        calls["run"] += 1
+        return {"answer": "x", "logprob": float("nan")}
+
+    runtime = _Runtime(run=run, reward=lambda t, o: 1.0,
+                       cache=MemoryCache(meter), meter=meter,
+                       trajectory_store=store)
+    artifact = EvolvingArtifact("a", {"k": "v"}, strategy=AppendRules(),
+                                runtime=runtime)
+    assert runtime.eval_one(artifact, Task(id="t1", prompt="p")) == 1.0
+    assert calls["run"] == 1                     # paid once, not ATTEMPTS times
+    assert store.count() == 0
+    assert meter.snapshot().trajectory_write_failures == 1

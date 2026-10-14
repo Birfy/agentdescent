@@ -48,6 +48,13 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- `TrajectoryStore.record()` no longer raises when a record cannot be encoded
+  (a NaN inside a structured output, non-string dict keys, a circular value, a
+  `__str__` that raises, a non-string event detail) (#259). It is counted in
+  `trajectory_write_failures` like a full disk and nothing is written, so
+  `eval_one` no longer mistakes it for a backend transient and re-runs the
+  already-paid rollout `ATTEMPTS` times before failing the gate.
+
 - `TrajectoryStore.get` / `path_for` round-trip `trace_id`s whose `artifact_id` contains a colon by parsing with `rsplit(":", 1)` (#257). The key is always a hex digest; a leading split treated a namespaced id as part of the key and returned ``None`` for a record that was on disk.
 
 - Container sandbox allowlisted env vars are forwarded as `--env NAME` so
