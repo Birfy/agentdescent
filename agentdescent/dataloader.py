@@ -159,15 +159,21 @@ def _slug(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_")
 
 
-def _rows_cache_component(value: str) -> str:
-    """Bound a page-filename component without aliasing lossy conversions."""
+def _rows_cache_component(value: str, identity: Optional[str] = None) -> str:
+    """Bound a page-filename component without aliasing lossy conversions.
+
+    ``identity`` is the raw string the digest must distinguish when ``value``
+    is itself already a lossy rendering (the config slug): two configs that
+    slug identically must still hash apart once the name has to be bounded.
+    """
     slug = _slug(value)
     if re.fullmatch(r"[A-Za-z0-9._-]*", value) and len(value) <= 48:
         return value
     # Retain the original identity when sanitizing or truncating. `~` is
     # portable but absent from _slug's alphabet, so an ordinary split cannot
     # impersonate a transformed component by spelling out its digest suffix.
-    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:32]
+    raw = value if identity is None else identity
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
     return f"{slug[:12]}~{digest}"
 
 
@@ -268,7 +274,11 @@ def _rows_payload(dataset: str, config: str, split: str, offset: int, length: in
     # Preserve existing short config slugs; only the filename is transformed,
     # never the request. Ordinary filenames retain their existing cache hits.
     parts = (_slug(config), split, str(offset), str(length))
-    components = tuple(_rows_cache_component(part) for part in parts)
+    # The config slug is already lossy ("a/x" and "a:x" both become "a_x"), so
+    # when it must be bounded the digest is taken over the raw config, not the
+    # slug -- otherwise two long configs share one cache page (review on #262).
+    components = (_rows_cache_component(parts[0], identity=config),) + tuple(
+        _rows_cache_component(part) for part in parts[1:])
     # Legacy names always end in an integer length followed by `.json`.
     # A suffix after that field prevents an old literal split from aliasing a
     # transformed component. At least one component is <=45 bytes in this

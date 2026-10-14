@@ -66,7 +66,8 @@ All notable changes to AgentDescent are documented here. The format follows
 - HuggingFace row-cache filenames sanitize split names and bound their
   components (#261), keeping slash-containing and traversal-style splits in
   one portable cache entry. Lossy conversions include a digest to distinguish
-  split names, and a versioned suffix prevents old raw-split cache entries
+  split names (a bounded config is digested from the raw config, so configs
+  that slug identically stay distinct), and a versioned suffix prevents old raw-split cache entries
   from aliasing the new names. Existing normal filenames and datasets-server
   requests are unchanged.
 

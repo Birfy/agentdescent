@@ -117,6 +117,19 @@ def test_truncated_config_names_keep_distinct_entries(rows_cache):
     assert [query["config"][0] for _, _, query in requests] == configs
 
 
+def test_long_configs_that_slug_identically_keep_distinct_entries(rows_cache):
+    """A bounded config is digested from the raw config, not its lossy slug:
+    ``a/x...`` and ``a:x...`` both slug to ``a_x...`` (review on #262)."""
+    _, paths, requests = rows_cache
+    configs = ["a/" + "x" * 1000, "a:" + "x" * 1000]
+    for config in configs + list(reversed(configs)):
+        assert dl.hf_rows("example/ds", "train", config=config, limit=1) == [
+            {"split": "train"}]
+    assert len(requests) == 2
+    assert len(set(paths)) == 2
+    assert [query["config"][0] for _, _, query in requests] == configs
+
+
 def test_transformed_split_cannot_alias_its_own_cache_component(rows_cache):
     _, paths, requests = rows_cache
     split = "a/b"
