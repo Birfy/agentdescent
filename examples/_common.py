@@ -513,6 +513,13 @@ def claude_cli(model: str = "haiku", *, usage: Optional[Usage] = None,
         try:
             done = subprocess.run(argv, input=prompt, capture_output=True, text=True,
                                   timeout=timeout, env=cli_env())
+        except FileNotFoundError as exc:
+            if usage is not None:
+                usage.record(failed=True, seconds=time.time() - started)
+            raise RuntimeError(
+                f"{binary!r} is not on PATH; install the Claude Code CLI or "
+                f"pass --provider claude / openai instead"
+            ) from exc
         except subprocess.TimeoutExpired:
             if usage is not None:
                 usage.record(failed=True, seconds=time.time() - started)
