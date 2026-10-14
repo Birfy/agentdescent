@@ -96,6 +96,22 @@ State keys are file paths, so two workers editing different files **fuse** and
 two editing the same file are **resolved** on held-out score — the same
 [aggregator](aggregator.md) as every other strategy, with no special cases.
 
+**Keep it a skill.** Evaluation points the agent at the files directly, so the
+reward cannot see whether `SKILL.md` would still be *discovered* once
+installed. Pass a structural gate and a candidate that deletes `SKILL.md` or
+breaks its `name` / `description` frontmatter is rejected before any rollout,
+counted in `strategy.structural_rejections`:
+
+```python
+from agentdescent.skillspec import skill_tree_validator
+
+strategy = FileTree(tree, validators=[skill_tree_validator(root_name="pdf-audit")])
+```
+
+A `kind: "skill_dir"` spec wires this in by default (opt out with
+`validate_skill: false`). The same check runs on a contested `SKILL.md` that
+the reflective merge model rewrote, so a merged value never skips it.
+
 ## 4. Staging the task's own inputs
 
 A task usually needs data of its own beside the skill:

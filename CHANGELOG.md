@@ -8,6 +8,21 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- `kind="skill_dir"` now gates candidates structurally before any rollout
+  (#246): a diff that deletes `SKILL.md`, drops its frontmatter, or breaks the
+  Agent Skills `name` / `description` / `compatibility` rules (or renames the
+  skill) is rejected and counted in `FileTree.structural_rejections` by reason.
+  New `agentdescent.skillspec` (`validate_skill_tree`, `SkillTreeValidator`,
+  dependency-free) and a general `FileTree(validators=...)` hook. Skipped with
+  a note when the initial skill does not pass; opt out with
+  `validate_skill: false`. The gate also covers model-written merges:
+  `ReflectiveFusion` asks the strategy's new `FileTree.check_candidate` before
+  returning a synthesised union, and a refused one falls back to ranking. Header
+  values a YAML loader would refuse or read as non-text (unterminated quotes,
+  invalid `\` escapes, text after a closing quote, `[...]` / `{...}`, unquoted
+  `: `, reserved first characters, and plain `null` / `true` / number / date
+  values) are `frontmatter-malformed`; a BOM and inline `# comments` (even ones
+  containing a colon) are tolerated.
 - `Diff.rationale` carries the FileTree reflector's reason into the ledger
   commit message and the ReplayAwareProposal rejected-evidence note (#247).
   `parse_proposal` returns edits plus rationale; `parse_edits` stays a thin
