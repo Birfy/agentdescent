@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-340 public names across 56 modules.
+341 public names across 56 modules.
 
 ---
 
@@ -832,6 +832,10 @@ FileTree(
 ### `parse_edits(proposal: str) -> Dict[str, Optional[str]]`
 
 Parse a reflector reply into `{path: new_content}` (`None` = delete).
+
+### `parse_proposal(proposal: str) -> Tuple[Dict[str, Optional[str]], str]`
+
+Parse a reflector reply into `(edits, rationale)`.
 
 ### `tree_reflector(...)`
 

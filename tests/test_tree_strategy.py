@@ -293,3 +293,48 @@ def test_fuse_diffs_concatenates_parent_rationales():
     c = Diff("c", "t", {"z": "3"}, author="w2", rationale="fix x")  # dedupe
     fused = fuse_diffs([a, b, c])
     assert fused.rationale == "fix x; add y"
+
+
+def test_rationale_strips_nul_and_lone_surrogates_so_git_commit_survives(tmp_path):
+    """A reflector may emit an escaped NUL or lone surrogate in JSON; neither
+    may reach ``git commit -m`` (embedded null byte / UnicodeEncodeError)."""
+    import subprocess
+    from agentdescent.aggregator import merge_commit_message
+    from agentdescent.evolution import EvolvingArtifact
+    from agentdescent.ledger import Ledger
+
+    edits, rationale = parse_proposal(
+        '{"rationale": "why\\u0000oops\\ud800 \\u0007bell",'
+        ' "edits": [{"path": "SKILL.md", "content": "new"}]}')
+    assert edits == {"SKILL.md": "new"}
+    assert rationale == "why oops bell"
+
+    s = FileTree({"SKILL.md": "old"})
+    d = s.to_diff(
+        s.initial(),
+        '<EDITS>{"rationale": "nul\\u0000inside", "edits": '
+        '[{"path": "SKILL.md", "content": "new"}]}</EDITS>',
+        "w0", 1, "art")
+    assert d is not None and "\x00" not in d.rationale
+
+    # A hand-built Diff with raw control characters is normalized at commit time.
+    from dataclasses import replace
+    d = replace(d, rationale="raw\x00nul\ud800here")
+    msg = merge_commit_message(d, "art")
+    assert "\x00" not in msg and "\ud800" not in msg
+
+    led = Ledger(str(tmp_path / "repo"), lambda a: {"state": dict(a.state)},
+                 lambda aid, v, p: EvolvingArtifact(aid, p.get("state", {}), v))
+    art = EvolvingArtifact("art", s.initial(), strategy=s)
+    led.register(art)
+    base = led.head_version(Ledger.DEV)
+    led.commit(art.apply(d), base, branch=Ledger.DEV, message=msg)
+    body = subprocess.check_output(
+        ["git", "-C", led.repo_path, "log", "-1", "--format=%B"], text=True)
+    assert "raw nulhere" in body
+
+
+def test_parse_proposal_is_exported_from_the_package_root():
+    import agentdescent
+    assert agentdescent.parse_proposal is parse_proposal
+    assert "parse_proposal" in agentdescent.__all__

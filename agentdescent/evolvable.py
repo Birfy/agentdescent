@@ -22,6 +22,7 @@ template, a harness module, or a learned verifier.  What evolves is decided by
 from __future__ import annotations
 
 import hashlib
+import unicodedata
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Sequence, Tuple, runtime_checkable
 
@@ -126,10 +127,19 @@ def rationale_paragraph(text: Any, *, cap: int = _RATIONALE_CAP) -> str:
     """Collapse a rationale to a single paragraph, capped for commit messages.
 
     Non-strings and blanks become ``""``. Whitespace (including newlines) is
-    folded so a ledger commit subject/body stays one paragraph.
+    folded so a ledger commit subject/body stays one paragraph. Control
+    characters (NUL included) become spaces and lone surrogates are dropped:
+    a reflector can legally emit ``"\\u0000"`` or ``"\\ud800"`` in JSON, and
+    either would crash ``git commit -m`` (``embedded null byte`` /
+    ``UnicodeEncodeError``) for an otherwise valid merge.
     """
     if not isinstance(text, str):
         return ""
+    text = "".join(
+        " " if unicodedata.category(ch) == "Cc"
+        else "" if unicodedata.category(ch) == "Cs"
+        else ch
+        for ch in text)
     one = " ".join(text.split())
     if len(one) > cap:
         one = one[:cap].rstrip()

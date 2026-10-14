@@ -12,7 +12,9 @@ All notable changes to AgentDescent are documented here. The format follows
   commit message and the ReplayAwareProposal rejected-evidence note (#247).
   `parse_proposal` returns edits plus rationale; `parse_edits` stays a thin
   wrapper. Fused/synth diffs concatenate parent rationales (deduped, capped).
-  Rationales never enter `diff_id`.
+  Rationales never enter `diff_id`. Control characters (NUL included) and
+  lone surrogates are stripped from rationales so `git commit` cannot crash on
+  them, and `parse_proposal` is exported from the package root.
 
 - Add the RRSI cosine-annealed L0 edit-budget schedule (`examples/rrsi/schedule.py`)
   adapted from the pinned Google release, with endpoint / float-guard / bound
