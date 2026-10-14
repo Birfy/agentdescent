@@ -9,7 +9,7 @@ import pytest
 
 from agentdescent.evolution import EvolvingArtifact, Task
 from agentdescent.filetree import canonical
-from agentdescent.treestrategy import FileTree, parse_edits, tree_reflector
+from agentdescent.treestrategy import FileTree, parse_edits, parse_proposal, tree_reflector
 
 
 def _tree(**files):
@@ -184,3 +184,157 @@ def test_tree_reflector_bounds_what_it_puts_in_the_prompt():
     # the listing names every file, but only a couple of bodies are inlined.
     assert seen["prompt"].count("--- f") <= 2
     assert "f19.md" in seen["prompt"]              # still listed
+
+
+# ---------------------------------------------------------------------------
+# rationale: paid for in tokens, kept for lineage (#247)
+# ---------------------------------------------------------------------------
+
+
+def test_parse_proposal_returns_edits_and_rationale():
+    block = """<EDITS>
+{"rationale": "  fix the units   and retry  ",
+ "edits": [{"path": "SKILL.md", "content": "new body"}]}
+</EDITS>"""
+    edits, rationale = parse_proposal(block)
+    assert edits == {"SKILL.md": "new body"}
+    assert rationale == "fix the units and retry"
+    # wrappers: fenced and bare
+    fenced = '```json\n{"rationale": "why", "edits": [{"path": "a.md", "content": "x"}]}\n```'
+    bare = '{"rationale": "why", "edits": [{"path": "a.md", "content": "x"}]}'
+    for text in (fenced, bare):
+        e, r = parse_proposal(text)
+        assert e == {"a.md": "x"} and r == "why"
+
+
+def test_parse_proposal_non_string_or_missing_rationale_is_empty():
+    assert parse_proposal('{"rationale": 17, "edits": [{"path": "a.md", "content": "x"}]}')[1] == ""
+    assert parse_proposal('{"edits": [{"path": "a.md", "content": "x"}]}')[1] == ""
+    assert parse_proposal("not json") == ({}, "")
+
+
+def test_parse_edits_is_byte_for_byte_the_edits_half():
+    """Existing callers of parse_edits must be unaffected (#247 acceptance)."""
+    proposal = """Sure.
+<EDITS>
+{"rationale": "r", "edits": [{"path": "SKILL.md", "content": "new body"}]}
+</EDITS>"""
+    assert parse_edits(proposal) == parse_proposal(proposal)[0] == {"SKILL.md": "new body"}
+
+
+def test_identical_edits_share_diff_id_even_with_different_rationales():
+    s = _tree(**{"SKILL.md": "old"})
+    a = _diff(s, s.initial(),
+              '<EDITS>{"rationale": "first idea", "edits": '
+              '[{"path": "SKILL.md", "content": "new"}]}</EDITS>')
+    b = _diff(s, s.initial(),
+              '<EDITS>{"rationale": "second idea", "edits": '
+              '[{"path": "SKILL.md", "content": "new"}]}</EDITS>')
+    assert a is not None and b is not None
+    assert a.diff_id == b.diff_id
+    assert a.rationale == "first idea" and b.rationale == "second idea"
+
+
+def test_filetree_to_diff_carries_the_rationale():
+    s = _tree(**{"SKILL.md": "old"})
+    d = _diff(s, s.initial(),
+              '<EDITS>{"rationale": "clarify the units", "edits": '
+              '[{"path": "SKILL.md", "content": "new"}]}</EDITS>')
+    assert d.rationale == "clarify the units"
+
+
+def test_accepted_filetree_diff_puts_rationale_in_ledger_commit(tmp_path):
+    """git log on the ledger must carry *why*, not just ids (#247)."""
+    import subprocess
+    from agentdescent.aggregator import merge_commit_message
+    from agentdescent.evolution import EvolvingArtifact
+    from agentdescent.ledger import Ledger
+
+    s = FileTree({"SKILL.md": "old"})
+    d = s.to_diff(
+        s.initial(),
+        '<EDITS>{"rationale": "units were wrong; check SI first",'
+        ' "edits": [{"path": "SKILL.md", "content": "new"}]}</EDITS>',
+        "w0", 1, "art")
+    assert d is not None and d.rationale
+
+    def serialize(a):
+        return {"state": dict(a.state)}
+
+    def deserialize(aid, v, payload):
+        return EvolvingArtifact(aid, payload.get("state", {}), v)
+
+    led = Ledger(str(tmp_path / "repo"), serialize, deserialize)
+    art = EvolvingArtifact("art", s.initial(), strategy=s)
+    led.register(art)
+    base = led.head_version(Ledger.DEV)
+    candidate = art.apply(d)
+    msg = merge_commit_message(d, "art")
+    led.commit(candidate, base, branch=Ledger.DEV, message=msg)
+    body = subprocess.check_output(
+        ["git", "-C", led.repo_path, "log", "-1", "--format=%B"],
+        text=True)
+    assert f"merge {d.diff_id} -> art" in body
+    assert "units were wrong; check SI first" in body
+
+
+def test_merge_commit_message_without_rationale_is_unchanged():
+    from agentdescent.aggregator import merge_commit_message
+    from agentdescent.evolvable import Diff
+    d = Diff(diff_id="w0:abcd:1", target="art", ops={"k": "v"}, author="w0")
+    assert merge_commit_message(d, "art") == "merge w0:abcd:1 -> art"
+
+
+def test_fuse_diffs_concatenates_parent_rationales():
+    from agentdescent.aggregator import fuse_diffs
+    from agentdescent.evolvable import Diff
+    a = Diff("a", "t", {"x": "1"}, author="w0", rationale="fix x")
+    b = Diff("b", "t", {"y": "2"}, author="w1", rationale="add y")
+    c = Diff("c", "t", {"z": "3"}, author="w2", rationale="fix x")  # dedupe
+    fused = fuse_diffs([a, b, c])
+    assert fused.rationale == "fix x; add y"
+
+
+def test_rationale_strips_nul_and_lone_surrogates_so_git_commit_survives(tmp_path):
+    """A reflector may emit an escaped NUL or lone surrogate in JSON; neither
+    may reach ``git commit -m`` (embedded null byte / UnicodeEncodeError)."""
+    import subprocess
+    from agentdescent.aggregator import merge_commit_message
+    from agentdescent.evolution import EvolvingArtifact
+    from agentdescent.ledger import Ledger
+
+    edits, rationale = parse_proposal(
+        '{"rationale": "why\\u0000oops\\ud800 \\u0007bell",'
+        ' "edits": [{"path": "SKILL.md", "content": "new"}]}')
+    assert edits == {"SKILL.md": "new"}
+    assert rationale == "why oops bell"
+
+    s = FileTree({"SKILL.md": "old"})
+    d = s.to_diff(
+        s.initial(),
+        '<EDITS>{"rationale": "nul\\u0000inside", "edits": '
+        '[{"path": "SKILL.md", "content": "new"}]}</EDITS>',
+        "w0", 1, "art")
+    assert d is not None and "\x00" not in d.rationale
+
+    # A hand-built Diff with raw control characters is normalized at commit time.
+    from dataclasses import replace
+    d = replace(d, rationale="raw\x00nul\ud800here")
+    msg = merge_commit_message(d, "art")
+    assert "\x00" not in msg and "\ud800" not in msg
+
+    led = Ledger(str(tmp_path / "repo"), lambda a: {"state": dict(a.state)},
+                 lambda aid, v, p: EvolvingArtifact(aid, p.get("state", {}), v))
+    art = EvolvingArtifact("art", s.initial(), strategy=s)
+    led.register(art)
+    base = led.head_version(Ledger.DEV)
+    led.commit(art.apply(d), base, branch=Ledger.DEV, message=msg)
+    body = subprocess.check_output(
+        ["git", "-C", led.repo_path, "log", "-1", "--format=%B"], text=True)
+    assert "raw nulhere" in body
+
+
+def test_parse_proposal_is_exported_from_the_package_root():
+    import agentdescent
+    assert agentdescent.parse_proposal is parse_proposal
+    assert "parse_proposal" in agentdescent.__all__

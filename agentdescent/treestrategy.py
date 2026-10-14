@@ -23,10 +23,10 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from .agents import Completion
-from .evolvable import Diff, stable_hash
+from .evolvable import Diff, rationale_paragraph, stable_hash
 from .filetree import (
     DEFAULT_MAX_FILE_BYTES,
     TreeError,
@@ -37,7 +37,7 @@ from .filetree import (
     tree_summary,
 )
 
-__all__ = ["FileTree", "parse_edits", "tree_reflector", "EDIT_PROTOCOL"]
+__all__ = ["FileTree", "parse_edits", "parse_proposal", "tree_reflector", "EDIT_PROTOCOL"]
 
 
 # ---------------------------------------------------------------------------
@@ -95,29 +95,25 @@ def _first_json_object(text: str) -> Optional[str]:
     return None
 
 
-def parse_edits(proposal: str) -> Dict[str, Optional[str]]:
-    """Parse a reflector reply into ``{path: new_content}`` (``None`` = delete).
-
-    Lenient about the wrapper -- ``<EDITS>`` block, fenced JSON, or a bare object
-    -- and strict about the payload. Returns ``{}`` when nothing parses, because
-    a reflector that ignores the protocol is a *quality* problem the run should
-    absorb and count (``to_diff`` returns ``None``), not a crash.
-    """
+def _proposal_object(proposal: str) -> Optional[dict]:
+    """Pull the JSON object out of an ``<EDITS>`` / fenced / bare wrapper."""
     if not isinstance(proposal, str) or not proposal.strip():
-        return {}
+        return None
     m = _BLOCK_RE.search(proposal)
     raw = m.group(1) if m else None
     if raw is None:
         f = _FENCE_RE.search(proposal)
         raw = f.group(1) if f else _first_json_object(proposal)
     if not raw:
-        return {}
+        return None
     try:
         data = json.loads(raw)
     except Exception:  # noqa: BLE001 - malformed model output, not a bug
-        return {}
-    if not isinstance(data, dict):
-        return {}
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _edits_from_object(data: dict) -> Dict[str, Optional[str]]:
     items: Sequence[Any]
     if isinstance(data.get("edits"), list):
         items = data["edits"]
@@ -138,6 +134,32 @@ def parse_edits(proposal: str) -> Dict[str, Optional[str]]:
         elif isinstance(item.get("content"), str):
             out[path] = item["content"]
     return out
+
+
+def parse_proposal(proposal: str) -> Tuple[Dict[str, Optional[str]], str]:
+    """Parse a reflector reply into ``(edits, rationale)``.
+
+    ``edits`` is ``{path: new_content}`` (``None`` = delete), same rules as
+    :func:`parse_edits`. ``rationale`` is the reflector's one-sentence reason,
+    stripped to a single paragraph and capped; missing or non-string becomes
+    ``""``. Lenient about the wrapper -- ``<EDITS>`` block, fenced JSON, or a
+    bare object -- and returns ``({}, "")`` when nothing parses.
+    """
+    data = _proposal_object(proposal)
+    if data is None:
+        return {}, ""
+    return _edits_from_object(data), rationale_paragraph(data.get("rationale", ""))
+
+
+def parse_edits(proposal: str) -> Dict[str, Optional[str]]:
+    """Parse a reflector reply into ``{path: new_content}`` (``None`` = delete).
+
+    Thin wrapper over :func:`parse_proposal` that discards the rationale, kept
+    for backward compatibility. Returns ``{}`` when nothing parses, because a
+    reflector that ignores the protocol is a *quality* problem the run should
+    absorb and count (``to_diff`` returns ``None``), not a crash.
+    """
+    return parse_proposal(proposal)[0]
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +217,7 @@ class FileTree:
         return canonical(state)
 
     def to_diff(self, state, proposal, author, base_version, target) -> Optional[Diff]:
-        edits = parse_edits(proposal)
+        edits, rationale = parse_proposal(proposal)
         ops: Dict[str, Optional[str]] = {}
         for path, content in edits.items():
             if not self.writable(path):
@@ -210,9 +232,11 @@ class FileTree:
                 ops[path] = content
         if not ops or len(ops) > self.max_files_per_diff:
             return None
+        # Fingerprint is ops-only: rationale must not affect diff_id / dedup.
         fingerprint = stable_hash(tuple(sorted((k, v) for k, v in ops.items())))
         return Diff(diff_id=f"{author}:{fingerprint & 0xFFFFFFFF:08x}:{base_version}",
-                    target=target, ops=dict(ops), author=author)
+                    target=target, ops=dict(ops), author=author,
+                    rationale=rationale)
 
     # -- helpers ------------------------------------------------------------
 

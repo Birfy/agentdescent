@@ -151,7 +151,7 @@ from .filetree import (
     parse_tree,
     tree_summary,
 )
-from .treestrategy import EDIT_PROTOCOL, FileTree, parse_edits, tree_reflector
+from .treestrategy import EDIT_PROTOCOL, FileTree, parse_edits, parse_proposal, tree_reflector
 from .runners import (
     LAYOUTS, PLUGIN_FROZEN, PLUGIN_HOSTS, TEST_FAILURE_MARKER, PluginHost, code_runner,
     gated_reward, plugin_runner, tree_runner,
@@ -424,6 +424,7 @@ __all__ = [
     "EDIT_PROTOCOL",
     "FileTree",
     "parse_edits",
+    "parse_proposal",
     "tree_reflector",
     "LAYOUTS",
     "TEST_FAILURE_MARKER",
