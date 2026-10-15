@@ -63,6 +63,11 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- `FileCache` write failures no longer leave orphan `*.tmp` siblings, and
+  encode errors (`TypeError`/`ValueError`) are swallowed like `OSError` so a
+  paid evaluation is never failed by the cache; non-finite scores are returned
+  but not written (`allow_nan=False`). Non-JSON-native keys (`Path`, `UUID`)
+  still persist via `default=str`, matching how `_path()` hashes them (#263).
 - A failed `Ledger` write no longer corrupts the ledger (#265). Payloads are
   encoded before any file is touched, each file is replaced via a temp
   sibling, and an operation that fails part-way restores the files it already
