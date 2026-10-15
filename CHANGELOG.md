@@ -101,6 +101,13 @@ All notable changes to AgentDescent are documented here. The format follows
   `append` / `resolve` / `reopen` / `remember_*` leaves the index agreeing with
   a fresh reload. `observe_unlabelled` and `resolve` refuse non-finite scores
   with `ValueError`. An unknown `schema_version` still raises.
+- HuggingFace row-cache filenames sanitize split names and bound their
+  components (#261), keeping slash-containing and traversal-style splits in
+  one portable cache entry. Lossy conversions include a digest to distinguish
+  split names (a bounded config is digested from the raw config, so configs
+  that slug identically stay distinct), and a versioned suffix prevents old raw-split cache entries
+  from aliasing the new names. Existing normal filenames and datasets-server
+  requests are unchanged.
 
 - `TrajectoryStore.record()` no longer raises when a record cannot be encoded
   (a NaN inside a structured output, non-string dict keys, a circular value, a
