@@ -348,12 +348,18 @@ class EvolvingArtifact:
     def __init__(self, id: str, state: Optional[Dict[str, str]] = None,
                  version: int = 1, blast_radius: float = 0.2,
                  runtime: Optional["_Runtime"] = None,
-                 strategy: Optional[Strategy] = None) -> None:
+                 strategy: Optional[Strategy] = None,
+                 contract: Optional[Contract] = None) -> None:
         self.id = id
         self.state: Dict[str, str] = dict(state or {})
         self.version = version
         self.blast_radius = blast_radius
-        self.contract = Contract(input_schema="task", output_schema="text", major=1)
+        #: The artifact's contract. A caller passes one to declare governance
+        #: invariants (``Contract(invariants=(...))``, see
+        #: :mod:`agentdescent.invariants`); the default is the reference skill
+        #: contract, which declares nothing and enforces nothing.
+        self.contract = contract or Contract(
+            input_schema="task", output_schema="text", major=1)
         self._rt = runtime
         self._strategy = strategy or AppendRules()
 
@@ -1102,6 +1108,8 @@ def _cost_fields(meter: Meter) -> Dict[str, Any]:
         "redispatched": m.redispatched,
         "duplicates_dropped": m.duplicates_dropped,
         "cas_conflicts": m.cas_conflicts,
+        "invariant_checked": m.invariant_checked,
+        "invariant_rejections": m.invariant_rejections,
         "cache_hits": m.cache_hits,
         "cache_misses": m.cache_misses,
         "trajectories_recorded": m.trajectories_recorded,
@@ -1479,6 +1487,13 @@ class EvolutionResult:
     #: reading the counters against it tells "recording was off" from "records
     #: exist somewhere". Filled by the drivers from the engine's runtime.
     trajectories_path: Optional[str] = None
+    #: Governance invariants: candidates whose contract declared rules and
+    #: were checked, and the individual violations that rejected them (each
+    #: rejected merge reports a ``violates-invariant`` outcome too, so
+    #: ``outcomes()`` carries the merge-level count). A run that declared no
+    #: invariants reports zeros -- the honest reading "no rules to enforce".
+    invariant_checked: int = 0
+    invariant_rejections: int = 0
     #: Sandbox accounting. Zero on the default single-workspace path: there is
     #: no pool to wait for and no image to warm. They exist here so that when a
     #: pool does appear, "8 workers only bought 2x" can be attributed to queueing
@@ -2035,7 +2050,8 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
                   checkpointing: bool = False,
                   allocator: Optional[Any] = None,
                   record_trajectories: bool = False,
-                  trajectory_store: Optional[Any] = None) -> _Engine:
+                  trajectory_store: Optional[Any] = None,
+                  contract: Optional[Contract] = None) -> _Engine:
     """Wire the ledger, runtime, verifier and aggregator (shared by
     :func:`evolve` and :func:`~agentdescent.async_evolve.async_evolve`)."""
     import tempfile
@@ -2165,11 +2181,26 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
                                         else ""))
 
     def serialize(a: EvolvingArtifact) -> dict:
-        return {"state": a.state, "blast_radius": a.blast_radius}
+        # The contract rides in the payload because the merge gate enforces it:
+        # an artifact whose invariants evaporated on the ledger round-trip is a
+        # governance rule that silently stopped running. ``None`` (no explicit
+        # contract) is stored as absent, so old payloads and the untouched path
+        # read back to the caller's default contract.
+        out = {"state": a.state, "blast_radius": a.blast_radius}
+        contract = getattr(a, "contract", None)
+        if contract is not None:
+            from .invariants import contract_to_dict
+            out["contract"] = contract_to_dict(contract)
+        return out
 
     def deserialize(aid: str, version: int, state: dict) -> EvolvingArtifact:
+        contract = None
+        if state.get("contract"):
+            from .invariants import contract_from_dict
+            contract = contract_from_dict(state["contract"])
         return EvolvingArtifact(aid, state.get("state", {}), version,
-                                state.get("blast_radius", blast_radius), runtime, strategy)
+                                state.get("blast_radius", blast_radius), runtime,
+                                strategy, contract=contract)
 
     scratch: Optional[str] = None
     if repo_path:
@@ -2235,7 +2266,19 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
             "to start over.", RuntimeWarning, stacklevel=3)
     ledger.register(EvolvingArtifact(artifact_id, initial_state or strategy.initial(),
                                      blast_radius=blast_radius, runtime=runtime,
-                                     strategy=strategy))
+                                     strategy=strategy, contract=contract))
+    # Registration-time governance: a contract that declares a self-referential
+    # or cyclic dependency graph is refused before the run starts, not after
+    # the first merge trips over it. (Depends_on is duck-typed, so this is a
+    # no-op on today's single-artifact contracts and becomes load-bearing with
+    # multi-artifact dependencies.)
+    if contract is not None:
+        from .invariants import check_dependency_graph
+        violations = check_dependency_graph({artifact_id: contract})
+        if violations:
+            raise GovernanceError(
+                f"artifact {artifact_id!r} declares an invalid contract: "
+                + "; ".join(violations))
 
     # The cheap layer must actually be cheap. It used to be pinned to the full
     # held-out set (`rule_subset=len(held_out)`) with zero noise, on the reasoning
@@ -2567,6 +2610,15 @@ def evolve(
     #: ``<repo_path>/trajectories/`` default. ``None`` + ``record_trajectories``
     #: builds the default store.
     trajectory_store: Optional["TrajectoryStore"] = None,
+    #: The artifact's contract -- the externally-visible interface, and where
+    #: governance invariants are declared. Pass
+    #: ``Contract(invariants=(Invariant("mutable_keys", {"a", "b"}),))`` and the
+    #: aggregator enforces each rule **before** a candidate is measured (see
+    #: :mod:`agentdescent.invariants`); a diff that breaks one reports a
+    #: ``violates-invariant`` outcome and never buys a held-out sweep. ``None``
+    #: (the default) is the reference skill contract, which declares nothing and
+    #: enforces nothing -- the untouched path exactly.
+    contract: Optional[Contract] = None,
 ) -> EvolutionResult:
     """Evolve an artifact. Provide either ``agent`` (with ``solve``/``propose``)
     or the ``run`` / ``propose`` callables directly.
@@ -2922,6 +2974,15 @@ def evolve(
         ``<repo_path>/trajectories/`` default. The explicit store wins over
         ``record_trajectories``; ``None`` + ``record_trajectories`` builds the
         default store.
+    contract:
+        The artifact's contract -- the externally-visible interface, and where
+        governance invariants are declared. Pass
+        ``Contract(invariants=(Invariant("mutable_keys", {"a", "b"}),))`` and
+        the aggregator enforces each rule **before** a candidate is measured
+        (see :mod:`agentdescent.invariants`); a diff that breaks one reports a
+        ``violates-invariant`` outcome and never buys a held-out sweep.
+        ``None`` (the default) is the reference skill contract, which declares
+        nothing and enforces nothing -- the untouched path exactly.
 
     Returns
     -------
@@ -3008,7 +3069,7 @@ def evolve(
             efficiency_floor=efficiency_floor,
             call_budget=call_budget, allocator=allocator,
             record_trajectories=record_trajectories,
-            trajectory_store=trajectory_store)
+            trajectory_store=trajectory_store, contract=contract)
 
     if pipelined_gate:
         # The mirror of the block above, and the same reasoning: a knob accepted
@@ -3069,7 +3130,7 @@ def evolve(
         usage=usage, verifier=_pol.verifier, ledger_impl=_pol.ledger,
         policies_bundle=_pol, checkpointing=checkpointing,
         allocator=allocator, record_trajectories=record_trajectories,
-        trajectory_store=trajectory_store)
+        trajectory_store=trajectory_store, contract=contract)
     # Start the clock after the wiring, before the first unit of work: setup
     # is not what a time-to-quality number is asking about.
     eng.meter.start()

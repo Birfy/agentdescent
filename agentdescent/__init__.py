@@ -44,6 +44,12 @@ from .advantage import (
     state_distance,
 )
 from .defaults import DefaultConflict, DefaultFusion
+from .invariants import (
+    BUILTIN_INVARIANTS,
+    Invariant,
+    check_dependency_graph,
+    check_invariants,
+)
 from .fusion import KeepContradictions, ReflectiveFusion, reflective_merge
 from .sampling import DifficultyWeighted, ReplaySampler, RoundRobin, TaskSampler
 from .replay import ReplayAwareProposal
