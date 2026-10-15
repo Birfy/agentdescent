@@ -268,3 +268,35 @@ def test_moments_and_side_records_still_round_trip(tmp_path):
     assert reread.unlabelled_moments("v1")["all"]["skipped"] == 1
     assert reread.priorities == {"sig": 0.9}
     assert reread.last_fingerprint == "fp"
+
+
+# -- malformed record ids ----------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad_id", [[], {}, 7, ""])
+def test_a_malformed_record_id_is_one_corrupt_line_not_an_unopenable_store(
+        tmp_path, bad_id):
+    path = _path(tmp_path)
+    store = AuditStore(path)
+    store.append(_record("r1"))
+    good = _record("r2").to_dict()
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(dict(good, record_id=bad_id)) + "\n")
+    store.append(_record("r3"))
+
+    reread = AuditStore(path)
+    assert [r.record_id for r in reread] == ["r1", "r3"]
+    assert reread.corrupt == 1
+
+
+@pytest.mark.parametrize("bad_id", [[], {}, 7, ""])
+def test_a_malformed_record_id_cannot_be_constructed_or_appended(
+        tmp_path, bad_id):
+    path = _path(tmp_path)
+    store = AuditStore(path)
+    store.append(_record("r1"))
+    before = open(path, "rb").read()
+    with pytest.raises(TypeError):
+        _record(bad_id)
+    assert open(path, "rb").read() == before
+    assert [r.record_id for r in AuditStore(path)] == ["r1"]
