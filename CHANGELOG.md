@@ -100,7 +100,12 @@ All notable changes to AgentDescent are documented here. The format follows
   touched and memory is updated only after the write returns, so a failed
   `append` / `resolve` / `reopen` / `remember_*` leaves the index agreeing with
   a fresh reload. `observe_unlabelled` and `resolve` refuse non-finite scores
-  with `ValueError`. An unknown `schema_version` still raises.
+  with `ValueError`, and `load` counts a line holding a non-finite number (the
+  `NaN` / `Infinity` tokens older builds wrote, or an overflowing literal) as
+  corrupt instead of loading it. `resolve_from_mapping` refuses a batch with a
+  non-numeric or non-finite answer before anything lands, naming the offending
+  ids, instead of reporting it as already resolved. An unknown
+  `schema_version` still raises.
 - HuggingFace row-cache filenames sanitize split names and bound their
   components (#261), keeping slash-containing and traversal-style splits in
   one portable cache entry. Lossy conversions include a digest to distinguish

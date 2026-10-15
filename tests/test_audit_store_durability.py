@@ -300,3 +300,88 @@ def test_a_malformed_record_id_cannot_be_constructed_or_appended(
         _record(bad_id)
     assert open(path, "rb").read() == before
     assert [r.record_id for r in AuditStore(path)] == ["r1"]
+
+
+# -- legacy non-finite lines and batch resolution (Codex review on #277) -------
+
+
+@pytest.mark.parametrize("token", ["NaN", "Infinity", "-Infinity", "1e999"])
+def test_a_legacy_non_finite_record_line_is_counted_not_loaded(tmp_path, token):
+    # Older builds wrote with allow_nan=True, so these tokens exist on disk.
+    path = _path(tmp_path)
+    store = AuditStore(path)
+    store.append(_record("r1"))
+    line = json.dumps(_record("r2").to_dict()).replace(
+        '"verifier_score": 0.7', f'"verifier_score": {token}')
+    assert token in line
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(line + "\n")
+    store.append(_record("r3"))
+
+    reread = AuditStore(path)
+    assert [r.record_id for r in reread] == ["r1", "r3"]
+    assert reread.corrupt == 1
+    assert all(math.isfinite(r.verifier_score) for r in reread)
+
+
+def test_a_legacy_non_finite_resolution_leaves_the_record_pending(tmp_path):
+    path = _path(tmp_path)
+    store = AuditStore(path)
+    store.append(_record("r1"))
+    resolved = dict(_record("r1").to_dict(), resolved_at=2.0)
+    line = json.dumps(dict(resolved, oracle_score=0.0)).replace(
+        '"oracle_score": 0.0', '"oracle_score": NaN')
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(line + "\n")
+
+    reread = AuditStore(path)
+    assert reread.corrupt == 1
+    assert not reread.get("r1").resolved
+    assert reread.resolve("r1", 1.0)
+
+
+def test_legacy_non_finite_moments_do_not_reach_the_estimator(tmp_path):
+    path = _path(tmp_path)
+    store = AuditStore(path)
+    store.observe_unlabelled("v1", "all", 0.2)
+    store.observe_unlabelled("v1", "all", 0.6)
+    store.flush()
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"kind": MOMENTS_KIND, "verifier_version": "v1",
+                             "stratum": "all",
+                             "moments": {"n": 3, "mean": float("nan"),
+                                         "m2": 0.0}}) + "\n")
+    reread = AuditStore(path)
+    assert reread.corrupt == 1
+    m = reread.unlabelled_moments("v1")["all"]
+    assert m["n"] == 2 and math.isclose(m["mean"], 0.4)
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), "nan", "oops", None])
+def test_a_non_finite_batch_answer_refuses_the_batch_not_counted_as_resolved(
+        tmp_path, bad):
+    from agentdescent.audit.sources import resolve_from_mapping
+
+    path = _path(tmp_path)
+    store = AuditStore(path)
+    for rid in ("r1", "r2", "r3"):
+        store.append(_record(rid))
+    before = open(path, "rb").read()
+    with pytest.raises(ValueError, match="r2"):
+        resolve_from_mapping(store, {"r1": 1.0, "r2": bad, "r3": 0.0})
+    assert open(path, "rb").read() == before
+    assert len(store.pending()) == 3
+
+
+def test_a_replayed_batch_still_counts_duplicates(tmp_path):
+    from agentdescent.audit.sources import resolve_from_mapping
+
+    store = AuditStore(_path(tmp_path))
+    for rid in ("r1", "r2"):
+        store.append(_record(rid))
+    first = resolve_from_mapping(store, {"r1": 1.0})
+    assert first == 1 and first.already_resolved == 0
+    again = resolve_from_mapping(store, {"r1": 0.0, "r2": "1", "nope": 1.0})
+    assert again == 1 and again.already_resolved == 1
+    assert store.get("r1").oracle_score == 1.0
+    assert store.get("r2").oracle_score == 1.0

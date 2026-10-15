@@ -124,6 +124,10 @@ class AuditStore:
         one bad line cannot make the whole store unopenable), a line that parses
         to something other than an object, a side-record missing the keys it
         needs, and a current-schema record whose fields will not construct one.
+        A line holding a non-finite number -- the ``NaN`` / ``Infinity`` tokens
+        an older build wrote, or a literal like ``1e999`` that overflows -- is
+        skipped and counted the same way: folded in, one ``nan`` score would
+        poison every residual, moment and interval computed from the store.
         A line that parses but carries an unknown ``schema_version`` **raises**:
         that is a different build's file, the fields do not mean what this code
         thinks they mean, and continuing would produce numbers rather than an
@@ -144,9 +148,12 @@ class AuditStore:
                     if not raw:
                         continue
                     try:
-                        payload = json.loads(raw.decode("utf-8"))
+                        payload = json.loads(raw.decode("utf-8"),
+                                             parse_constant=_refuse_constant,
+                                             parse_float=_finite_float)
                     except (UnicodeDecodeError, ValueError):
-                        # ValueError covers JSONDecodeError: a torn write.
+                        # ValueError covers JSONDecodeError (a torn write) and
+                        # a non-finite number in a line an older build wrote.
                         self._corrupt += 1
                         continue
                     if not isinstance(payload, dict):
@@ -507,6 +514,19 @@ def _finite_score(value: Any, name: str) -> float:
     x = float(value)
     if not math.isfinite(x):
         raise ValueError(f"{name} must be finite, got {value!r}")
+    return x
+
+
+def _refuse_constant(token: str) -> float:
+    """``json`` hook for ``NaN`` / ``Infinity`` / ``-Infinity``: refuse them."""
+    raise ValueError(f"non-finite JSON constant {token!r}")
+
+
+def _finite_float(text: str) -> float:
+    """``json`` hook for float literals: refuse one that overflows to ``inf``."""
+    x = float(text)
+    if not math.isfinite(x):
+        raise ValueError(f"non-finite JSON number {text!r}")
     return x
 
 
