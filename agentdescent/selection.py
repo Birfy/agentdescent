@@ -66,6 +66,7 @@ __all__ = [
     "Archive",
     "Beam",
     "Candidate",
+    "CladeThompson",
     "FlatPuct",
     "MCTS",
     "MultiHeadUnsupported",
@@ -73,6 +74,7 @@ __all__ = [
     "SelectionContext",
     "SelectionPolicy",
     "SingleHead",
+    "clade_counts",
     "pareto_front",
     "pareto_win_frequency",
     "sigmoid_novelty_weights",
@@ -753,4 +755,139 @@ class CostEfficient(FlatPuct):
                 visits[node] += 1
                 parent = rows[node].parent
                 node = by_version.get(parent) if parent is not None else None
+        return picked
+
+
+def clade_counts(candidates: Sequence[Candidate]) -> List[Tuple[float, float]]:
+    """HGM's clade evidence ``(n^C_success, n^C_failure)`` for each candidate.
+
+    A node's *own* evidence is ``(sum s_i, n - sum s_i)`` over its ``per_task``
+    scores (each clipped to ``[0, 1]``, non-finite ones dropped) when it has
+    any, else ``(score, 1 - score)`` as one pseudo-observation, else nothing.
+    Its *clade* evidence is its own plus every descendant's, found by walking
+    ``Candidate.parent`` up from each node -- guarded against a chain that loops
+    or names a version outside the pool, exactly like :class:`FlatPuct`.
+
+    Pure: the result is recomputed from ``candidates`` on every call and never
+    stored on them. That is a deliberate deviation from upstream ``main``, whose
+    ``tree.py::Node.get_decendant_evals`` extends a node's own measure list in
+    place once it has fewer than ``num_pseudo`` evals, so evidence grows each
+    time ``expand()`` runs; the paper's formula has no such accumulation.
+    """
+    rows = list(candidates)
+    own: List[Tuple[float, float]] = []
+    for c in rows:
+        vals = [min(1.0, max(0.0, float(v))) for v in c.per_task.values()
+                if v is not None and math.isfinite(float(v))]
+        if vals:
+            s = sum(vals)
+            own.append((s, len(vals) - s))
+        elif c.score is not None and math.isfinite(float(c.score)):
+            s = min(1.0, max(0.0, float(c.score)))
+            own.append((s, 1.0 - s))
+        else:
+            own.append((0.0, 0.0))
+    by_version: Dict[int, int] = {}
+    for i, c in enumerate(rows):
+        by_version.setdefault(c.version, i)
+    totals = [[0.0, 0.0] for _ in rows]
+    for i, (s, f) in enumerate(own):
+        seen: Set[int] = set()
+        node: Optional[int] = i
+        while node is not None and node not in seen:
+            seen.add(node)
+            totals[node][0] += s
+            totals[node][1] += f
+            parent = rows[node].parent
+            node = by_version.get(parent) if parent is not None else None
+    return [(s, f) for s, f in totals]
+
+
+class CladeThompson(SingleHead):
+    """HGM's expansion policy: Thompson sampling on clade metaproductivity.
+
+    The Huxley-Gödel Machine (Wang et al., ICLR 2026,
+    https://arxiv.org/abs/2510.21614; code https://github.com/metauto-ai/HGM)
+    observes that the highest-*scoring* node -- what DGM's and SICA's archive
+    rules expand (here ``Archive('sigmoid_novelty')`` / ``Archive('best')``) --
+    is a weak predictor of which node has good *descendants*. It scores a node
+    by its clade instead (see :func:`clade_counts`) and draws
+    ``theta_a ~ Beta(tau * (1 + S_a), tau * (1 + F_a))``, expanding the argmax.
+
+    **Eligibility** mirrors upstream ``hgm.py::expand``: only nodes whose *own*
+    mean score is finite and ``> 0``. With none eligible, or a pool of one, the
+    answer is ``ctx.head``.
+
+    **tau.** ``1`` by default (upstream ``cool_down: false``). With
+    ``cool_down_beta > 0`` upstream's multiplier
+    ``max_evals**beta / (max_evals - used)**beta`` is read off
+    ``ctx.budget_remaining`` as ``tau = budget_remaining**(-beta)``, capped at
+    ``max_tau``: the Beta draws tighten around each clade's mean as the budget
+    runs out, so exploration narrows onto the most metaproductive node.
+
+    **n > 1** makes ``n`` independent draws, *with* replacement: two workers on
+    the same node is the protocol's way to say "this one deserves both".
+
+    **Deterministic** given ``seed``, or pass ``rng`` to own the stream, exactly
+    like :class:`Archive`.
+
+    **Fidelity.** This ports HGM's *expansion* policy only. Its separate
+    evaluation policy and the expand-vs-evaluate scheduler (``n_task_evals **
+    alpha``) need an engine seam agentdescent does not have. Upstream's
+    replacement of a well-evaluated node's own evals by ``num_pseudo`` copies of
+    its mean is not ported, nor is its in-place accumulation of descendant
+    evidence (see :func:`clade_counts`). Under ``evolve()`` the tree is only as
+    real as ``Candidate.parent``, which the population archive records once
+    #275 lands.
+    """
+
+    def __init__(self, cool_down_beta: float = 0.0, max_tau: float = 1e3,
+                 seed: int = 0, rng: Optional["random.Random"] = None) -> None:
+        if cool_down_beta < 0:
+            raise ValueError("cool_down_beta must be >= 0")
+        if max_tau < 1:
+            raise ValueError("max_tau must be >= 1")
+        self.cool_down_beta = cool_down_beta
+        self.max_tau = max_tau
+        self.seed = seed
+        self.rng = rng
+
+    def tau(self, budget_remaining: float) -> float:
+        if self.cool_down_beta == 0:
+            return 1.0
+        b = float(budget_remaining)
+        if not math.isfinite(b) or b <= 0:
+            return self.max_tau
+        return min(self.max_tau, max(1.0, min(b, 1.0) ** (-self.cool_down_beta)))
+
+    @staticmethod
+    def _eligible(c: Candidate) -> bool:
+        vals = [float(v) for v in c.per_task.values()
+                if v is not None and math.isfinite(float(v))]
+        if vals:
+            return sum(vals) / len(vals) > 0
+        return (c.score is not None and math.isfinite(float(c.score))
+                and float(c.score) > 0)
+
+    def select(self, ctx: SelectionContext, n: int) -> Sequence[Candidate]:
+        import random
+
+        rows = list(ctx.candidates)
+        if len(rows) <= 1:
+            return super().select(ctx, n)
+        counts = clade_counts(rows)
+        pool = [i for i, c in enumerate(rows) if self._eligible(c)]
+        if not pool:
+            return super().select(ctx, n)
+        tau = self.tau(ctx.budget_remaining)
+        rng = self.rng or random.Random(self.seed * 1_000_003 + ctx.round)
+        picked: List[Candidate] = []
+        for _ in range(n):
+            best, best_theta = pool[0], -math.inf
+            for i in pool:
+                s, f = counts[i]
+                theta = rng.betavariate(tau * (1.0 + s), tau * (1.0 + f))
+                if theta > best_theta:
+                    best, best_theta = i, theta
+            picked.append(rows[best])
         return picked
