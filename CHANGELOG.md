@@ -8,6 +8,12 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- Add the RRSI component vocabulary (`examples/rrsi/components.py`) and per-edit
+  history `L_t` (`examples/rrsi/history.py`: yield, prune set, stall
+  exploration) adapted from the pinned Google release, with defensive handling
+  of non-finite measurements and torn JSONL lines, including tails cut
+  inside a multibyte UTF-8 character (#252). Still not an
+  `evolve()` integration; see `docs/algo-rrsi.md`.
 - `kind="skill_dir"` now gates candidates structurally before any rollout
   (#246): a diff that deletes `SKILL.md`, drops its frontmatter, or breaks the
   Agent Skills `name` / `description` / `compatibility` rules (or renames the
