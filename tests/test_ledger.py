@@ -152,3 +152,30 @@ def test_branch_switching_still_works_with_the_cached_branch(tmp_path):
     lg.promote_to_stable("a")
     assert lg.snapshot(Ledger.STABLE).get("a").state == {"n": "dev2"}
     assert lg.snapshot(Ledger.DEV).get("a").state == {"n": "dev2"}   # dev intact
+
+
+def test_commit_refuses_a_candidate_that_drops_registered_invariants(tmp_path):
+    """Defence in depth for the governance gate: the rules are operator-supplied
+    at register, and a normal commit must not silently change them. A candidate
+    whose contract lost the registered invariants is refused by the ledger's
+    contract check (not just quietly re-registered by the loop), so a bug on the
+    apply/serialize round-trip cannot make a rule evaporate while the run keeps
+    counting invariant_checked."""
+    from agentdescent import Contract, Invariant
+    from agentdescent.evolution import EvolvingArtifact
+    from agentdescent.ledger import ContractRejected, Ledger
+
+    rule = Invariant("mutable_keys", ("a",))
+    contract = Contract(invariants=(rule,))
+    lg = Ledger(str(tmp_path), lambda a: {"state": dict(a.state)},
+                lambda aid, v, s: EvolvingArtifact(aid, s.get("state", {}), v))
+    lg.register(EvolvingArtifact("a", {"n": "1"}, contract=contract))
+    # A candidate that keeps the contract commits normally.
+    lg.commit(EvolvingArtifact("a", {"n": "2"}, contract=contract),
+              {"a": 1}, branch=Ledger.DEV)
+    # A candidate whose contract dropped the invariants is refused.
+    with pytest.raises(ContractRejected):
+        lg.commit(EvolvingArtifact("a", {"n": "3"}),
+                  {"a": 2}, branch=Ledger.DEV)
+    # The head is untouched by the refused commit.
+    assert lg.snapshot(Ledger.DEV).get("a").state == {"n": "2"}
