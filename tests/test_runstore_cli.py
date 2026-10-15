@@ -7,6 +7,7 @@ agent. Everything uses the stub workspace agent from `test_evolvespec.py`.
 """
 
 import json
+from pathlib import Path
 import os
 import subprocess
 import sys
@@ -15,6 +16,7 @@ import time
 import pytest
 
 from agentdescent import cli, runstore
+from agentdescent.evolution import RoundInfo
 from agentdescent.runstore import RunStoreError, RunStatus
 
 from tests.test_evolvespec import _WORDS, _dir_spec  # noqa: F401  (shared fixtures)
@@ -85,6 +87,82 @@ def test_status_is_replaced_atomically(store, tmp_path):
     rd.update_status(round=2, best_reward=0.5)
     assert not [f for f in os.listdir(rd.path) if f.endswith(".tmp")]
     assert rd.status().round == 2
+
+
+def _round(reward=0.5, n=0):
+    return RoundInfo(round=n, held_out_reward=reward, n_items=1,
+                     committed=0, rejected=0)
+
+
+def test_append_round_writes_null_not_nan_for_nonfinite_reward(store, tmp_path):
+    """A NaN/inf reward must not land as the non-portable NaN token (#271)."""
+    _, spec = _spec_file(tmp_path)
+    rd = runstore.create(spec.to_dict(), store=store)
+    rd.append_round(_round(float("nan")))
+    rd.append_round(_round(float("inf"), n=1))
+    raw = Path(rd.rounds_path).read_text()
+    assert "NaN" not in raw and "Infinity" not in raw
+    rows = rd.rounds()
+    assert len(rows) == 2
+    assert rows[0]["held_out_reward"] is None
+    assert rows[1]["held_out_reward"] is None
+    # Strict JSON: browsers and jq parse every line.
+    for line in raw.splitlines():
+        json.loads(line)
+
+
+def test_rounds_skips_a_torn_line_and_keeps_the_rest(store, tmp_path):
+    """One corrupt JSONL line must not hide every other round (#271)."""
+    _, spec = _spec_file(tmp_path)
+    rd = runstore.create(spec.to_dict(), store=store)
+    rd.append_round(_round(0.25, n=0))
+    with open(rd.rounds_path, "a", encoding="utf-8") as fh:
+        fh.write('{"round": 1, "held_out_rew')          # torn
+        fh.write("\n")
+    rd.append_round(_round(0.75, n=2))
+    rows = rd.rounds()
+    assert [r["round"] for r in rows] == [0, 2]
+    assert [r["held_out_reward"] for r in rows] == [0.25, 0.75]
+
+
+def test_finite_or_none_and_sanitize_strip_nonfinite_floats():
+    """Helpers used by append_round / on_round / the panel (#271)."""
+    assert runstore._finite_or_none(1.5) == 1.5
+    assert runstore._finite_or_none(float("nan")) is None
+    assert runstore._finite_or_none(float("-inf")) is None
+    assert runstore._finite_or_none("x") == "x"
+    cleaned = runstore._sanitize_jsonable(
+        {"best": float("nan"), "nested": [1.0, float("inf")], "ok": 0.2})
+    assert cleaned == {"best": None, "nested": [1.0, None], "ok": 0.2}
+    # Order-dependence that status used to inherit from max(best):
+    assert max([1.0, float("nan")]) == 1.0
+    assert str(max([float("nan"), 1.0])) == "nan"
+
+
+def test_status_and_panel_payload_stay_strict_json_after_nan_rounds(store, tmp_path):
+    """Finite-only best tracking + sanitize keep status/panel portable (#271)."""
+    _, spec = _spec_file(tmp_path)
+    rd = runstore.create(spec.to_dict(), store=store)
+    best = []
+    for n, reward in enumerate(
+            (float("nan"), 0.4, float("inf"), 0.9)):
+        rd.append_round(_round(reward, n=n))
+        finite = runstore._finite_or_none(reward)
+        if finite is not None:
+            best.append(finite)
+        rd.update_status(
+            round=n + 1, last_reward=finite,
+            best_reward=max(best) if best else None)
+    st = rd.status()
+    assert st.best_reward == 0.9 and st.last_reward == 0.9
+    raw_status = Path(rd.status_path).read_text()
+    assert "NaN" not in raw_status and "Infinity" not in raw_status
+    body = json.dumps(
+        runstore._sanitize_jsonable(
+            {**st.to_dict(), "rounds": rd.rounds()}),
+        default=str, allow_nan=False)
+    json.loads(body)
+    assert "NaN" not in body and "Infinity" not in body
 
 
 def test_a_dead_pid_reads_as_failed_not_running(store, tmp_path):

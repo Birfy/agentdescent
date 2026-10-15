@@ -34,6 +34,7 @@ run. Nothing is serialised beyond what the engine already persists.
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import signal
@@ -154,6 +155,31 @@ def _read_json(path: str) -> Any:
         return json.load(fh)
 
 
+
+def _finite_or_none(value: Any) -> Any:
+    """Replace a non-finite float with ``None``; leave everything else alone.
+
+    ``json.dumps`` with the default ``allow_nan=True`` emits the literal tokens
+    ``NaN`` / ``Infinity``, which Python's decoder accepts but browsers'
+    ``JSON.parse`` and ``jq`` refuse. A status payload that cannot be parsed
+    is a run the panel cannot show.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
+
+
+def _sanitize_jsonable(obj: Any) -> Any:
+    """Walk a JSON-shaped tree and replace non-finite floats with ``None``."""
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _sanitize_jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_jsonable(v) for v in obj]
+    return obj
+
+
 # ---------------------------------------------------------------------------
 # the run directory
 # ---------------------------------------------------------------------------
@@ -232,9 +258,27 @@ class RunDir:
         return st
 
     def rounds(self) -> List[Dict[str, Any]]:
+        """Every well-formed round, in file order.
+
+        A torn or corrupt line (kill mid-write, hand edit, non-JSON token) is
+        skipped rather than raised: one bad line must not hide every other
+        round from ``status``, MCP, or the loopback panel. Empty / whitespace
+        lines are ignored the same way.
+        """
         try:
             with open(self.rounds_path, encoding="utf-8") as fh:
-                return [json.loads(line) for line in fh if line.strip()]
+                out: List[Dict[str, Any]] = []
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except ValueError:
+                        continue
+                    if isinstance(row, dict):
+                        out.append(row)
+                return out
         except FileNotFoundError:
             return []
 
@@ -264,8 +308,17 @@ class RunDir:
         return st
 
     def append_round(self, info: RoundInfo) -> None:
+        """Append one round as a single strict-JSON line.
+
+        Non-finite floats become ``null`` and ``allow_nan=False`` so the line
+        never carries the non-portable ``NaN`` / ``Infinity`` tokens that
+        break the status panel's ``JSON.parse``. Encode before opening the
+        file so a serializer refusal cannot leave a torn partial line.
+        """
+        payload = _sanitize_jsonable(asdict(info))
+        line = json.dumps(payload, default=str, allow_nan=False) + "\n"
         with open(self.rounds_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(asdict(info), default=str) + "\n")
+            fh.write(line)
 
 
 # ---------------------------------------------------------------------------
@@ -452,10 +505,16 @@ def execute(rd: RunDir, *, budget_usd: Optional[float] = None,
 
     def on_round(info: RoundInfo) -> None:
         rd.append_round(info)
-        best.append(info.held_out_reward)
+        # Non-finite rewards are a failed measurement, not a score: tracking
+        # them makes ``max(best)`` order-dependent (``max([1.0, nan])`` is
+        # 1.0 but ``max([nan, 1.0])`` is nan) and poisons status.json for
+        # the panel. Budget already skips them (#243); the store must too.
+        reward = _finite_or_none(info.held_out_reward)
+        if reward is not None:
+            best.append(reward)
         changes: Dict[str, Any] = dict(
-            round=info.round + 1, last_reward=info.held_out_reward,
-            best_reward=max(best), calls=usage.calls)
+            round=info.round + 1, last_reward=reward,
+            best_reward=max(best) if best else None, calls=usage.calls)
         st = rd.status()
         # `committed` is per round and accumulates; `rollouts` is already a
         # running total ("Rollouts completed by the end of this round,
@@ -499,11 +558,12 @@ def execute(rd: RunDir, *, budget_usd: Optional[float] = None,
     if comp.tree is not None:
         shutil.rmtree(rd.tree_path, ignore_errors=True)
         materialize(result.state, rd.tree_path)
+    final = _finite_or_none(result.final_reward)
     rd.update_status(
         state="failed" if result.error else "done", finished=time.time(),
         stop_reason=result.stop_reason, error=result.error,
-        best_reward=max(best) if best else result.final_reward,
-        last_reward=result.final_reward, calls=usage.calls,
+        best_reward=max(best) if best else final,
+        last_reward=final, calls=usage.calls,
         usd=None if usd_per_call is None else round(usage.calls * usd_per_call, 4))
     return result
 
@@ -607,7 +667,12 @@ def _http_handler(store: Optional[str]):
             self.wfile.write(body)
 
         def _json(self, code: int, payload: Any) -> None:
-            self._send(code, json.dumps(payload, default=str).encode(), "application/json")
+            # Sanitize before dump: a NaN in status/rounds would make
+            # ``allow_nan=False`` raise, and with ``allow_nan=True`` the
+            # browser's JSON.parse would refuse the body.
+            body = json.dumps(_sanitize_jsonable(payload), default=str,
+                              allow_nan=False).encode()
+            self._send(code, body, "application/json")
 
         def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler's spelling
             path = self.path.split("?", 1)[0].rstrip("/") or "/"

@@ -63,6 +63,13 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- `runstore` rounds/status no longer break on a non-finite reward or a torn
+  `rounds.jsonl` line (#271). `append_round` encodes with `allow_nan=False` and
+  writes non-finite floats as `null`; `rounds()` skips malformed lines instead
+  of raising; `on_round` tracks only finite rewards for `best_reward` /
+  `last_reward` so `max(best)` cannot become order-dependent on `NaN`; the
+  loopback panel dumps with the same sanitize + `allow_nan=False` contract.
+
 - `meta.cached_completion` is best effort and never costs the caller a paid call: a cache-write failure (`OSError`, unencodable or non-`str` response) returns the response uncached and leaves no `*.partial` sibling, the entry is encoded before the disk is touched, and a corrupt or non-`str` entry (including a JSON list, which used to raise `TypeError`) is counted once, as a miss, instead of as both a hit and a miss (#269).
 
 - `TrajectoryStore.get` / `path_for` round-trip `trace_id`s whose `artifact_id` contains a colon by parsing with `rsplit(":", 1)` (#257). The key is always a hex digest; a leading split treated a namespaced id as part of the key and returned ``None`` for a record that was on disk.
