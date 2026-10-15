@@ -310,7 +310,8 @@ def test_archive_sampling_is_reproducible():
 @pytest.mark.parametrize("kwargs", [
     {"sampling": "nope"}, {"temperature": 0.0}, {"temperature": -1.0},
     {"temperature": float("nan")}, {"temperature": float("inf")},
-    {"temperature": "warm"}, {"temperature": None},
+    {"temperature": "warm"}, {"temperature": "0.5"}, {"temperature": b"0.5"},
+    {"temperature": None},
 ])
 def test_archive_arguments_are_checked(kwargs):
     with pytest.raises(ValueError):
@@ -347,7 +348,7 @@ def test_archive_ordinary_temperatures_draw_exactly_as_before(
 
 
 @pytest.mark.parametrize("sampling", ["performance", "novelty"])
-@pytest.mark.parametrize("temperature", [1e-3, 1e-6, 1e-300])
+@pytest.mark.parametrize("temperature", [1e-3, 1e-6, 1e-300, 1e-309, 5e-324])
 def test_archive_small_temperature_does_not_overflow(sampling, temperature):
     """`exp(1 / 0.001)` is past the float range: `select()` used to raise
     OverflowError. A tiny temperature is near-greedy, so it has to pick the
@@ -356,6 +357,17 @@ def test_archive_small_temperature_does_not_overflow(sampling, temperature):
     got = Archive(sampling=sampling, temperature=temperature,
                   seed=0).select(ctx, 5)
     assert [c.version for c in got] == [3] * 5
+
+
+def test_archive_keeps_the_validated_temperature_as_a_float():
+    """An accepted archive must not fail at its first `score / temperature`:
+    what it keeps is the float it checked, and an int divides exactly the
+    same."""
+    arch = Archive(sampling="performance", temperature=1)
+    assert type(arch.temperature) is float and arch.temperature == 1.0
+    pool = (_c(1, 0.9), _c(2, 0.5))
+    assert arch.select(_ctx(*pool, n=3), 3) == \
+        Archive(sampling="performance", temperature=1.0).select(_ctx(*pool, n=3), 3)
 
 
 def test_archive_many_near_top_candidates_do_not_overflow_the_total():
@@ -374,8 +386,8 @@ def test_archive_overflow_fallback_is_the_same_distribution():
     temperature = 0.05            # representable: raw weights are returned
     arch = Archive(sampling="novelty", temperature=temperature)
     raw = arch._weights(pool)
-    top = max(0.2, 0.9, 1.0) / temperature
-    shifted = [math.exp(c.score / temperature - top) / (1 + c.selected)
+    top = max(0.2, 0.9, 1.0)
+    shifted = [math.exp((c.score - top) / temperature) / (1 + c.selected)
                for c in pool]
     ratios = [r / s for r, s in zip(raw, shifted)]
     assert all(math.isclose(x, ratios[0], rel_tol=1e-12) for x in ratios)

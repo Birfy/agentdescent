@@ -460,23 +460,29 @@ class Archive(SingleHead):
         # `not (t > 0)` rather than `t <= 0`: NaN compares false both ways, and
         # an archive built with it only failed at the first `select()`, with a
         # message about weight totals that named nothing the caller had set.
+        # A string is refused even when it parses: `"0.5"` is a config typo,
+        # not a temperature, and accepting it would only move the failure to
+        # the first `score / temperature`. The value kept is the validated
+        # float, which for any int, float or numpy scalar divides exactly as
+        # the caller's own value did.
         try:
-            t = float(temperature)
+            t = (math.nan if isinstance(temperature, (str, bytes))
+                 else float(temperature))
         except (TypeError, ValueError):
             t = math.nan
         if not (math.isfinite(t) and t > 0):
             raise ValueError(
                 f"temperature must be a positive finite number, got {temperature!r}")
         self.sampling = sampling
-        self.temperature = temperature
+        self.temperature = t
         self.seed = seed
         self.rng = rng
 
-    def _logit(self, c: Candidate) -> float:
+    @staticmethod
+    def _score(c: Candidate) -> float:
         # An unscored candidate is given the mean, not zero: the archive's job is
         # to keep trying things that have not been tried.
-        score = 0.5 if c.score is None else c.score
-        return score / self.temperature
+        return 0.5 if c.score is None else c.score
 
     def _weights(self, pool: Sequence[Candidate]) -> List[float]:
         """Softmax weights for ``'performance'`` / ``'novelty'`` / ``'uniform'``.
@@ -490,14 +496,18 @@ class Archive(SingleHead):
         total. Only then -- raw weights overflowing, or a total that is not a
         positive finite number -- are the max-shifted ``exp((s - s_max) / T)``
         used instead: the same distribution, with the largest weight exactly 1.
+        The shift is taken on the *scores*, before dividing: at a subnormal
+        ``T`` the logit ``s / T`` is already ``inf``, and shifting logits would
+        compute ``inf - inf``.
         """
         if self.sampling == "uniform":
             return [1.0] * len(pool)
-        logits = [self._logit(c) for c in pool]
+        scores = [self._score(c) for c in pool]
         divisors = ([1 + c.selected for c in pool] if self.sampling == "novelty"
                     else [1] * len(pool))
         try:
-            weights = [math.exp(x) / d for x, d in zip(logits, divisors)]
+            weights = [math.exp(s / self.temperature) / d
+                       for s, d in zip(scores, divisors)]
         except OverflowError:
             weights = None
         if weights is not None:
@@ -508,8 +518,9 @@ class Archive(SingleHead):
                 total += w
             if 0.0 < total < math.inf:
                 return weights
-        top = max(logits)
-        return [math.exp(x - top) / d for x, d in zip(logits, divisors)]
+        top = max(scores)
+        return [math.exp((s - top) / self.temperature) / d
+                for s, d in zip(scores, divisors)]
 
     def select(self, ctx: SelectionContext, n: int) -> Sequence[Candidate]:
         import random
