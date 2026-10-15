@@ -282,18 +282,20 @@ class RunDir:
         A torn or corrupt line (kill mid-write, hand edit, non-JSON token) is
         skipped rather than raised: one bad line must not hide every other
         round from ``status``, MCP, or the loopback panel. Empty / whitespace
-        lines are ignored the same way.
+        lines are ignored the same way. The file is read as bytes and decoded
+        per line, so a tear inside a multi-byte character costs that one line
+        rather than raising ``UnicodeDecodeError`` for the whole file.
         """
         try:
-            with open(self.rounds_path, encoding="utf-8") as fh:
+            with open(self.rounds_path, "rb") as fh:
                 out: List[Dict[str, Any]] = []
-                for line in fh:
-                    line = line.strip()
-                    if not line:
+                for raw in fh:
+                    raw = raw.strip()
+                    if not raw:
                         continue
                     try:
-                        row = json.loads(line)
-                    except ValueError:
+                        row = json.loads(raw.decode("utf-8"))
+                    except (UnicodeDecodeError, ValueError):
                         continue
                     if isinstance(row, dict):
                         out.append(row)
@@ -332,12 +334,21 @@ class RunDir:
         Non-finite floats become ``null`` and ``allow_nan=False`` so the line
         never carries the non-portable ``NaN`` / ``Infinity`` tokens that
         break the status panel's ``JSON.parse``. Encode before opening the
-        file so a serializer refusal cannot leave a torn partial line.
+        file so a serializer refusal cannot leave a torn partial line. If the
+        file ends in a fragment with no newline (a process killed mid-write),
+        a newline goes first so the fragment stays its own skipped line
+        instead of swallowing this round on resume.
         """
         payload = _sanitize_jsonable(asdict(info))
-        line = json.dumps(payload, default=str, allow_nan=False) + "\n"
-        with open(self.rounds_path, "a", encoding="utf-8") as fh:
-            fh.write(line)
+        data = (json.dumps(payload, default=str, allow_nan=False)
+                + "\n").encode("utf-8")
+        with open(self.rounds_path, "ab+") as fh:
+            fh.seek(0, os.SEEK_END)
+            if fh.tell() > 0:
+                fh.seek(-1, os.SEEK_END)
+                if fh.read(1) != b"\n":
+                    data = b"\n" + data
+            fh.write(data)
 
 
 # ---------------------------------------------------------------------------

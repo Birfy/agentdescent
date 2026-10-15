@@ -96,6 +96,10 @@ All notable changes to AgentDescent are documented here. The format follows
   of raising; `on_round` tracks only finite rewards for `best_reward` /
   `last_reward` so `max(best)` cannot become order-dependent on `NaN`; the
   loopback panel dumps with the same sanitize + `allow_nan=False` contract.
+  `append_round` writes a newline first when the file ends in a torn fragment,
+  so the round written after a crash is not glued onto it; `rounds()` decodes
+  per line so a tear inside a multi-byte character costs one line; text
+  `status <run_id>` / `watch` print a `null` reward as `n/a` instead of raising.
 
 - `TrajectoryStore.record()` no longer raises when a record cannot be encoded
   (a NaN inside a structured output, non-string dict keys, a circular value, a

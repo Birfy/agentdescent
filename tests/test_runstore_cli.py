@@ -125,6 +125,44 @@ def test_rounds_skips_a_torn_line_and_keeps_the_rest(store, tmp_path):
     assert [r["held_out_reward"] for r in rows] == [0.25, 0.75]
 
 
+def test_append_after_a_torn_tail_without_newline_keeps_the_next_round(
+        store, tmp_path):
+    """A killed writer leaves no newline; the next append must not glue on (#271)."""
+    _, spec = _spec_file(tmp_path)
+    rd = runstore.create(spec.to_dict(), store=store)
+    rd.append_round(_round(0.25, n=0))
+    with open(rd.rounds_path, "a", encoding="utf-8") as fh:
+        fh.write('{"round": 1, "held_out_rew')          # torn, no newline
+    rd.append_round(_round(0.75, n=2))
+    rows = rd.rounds()
+    assert [r["round"] for r in rows] == [0, 2]
+    assert [r["held_out_reward"] for r in rows] == [0.25, 0.75]
+
+
+def test_rounds_survives_a_tear_inside_a_multibyte_character(store, tmp_path):
+    _, spec = _spec_file(tmp_path)
+    rd = runstore.create(spec.to_dict(), store=store)
+    rd.append_round(_round(0.25, n=0))
+    with open(rd.rounds_path, "ab") as fh:
+        fh.write('{"round": 1, "note": "é'.encode("utf-8")[:-1])
+    rd.append_round(_round(0.75, n=2))
+    assert [r["round"] for r in rd.rounds()] == [0, 2]
+
+
+def test_text_status_and_watch_print_null_rewards(store, tmp_path):
+    """A non-finite reward is stored as null; text status/watch must not crash."""
+    _, spec = _spec_file(tmp_path)
+    rd = runstore.create(spec.to_dict(), store=store)
+    rid = os.path.basename(rd.path)
+    rd.append_round(_round(float("nan"), n=0))
+    rd.append_round(_round(0.5, n=1))
+    code, out = _cli("--store", store, "status", rid)
+    assert code == 0, out
+    assert "reward=n/a" in out and "reward=0.500" in out
+    code, out = _cli("--store", store, "watch", rid, "--interval", "0")
+    assert "round   0  reward=n/a" in out and "reward=0.500" in out
+
+
 def test_finite_or_none_and_sanitize_strip_nonfinite_floats():
     """Helpers used by append_round / on_round / the panel (#271)."""
     assert runstore._finite_or_none(1.5) == 1.5
