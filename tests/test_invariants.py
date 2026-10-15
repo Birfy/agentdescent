@@ -12,7 +12,7 @@ not a silent skip. Each of those is pinned here.
 import pytest
 
 from agentdescent import Contract, Invariant, check_dependency_graph, check_invariants
-from agentdescent.evolution import SingleSlot, Task, evolve
+from agentdescent.evolution import AppendRules, SingleSlot, Task, evolve
 from agentdescent.evolvable import Diff
 from agentdescent.workspec import Ref
 
@@ -275,6 +275,54 @@ def test_a_satisfied_invariant_commits_normally(tmp_path):
     assert result.invariant_rejections == 0
     assert result.outcomes().get("violates-invariant", 0) == 0
     assert result.outcomes().get("committed", 0) >= 1
+
+
+def test_invariants_survive_commits_and_still_enforce_on_v2_base(tmp_path):
+    """The governance rule must not evaporate after the first commit.
+
+    The candidate every merge commits is produced by ``EvolvingArtifact.apply``;
+    if it dropped the contract, the serialized head would store the default
+    (invariant-free) contract, and every later diff would pass the gate unchecked
+    while the run still counted ``invariant_checked``. The rule is a "freeze
+    after v1": a diff on a base of version >= 2 is a violation. With the
+    contract surviving the apply + store round-trip, exactly one commit lands
+    (the first, on v1) and the later diffs are rejected on the v2+ base. The
+    clue domain keeps proposing every round (each task needs its own clue), so
+    the later diffs exist to be judged."""
+    import agentdescent.invariants as inv
+
+    def freeze_after_v1(base, diff, candidate):
+        return [f"frozen after v1 (base v{base.version})"] if base.version >= 2 else []
+
+    inv._custom_for_tests = freeze_after_v1
+
+    def run(rendered, task):
+        return "correct" if task.meta["h"] in rendered else "wrong"
+
+    def reward(task, output):
+        return 1.0 if output == "correct" else 0.0
+
+    def propose(rendered, task, output, reward):
+        return task.meta["h"] if task.meta["h"] not in rendered else None
+
+    tasks = [Task(id=f"t{i}", prompt="p", meta={"h": f"H{i % 3}"})
+             for i in range(9)]
+    contract = Contract(invariants=(
+        Invariant("custom", ref=Ref("agentdescent.invariants:_custom_for_tests",
+                                    call=False)),))
+    result = evolve(tasks, reward, run=run, propose=propose,
+                    strategy=AppendRules(), rounds=6, n_workers=2,
+                    repo_path=str(tmp_path / "repo"), contract=contract)
+    outcomes = result.outcomes()
+    assert outcomes.get("committed", 0) == 1, (
+        "only the first commit (on v1) may land when the rule freezes v>=2; "
+        f"got {outcomes}")
+    assert outcomes.get("violates-invariant", 0) >= 1, (
+        "the later commits must be rejected by the still-enforced rule; "
+        f"got {outcomes}")
+    assert result.invariant_checked >= 2, (
+        "the gate must run on v2+ bases, not just the first; "
+        f"checked={result.invariant_checked}")
 
 
 def test_no_contract_means_no_invariant_accounting(tmp_path):

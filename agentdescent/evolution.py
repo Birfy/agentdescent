@@ -391,7 +391,7 @@ class EvolvingArtifact:
             else:
                 new_state[key] = value
         return EvolvingArtifact(self.id, new_state, self.version + 1, self.blast_radius,
-                                self._rt, self._strategy)
+                                self._rt, self._strategy, contract=self.contract)
 
     def _signature(self):
         """The evaluation-cache key: what the artifact *renders to*.
