@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-341 public names across 56 modules.
+342 public names across 56 modules.
 
 ---
 
@@ -2725,6 +2725,19 @@ Archive(
 ### `Beam(k: int = 1) -> None`
 
 Keep the `k` best-scoring candidates and spread the workers over them.
+
+### `CladeThompson(...)`
+
+HGM's expansion policy: Thompson sampling on clade metaproductivity.
+
+```python
+CladeThompson(
+    cool_down_beta: float = 0.0,
+    max_tau: float = 1000.0,
+    seed: int = 0,
+    rng: Optional['random.Random'] = None
+) -> None
+```
 
 ### `CostEfficient(...)`
 

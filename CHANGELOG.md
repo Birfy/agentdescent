@@ -8,6 +8,11 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- `CladeThompson` selection policy (#276): HGM's expansion rule, Thompson
+  sampling on clade metaproductivity (node plus descendants via
+  `Candidate.parent`), with an opt-in budget-driven cool-down and
+  seeded draws; `clade_counts()` exposes the `(S, F)` evidence. Ports the
+  paper's formula without upstream's in-place evidence accumulation.
 - Add the RRSI component vocabulary (`examples/rrsi/components.py`) and per-edit
   history `L_t` (`examples/rrsi/history.py`: yield, prune set, stall
   exploration) adapted from the pinned Google release, with defensive handling
