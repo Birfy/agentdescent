@@ -75,7 +75,9 @@ All notable changes to AgentDescent are documented here. The format follows
   that branch is filed as its child, and `selected` increments on the node
   and every ancestor (cycle-guarded), so `FlatPuct` / `CostEfficient` /
   `MCTS` see a real tree instead of a flat bag. Lineage survives
-  checkpoint/restore; pre-change checkpoints restore as roots.
+  checkpoint/restore; pre-change checkpoints restore as roots. Archive ids
+  are unique even when two forks commit different states at the same
+  ledger version, so one fork's selection never bumps or parents the other.
 
 - `FileCache` write failures no longer leave orphan `*.tmp` siblings, and
   encode errors (`TypeError`/`ValueError`) are swallowed like `OSError` so a

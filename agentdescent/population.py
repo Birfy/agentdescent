@@ -153,10 +153,23 @@ class PopulationAggregator(Aggregator):
         # held-out set, so this is a cache hit, not a new evaluation.
         score = self.verifier.eval_fn(artifact, list(self.verifier.held_out))
         with self._archive_lock:
+            # ``version`` is the archive's node id, and every lineage lookup
+            # (``parent``, ``_branch_parent``, ``_bump_selected``, FlatPuct's
+            # ``by_version``) keys on it, so it must be unique. The ledger
+            # version alone is not: forks taken from one snapshot each count
+            # up from the same base, so ``head/0`` and ``head/1`` can both
+            # commit a *different* state at version 5. Keep the ledger version
+            # when it is free (the common, single-head case) and otherwise
+            # take a fresh id past every id in use, so selecting one fork's
+            # candidate can never bump or parent the other's.
+            node = int(version)
+            used = {int(e["version"]) for e in self._archive}
+            if node in used:
+                node = max(used) + 1
             self._archive.append({
                 "state": dict(getattr(artifact, "state", {}) or {}),
                 "score": float(score),
-                "version": int(version),
+                "version": node,
                 "selected": 0,
                 "parent": (int(parent) if parent is not None else None),
             })

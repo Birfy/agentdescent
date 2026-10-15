@@ -242,3 +242,31 @@ def test_population_checkpoint_roundtrips_parent():
         Aggregator.restore = original
     assert fresh._archive[0]["parent"] is None
     assert fresh._branch_parent == {}
+
+
+def test_colliding_ledger_versions_on_two_forks_get_distinct_nodes(tmp_path):
+    """Two forks from one snapshot can each commit a different state at the same
+    ledger version. The archive must still give them distinct ids, or selecting
+    one bumps (and parents) the other -- review feedback on #278."""
+    lg, agg = _agg(tmp_path, Archive())
+    seed = lg.snapshot("dev").get("a")
+    agg._admit(seed, 1)
+    left = EvolvingArtifact("a", {"k": "v2"}, 5, 0.2, None, AppendRules())
+    right = EvolvingArtifact("a", {"k": "v3"}, 5, 0.2, None, AppendRules())
+    agg._admit(left, 5, branch="head/0")
+    agg._admit(right, 5, branch="head/1")
+
+    cands = {c.state["k"]: c for c in agg._candidates()}
+    assert len({c.version for c in cands.values()}) == 3
+    assert cands["v2"].version == 5          # first claimant keeps the ledger id
+
+    agg._bump_selected(cands["v3"].version)
+    after = {c.state["k"]: c.selected for c in agg._candidates()}
+    assert after == {"v0": 0, "v2": 0, "v3": 1}
+
+    # A later child of the right fork must point at the right fork's node.
+    agg._branch_parent["head/1"] = cands["v3"].version
+    child = EvolvingArtifact("a", {"k": "v4"}, 6, 0.2, None, AppendRules())
+    agg._admit(child, 6, branch="head/1")
+    kid = next(c for c in agg._candidates() if c.state["k"] == "v4")
+    assert kid.parent == cands["v3"].version != cands["v2"].version
