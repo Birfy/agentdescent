@@ -8,6 +8,11 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- `CladeThompson` selection policy (#276): HGM's expansion rule, Thompson
+  sampling on clade metaproductivity (node plus descendants via
+  `Candidate.parent`), with an opt-in budget-driven cool-down and
+  seeded draws; `clade_counts()` exposes the `(S, F)` evidence. Ports the
+  paper's formula without upstream's in-place evidence accumulation.
 - Add the RRSI component vocabulary (`examples/rrsi/components.py`) and per-edit
   history `L_t` (`examples/rrsi/history.py`: yield, prune set, stall
   exploration) adapted from the pinned Google release, with defensive handling
@@ -66,6 +71,22 @@ All notable changes to AgentDescent are documented here. The format follows
   `trajectory_write_seconds`, `trajectory_write_failures`; new
   `EvolutionResult.trajectories_path`. Off by default -- a run without a store
   reports zeros and behaves exactly as before.
+- **Governance invariants.** `evolve(contract=Contract(invariants=(...)))` (and
+  `async_evolve`) declares machine-checkable rules every diff to the artifact
+  must satisfy -- ``mutable_keys``, per-commit op/char caps, a non-decreasing
+  ``blast_radius`` (an artifact may not relax its own governance layer), a
+  no-self-dependency rule, or a custom predicate resolved as a ``workspec.Ref``.
+  The aggregator enforces them **before** a candidate is measured, so a
+  policy-violating diff is rejected with a ``violates-invariant`` outcome
+  instead of buying a held-out sweep; a rule that cannot run (an unknown kind,
+  a broken predicate) is a violation, never a silent skip. The contract rides
+  in the ledger payload so invariants survive the round-trip (an artifact whose
+  rules evaporate in storage is a governance rule that silently stopped
+  running); registration-time dependency-graph checks refuse self/cyclic
+  ``depends_on`` (duck-typed, so they light up with multi-artifact deps). New
+  meter counters ``invariant_checked`` / ``invariant_rejections`` and a
+  ``violates-invariant`` outcome; an artifact that declares nothing reports
+  zeros and is the untouched path exactly.
 
 ### Fixed
 
@@ -76,6 +97,13 @@ All notable changes to AgentDescent are documented here. The format follows
   that slug identically stay distinct), and a versioned suffix prevents old raw-split cache entries
   from aliasing the new names. Existing normal filenames and datasets-server
   requests are unchanged.
+
+- `TrajectoryStore.record()` no longer raises when a record cannot be encoded
+  (a NaN inside a structured output, non-string dict keys, a circular value, a
+  `__str__` that raises, a non-string event detail) (#259). It is counted in
+  `trajectory_write_failures` like a full disk and nothing is written, so
+  `eval_one` no longer mistakes it for a backend transient and re-runs the
+  already-paid rollout `ATTEMPTS` times before failing the gate.
 
 - `FileCache` write failures no longer leave orphan `*.tmp` siblings, and
   encode errors (`TypeError`/`ValueError`) are swallowed like `OSError` so a
