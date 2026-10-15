@@ -457,21 +457,59 @@ class Archive(SingleHead):
                  seed: int = 0, rng: Optional["random.Random"] = None) -> None:
         if sampling not in self.MODES:
             raise ValueError(f"sampling must be one of {self.MODES}, not {sampling!r}")
-        if temperature <= 0:
-            raise ValueError("temperature must be positive")
+        # `not (t > 0)` rather than `t <= 0`: NaN compares false both ways, and
+        # an archive built with it only failed at the first `select()`, with a
+        # message about weight totals that named nothing the caller had set.
+        try:
+            t = float(temperature)
+        except (TypeError, ValueError):
+            t = math.nan
+        if not (math.isfinite(t) and t > 0):
+            raise ValueError(
+                f"temperature must be a positive finite number, got {temperature!r}")
         self.sampling = sampling
         self.temperature = temperature
         self.seed = seed
         self.rng = rng
 
-    def _weight(self, c: Candidate) -> float:
-        if self.sampling == "uniform":
-            return 1.0
+    def _logit(self, c: Candidate) -> float:
         # An unscored candidate is given the mean, not zero: the archive's job is
         # to keep trying things that have not been tried.
         score = 0.5 if c.score is None else c.score
-        weight = math.exp(score / self.temperature)
-        return weight / (1 + c.selected) if self.sampling == "novelty" else weight
+        return score / self.temperature
+
+    def _weights(self, pool: Sequence[Candidate]) -> List[float]:
+        """Softmax weights for ``'performance'`` / ``'novelty'`` / ``'uniform'``.
+
+        The raw ``exp(score / T)`` (divided by ``1 + selected`` for novelty) is
+        returned **unchanged whenever it is representable**, so every seeded
+        draw at an ordinary temperature is the one it always was. Below about
+        ``T = 1/709`` a score of 1 is past the float range: ``math.exp`` raised
+        ``OverflowError`` mid-``select()``, and just above that a few hundred
+        near-top candidates summed to ``inf`` and ``random.choices`` refused the
+        total. Only then -- raw weights overflowing, or a total that is not a
+        positive finite number -- are the max-shifted ``exp((s - s_max) / T)``
+        used instead: the same distribution, with the largest weight exactly 1.
+        """
+        if self.sampling == "uniform":
+            return [1.0] * len(pool)
+        logits = [self._logit(c) for c in pool]
+        divisors = ([1 + c.selected for c in pool] if self.sampling == "novelty"
+                    else [1] * len(pool))
+        try:
+            weights = [math.exp(x) / d for x, d in zip(logits, divisors)]
+        except OverflowError:
+            weights = None
+        if weights is not None:
+            # Summed left to right, as `random.choices` accumulates them: the
+            # builtin `sum` may compensate and stay finite where it would not.
+            total = 0.0
+            for w in weights:
+                total += w
+            if 0.0 < total < math.inf:
+                return weights
+        top = max(logits)
+        return [math.exp(x - top) / d for x, d in zip(logits, divisors)]
 
     def select(self, ctx: SelectionContext, n: int) -> Sequence[Candidate]:
         import random
@@ -493,7 +531,7 @@ class Archive(SingleHead):
                 [0.0 if c.score is None else c.score for c in pool],
                 [c.selected for c in pool])
         else:
-            weights = [self._weight(c) for c in pool]
+            weights = self._weights(pool)
         # An int, not a tuple: tuple seeding is deprecated from 3.9 and would
         # eventually start raising in the middle of a long run.
         rng = self.rng or random.Random(self.seed * 1_000_003 + ctx.round)
