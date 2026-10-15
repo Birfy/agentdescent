@@ -71,6 +71,12 @@ class Audit:
     #: :meth:`~agentdescent.audit.gate.VerifierWatch.check` between rounds, or
     #: :meth:`~agentdescent.audit.gate.VerifierWatch.on_merge` from a hook.
     watch: VerifierWatch
+    #: Optional verifier bootstrap flywheel (see
+    #: :class:`~agentdescent.audit.boost.VerifierBoost`). ``None`` keeps the
+    #: old behaviour exactly. When set, :meth:`recompute` retrains it after
+    #: re-estimating the rectification, so the loop's calibration and the
+    #: verifier's own improvement move together.
+    boost: Optional["VerifierBoost"] = None
 
     @property
     def verifier_version(self) -> str:
@@ -85,8 +91,15 @@ class Audit:
         return self.calibrator.current(self.verifier_version)
 
     def recompute(self) -> Rectification:
-        """Re-read the store and re-estimate. Call after a batch resolves."""
-        return self.calibrator.recompute(self.verifier_version)
+        """Re-read the store and re-estimate. Call after a batch resolves.
+
+        When a :class:`~agentdescent.audit.boost.VerifierBoost` is attached,
+        it is retrained here too -- a batch of resolved labels is exactly the
+        moment the flywheel should learn from."""
+        rect = self.calibrator.recompute(self.verifier_version)
+        if self.boost is not None:
+            self.boost.retrain()
+        return rect
 
     def rebalance(self, unseen: float, **kw: Any) -> float:
         """Move the calibration share as the improvement pool stops learning.
@@ -173,7 +186,8 @@ def attach(verifier: Callable[[Any, str], float], *,
            verifier_version: Optional[str] = None,
            version_extra: Any = None,
            watch_ids: Iterable[str] = (),
-           watch_globs: Sequence[str] = ()) -> Audit:
+           watch_globs: Sequence[str] = (),
+           boost: Optional["VerifierBoost"] = None) -> Audit:
     """Assemble the audit around ``verifier`` and return what ``evolve()`` needs.
 
     Parameters
@@ -251,4 +265,4 @@ def attach(verifier: Callable[[Any, str], float], *,
     watch.check()
     return Audit(reward=reward, run=RenderTap(run) if run is not None else None,
                  acceptance=acceptance, store=store, calibrator=calibrator,
-                 watch=watch)
+                 watch=watch, boost=boost)

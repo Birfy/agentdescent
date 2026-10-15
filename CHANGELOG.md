@@ -8,6 +8,21 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- **Verifier bootstrap flywheel** (`agentdescent/audit/boost.py`):
+  `VerifierBoost` wraps any verifier and learns a monotone calibration curve
+  (`isotonic_fit`, numpy-only PAV) from the audit's **IMPROVEMENT** pool, then
+  activates it **only if it provably reduces residual error on a held-out slice
+  of that pool** (the bootstrap gate). When active it corrects the cheap and
+  learned layers the aggregator uses to rank candidates and the audit uses for
+  its trust signal; `eval_counts` / `full_eval` are delegated **raw**, so the
+  commit gate keeps the oracle's authority over what commits. It trains on the
+  IMPROVEMENT pool only (never the CALIBRATION pool that measures it), and it
+  declares itself as a new verifier version (`version_tag`) so a caller wiring
+  it as the audit's `version_extra` makes `VerifierWatch` withdraw the old
+  calibration and re-measure the boosted verifier. `attach(boost=...)` and
+  `Audit.recompute()` retrain it when a batch of labels resolves. Default
+  behaviour unchanged -- no boost means no fitting and no correction.
+
 - `kind="skill_dir"` now gates candidates structurally before any rollout
   (#246): a diff that deletes `SKILL.md`, drops its frontmatter, or breaks the
   Agent Skills `name` / `description` / `compatibility` rules (or renames the
@@ -23,6 +38,7 @@ All notable changes to AgentDescent are documented here. The format follows
   `: `, reserved first characters, and plain `null` / `true` / number / date
   values) are `frontmatter-malformed`; a BOM and inline `# comments` (even ones
   containing a colon) are tolerated.
+
 - `Diff.rationale` carries the FileTree reflector's reason into the ledger
   commit message and the ReplayAwareProposal rejected-evidence note (#247).
   `parse_proposal` returns edits plus rationale; `parse_edits` stays a thin
