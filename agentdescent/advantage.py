@@ -307,6 +307,17 @@ class AdaptiveTrustRegion:
 
     Bounded at both ends. Unbounded growth ends with a trust region that does not
     constrain anything, which is the same as not having one.
+
+    **Every move is a move.** A widen raises each cap by at least one unit and
+    a tighten lowers it by at least one, before the bounds are applied. With
+    plain ``round(cap * factor)`` the default ``widen=1.25`` maps an op cap of
+    2 to ``round(2.5) == 2`` and 1 to 1, so two reversals from the default 6
+    used to leave the op cap stuck there for the rest of the run while
+    ``history`` kept recording windows that "widened" it (#282). And a reversal
+    never loosens anything: an ``initial`` below ``minimum`` is honoured as
+    given, and a tighten leaves it where it is instead of clamping it *up* to
+    ``minimum`` -- a rollback that raised a cap would be the expensive
+    direction rewarded. ``maximum`` stays a hard ceiling on every move.
     """
 
     def __init__(self, *, initial: TrustRegion = TrustRegion(6, 32_000),
@@ -314,6 +325,25 @@ class AdaptiveTrustRegion:
                  maximum: TrustRegion = TrustRegion(64, 512_000),
                  window: int = 10, widen: float = 1.25, tighten: float = 0.5,
                  accept_rate_to_widen: float = 0.5) -> None:
+        if isinstance(window, bool) or not isinstance(window, int) or window < 1:
+            raise ValueError(f"window must be an int >= 1, got {window!r}")
+        if not (math.isfinite(widen) and widen >= 1.0):
+            raise ValueError(f"widen must be finite and >= 1, got {widen!r}")
+        if not (math.isfinite(tighten) and 0.0 < tighten <= 1.0):
+            raise ValueError(f"tighten must be finite and in (0, 1], got {tighten!r}")
+        if not (math.isfinite(accept_rate_to_widen)
+                and 0.0 <= accept_rate_to_widen <= 1.0):
+            raise ValueError("accept_rate_to_widen must be finite and in [0, 1], "
+                             f"got {accept_rate_to_widen!r}")
+        for name in ("ops", "chars"):
+            # Not ``minimum <= maximum``: passing only a small ``maximum`` (below
+            # the default ``minimum.chars``) is a supported way to cap a run,
+            # and ``maximum`` wins wherever the two disagree.
+            for bound, value in (("minimum", getattr(minimum, name)),
+                                 ("maximum", getattr(maximum, name))):
+                if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                    raise ValueError(
+                        f"{bound}.{name} must be an int >= 1, got {value!r}")
         self.current = initial
         self.minimum, self.maximum = minimum, maximum
         self.window = window
@@ -358,16 +388,32 @@ class AdaptiveTrustRegion:
             # tightening would blame the region for something it did not do.
             return self.current
         nxt = TrustRegion(
-            ops=int(min(self.maximum.ops,
-                        max(self.minimum.ops, round(self.current.ops * factor)))),
-            chars=int(min(self.maximum.chars,
-                          max(self.minimum.chars,
-                              round(self.current.chars * factor)))))
+            ops=self._step(self.current.ops, factor,
+                           self.minimum.ops, self.maximum.ops),
+            chars=self._step(self.current.chars, factor,
+                             self.minimum.chars, self.maximum.chars))
         if nxt != self.current:
             self.current = nxt
             self.history.append(nxt)
             self._recent.clear()          # give the new size a fresh window
         return self.current
+
+
+    @staticmethod
+    def _step(cur: int, factor: float, lo: int, hi: int) -> int:
+        """One cap's next value: at least one unit in ``factor``'s direction,
+        clamped to ``[lo, hi]`` (``hi`` wins if they disagree) -- except that
+        a tighten never ends above ``cur``, which the clamp to ``lo`` did for a
+        cap below ``minimum``."""
+        if factor > 1.0:
+            # ``maximum`` is a hard ceiling on any move, so an ``initial``
+            # above it is brought down to it here -- the conservative way.
+            target = max(cur + 1, round(cur * factor))
+            return int(min(hi, max(lo, target)))
+        if factor < 1.0:
+            target = min(cur - 1, round(cur * factor))
+            return int(min(cur, hi, max(lo, target)))
+        return int(cur)
 
 
 # ---------------------------------------------------------------------------
