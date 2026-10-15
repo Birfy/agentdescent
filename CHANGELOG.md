@@ -8,6 +8,12 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- Add the RRSI component vocabulary (`examples/rrsi/components.py`) and per-edit
+  history `L_t` (`examples/rrsi/history.py`: yield, prune set, stall
+  exploration) adapted from the pinned Google release, with defensive handling
+  of non-finite measurements and torn JSONL lines, including tails cut
+  inside a multibyte UTF-8 character (#252). Still not an
+  `evolve()` integration; see `docs/algo-rrsi.md`.
 - `kind="skill_dir"` now gates candidates structurally before any rollout
   (#246): a diff that deletes `SKILL.md`, drops its frontmatter, or breaks the
   Agent Skills `name` / `description` / `compatibility` rules (or renames the
@@ -75,6 +81,11 @@ All notable changes to AgentDescent are documented here. The format follows
   a fresh reload. `observe_unlabelled` and `resolve` refuse non-finite scores
   with `ValueError`. An unknown `schema_version` still raises.
 
+- `FileCache` write failures no longer leave orphan `*.tmp` siblings, and
+  encode errors (`TypeError`/`ValueError`) are swallowed like `OSError` so a
+  paid evaluation is never failed by the cache; non-finite scores are returned
+  but not written (`allow_nan=False`). Non-JSON-native keys (`Path`, `UUID`)
+  still persist via `default=str`, matching how `_path()` hashes them (#263).
 - A failed `Ledger` write no longer corrupts the ledger (#265). Payloads are
   encoded before any file is touched, each file is replaced via a temp
   sibling, and an operation that fails part-way restores the files it already
