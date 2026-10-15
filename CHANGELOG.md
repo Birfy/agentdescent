@@ -63,6 +63,18 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- `audit.AuditStore` keeps its crash-safety contract (#274). A torn tail left
+  by a killed process gets a newline before the next append, so the record
+  written after the crash is no longer glued onto the fragment and lost; the
+  file is read as bytes and decoded per line, so a tear inside a multi-byte
+  character, a line that parses to a non-object, or a side-record missing its
+  keys costs that one line (counted in `corrupt`) instead of making the store
+  unopenable. Lines are encoded with `allow_nan=False` before the file is
+  touched and memory is updated only after the write returns, so a failed
+  `append` / `resolve` / `reopen` / `remember_*` leaves the index agreeing with
+  a fresh reload. `observe_unlabelled` and `resolve` refuse non-finite scores
+  with `ValueError`. An unknown `schema_version` still raises.
+
 - A failed `Ledger` write no longer corrupts the ledger (#265). Payloads are
   encoded before any file is touched, each file is replaced via a temp
   sibling, and an operation that fails part-way restores the files it already
