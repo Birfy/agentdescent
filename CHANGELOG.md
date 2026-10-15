@@ -69,6 +69,8 @@ All notable changes to AgentDescent are documented here. The format follows
   but not written (`allow_nan=False`). Non-JSON-native keys (`Path`, `UUID`)
   still persist via `default=str`, matching how `_path()` hashes them (#263).
 
+- `meta.cached_completion` is best effort and never costs the caller a paid call: a cache-write failure (`OSError`, unencodable or non-`str` response) returns the response uncached and leaves no `*.partial` sibling, the entry is encoded before the disk is touched, and a corrupt or non-`str` entry (including a JSON list, which used to raise `TypeError`) is counted once, as a miss, instead of as both a hit and a miss (#269).
+
 - `TrajectoryStore.get` / `path_for` round-trip `trace_id`s whose `artifact_id` contains a colon by parsing with `rsplit(":", 1)` (#257). The key is always a hex digest; a leading split treated a namespaced id as part of the key and returned ``None`` for a record that was on disk.
 
 - `dataloader` cache entries are written atomically (temp file + `os.replace`),
@@ -2447,7 +2449,6 @@ value-directed evaluation or Genesis blind-mode proposals.
   `NameError` twenty minutes into a paid sweep -- which is exactly how one
   shipped.
 
-
 ### Added
 
 - **`--budget-rollouts` on every algorithm port**, forwarded as
@@ -2470,7 +2471,6 @@ value-directed evaluation or Genesis blind-mode proposals.
   one in the matrix that was equal-budget before this existed — which is itself a
   "semantics changed" entry, since one row of a table meaning something different
   from the other six is the failure the column is there to prevent.
-
 
 ### Changed
 
