@@ -101,6 +101,14 @@ All notable changes to AgentDescent are documented here. The format follows
   per line so a tear inside a multi-byte character costs one line; text
   `status <run_id>` / `watch` print a `null` reward as `n/a` instead of raising.
 
+- HuggingFace row-cache filenames sanitize split names and bound their
+  components (#261), keeping slash-containing and traversal-style splits in
+  one portable cache entry. Lossy conversions include a digest to distinguish
+  split names (a bounded config is digested from the raw config, so configs
+  that slug identically stay distinct), and a versioned suffix prevents old raw-split cache entries
+  from aliasing the new names. Existing normal filenames and datasets-server
+  requests are unchanged.
+
 - `TrajectoryStore.record()` no longer raises when a record cannot be encoded
   (a NaN inside a structured output, non-string dict keys, a circular value, a
   `__str__` that raises, a non-string event detail) (#259). It is counted in
