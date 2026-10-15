@@ -65,7 +65,7 @@ evolve(tasks, reward, agent=agent,
 | `Beam(k)` | classic beam search | the walk over the `k` best is continuous across calls, so asking one at a time expands each in turn; `Beam(1)` computes `SingleHead`'s answer by another route, and the tests assert they agree |
 | `ParetoFrontier(mode=...)` | GEPA / EvoSkill | `win_frequency` is GEPA's Algorithm 2 exactly; `per_instance` is plain Pareto walked round-robin; `topk_aggregate` is EvoSkill's — three published rules, one argument |
 | `Archive(sampling=...)` | DGM / ADAS / SICA | `sigmoid_novelty` is DGM's `choose_selfimproves`; `performance`, `novelty` (softmax ÷ `1 + selected`), `best` (SICA's `idxmax`), `uniform` as the ablation |
-| `MCTS(exploration=...)` | tree search | UCT over the candidate tree; one evolve step is one rollout, value is held-out reward, backup runs up `Candidate.parent` |
+| `MCTS(exploration=...)` | tree search | UCT over the candidate tree; one evolve step is one rollout, value is held-out reward, visits are `Candidate.selected` (subtree counts under `evolve()` via `PopulationAggregator`, #275) |
 | `FlatPuct(c_puct=...)` | [ERA](algo-era.md) | `futs.py`'s Flat UCB tree search: every node selectable, exploitation by **normalised rank** rather than raw score, uniform `1/N` prior. `Candidate.selected` must be the *subtree* visit count. Asking for `n > 1` reserves a visit per pick, which is upstream exactly at `n == 1` |
 
 Three details that are decisions rather than defaults:

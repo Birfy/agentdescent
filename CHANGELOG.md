@@ -69,6 +69,14 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- `PopulationAggregator` records `Candidate.parent` and backpropagates
+  subtree `selected` counts under `evolve()` (#275). Selecting a candidate
+  remembers its version as the branch tip; the next new state admitted from
+  that branch is filed as its child, and `selected` increments on the node
+  and every ancestor (cycle-guarded), so `FlatPuct` / `CostEfficient` /
+  `MCTS` see a real tree instead of a flat bag. Lineage survives
+  checkpoint/restore; pre-change checkpoints restore as roots.
+
 - `FileCache` write failures no longer leave orphan `*.tmp` siblings, and
   encode errors (`TypeError`/`ValueError`) are swallowed like `OSError` so a
   paid evaluation is never failed by the cache; non-finite scores are returned

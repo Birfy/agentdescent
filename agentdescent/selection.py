@@ -625,11 +625,13 @@ class FlatPuct(SingleHead):
 class MCTS(SingleHead):
     """UCT over the candidate tree: one evolve step is one rollout.
 
-    ``value`` is the candidate's held-out reward, ``visits`` is
-    ``Candidate.selected``, and the backup runs up ``Candidate.parent``. An
-    unvisited candidate has infinite UCT score and so is always tried first,
-    which is the standard rule and the one that keeps a shallow tree from being
-    ignored.
+    ``value`` is the candidate's held-out reward and ``visits`` is
+    ``Candidate.selected``. Under ``evolve()``, ``PopulationAggregator``
+    backpropagates each selection up ``Candidate.parent`` so those visits are
+    subtree counts (#275); this policy itself only *reads* ``selected`` — it
+    does not walk the parent chain. An unvisited candidate has infinite UCT
+    score and so is always tried first, which is the standard rule and the one
+    that keeps a shallow tree from being ignored.
     """
 
     def __init__(self, exploration: float = 1.4) -> None:
