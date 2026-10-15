@@ -265,7 +265,7 @@ def check_dependency_graph(contracts: Mapping[str, Contract]) -> List[str]:
 
     for aid in deps:
         cycle = cycle_from(aid, ())
-        if cycle is not None and f"cycle: {cycle}" not in out:
+        if cycle is not None and f"dependency cycle: {cycle}" not in out:
             out.append(f"dependency cycle: {cycle}")
     return out
 

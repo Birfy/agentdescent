@@ -2194,13 +2194,23 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
         return out
 
     def deserialize(aid: str, version: int, state: dict) -> EvolvingArtifact:
-        contract = None
-        if state.get("contract"):
+        # The gate and _assert_contract must read the *operator-supplied*
+        # contract, not whatever a previous run serialized. On a fresh run the
+        # stored contract is the supplied one, so they agree; on a resume with a
+        # tightened/loosened `contract=`, reading the stored rules would enforce
+        # the old rules (or halve the run at the first commit with a
+        # ContractRejected when the gate passed under rules _assert_contract now
+        # refuses) -- the operator's contract is the source of truth (review).
+        # `contract` here is the engine's `contract=` param, in closure.
+        resolved = None
+        if contract is not None and aid == artifact_id:
+            resolved = contract
+        elif state.get("contract"):
             from .invariants import contract_from_dict
-            contract = contract_from_dict(state["contract"])
+            resolved = contract_from_dict(state["contract"])
         return EvolvingArtifact(aid, state.get("state", {}), version,
                                 state.get("blast_radius", blast_radius), runtime,
-                                strategy, contract=contract)
+                                strategy, contract=resolved)
 
     scratch: Optional[str] = None
     if repo_path:
@@ -2612,7 +2622,7 @@ def evolve(
     trajectory_store: Optional["TrajectoryStore"] = None,
     #: The artifact's contract -- the externally-visible interface, and where
     #: governance invariants are declared. Pass
-    #: ``Contract(invariants=(Invariant("mutable_keys", {"a", "b"}),))`` and the
+    #: ``Contract(invariants=(Invariant("mutable_keys", ("a", "b")),))`` and the
     #: aggregator enforces each rule **before** a candidate is measured (see
     #: :mod:`agentdescent.invariants`); a diff that breaks one reports a
     #: ``violates-invariant`` outcome and never buys a held-out sweep. ``None``
@@ -2977,7 +2987,7 @@ def evolve(
     contract:
         The artifact's contract -- the externally-visible interface, and where
         governance invariants are declared. Pass
-        ``Contract(invariants=(Invariant("mutable_keys", {"a", "b"}),))`` and
+        ``Contract(invariants=(Invariant("mutable_keys", ("a", "b")),))`` and
         the aggregator enforces each rule **before** a candidate is measured
         (see :mod:`agentdescent.invariants`); a diff that breaks one reports a
         ``violates-invariant`` outcome and never buys a held-out sweep.

@@ -9,6 +9,8 @@ that cannot run -- an unknown kind, a broken predicate -- must be a violation,
 not a silent skip. Each of those is pinned here.
 """
 
+import warnings
+
 import pytest
 
 from agentdescent import Contract, Invariant, check_dependency_graph, check_invariants
@@ -344,3 +346,52 @@ def test_a_self_referential_contract_is_refused_at_registration(tmp_path):
                strategy=SingleSlot(initial_value="seed"), rounds=1,
                n_workers=2, repo_path=str(tmp_path / "repo"),
                contract=contract)
+
+
+def test_a_resumed_contract_is_the_operator_s_rules_not_the_stored_one(tmp_path):
+    """A `contract=` passed on a resumed run must be the rules the gate enforces.
+
+    Run 1 commits under a permissive rule; run 2 resumes the same repo with a
+    tightened rule. The gate must read the *operator-supplied* contract -- not
+    whatever run 1 serialized -- so the new rule rejects (`violates-invariant`),
+    and `_assert_contract` must agree with the gate (no `ContractRejected`
+    early stop from a stored-vs-supplied mismatch) (review: run 2 passed the
+    diff under the old rule and then halted on the first commit)."""
+    def run(rendered, task):
+        return "answer"
+
+    def reward(task, output):
+        return 0.5                      # never solved: propose fires every round
+
+    def propose(rendered, task, output, reward):
+        return f"rule {task.id}"
+
+    tasks = [Task(id=f"t{i}", prompt=f"item {i}") for i in range(6)]
+    repo = str(tmp_path / "repo")
+    allow = Contract(invariants=(Invariant("diff_size_bounded", (5,)),))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        evolve(tasks, reward, run=run, propose=propose, strategy=AppendRules(),
+               rounds=2, n_workers=2, repo_path=repo, contract=allow)
+
+    deny = Contract(invariants=(Invariant("diff_size_bounded", (0,)),))
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = evolve(tasks, reward, run=run, propose=propose,
+                        strategy=AppendRules(), rounds=3, n_workers=2,
+                        repo_path=repo, contract=deny)
+    outcomes = result.outcomes()
+    assert outcomes.get("violates-invariant", 0) >= 1, (
+        "the resumed run must enforce the *new* rule, not the stored one; "
+        f"got {outcomes}")
+    assert result.invariant_rejections >= 1, (
+        "the tightened rule must reject; got "
+        f"{result.invariant_rejections}")
+    assert result.stop_reason != "error", (
+        "the run must not halt on a ContractRejected from the stored-vs-"
+        f"supplied mismatch; error={result.error}")
+    contract_warns = [str(w.message) for w in caught
+                      if "ContractRejected" in str(w.message)]
+    assert not contract_warns, (
+        "the gate and _assert_contract must agree on the operator's rules; "
+        f"got {contract_warns}")
