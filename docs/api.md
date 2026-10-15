@@ -2746,6 +2746,10 @@ CladeThompson(
 ) -> None
 ```
 
+| method | what it does |
+|---|---|
+| `tau(budget_remaining: float) -> float` | `budget_remaining ** (-cool_down_beta)`, clamped to `[1, max_tau]`. |
+
 ### `CostEfficient(...)`
 
 FlatPuct that pays for exploration out of a budget. **Test-time scaling.**
