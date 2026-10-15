@@ -472,6 +472,28 @@ class PopulationAggregator(Aggregator):
                 })
             except (TypeError, ValueError):
                 continue
+        # ``version`` is the archive's node id and must be unique (see
+        # ``_admit``). A checkpoint written before ids were de-duplicated can
+        # hold two distinct fork states that share one ledger version; restored
+        # verbatim, ``_bump_selected`` / ``by_version`` would only ever reach
+        # one of them. Migration policy, applied in saved order: the first row
+        # with a given id keeps it, every later duplicate gets a fresh id past
+        # all ids in use. Saved ``parent`` / ``branch_parent`` references were
+        # written against the ambiguous id, so they keep resolving to the row
+        # that kept it (first claimant) -- the same first-wins rule the tree
+        # policies' ``by_version`` lookups already apply.
+        used: Set[int] = set()
+        duplicates: List[Dict[str, object]] = []
+        for entry in restored:
+            node = int(entry["version"])
+            if node in used:
+                duplicates.append(entry)
+            else:
+                used.add(node)
+        for entry in duplicates:
+            fresh_id = max(used) + 1
+            entry["version"] = fresh_id
+            used.add(fresh_id)
         with self._archive_lock:
             self._archive = restored
             branch_parent = state.get("branch_parent")

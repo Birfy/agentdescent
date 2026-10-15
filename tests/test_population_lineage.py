@@ -270,3 +270,62 @@ def test_colliding_ledger_versions_on_two_forks_get_distinct_nodes(tmp_path):
     agg._admit(child, 6, branch="head/1")
     kid = next(c for c in agg._candidates() if c.state["k"] == "v4")
     assert kid.parent == cands["v3"].version != cands["v2"].version
+
+
+def test_restore_gives_legacy_duplicate_versions_distinct_ids():
+    """A pre-dedup multi-head checkpoint can hold two distinct fork states with
+    one ledger version. restore() must give the later one a fresh id so that
+    selecting either bumps only that candidate and its ancestors (#278)."""
+    fresh = PopulationAggregator.__new__(PopulationAggregator)
+    fresh.selection = Archive(sampling="novelty")
+    fresh.population_artifact = "a"
+    fresh._archive = []
+    fresh._keys = set()
+    fresh._archive_lock = threading.Lock()
+    fresh._selections = 0
+    fresh._branch_parent = {}
+    fresh._seen = set()
+    fresh.posteriors = {}
+    fresh.promoted_at = {}
+    legacy = {
+        "archive": [
+            {"state": {"k": "root"}, "score": 0.1, "version": 1, "selected": 0},
+            {"state": {"k": "left"}, "score": 0.4, "version": 5, "selected": 0,
+             "parent": 1},
+            {"state": {"k": "right"}, "score": 0.6, "version": 5, "selected": 0,
+             "parent": 1},
+            {"state": {"k": "kid"}, "score": 0.7, "version": 6, "selected": 0,
+             "parent": 5},
+        ],
+        "keys": ["root", "left", "right", "kid"],
+        "selections": 0,
+        "branch_parent": {"head/0": 5},
+    }
+
+    def _noop(self, state):
+        pass
+
+    original = Aggregator.restore
+    Aggregator.restore = _noop
+    try:
+        fresh.restore(legacy)
+    finally:
+        Aggregator.restore = original
+
+    cands = {c.state["k"]: c for c in fresh._candidates()}
+    versions = [c.version for c in cands.values()]
+    assert len(set(versions)) == len(versions) == 4
+    # First claimant keeps the id; saved references resolve to it.
+    assert cands["left"].version == 5
+    assert cands["right"].version == 7
+    assert cands["right"].parent == 1
+    assert cands["kid"].parent == 5
+    assert fresh._branch_parent == {"head/0": 5}
+
+    fresh._bump_selected(cands["right"].version)
+    after = {c.state["k"]: c.selected for c in fresh._candidates()}
+    assert after == {"root": 1, "left": 0, "right": 1, "kid": 0}
+
+    fresh._bump_selected(cands["left"].version)
+    after = {c.state["k"]: c.selected for c in fresh._candidates()}
+    assert after == {"root": 2, "left": 1, "right": 1, "kid": 0}
