@@ -335,7 +335,10 @@ class TrajectoryStore:
         write failure is also ``None`` and is counted -- a full disk degrades
         the recording, not the run (the caller records the trace_id only when
         it is returned, so nothing downstream depends on the file having
-        landed).
+        landed). A record that cannot be *encoded* (a NaN inside a structured
+        output, a dict output with non-string keys, a circular reference) is
+        the same kind of failure: counted in ``trajectory_write_failures``,
+        never raised, and nothing is left on disk.
 
         Thread-safe, and the exists-check + write pair runs under
         ``self._lock``, so two threads in this process racing the same identity
@@ -346,15 +349,36 @@ class TrajectoryStore:
         over-count recorded -- the trade-off of having no inter-process broker.
         """
         with self._lock:
-            key = trajectory_key(
-                trajectory.rendered, trajectory.task_id,
-                trajectory.env_fingerprint)
+            try:
+                key = trajectory_key(
+                    trajectory.rendered, trajectory.task_id,
+                    trajectory.env_fingerprint)
+            except Exception:  # noqa: BLE001 -- recording must never fail a rollout
+                self._count("trajectory_write_failures")
+                return None
             path = self._path(key)
             if os.path.exists(path):
                 self._count("trajectories_dedup")
                 return None
-            payload = self._prepare(trajectory, key)
             t0 = time.time()
+            try:
+                # Encode *before* touching the disk, and treat an unencodable
+                # record exactly like a full disk. ``json.dump`` raises
+                # ``ValueError`` for a NaN/inf anywhere in the payload
+                # (``allow_nan=False``) or a circular reference, ``TypeError``
+                # for a dict output with non-string keys, and whatever a
+                # ``__str__`` raises through ``default=str``. Only ``OSError``
+                # used to be caught, so any of those escaped ``record()`` --
+                # and inside ``eval_one``'s retry loop an escaped error reads as
+                # a backend transient: the already-paid rollout was re-run
+                # ``ATTEMPTS`` times and the gate then failed, all because the
+                # *diagnostics* could not serialise what it had been handed.
+                payload = self._prepare(trajectory, key)
+                text = json.dumps(payload.to_dict(), sort_keys=True,
+                                  default=str, allow_nan=False)
+            except Exception:  # noqa: BLE001 -- recording must never fail a rollout
+                self._count("trajectory_write_failures")
+                return None
             tmp: Optional[str] = None
             try:
                 # A sibling named per-thread: two threads in one process would
@@ -363,8 +387,7 @@ class TrajectoryStore:
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
                 with open(tmp, "w", encoding="utf-8") as fh:
-                    json.dump(payload.to_dict(), fh, sort_keys=True,
-                              default=str, allow_nan=False)
+                    fh.write(text)
                 os.replace(tmp, path)
                 self._count("trajectories_recorded")
                 self._count("trajectory_write_seconds", time.time() - t0)

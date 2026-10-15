@@ -53,7 +53,7 @@ competing with one.
 ```python
 from agentdescent import Policies, evolve
 from agentdescent.selection import (
-    Archive, Beam, FlatPuct, MCTS, ParetoFrontier, SingleHead)
+    Archive, Beam, CladeThompson, FlatPuct, MCTS, ParetoFrontier, SingleHead)
 
 evolve(tasks, reward, agent=agent,
        policies=Policies(selection=Beam(4)))
@@ -67,6 +67,7 @@ evolve(tasks, reward, agent=agent,
 | `Archive(sampling=...)` | DGM / ADAS / SICA | `sigmoid_novelty` is DGM's `choose_selfimproves`; `performance`, `novelty` (softmax ÷ `1 + selected`), `best` (SICA's `idxmax`), `uniform` as the ablation |
 | `MCTS(exploration=...)` | tree search | UCT over the candidate tree; one evolve step is one rollout, value is held-out reward, backup runs up `Candidate.parent` |
 | `FlatPuct(c_puct=...)` | [ERA](algo-era.md) | `futs.py`'s Flat UCB tree search: every node selectable, exploitation by **normalised rank** rather than raw score, uniform `1/N` prior. `Candidate.selected` must be the *subtree* visit count. Asking for `n > 1` reserves a visit per pick, which is upstream exactly at `n == 1` |
+| `CladeThompson(cool_down_beta=...)` | [HGM](https://arxiv.org/abs/2510.21614) | Huxley-Gödel Machine's expansion policy: Thompson sampling on **clade** evidence (the node plus every descendant via `Candidate.parent`), so a low-scoring node whose descendants succeed beats a high scorer whose descendants fail. See below |
 
 Three details that are decisions rather than defaults:
 
@@ -101,6 +102,35 @@ answer it gave before.
 on a re-run makes a seeded comparison meaningless. Pass `rng=` instead when the
 caller owns the stream: a port migrating off a hand-written rule has to keep
 drawing from *its* rng in *its* order, or every number it published moves.
+
+### `CladeThompson` — HGM's clade-metaproductivity sampling
+
+The [Huxley-Gödel Machine](https://arxiv.org/abs/2510.21614) (ICLR 2026;
+[code](https://github.com/metauto-ai/HGM)) names a *metaproductivity–performance
+mismatch*: expanding the highest-scoring node, which is what DGM's and SICA's
+rules do (`Archive('sigmoid_novelty')`, `Archive('best')`), is a weak predictor
+of which node produces good descendants. `CladeThompson` scores each node by its
+clade: `clade_counts()` returns `(S, F)` summed over the node and all of its
+descendants, where a node's own evidence is `(Σ s_i, n − Σ s_i)` over its
+`per_task` scores (clipped to `[0, 1]`), else `(score, 1 − score)`, else
+nothing. It then draws `θ ~ Beta(τ(1+S), τ(1+F))` per eligible node and expands
+the argmax; `n > 1` draws with replacement.
+
+- **Eligibility** follows upstream `expand()`: a node's own mean must be finite
+  and `> 0`; with none eligible the answer is `ctx.head`.
+- **`τ`** is `1` by default (upstream `cool_down: false`). `cool_down_beta=β`
+  maps upstream's cool-down multiplier onto `SelectionContext.budget_remaining`
+  as `τ = budget_remaining ** -β`, capped at `max_tau`, so the draws tighten
+  onto the most metaproductive clade as the budget runs out.
+- **Seeded** with `seed=` or `rng=`, like `Archive`.
+
+Fidelity notes: only HGM's *expansion* policy is ported; its evaluation policy
+and expand-vs-evaluate scheduler need an engine seam this repository does not
+have. Upstream `main`'s `Node.get_decendant_evals` extends a node's own measure
+list in place, so repeated `expand()` calls inflate its evidence; this port
+implements the paper's formula with no accumulation, and a test pins it. Under
+`evolve()` the clade is only as real as `Candidate.parent`, which the
+population archive records from #275 on.
 
 ## How a policy takes effect: serialised heads
 

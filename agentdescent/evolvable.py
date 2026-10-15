@@ -80,12 +80,21 @@ class Contract:
     ``breaking`` marks a semver-major style change; the Ledger refuses diffs
     that declare a dependency on a superseded major (design doc, section 6,
     "contract mechanism").
+
+    ``invariants`` are declarative governance rules every diff to this
+    artifact must satisfy (see :mod:`agentdescent.invariants`). They are
+    enforced by the aggregator **before** a candidate is measured, so a
+    policy-violating diff is rejected without buying a held-out sweep. Empty
+    (the default) is the untouched path exactly -- no rule, no check, no
+    overhead. Because the check is part of the merge pipeline, a contract that
+    declares a rule can never silently stop enforcing it.
     """
 
     input_schema: str = "any"
     output_schema: str = "any"
     side_effects: Tuple[str, ...] = ()
     major: int = 1
+    invariants: Tuple[Any, ...] = ()
 
     def is_compatible_with(self, other: "Contract") -> bool:
         return self.major == other.major
