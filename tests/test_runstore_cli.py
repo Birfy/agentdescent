@@ -164,6 +164,57 @@ def test_status_and_panel_payload_stay_strict_json_after_nan_rounds(store, tmp_p
     json.loads(body)
     assert "NaN" not in body and "Infinity" not in body
 
+class _RaiseOnStr:
+    def __str__(self):
+        raise TypeError("cannot stringify for status")
+
+
+def test_unencodable_status_write_leaves_no_orphan_tmp(store, tmp_path):
+    """A serializer refusal must not leave status.json.<uuid>.tmp behind (#267)."""
+    _, spec = _spec_file(tmp_path)
+    rd = runstore.create(spec.to_dict(), store=store)
+    before = set(os.listdir(rd.path))
+    with pytest.raises(TypeError, match="cannot stringify"):
+        rd.update_status(error=_RaiseOnStr())
+    after = set(os.listdir(rd.path))
+    assert after == before
+    assert not [f for f in after if f.endswith(".tmp")]
+    # Prior status remains readable and unchanged.
+    assert rd.status().state == "created"
+
+
+def test_failed_replace_still_removes_the_sibling_tmp(store, tmp_path, monkeypatch):
+    """os.replace failure must clean the sibling, not leave an orphan (#267)."""
+    _, spec = _spec_file(tmp_path)
+    rd = runstore.create(spec.to_dict(), store=store)
+    real_replace = os.replace
+
+    def boom(src, dst):
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr(runstore.os, "replace", boom)
+    with pytest.raises(OSError, match="simulated replace failure"):
+        rd.update_status(round=9, best_reward=0.9)
+    assert not [f for f in os.listdir(rd.path) if f.endswith(".tmp")]
+    # Old status untouched.
+    assert rd.status().round == 0
+
+    monkeypatch.setattr(runstore.os, "replace", real_replace)
+    rd.update_status(round=3)
+    assert rd.status().round == 3
+    assert not [f for f in os.listdir(rd.path) if f.endswith(".tmp")]
+
+
+def test_encode_refusal_never_creates_a_tmp(tmp_path):
+    """json.dumps must run before open(tmp); a raise leaves zero new files (#267)."""
+    path = str(tmp_path / "status.json")
+    before = set(os.listdir(tmp_path))
+    with pytest.raises(TypeError, match="cannot stringify"):
+        runstore._write_json(path, {"error": _RaiseOnStr()})
+    assert set(os.listdir(tmp_path)) == before
+    assert not os.path.exists(path)
+    assert not [f for f in os.listdir(tmp_path) if f.endswith(".tmp")]
+
 
 def test_a_dead_pid_reads_as_failed_not_running(store, tmp_path):
     _, spec = _spec_file(tmp_path)

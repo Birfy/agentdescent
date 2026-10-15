@@ -70,6 +70,17 @@ All notable changes to AgentDescent are documented here. The format follows
   `last_reward` so `max(best)` cannot become order-dependent on `NaN`; the
   loopback panel dumps with the same sanitize + `allow_nan=False` contract.
 
+- A failed `Ledger` write no longer corrupts the ledger (#265). Payloads are
+  encoded before any file is touched, each file is replaced via a temp
+  sibling, and an operation that fails part-way restores the files it already
+  wrote, so a serializer refusal or a full disk can no longer leave a torn
+  `artifacts/<id>.json` (or half of a `commit_atomic`) for the next commit's
+  `git add -A` to sweep in and break every later `snapshot()`.
+- `runstore._write_json` encodes before creating a sibling tmp and always
+  removes that sibling in `finally`, so a serializer refusal or a failed
+  replace can no longer leave an orphan `status.json.<uuid>.tmp` /
+  `spec.json.<uuid>.tmp` in a run directory (#267).
+
 - `meta.cached_completion` is best effort and never costs the caller a paid call: a cache-write failure (`OSError`, unencodable or non-`str` response) returns the response uncached and leaves no `*.partial` sibling, the entry is encoded before the disk is touched, and a corrupt or non-`str` entry (including a JSON list, which used to raise `TypeError`) is counted once, as a miss, instead of as both a hit and a miss (#269).
 
 - `TrajectoryStore.get` / `path_for` round-trip `trace_id`s whose `artifact_id` contains a colon by parsing with `rsplit(":", 1)` (#257). The key is always a hex digest; a leading split treated a namespaced id as part of the key and returned ``None`` for a record that was on disk.
@@ -2450,7 +2461,6 @@ value-directed evaluation or Genesis blind-mode proposals.
   `NameError` twenty minutes into a paid sweep -- which is exactly how one
   shipped.
 
-
 ### Added
 
 - **`--budget-rollouts` on every algorithm port**, forwarded as
@@ -2473,7 +2483,6 @@ value-directed evaluation or Genesis blind-mode proposals.
   one in the matrix that was equal-budget before this existed — which is itself a
   "semantics changed" entry, since one row of a table meaning something different
   from the other six is the failure the column is there to prevent.
-
 
 ### Changed
 
