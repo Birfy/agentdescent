@@ -11,8 +11,8 @@ results.
   2026-10-04.
 - Released implementation: [`google-research/rrsi` at
   `be50316e1db05914068a973f322770ef08ed7ba1`](https://github.com/google-research/rrsi/tree/be50316e1db05914068a973f322770ef08ed7ba1).
-- Adapted sources: `rrsi/selection.py` (with component novelty semantics from
-  `rrsi/components.py`) and `rrsi/schedule.py`.
+- Adapted sources: `rrsi/selection.py`, `rrsi/schedule.py`,
+  `rrsi/components.py` and `rrsi/history.py`.
 
 ## What is preserved so far
 
@@ -47,6 +47,30 @@ clamping of `t` into `[0, T]`. Defensive validation rejects non-positive or
 inverted `b_min`/`b_max` and non-integer inputs; that is an AgentDescent
 boundary, not an upstream claim.
 
+### Component vocabulary (`examples/rrsi/components.py`)
+
+`K` is the fixed set of harness components an edit can be tagged with, and
+`K_STR` (`client_tool`, `skill`, `memory`, `subagent`) the structural subset
+that adds machinery. `normalize` keeps a proposer's declared tag only when the
+diff carries a signal for it (domain signals first, then generic ones) and
+otherwise reclassifies the diff, so a prompt tweak cannot be booked as a skill;
+a diff whose changed lines are all string literals or comments is a `prompt`
+edit whatever its words say. `novelty` counts structural components the
+incumbent has never accepted an edit on; `selection.py` now takes its
+structural set from here instead of a copy.
+
+### Per-edit history (`examples/rrsi/history.py`)
+
+The JSONL ledger \(L_t\): one record per *edit*, with a bundle's single
+measurement copied to each of its edits. Unmeasured candidates (critic reject,
+smoke failure) carry `delta_S = None`, are counted by `attempted()`, and stay
+out of the tried set \(T_t\) and the yield \(g_t\). From it:
+
+- `yield_g(t, n_prune)`: \(g_t(l) = \max\{\Delta S_i : l_i = l,\ t - t_i \le n_{prune}\}\), `-inf` when a tried component has nothing in the window.
+- `prune_set(t, n_prune)`: \(B_t = \{l \in T_t : g_t(l) \le 0\}\), each with the accepted edits still in the incumbent.
+- `stall_flag` (\(\sigma_t = 1[S_t - S_{t-w} \le \delta]\)) and `exploration`, which reserves `m_draft` slots for untried components \(U_t = K \setminus T_t\) when stalled.
+- `render(n)`: the proposer's view, keeping only the latest few unmeasured records.
+
 ## Parity and intentional differences
 
 | Behavior | Pinned upstream | This microport |
@@ -60,10 +84,19 @@ boundary, not an upstream claim.
 | Round candidates | Evaluate from same base, choose admissible argmax | Caller contract documented; this module does not orchestrate evaluation |
 | Cosine edit budget | `edit_budget` / `budget_table` | Preserved, plus defensive bound checks |
 | Invalid `b_min`/`b_max` | Not guarded by `schedule.py` itself | Rejected before anneal arithmetic |
+| Declared non-structural tag (`config`, `control_flow`, ...) | Kept only if a domain signal backs it; generic signals cover structural components only | Preserved |
+| Tried component with no record in the prune window | `g_t = -inf`, so it is in `B_t` | Preserved |
+| Candidate with no edits | One placeholder record (`C1`, no component, `bundle = 0`) | Preserved |
+| Non-finite `delta_S` / `delta_C` / `S` / `C` | Written as non-standard `NaN` / `Infinity` JSON | Rejected with `ValueError` |
+| Torn final JSONL line after a crash | `records()` raises; the next append extends the fragment | Ignored by `records()` (also when cut inside a multibyte UTF-8 character), dropped by the next append; invalid JSON / UTF-8 or a non-object line elsewhere raises `ValueError` with its line number |
+| `replace_round` rewrite | In-place `write_text` | Atomic temp file (fsynced, original file mode kept) + `os.replace` |
+| numpy scalar measurements (`np.float32`) | Written as-is | Accepted as any `numbers.Real` except `bool` |
+| Text-only diff (string literals / comments) declared structural, prose mentions a signal word | Declared tag kept | Recorded as `prompt` |
 
-Neither mechanism is wired into `evolve()`, `aggregator_factory`, a proposal
-policy, or a resumable run record yet. There is no RRSI CLI, harness-directory
-domain, leakage critic, per-edit history, trial aggregation, pruning loop, or
+None of these mechanisms is wired into `evolve()`, `aggregator_factory`, a
+proposal policy, or a resumable run record yet. There is no RRSI CLI,
+harness-directory domain, leakage critic, proposer, trial aggregation, pruning
+loop (the history computes \(B_t\) but nothing removes machinery), or
 evaluation/accounting adapter. AgentDescent's default evolution behavior is
 unchanged. Real-model and benchmark measurements are **unmeasured** here;
 upstream reported values are not AgentDescent results.
@@ -71,12 +104,16 @@ upstream reported values are not AgentDescent results.
 ## Local verification
 
 ```bash
-pytest -q tests/test_rrsi_selection.py tests/test_rrsi_schedule.py
+pytest -q tests/test_rrsi_selection.py tests/test_rrsi_schedule.py tests/test_rrsi_history.py
 ```
 
 Selection goldens cover the historical floor, both cost branches, domain veto,
 ties, no winner, missing cost telemetry, rejected/missing candidates and invalid
 numeric inputs. Schedule fixtures cover endpoints, monotonic anneal, the float
-guard, clamping, degenerate horizons and invalid bounds. Completing the full
+guard, clamping, degenerate horizons and invalid bounds. History fixtures
+cover bundle fan-out, unmeasured records, the prune window and \(B_t\),
+`render`'s cap, torn-line recovery, atomic rewrites, stall and exploration, and
+`normalize`'s evidence check. Completing the full
 RRSI integration (issue #221) still needs pre-evaluation leakage screening,
-proposal/history state, and the `evolve()`/CLI fixture.
+the proposer and pruning loop that consume this history, and the
+`evolve()`/CLI fixture.

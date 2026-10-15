@@ -41,8 +41,11 @@ import math
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
+from .components import K_STR
 
-STRUCTURAL_COMPONENTS = frozenset({"client_tool", "skill", "memory", "subagent"})
+
+# The structural subset K_str of the component vocabulary (see components.py).
+STRUCTURAL_COMPONENTS = frozenset(K_STR)
 
 
 @dataclass(frozen=True)
