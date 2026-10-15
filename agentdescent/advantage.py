@@ -398,7 +398,6 @@ class AdaptiveTrustRegion:
             self._recent.clear()          # give the new size a fresh window
         return self.current
 
-
     @staticmethod
     def _step(cur: int, factor: float, lo: int, hi: int) -> int:
         """One cap's next value: at least one unit in ``factor``'s direction,
