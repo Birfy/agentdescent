@@ -295,10 +295,37 @@ def sigmoid_novelty_weights(scores: Sequence[float],
     `examples/adas` each carried a byte-identical copy, one selecting a parent
     and one choosing what to show the meta-agent. Two copies of a published
     formula is how the two quietly stop being the same formula.
+
+    Scores far below zero used to raise ``OverflowError`` inside ``math.exp``
+    (#286). The formula is unchanged for every finite score that fits in a
+    float exponential -- including the whole ``[0, 1]`` band DGM publishes --
+    so port-equivalence stays bit-identical; only an overflowing evaluation
+    falls back to sigmoid 0 (the same limit ``-inf`` already reached). A
+    non-finite score contributes weight 0 -- the same convention this mode
+    already uses for an unscored candidate -- so a ``NaN`` in the archive
+    cannot poison ``random.choices`` with a non-finite weight total.
     """
-    raw = [(1.0 / (1.0 + math.exp(-10.0 * (s - 0.5)))) * (1.0 / (1.0 + c))
-           for s, c in zip(scores, children)]
-    total = sum(raw) or 1.0
+    raw: List[float] = []
+    for s, c in zip(scores, children):
+        try:
+            score = float(s)
+        except (TypeError, ValueError):
+            score = float("nan")
+        if not math.isfinite(score):
+            # Unscored / corrupted: zero weight, matching Archive(sigmoid_novelty)
+            # treating score=None as 0.0 before calling this helper.
+            raw.append(0.0)
+            continue
+        try:
+            # Exact DGM formula. Overflow only for finite scores << 0 (about
+            # s <= -70); the [0, 1] band never takes this branch.
+            sig = 1.0 / (1.0 + math.exp(-10.0 * (score - 0.5)))
+        except OverflowError:
+            sig = 0.0
+        raw.append(sig * (1.0 / (1.0 + c)))
+    total = sum(raw)
+    if not total or not math.isfinite(total):
+        total = 1.0
     return [r / total for r in raw]
 
 
