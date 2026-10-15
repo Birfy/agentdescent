@@ -85,6 +85,13 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- `TrajectoryStore.record()` no longer raises when a record cannot be encoded
+  (a NaN inside a structured output, non-string dict keys, a circular value, a
+  `__str__` that raises, a non-string event detail) (#259). It is counted in
+  `trajectory_write_failures` like a full disk and nothing is written, so
+  `eval_one` no longer mistakes it for a backend transient and re-runs the
+  already-paid rollout `ATTEMPTS` times before failing the gate.
+
 - `FileCache` write failures no longer leave orphan `*.tmp` siblings, and
   encode errors (`TypeError`/`ValueError`) are swallowed like `OSError` so a
   paid evaluation is never failed by the cache; non-finite scores are returned
