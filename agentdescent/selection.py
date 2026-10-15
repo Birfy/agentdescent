@@ -324,8 +324,13 @@ def sigmoid_novelty_weights(scores: Sequence[float],
             sig = 0.0
         raw.append(sig * (1.0 / (1.0 + c)))
     total = sum(raw)
+    if not raw:
+        return []
+    # All zeros (every score non-finite or overflowing-negative) still has to
+    # be a selectable distribution: dividing by 1.0 would hand random.choices
+    # an all-zero vector and raise. Uniform matches Archive('uniform').
     if not total or not math.isfinite(total):
-        total = 1.0
+        return [1.0 / len(raw)] * len(raw)
     return [r / total for r in raw]
 
 

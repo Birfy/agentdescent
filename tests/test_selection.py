@@ -352,6 +352,20 @@ def test_archive_sigmoid_novelty_selects_with_extreme_and_nan_scores():
     assert {c.version for c in picks} == {2}  # only the finite good score weighs
 
 
+def test_sigmoid_novelty_all_rejected_scores_fall_back_to_uniform():
+    """All-NaN / all-overflowing archives must still be drawable (Codex P2)."""
+    import math
+    weights = sigmoid_novelty_weights(
+        [float("nan"), float("inf"), -1e6], [0, 0, 0])
+    assert weights == [1.0 / 3, 1.0 / 3, 1.0 / 3]
+    pool = (_c(0, float("nan")), _c(1, -1e6), _c(2, float("inf")))
+    ctx = _ctx(*pool, head=pool[0], n=9)
+    picks = Archive(sampling="sigmoid_novelty", seed=0).select(ctx, 9)
+    assert len(picks) == 9
+    assert {c.version for c in picks} == {0, 1, 2}
+
+
+
 @pytest.mark.parametrize("kwargs", [{"sampling": "nope"}, {"temperature": 0.0}])
 def test_archive_arguments_are_checked(kwargs):
     with pytest.raises(ValueError):
