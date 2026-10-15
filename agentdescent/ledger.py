@@ -559,13 +559,24 @@ class Ledger:
             return commit_hash, new_version
 
     def _assert_contract(self, new_state: Evolvable) -> None:
-        """Refuse a commit that would change the registered contract major.
+        """Refuse a commit that would change the registered contract.
 
         The check the design calls for and the codebase never made: `Contract`,
         `Contract.is_compatible_with` and `ContractRejected` all existed, nothing
         called any of them, and the docstrings described an enforcement that was
         not there. Comparing against the contract recorded at
-        :meth:`register` needs no change to any serializer."""
+        :meth:`register` needs no change to any serializer.
+
+        The **invariants** are compared too, as defence in depth: the gate reads
+        rules off the base artifact, which the loop writes to the ledger payload
+        -- so a bug that dropped them on the apply/serialize round-trip would
+        silently disable the rule while the run kept counting `invariant_checked`.
+        Refusing a commit whose candidate's invariants differ from the registered
+        (operator-supplied) contract turns that silent evaporation into a loud
+        `ContractRejected`, independent of where the candidate's contract came
+        from. The comparison is by value (``Invariant`` is a frozen dataclass),
+        so a re-registration that moves the major is the sanctioned way to change
+        rules, exactly as before."""
         known = self._contracts.get(new_state.id)
         incoming = getattr(new_state, "contract", None)
         if known is None or incoming is None:
@@ -575,6 +586,13 @@ class Ledger:
                 f"{new_state.id}: contract major {incoming.major} is incompatible "
                 f"with the registered major {known.major}. A breaking contract "
                 "change must be re-registered deliberately, not merged.")
+        if known.invariants != incoming.invariants:
+            raise ContractRejected(
+                f"{new_state.id}: commit would change the registered contract's "
+                f"governance invariants from {list(known.invariants)} to "
+                f"{list(incoming.invariants)}. Invariants are operator-supplied "
+                "and must be changed by re-registering the artifact, not by a "
+                "merged diff.")
 
     def commit_atomic(
         self,

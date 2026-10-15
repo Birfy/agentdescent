@@ -45,6 +45,7 @@ from .evolvable import (
     ContractError, Diff, EvidenceCard, Evolvable, VersionVector,
     combined_rationale, rationale_paragraph, vv_staleness,
 )
+from .invariants import check_invariants
 from .defaults import (
     DefaultAcceptance, DefaultConflict, DefaultFusion, DefaultPromotion,
 )
@@ -223,6 +224,11 @@ class MergeOutcome(str, Enum):
     CAS_CONFLICT = "cas-conflict"
     #: The bucket named an artifact the ledger does not have.
     UNKNOWN_ARTIFACT = "unknown-artifact"
+    #: The diff broke one of the artifact's declared governance invariants
+    #: (see :mod:`agentdescent.invariants`). Rejected **before** measurement,
+    #: so a policy-violating proposal never buys a held-out sweep. The
+    #: reflector (or the contract) is the thing to look at.
+    VIOLATES_INVARIANT = "violates-invariant"
 
     def __str__(self) -> str:            # so f-strings render the value, not the name
         return self.value
@@ -1378,6 +1384,30 @@ class Aggregator:
         kept_cards, conflicts = self._resolve_conflicts(artifact, survivors)
         kept_diffs = [c.diff for c in kept_cards]
         best_diff, best_state, fused = self._tournament(artifact, kept_diffs)
+        # Governance invariants (design doc, section 6): a declared contract
+        # is enforced here, **before** the expensive measurement -- a diff that
+        # breaks one must not buy a held-out sweep. The check reads the base
+        # artifact's contract, which is the registered one; a contract with no
+        # invariants returns no violations and costs a getattr. A violation
+        # settles the survivor cards (so the replay path learns not to propose
+        # it again) and reports ``violates-invariant`` with the reasons.
+        # ``invariant_checked`` counts every candidate whose contract declared
+        # a rule and passed through the gate (violated or not); a run that
+        # declared nothing reports zero, which is the honest reading "no rules
+        # to enforce", not "the gate is broken".
+        _declared = getattr(getattr(artifact, "contract", None), "invariants", ())
+        if _declared and self.meter is not None:
+            self.meter.add("invariant_checked")
+        violations = check_invariants(artifact, best_diff, best_state)
+        if violations:
+            if self.meter is not None:
+                self.meter.add("invariant_rejections", len(violations))
+            self.buffer.settle(survivors)
+            return MergeReport(artifact_id, None, False, n_considered,
+                               len(survivors), len(discarded), conflicts, 0.0,
+                               None, "; ".join(violations),
+                               MergeOutcome.VIOLATES_INVARIANT,
+                               oversized=len(oversized))
         return _Candidate(
             artifact_id=artifact_id, artifact=artifact, candidate=best_state,
             diff=best_diff, cards=kept_cards, survivor_cards=survivors,

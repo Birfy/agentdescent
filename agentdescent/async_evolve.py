@@ -50,7 +50,7 @@ from .evolution import (
     _head_for_worker, _step,
 )
 from .aggregator import Aggregator, AggregatorConfig, check_reports
-from .evolvable import ContractError, EvidenceCard, vv_staleness
+from .evolvable import Contract, ContractError, EvidenceCard, vv_staleness
 from .ledger import Ledger, LedgerFailure
 from .sampling import RoundRobin, TaskSampler
 from .scheduler import DurationEstimator, ResumeItem, ResumeQueue
@@ -161,6 +161,11 @@ def async_evolve(
     #: into. ``None`` + ``record_trajectories`` builds the default store at
     #: ``<repo_path>/trajectories``.
     trajectory_store: Optional[Any] = None,
+    #: The artifact's contract -- where governance invariants are declared.
+    #: See :func:`~agentdescent.evolution.evolve`; ``None`` (the default) is
+    #: the reference skill contract, which declares nothing and enforces
+    #: nothing.
+    contract: Optional[Contract] = None,
 ) -> EvolutionResult:
     """Evolve an artifact **without a round barrier**.
 
@@ -411,6 +416,11 @@ def async_evolve(
         An explicit :class:`~agentdescent.trajectory.TrajectoryStore` to record
         into. ``None`` + ``record_trajectories`` builds the default store at
         ``<repo_path>/trajectories``.
+    contract:
+        Exactly as in :func:`~agentdescent.evolution.evolve`: the artifact's
+        contract, where governance invariants are declared. ``None`` (the
+        default) is the reference skill contract, which declares nothing and
+        enforces nothing.
 
     Returns
     -------
@@ -457,7 +467,7 @@ def async_evolve(
         usage=usage, verifier=_pol.verifier, ledger_impl=_pol.ledger,
         policies_bundle=_pol, checkpointing=checkpointing,
         allocator=allocator, record_trajectories=record_trajectories,
-        trajectory_store=trajectory_store)
+        trajectory_store=trajectory_store, contract=contract)
     eng.meter.start()
     # The cost-aware governor for the async path. The merger loop has no round
     # barrier, so the governor checks per sweep (after each merge, before the

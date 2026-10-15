@@ -64,6 +64,8 @@ EvolutionResult(
     trajectory_write_seconds: float = 0.0,
     trajectory_write_failures: int = 0,
     trajectories_path: Optional[str] = None,
+    invariant_checked: int = 0,
+    invariant_rejections: int = 0,
     sandbox_wait_s: float = 0.0,
     sandbox_setup_s: float = 0.0,
     sandboxes_created: int = 0,
@@ -100,7 +102,8 @@ EvolvingArtifact(
     version: int = 1,
     blast_radius: float = 0.2,
     runtime: Optional['_Runtime'] = None,
-    strategy: Optional[Strategy] = None
+    strategy: Optional[Strategy] = None,
+    contract: Optional[Contract] = None
 ) -> None
 ```
 
@@ -254,7 +257,8 @@ evolve(
     policies: Optional['Policies'] = None,
     allocator: Optional[Any] = None,
     record_trajectories: bool = False,
-    trajectory_store: Optional['TrajectoryStore'] = None
+    trajectory_store: Optional['TrajectoryStore'] = None,
+    contract: Optional[Contract] = None
 ) -> EvolutionResult
 ```
 
@@ -313,6 +317,7 @@ evolve(
 | `allocator` | `Optional[Any]` | `None` | Value-directed budget allocation (see `allocator`). `None` (the default) is the old behaviour exactly: optional spend (fusion tournaments, the self-verify rollout) degrades against the global `soft_floor` / `hard_floor` thresholds as the token budget runs out, every candidate treated alike. Pass a `ValueBudgetAllocator` (or any object with `decide(ctx) -> AllocateDecision` and `observe(ctx, committed)`) and, once the budget is tight, the self-verify rollout is spent only on candidates the allocator's value model expects to commit; the merge path reports every outcome back so the model learns. Requires `max_tokens` to be set (the allocator decides how the budget is spent; `max_tokens` is what exists to spend). Counterfactual exploration re-measures candidates the model judged unworthy, so a biased value model is corrected rather than reinforced. |
 | `record_trajectories` | `bool` | `False` | Persist every rollout and gate evaluation as a `Trajectory` under `<repo_path>/trajectories/` -- what the run provider saw, what it returned, what that earned, against which artifact version and environment. Off by default: a throwaway repo's records die with it, so the write cost is pure overhead there, and recording is a deliberate choice about keeping a run's evidence. The store is the durable base every learning-type increment reads -- process-supervised reflection, offline re-weighting, audit replay -- and it is what an `EvidenceCard.trace_ids` entry points at. Pass `trajectory_store=` with a store you built to control where records land instead. |
 | `trajectory_store` | `Optional['TrajectoryStore']` | `None` | An explicit `TrajectoryStore` to record into. Pass one to control where records land (a shared store, a custom root, a custom privacy configuration) without going through the `<repo_path>/trajectories/` default. The explicit store wins over `record_trajectories`; `None` + `record_trajectories` builds the default store. |
+| `contract` | `Optional[Contract]` | `None` | The artifact's contract -- the externally-visible interface, and where governance invariants are declared. Pass `Contract(invariants=(Invariant("mutable_keys", ("a", "b")),))` and the aggregator enforces each rule **before** a candidate is measured (see `invariants`); a diff that breaks one reports a `violates-invariant` outcome and never buys a held-out sweep. `None` (the default) is the reference skill contract, which declares nothing and enforces nothing -- the untouched path exactly. |
 
 ### `reflector(...)`
 
@@ -963,7 +968,8 @@ Contract(
     input_schema: str = 'any',
     output_schema: str = 'any',
     side_effects: Tuple[str, ...] = (),
-    major: int = 1
+    major: int = 1,
+    invariants: Tuple[Any, ...] = ()
 ) -> None
 ```
 
@@ -1123,6 +1129,7 @@ The vocabulary of `category`.
 | `ORACLE_REJECTED` | `'oracle-rejected'` |
 | `CAS_CONFLICT` | `'cas-conflict'` |
 | `UNKNOWN_ARTIFACT` | `'unknown-artifact'` |
+| `VIOLATES_INVARIANT` | `'violates-invariant'` |
 
 ### `MergeReport(...)`
 
@@ -3183,7 +3190,8 @@ async_evolve(
     policies: Optional['Policies'] = None,
     allocator: Optional[Any] = None,
     record_trajectories: bool = False,
-    trajectory_store: Optional[Any] = None
+    trajectory_store: Optional[Any] = None,
+    contract: Optional[Contract] = None
 ) -> EvolutionResult
 ```
 
@@ -3241,6 +3249,7 @@ async_evolve(
 | `allocator` | `Optional[Any]` | `None` | Exactly as in `evolve`: value-directed budget allocation (see `allocator`). `None` (the default) is the old behaviour exactly. Pass a value allocator and, once the token budget is tight, the self-verify rollout is spent only on candidates the allocator expects to commit; the merger reports every outcome back so it learns. Requires `max_tokens`. Counterfactual exploration corrects a biased value model rather than reinforcing it. |
 | `record_trajectories` | `bool` | `False` | Exactly as in `evolve`: persist every rollout and gate evaluation as a `Trajectory` under `<repo_path>/trajectories/`. Off by default; pass `trajectory_store=` to control where records land. |
 | `trajectory_store` | `Optional[Any]` | `None` | An explicit `TrajectoryStore` to record into. `None` + `record_trajectories` builds the default store at `<repo_path>/trajectories`. |
+| `contract` | `Optional[Contract]` | `None` | Exactly as in `evolve`: the artifact's contract, where governance invariants are declared. `None` (the default) is the reference skill contract, which declares nothing and enforces nothing. |
 
 ---
 
