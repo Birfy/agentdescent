@@ -457,11 +457,23 @@ class AuditStore:
             "for_calibration returned an unresolved record")
         return out
 
-    def for_improvement(self, verifier_version: Optional[str] = None) -> List[AuditRecord]:
-        """Resolved IMPROVEMENT records -- the pool you are allowed to look at."""
+    def for_improvement(self, verifier_version: Optional[str] = None,
+                        scorer_version: Optional[str] = None) -> List[AuditRecord]:
+        """Resolved IMPROVEMENT records -- the pool you are allowed to look at.
+
+        ``verifier_version`` keeps exactly that measurement identity.
+        ``scorer_version`` keeps every record of one *underlying scorer*
+        whatever correction layer was active when it was written (records that
+        carry no scorer stamp fall back to ``verifier_version`` when one is
+        given, so an older store still trains)."""
         out = [r for r in self.all()
                if r.purpose is Purpose.IMPROVEMENT and r.resolved]
-        if verifier_version is not None:
+        if scorer_version is not None:
+            out = [r for r in out
+                   if r.scorer_version == scorer_version
+                   or (not r.scorer_version and verifier_version is not None
+                       and r.verifier_version == verifier_version)]
+        elif verifier_version is not None:
             out = [r for r in out if r.verifier_version == verifier_version]
         return out
 

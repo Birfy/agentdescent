@@ -157,6 +157,11 @@ class AuditedReward:
     version_extra:
         Mixed into the derived fingerprint. The cheaper way to say the same
         thing: ``version_extra={"model": "...", "prompt_sha": "..."}``.
+    correction_extra:
+        A live tag (a callable, e.g. ``VerifierBoost.version_tag``) for a
+        correction layered on the scorer. It is mixed into ``verifier_version``
+        -- so the audit re-measures when the correction changes -- but not into
+        :attr:`scorer_version`, which keeps naming the scorer alone.
 
     Notes
     -----
@@ -180,7 +185,8 @@ class AuditedReward:
                  calibration_fraction: float = 0.7,
                  seed: int = 0,
                  verifier_version: Optional[str] = None,
-                 version_extra: Any = None) -> None:
+                 version_extra: Any = None,
+                 correction_extra: Any = None) -> None:
         if not 0.0 <= sample_rate <= 1.0:
             raise ValueError(f"sample_rate must be in [0, 1], got {sample_rate!r}")
         if not 0.0 <= calibration_fraction <= 1.0:
@@ -198,12 +204,18 @@ class AuditedReward:
         self.rates = dict(rates or {})
         self.calibration_fraction = calibration_fraction
         self.seed = seed
-        # Keep the ingredients so a live ``version_extra`` (e.g. a boost's
+        # Keep the ingredients so a live ``correction_extra`` (a boost's
         # ``version_tag``) can be re-fingerprinted when the boost activates.
         self._version_extra = version_extra
+        self._correction_extra = correction_extra
         self._explicit_verifier_version = verifier_version
-        self.verifier_version = verifier_version or verifier_fingerprint(
-            verifier, extra=_resolve_version_extra(version_extra))
+        #: The underlying scorer's identity, *without* the correction layer.
+        #: ``verifier_version`` (the measurement identity) changes whenever the
+        #: attached correction does; this does not, so a boost can keep training
+        #: on every label of one scorer across its own activations.
+        self.scorer_version = ""
+        self.verifier_version = ""
+        self._derive_versions()
         #: Units seen, and units audited. A sample rate that never fires is the
         #: quiet failure this makes loud.
         self._warn_about_the_rates()
@@ -222,11 +234,25 @@ class AuditedReward:
         (gate, watch, store filter) must follow, or the old calibration keeps
         applying to a judge that has moved.
         """
-        if self._explicit_verifier_version is not None:
-            return self.verifier_version
-        self.verifier_version = verifier_fingerprint(
-            self.verifier, extra=_resolve_version_extra(self._version_extra))
+        self._derive_versions()
         return self.verifier_version
+
+    def _derive_versions(self) -> None:
+        if self._explicit_verifier_version is not None:
+            # The caller named the version; nothing live feeds it.
+            self.verifier_version = self.scorer_version = (
+                self._explicit_verifier_version)
+            return
+        base = _resolve_version_extra(self._version_extra)
+        self.scorer_version = verifier_fingerprint(self.verifier, extra=base)
+        if self._correction_extra is None:
+            self.verifier_version = self.scorer_version
+            return
+        tag = _resolve_version_extra(self._correction_extra)
+        # With no caller extra the measurement identity is the fingerprint with
+        # the tag as ``extra`` -- unchanged from before the split.
+        self.verifier_version = verifier_fingerprint(
+            self.verifier, extra=tag if base is None else [base, tag])
 
     # -- the Reward contract -------------------------------------------------
 
@@ -381,6 +407,8 @@ class AuditedReward:
             purpose=purpose,
             stratum=stratum,
             sampler_seed=self.seed,
+            scorer_version=("" if self.scorer_version == self.verifier_version
+                            else self.scorer_version),
         )
         self.store.append(record)
         with self._lock:

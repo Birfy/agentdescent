@@ -96,6 +96,16 @@ class AuditRecord:
     #: the same sample back.
     sampler_seed: int = 0
     schema_version: int = SCHEMA_VERSION
+    #: The identity of the *underlying scorer* alone -- ``verifier_version``
+    #: minus any correction layered on it (a :class:`~agentdescent.audit.boost.
+    #: VerifierBoost`'s activation changes ``verifier_version`` so the audit
+    #: re-measures, but it does not change the scorer that produced
+    #: ``verifier_score``). The boost trains on every label of one scorer,
+    #: whichever correction state was in force when it was written. Empty on
+    #: records written without a correction layer (and on older stores), where
+    #: ``verifier_version`` is the scorer's identity; omitted from the on-disk
+    #: line then, so those files are unchanged.
+    scorer_version: str = ""
 
     def __post_init__(self) -> None:
         # The id is the store's dictionary key and the ticket an oracle
@@ -134,6 +144,8 @@ class AuditRecord:
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
         d["purpose"] = self.purpose.value
+        if not d["scorer_version"]:
+            del d["scorer_version"]     # keep pre-existing lines byte-identical
         return d
 
     @classmethod

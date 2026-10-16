@@ -101,9 +101,13 @@ class Audit:
         calibration is withdrawn before the new version is estimated.
         """
         if self.boost is not None:
-            # Train against labels scored under the version currently in force
-            # (before activation changes the tag).
-            self.boost.retrain(verifier_version=self.verifier_version)
+            # Train on every label of the scorer currently in force, whichever
+            # correction state wrote it: the boost's own activation changes the
+            # measurement identity (``verifier_version``) but not the scorer's,
+            # so keying training on the former made a validated curve withdraw
+            # itself the next time no *new* labels had arrived (#304).
+            self.boost.retrain(verifier_version=self.verifier_version,
+                               scorer_version=self.reward.scorer_version)
             prev = self.verifier_version
             self.reward.refresh_verifier_version()
             if self.reward.verifier_version != prev:
@@ -251,18 +255,23 @@ def attach(verifier: Callable[[Any, str], float], *,
         if not policy.enabled:
             enabled = False
 
+    correction_extra = None
     if boost is not None and version_extra is None and verifier_version is None:
-        # Live tag so activation changes the audit fingerprint (review #273).
-        version_extra = boost.version_tag
+        # Live tag so activation changes the audit fingerprint (review #273) --
+        # the measurement identity only: the scorer's own identity stays put so
+        # the boost keeps training on its labels across activations (#304).
+        correction_extra = boost.version_tag
 
     reward = AuditedReward(
         verifier, oracle=oracle, store=store, draw_by=draw_by,
         sample_rate=default_rate, stratify=stratify, rates=rates,
         calibration_fraction=calibration_fraction, seed=seed,
-        verifier_version=verifier_version, version_extra=version_extra)
+        verifier_version=verifier_version, version_extra=version_extra,
+        correction_extra=correction_extra)
 
     if boost is not None and boost._version_for_training is None:
         boost._version_for_training = lambda: reward.verifier_version
+        boost._scorer_for_training = lambda: reward.scorer_version
 
     calibrator = Calibrator(store, alpha=policy.alpha if policy else 0.05,
                             seed=seed)

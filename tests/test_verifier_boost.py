@@ -10,6 +10,7 @@ a new verifier version so the audit's calibration is withdrawn and re-measured.
 """
 
 import math
+import warnings
 
 import numpy as np
 import pytest
@@ -364,3 +365,195 @@ def test_wrapper_preserves_missing_full_eval_declaration():
     assert shares_eval_counts(inner) is False
     boost = VerifierBoost(inner, AuditStore(), auto=False)
     assert shares_eval_counts(boost) is False
+
+
+# -- #304: recompute must not oscillate; wrapping must not mask legacy evals ----
+
+
+def _stamped(score, oracle, version, scorer, n):
+    rec = _record(score, oracle, version=version)
+    return AuditRecord(**{**rec.to_dict(), "purpose": rec.purpose,
+                          "record_id": f"{rec.record_id}-{n}",
+                          "scorer_version": scorer})
+
+
+def _attached_boost(tmp_path, n_labels=80, **kw):
+    """An audit with a boost, plus `n_labels` biased IMPROVEMENT labels written
+    while the correction was inactive (the first-activation situation)."""
+    y = list(np.linspace(0.1, 0.9, n_labels))
+    s = _biased_scores(y, bias=0.2)
+    store = AuditStore(str(tmp_path / "audit.jsonl"))
+    boost = VerifierBoost(_FakeVerifier(score=0.5), store, min_labels=20,
+                          min_val_labels=5, seed=1, min_gain=0.0, auto=False,
+                          **kw)
+    audit = attach(verifier=lambda task, output: 0.5,
+                   oracle=lambda task, output: 0.3, store=store, boost=boost)
+    inactive = audit.verifier_version
+    for i, (score, oracle) in enumerate(zip(s, y)):
+        store.append(_stamped(score, oracle, inactive,
+                              audit.reward.scorer_version, i))
+    return audit, boost, store, inactive, (s, y)
+
+
+def test_recompute_keeps_a_validated_correction_without_new_data(tmp_path):
+    audit, boost, store, inactive, _ = _attached_boost(tmp_path)
+    audit.recompute()
+    assert boost.is_active is True
+    tag, version = boost.version_tag(), audit.verifier_version
+    assert version != inactive, "activation is a new measurement identity"
+    for _ in range(4):                       # no records added in between
+        audit.recompute()
+        assert boost.is_active is True, boost.status()["reason"]
+        assert boost.version_tag() == tag
+        assert audit.verifier_version == version
+
+
+def test_the_scorer_identity_survives_the_boost_activating(tmp_path):
+    audit, boost, _, inactive, _ = _attached_boost(tmp_path)
+    scorer = audit.reward.scorer_version
+    audit.recompute()
+    assert audit.verifier_version != inactive
+    assert audit.reward.scorer_version == scorer
+
+
+def test_labels_written_after_activation_keep_training_the_curve(tmp_path):
+    audit, boost, store, _, (s, y) = _attached_boost(tmp_path)
+    audit.recompute()
+    first = boost.status()
+    assert first["active"]
+    # a sub-min_labels batch written under the *active* measurement version
+    for i in range(5):
+        store.append(_stamped(s[i], y[i], audit.verifier_version,
+                              audit.reward.scorer_version, 1000 + i))
+    audit.recompute()
+    assert boost.is_active is True
+    assert boost.status()["n_train"] + boost.status()["n_val"] >= 80, (
+        "the post-activation labels join the same scorer's pool")
+
+
+def test_unstamped_older_labels_do_not_oscillate_either(tmp_path):
+    """A store written before records carried a scorer stamp: the labels sit
+    under the old measurement version. Activation then finds nothing under the
+    new one, and must keep the curve (the scorer is unchanged), not flip."""
+    y = list(np.linspace(0.1, 0.9, 80))
+    s = _biased_scores(y, bias=0.2)
+    store = AuditStore(str(tmp_path / "audit.jsonl"))
+    boost = VerifierBoost(_FakeVerifier(score=0.5), store, min_labels=20,
+                          min_val_labels=5, seed=1, min_gain=0.0, auto=False)
+    audit = attach(verifier=lambda task, output: 0.5,
+                   oracle=lambda task, output: 0.3, store=store, boost=boost)
+    for i, (score, oracle) in enumerate(zip(s, y)):
+        store.append(_stamped(score, oracle, audit.verifier_version, "", i))
+    audit.recompute()
+    assert boost.is_active is True
+    tag = boost.version_tag()
+    for _ in range(3):
+        audit.recompute()
+        assert boost.is_active is True and boost.version_tag() == tag
+
+
+def test_a_real_scorer_change_still_withdraws_the_correction(tmp_path):
+    audit, boost, store, _, _ = _attached_boost(tmp_path)
+    audit.recompute()
+    assert boost.is_active is True
+    # the scorer itself moves: a different identity, with too few labels of its
+    # own, so the old scorer's curve no longer applies
+    audit.reward.scorer_version = "a-different-scorer"
+    boost.retrain(verifier_version=audit.verifier_version,
+                  scorer_version=audit.reward.scorer_version)
+    assert boost.is_active is False
+    assert boost.version_tag() == "boost:inactive"
+
+
+def test_stamped_records_round_trip_and_unstamped_lines_are_unchanged(tmp_path):
+    plain = _record(0.5, 0.3)
+    assert "scorer_version" not in plain.to_dict()
+    stamped = _stamped(0.5, 0.3, "v1", "scorer", 0)
+    assert stamped.to_dict()["scorer_version"] == "scorer"
+    assert AuditRecord.from_dict(stamped.to_dict()) == stamped
+    assert AuditRecord.from_dict(plain.to_dict()) == plain
+
+
+class _OracleEvalOnly:
+    """A pre-0.5.1 verifier: `oracle_eval` is the whole-set scorer, no full_eval."""
+    oracle_shares_full_set = False
+
+    def __init__(self, value=0.4):
+        self.value, self.calls = value, 0
+
+    def rule_eval(self, a): return 0.5
+    def cheap_eval(self, a): return 0.5
+    def learned_eval(self, a): return 0.5, 0.1
+    def eval_counts(self, a, floor=None): return (5, 5)
+
+    def oracle_eval(self, a):
+        self.calls += 1
+        return self.value
+
+
+@pytest.mark.parametrize("active", [False, True])
+def test_a_wrapped_oracle_eval_only_verifier_is_still_evaluated(active):
+    from agentdescent.verifier import full_eval_of, shares_eval_counts
+    inner = _OracleEvalOnly(0.4)
+    if active:
+        y = list(np.linspace(0.1, 0.9, 24))
+        store = _store_with([_record(sc, o) for sc, o in
+                             zip(_biased_scores(y, 0.2), y)])
+        boost = VerifierBoost(inner, store, min_labels=10, min_val_labels=3,
+                              seed=1)
+        assert boost.is_active is True
+    else:
+        boost = VerifierBoost(inner, AuditStore())
+        assert boost.is_active is False
+    assert shares_eval_counts(boost) is False        # independence preserved
+    with pytest.warns(DeprecationWarning, match="oracle_eval"):
+        assert full_eval_of(boost)(object()) == 0.4
+    with pytest.warns(DeprecationWarning, match="oracle_eval"):
+        assert boost.oracle_eval(object()) == 0.4    # the wrapper's own alias
+    assert inner.calls == 2
+
+
+def test_wrapped_and_unwrapped_independent_gates_refuse_the_same_regression(
+        tmp_path):
+    """The engine's independent gate runs the scorer through the wrapper exactly
+    as it does unwrapped, and refuses a candidate whose independent score
+    regresses (rather than dying with AttributeError)."""
+    from agentdescent.aggregator import Aggregator, AggregatorConfig, _Candidate
+    from agentdescent.evolution import EvolvingArtifact
+    from agentdescent.evolvable import Diff
+    from agentdescent.ledger import Ledger
+    from agentdescent.scheduler import AuditScheduler
+
+    class Legacy(_OracleEvalOnly):
+        def eval_counts(self, a, floor=None):
+            return (7, 3)                          # cheap sweep says "improved"
+        def oracle_eval(self, a):                  # ...the independent one differs
+            return 0.2 if a.state.get("k") == "v" else 0.9
+
+    def run(wrap):
+        def serialize(a): return {"state": a.state, "blast_radius": a.blast_radius}
+        def deserialize(aid, version, state):
+            return EvolvingArtifact(aid, state.get("state", {}), version, 0.6)
+        lg = Ledger(str(tmp_path / f"repo-{wrap}"), serialize, deserialize)
+        lg.register(EvolvingArtifact("artifact", {"k": "v0"}, blast_radius=0.6))
+        v = Legacy()
+        verifier = VerifierBoost(v, AuditStore(), auto=False) if wrap else v
+        agg = Aggregator(lg, verifier, AuditScheduler(),
+                         AggregatorConfig(batch_trigger=1))
+        snap = lg.snapshot(Ledger.DEV)
+        base = snap.get("artifact")
+        diff = Diff(diff_id="d", target="artifact", ops={"k": "v"}, author="w")
+        c = _Candidate(
+            artifact_id="artifact", artifact=base, candidate=base.apply(diff),
+            diff=diff, cards=[], survivor_cards=[], head=snap.version,
+            fused=False, considered=1, survived=1, discarded=0, conflicts=0,
+            base_counts=(2.0, 8.0), cand_counts=(8.0, 2.0),
+            base_cheap=0.5, cand_cheap=0.8)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return agg._decide(c)
+
+    plain, wrapped = run(False), run(True)
+    assert plain.committed_version is None, plain.category
+    assert wrapped.committed_version is None
+    assert wrapped.category == plain.category

@@ -187,6 +187,14 @@ class VerifierBoost:
         self.seed = int(seed)
         self.max_records = int(max_records)
         self._version_for_training = version_for_training
+        #: Like ``version_for_training`` but names the underlying *scorer* (set
+        #: by :func:`~agentdescent.audit.wiring.attach`); the pool then spans
+        #: every correction state that scorer was measured under.
+        self._scorer_for_training: Optional[Callable[[], Optional[str]]] = None
+        #: The training identity the active curve was fit for. A curve is kept
+        #: through a retrain that merely lacks labels only while that identity
+        #: is unchanged; a different one means the scorer itself moved.
+        self._trained_for: Optional[str] = None
         self._xs: Optional[np.ndarray] = None
         self._vals: Optional[np.ndarray] = None
         self._fit_hash: str = ""
@@ -202,7 +210,8 @@ class VerifierBoost:
 
     # -- the flywheel ---------------------------------------------------------
 
-    def retrain(self, verifier_version: Optional[str] = None) -> BoostState:
+    def retrain(self, verifier_version: Optional[str] = None, *,
+                scorer_version: Optional[str] = None) -> BoostState:
         """Refit the calibration curve from the current IMPROVEMENT pool.
 
         The bootstrap gate: fit on the train slice, validate on a held-out
@@ -214,15 +223,36 @@ class VerifierBoost:
         ``verifier_version`` (or ``version_for_training``) filters the pool to
         labels scored by the judge currently under measurement, so an older
         verifier's labels cannot train the curve for a newer one.
+
+        ``scorer_version`` (or the attached audit's scorer identity) names the
+        *underlying scorer* instead: every label it produced trains the curve,
+        whichever correction state was in force when the label was written.
+        That identity is what an active curve is bound to -- the boost's own
+        activation changes the audit's measurement version, which must not
+        read as the scorer having changed. When the scorer is unchanged and
+        the pool merely holds too few labels, a validated curve is **kept**
+        rather than withdrawn (withdrawing it re-opened the previous fit and
+        the two states alternated with no new data); when the scorer is a
+        different one, the curve is withdrawn.
         """
         version = verifier_version
         if version is None and self._version_for_training is not None:
             version = self._version_for_training()
-        recs = [r for r in self.store.for_improvement(version)
+        scorer = scorer_version
+        if scorer is None and self._scorer_for_training is not None:
+            scorer = self._scorer_for_training()
+        identity = scorer if scorer is not None else version
+        recs = [r for r in self.store.for_improvement(
+                    version, scorer_version=scorer)
                 if r.resolved and _finite(r.verifier_score)
                 and _finite(r.oracle_score)]
         recs = recs[-self.max_records:]
         if len(recs) < self.min_labels:
+            if (self._state.active and identity is not None
+                    and identity == self._trained_for):
+                return self._retain(
+                    f"insufficient improvement labels ({len(recs)} < "
+                    f"{self.min_labels}) for an unchanged scorer")
             return self._deactivate(
                 f"insufficient improvement labels ({len(recs)} < "
                 f"{self.min_labels})")
@@ -262,6 +292,7 @@ class VerifierBoost:
             # older active version_tag.
             self._xs, self._vals = fit_xs, fit_vals
             self._fit_hash = digest[:12]
+            self._trained_for = identity
             self._resid_sd = math.sqrt(error_after)
             self._state = BoostState(True, True, len(train), len(val),
                                      error_before, error_after,
@@ -271,7 +302,16 @@ class VerifierBoost:
             f"bootstrap gate: corrected error {error_after:.4f} is not below "
             f"raw {error_before:.4f} by min_gain {self.min_gain}")
 
+    def _retain(self, reason: str) -> BoostState:
+        """Keep the validated curve; record why this retrain did not refit."""
+        s = self._state
+        self._state = BoostState(s.active, s.fitted, s.n_train, s.n_val,
+                                 s.error_before, s.error_after,
+                                 f"validated; kept: {reason}", s.fit_at)
+        return self._state
+
     def _deactivate(self, reason: str) -> BoostState:
+        self._trained_for = None
         self._xs = None
         self._vals = None
         self._fit_hash = ""
@@ -345,7 +385,12 @@ class VerifierBoost:
         return self._inner.eval_counts(artifact, floor=floor)
 
     def full_eval(self, artifact: Evolvable) -> float:
-        return self._inner.full_eval(artifact)
+        # The engine's own compatibility reader: a supported verifier may carry
+        # only the pre-0.5.1 ``oracle_eval``, which a bare ``inner.full_eval``
+        # would turn into an AttributeError on a wrapped (even inactive) boost.
+        from ..verifier import full_eval_of
+        return full_eval_of(self._inner)(artifact)
 
     def oracle_eval(self, artifact: Evolvable) -> float:  # legacy alias
-        return self._inner.full_eval(artifact)
+        from ..verifier import full_eval_of
+        return full_eval_of(self._inner)(artifact)
