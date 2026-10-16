@@ -1137,6 +1137,9 @@ class Aggregator:
                         failures=float(p.get("failures", 0.0)),
                     )
                 except (TypeError, ValueError):
+                    # ``BetaPosterior`` refuses NaN / infinite / negative counts
+                    # (a ``NaN`` posterior hangs ``prob_improvement``), so a
+                    # damaged checkpoint lands here like any malformed entry.
                     continue
         promoted_at = state.get("promoted_at")
         if isinstance(promoted_at, dict):
