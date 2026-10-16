@@ -114,10 +114,12 @@ cheatsheet is trained on one split and only kept if it helps the held-out one.
     pins both acceptance modes in all three schedulers.
 
 !!! note "What the test stream does and does not measure"
-    The reported **test quality for online mode is the streamed one**; the
-    frozen score of the same evolved cheatsheet is recorded beside it
-    (`framework.test_stream.frozen_quality`), so the gain from continued
-    learning is a difference, not a claim. The stream starts from the cheatsheet
+    The standard `baseline_quality` / `final_quality` (and therefore
+    `quality_gain`) stay **frozen-artifact** scores, so they compare the same
+    protocol as every other port. The streamed score lives only under
+    `framework.test_stream.quality`, with `frozen_quality` beside it, so the
+    gain from continued learning is a difference inside that block, not a claim
+    about the engine. The stream starts from the cheatsheet
     the engine evolved on the train / held-out splits, **not** from `(empty)` as
     upstream's single test stream does: it is transfer followed by online
     learning. It is strictly sequential whatever `--workers` says, uses its own

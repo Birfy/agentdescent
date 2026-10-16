@@ -7,3 +7,5 @@ opt-in `test_time_learning` (default `False`) so the runner scores the test
 split as a sequential Gen -> Cur stream. No other port changes. The
 self-evolution catalog counts (twenty-three ports, fifteen microports) are
 corrected across the docs, README and install guide.
+Standard baseline/final scores stay frozen so quality_gain is not
+mixed-protocol; streamed learning is under `framework.test_stream`.

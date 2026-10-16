@@ -48,9 +48,10 @@ Deliberate substitutions, stated as such:
   measurement, so they cannot disagree.
 * **The test split is a stream (online only).** ``MethodPolicy.test_time_learning``
   makes the runner solve, score and curate the test tasks in order, each seeing
-  the memory the previous one produced -- the Gen -> Cur loop itself. The
-  reported test quality is the streamed one (the frozen score is recorded beside
-  it); the ledger's artifact is not touched. ``--gated`` scores a frozen artifact.
+  the memory the previous one produced -- the Gen -> Cur loop itself. Streamed
+  quality is reported under ``framework.test_stream``; the standard
+  before/after fields stay frozen so ``quality_gain`` is not mixed-protocol.
+  The ledger's artifact is not touched. ``--gated`` scores a frozen artifact.
 * **Parallel curators.** Upstream is one sequential stream. Under
   ``evolve()`` several workers rewrite the same cheatsheet from the same base;
   those contradictions are merged by the shared reflective merge (one model
@@ -335,7 +336,7 @@ def build(seed: int, *, gated: bool = False) -> MethodPolicy:
             "No code execution: upstream's generator can run its own Python via EXECUTE CODE!; snippets here are text in the cheatsheet only.",
             "The cheatsheet is skill-layer context (blast_radius=0.2, as ACE): at the runner's L1 default of 0.6 the runtime's commit audit vetoes any non-improving rewrite regardless of the acceptance policy, so online mode would not be online.",
             "Online mode makes the cheap ranking layer the whole held-out split (MethodPolicy.cheap_eval_tasks): otherwise a cheap/full disagreement lowers the audit's trust below 0.75, it opens at any blast radius, and a non-improving rewrite is oracle-rejected before the accept-everything policy runs.",
-            "Online mode scores the test split as a sequential Gen -> Cur stream (MethodPolicy.test_time_learning), so the reported final quality is test-time learning rather than a frozen memory trained on another split; --gated scores a frozen artifact.",
+            "Online mode scores the test split as a sequential Gen -> Cur stream (MethodPolicy.test_time_learning); streamed quality is under framework.test_stream while baseline/final stay frozen so quality_gain is comparable; --gated scores a frozen artifact.",
             "Concurrent curator rewrites of one base are merged by the shared reflective merge; upstream is one sequential stream.",
             "Vendored 36-puzzle Game-of-24 slice replaces upstream's full Game-of-24 set; DC-RS / CumulativeRetrieval (embeddings) and AIME/GPQA are out of scope.",
         ),

@@ -554,7 +554,10 @@ def test_online_run_streams_the_test_split_and_reports_it():
     # USELESS is what the engine already committed, so every stream rewrite of it
     # is unchanged; the curated path is covered by the stream tests above.
     assert block["curated"] + block["unchanged"] + block["refused"] == 12
-    assert "frozen_quality" in block and "rendered" not in block
+    assert "frozen_quality" in block and "quality" in block
+    assert "rendered" not in block
+    # Standard before/after stay frozen so quality_gain is not mixed-protocol.
+    assert online.final_quality == block["frozen_quality"]
     phases = set(online.phase_summary)
     assert any(p.startswith("stream:dynamic_cheatsheet:solve") for p in phases)
     assert any(p.startswith("stream:dynamic_cheatsheet:curate") for p in phases)

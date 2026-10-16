@@ -494,18 +494,20 @@ def run_port(
     invalid_candidates = policy.invalid_proposals
     stream = None
     if policy.test_time_learning:
-        frozen_quality = final_quality
+        # Keep final_quality as the frozen evaluation so quality_gain stays
+        # apples-to-apples with baseline_quality (both freeze the artifact).
+        # Streamed learning is reported only under framework.test_stream.
         stream = _stream_test(
             policy, PhasedLLM(recorder, f"stream:{policy.name}:solve"),
             PhasedLLM(recorder, f"stream:{policy.name}:curate"),
             result.state, policy.test_tasks)
-        final_quality = float(stream.pop("quality"))
+        streamed_quality = float(stream["quality"])
         # The run's product, printed like the ledger's artifact; never stored in
         # the result, which keeps aggregate metrics only.
         streamed_artifact = stream.pop("rendered")
-        stream["frozen_quality"] = frozen_quality
-        print(f"[stream] test quality {frozen_quality:.3f} frozen -> "
-              f"{final_quality:.3f} streamed, {stream['curated']} updates, "
+        stream["frozen_quality"] = final_quality
+        print(f"[stream] test quality {final_quality:.3f} frozen -> "
+              f"{streamed_quality:.3f} streamed, {stream['curated']} updates, "
               f"{stream['refused']} refused", flush=True)
         print("[final streamed artifact]\n" + str(streamed_artifact), flush=True)
     # The evolved artifact is the run's product; a summary that reports its
