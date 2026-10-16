@@ -200,3 +200,125 @@ def test_the_policy_runs_end_to_end_through_evolve(tmp_path):
     assert policy.tournament_runs >= 1
     stats = result.fusion_stats()
     assert stats.trials >= 1
+
+
+# -- re-enabling the tournament must rank, not train on a union (#302) --------
+
+
+class _CountingVerifier(_ScoreVerifier):
+    """Counts cheap-layer calls so a test can prove a ranking really ran."""
+
+    def __init__(self, fn):
+        super().__init__(fn)
+        self.calls = 0
+
+    def cheap_eval(self, artifact):
+        self.calls += 1
+        return self.fn(artifact)
+
+
+def _a_single_beats_baseline(artifact):
+    # baseline (1 key) 0.5 < union (3 keys) 0.6 < a single (2 keys) 0.9, so a
+    # real ranking picks a single and the "fused" label must be False.
+    return {1: 0.5, 2: 0.9}.get(len(artifact.state), 0.6)
+
+
+def _assert_one_measured_ranking(policy, verifier, out):
+    # Singles win under `_single_wins`; a union flag would have said "fused".
+    assert out[2] is False
+    assert verifier.calls > 0                       # a ranking really ran
+    assert policy.tournament_runs == 1
+    assert policy._model.n_obs == 1                 # one label, from the winner
+    assert len(policy.trials) == 1
+    assert policy.trials[0].ranked is True
+    assert policy.trials[0].winner == "single"
+
+
+def test_false_to_true_flip_ranks_instead_of_training_on_the_union():
+    base, diffs = _setup()
+    policy = LearnableFusionPolicy(seed=0, tournament=False)
+    verifier = _CountingVerifier(_a_single_beats_baseline)
+    policy.bind(verifier)
+    policy.tournament = True                        # the governor's re-enable
+    out = policy.select(base, diffs)
+    _assert_one_measured_ranking(policy, verifier, out)
+
+
+def test_true_false_true_round_trip_ranks_on_the_second_enable():
+    base, diffs = _setup()
+    policy = LearnableFusionPolicy(seed=0, tournament=True)
+    verifier = _CountingVerifier(_a_single_beats_baseline)
+    policy.bind(verifier)
+    policy.tournament = False
+    off = policy.select(base, diffs)
+    assert off[2] is True and verifier.calls == 0   # union path, nothing ranked
+    assert policy.tournament_runs == 0 and policy._model.n_obs == 0
+    assert policy.trials[-1].ranked is False
+    policy.trials.clear()
+    policy.tournament = True
+    out = policy.select(base, diffs)
+    _assert_one_measured_ranking(policy, verifier, out)
+
+
+def test_forced_exploration_after_reenable_still_ranks():
+    base, diffs = _setup()
+    policy = LearnableFusionPolicy(seed=0, tournament=False, epsilon=1.0,
+                                   min_trials=1)
+    verifier = _CountingVerifier(_a_single_beats_baseline)
+    policy.bind(verifier)
+    policy.tournament = True
+    first = policy.select(base, diffs)
+    _assert_one_measured_ranking(policy, verifier, first)
+    # epsilon=1: every later merge is a counterfactual exploration, and each
+    # one must be a measured ranking with a label from the measured winner.
+    for i in range(2, 6):
+        out = policy.select(base, diffs)
+        assert out[2] is False
+        assert policy.tournament_runs == i
+        assert policy._model.n_obs == i
+    assert policy.skipped == 0
+    assert all(t.ranked and t.winner == "single" for t in policy.trials)
+
+
+def test_a_supplied_unranked_inner_is_ranked_for_the_label_path_only():
+    from agentdescent.defaults import DefaultFusion
+
+    base, diffs = _setup()
+    inner = DefaultFusion(tournament=False)
+    policy = LearnableFusionPolicy(inner, seed=0)
+    verifier = _CountingVerifier(_a_single_beats_baseline)
+    policy.bind(verifier)
+    out = policy.select(base, diffs)
+    _assert_one_measured_ranking(policy, verifier, out)
+    assert inner.tournament is False                # caller's setting restored
+
+
+def test_an_inner_that_still_returns_an_unranked_trial_gives_no_label():
+    from agentdescent.defaults import DefaultFusion
+
+    class _AlwaysUnranked(DefaultFusion):
+        def select(self, artifact, diffs):
+            union, reason = self._union_of(diffs)
+            return self._commit_union(artifact, diffs, union, reason)
+
+    base, diffs = _setup()
+    policy = LearnableFusionPolicy(_AlwaysUnranked(), seed=0)
+    policy.bind(_CountingVerifier(_a_single_beats_baseline))
+    out = policy.select(base, diffs)
+    assert out[2] is True                           # the union came back
+    assert policy.tournament_runs == 0              # ...but was not a ranking
+    assert policy._model.n_obs == 0                 # ...and trained nothing
+
+
+def test_the_engine_governor_flip_to_on_ranks_through_evolve():
+    # The engine mutates ``fusion_policy.tournament`` at the round barrier; the
+    # same attribute write must reach a ranking, not an unranked union.
+    base, diffs = _setup()
+    policy = LearnableFusionPolicy(seed=0, tournament=False)
+    verifier = _CountingVerifier(_a_single_beats_baseline)
+    policy.bind(verifier)
+    should = True                                   # governor.allow_fusion_tournament()
+    if policy.tournament != should:
+        policy.tournament = should
+    out = policy.select(base, diffs)
+    _assert_one_measured_ranking(policy, verifier, out)
