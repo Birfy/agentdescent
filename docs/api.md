@@ -57,6 +57,8 @@ EvolutionResult(
     redispatched: int = 0,
     duplicates_dropped: int = 0,
     cas_conflicts: int = 0,
+    critic_checked: int = 0,
+    critic_rejected: int = 0,
     cache_hits: int = 0,
     cache_misses: int = 0,
     trajectories_recorded: int = 0,
@@ -1056,7 +1058,8 @@ Aggregator(
     conflict: Optional['ConflictPolicy'] = None,
     fusion: Optional['FusionPolicy'] = None,
     acceptance: Optional['AcceptancePolicy'] = None,
-    promotion: Optional['PromotionPolicy'] = None
+    promotion: Optional['PromotionPolicy'] = None,
+    screen: Optional['ScreenPolicy'] = None
 ) -> None
 ```
 
@@ -1130,6 +1133,9 @@ The vocabulary of `category`.
 | `CAS_CONFLICT` | `'cas-conflict'` |
 | `UNKNOWN_ARTIFACT` | `'unknown-artifact'` |
 | `VIOLATES_INVARIANT` | `'violates-invariant'` |
+| `CRITIC_REJECTED` | `'critic-rejected'` |
+| `NOISE_FLOOR` | `'noise-floor'` |
+| `COST_RULE` | `'cost-rule'` |
 
 ### `MergeReport(...)`
 
@@ -2841,7 +2847,8 @@ PopulationAggregator(
     conflict = None,
     fusion = None,
     acceptance = None,
-    promotion = None
+    promotion = None,
+    screen = None
 )
 ```
 
@@ -2866,7 +2873,8 @@ population_factory(
     conflict = None,
     fusion = None,
     acceptance = None,
-    promotion = None
+    promotion = None,
+    screen = None
 )
 ```
 
