@@ -183,6 +183,13 @@ class SpatialContract:
     #: evaluator. Enforced here for *proposals* and, where the frozen files are
     #: what score the candidate, by the runner's pristine overlay.
     frozen: Sequence[str] = ()
+    #: The cap is on the *diff*, so exceeding it discards the whole proposal and not
+    #: the surplus -- an episode one file over contributes nothing. That makes it a
+    #: guard against a runaway rather than a trust region: the trust region here is
+    #: the node's own subtree, enforced above edit by edit, and it does not get
+    #: tighter because the work took more files. Size it above what one episode of
+    #: the run's executor legitimately produces; `genesis_recursive_worlds` measures
+    #: that per executor and says where the numbers come from.
     max_files_per_diff: int = 4
     max_file_bytes: int = DEFAULT_MAX_FILE_BYTES
     #: Where dropped edits are counted. Optional so the strategy can be used on
@@ -243,7 +250,16 @@ class SpatialContract:
                 continue                    # would be rejected as oversized anyway
             if state.get(path) != content:
                 ops[path] = content
-        if not ops or len(ops) > self.max_files_per_diff:
+        if not ops:
+            return None
+        if len(ops) > self.max_files_per_diff:
+            # The two drops above lose one edit; this one loses the episode. A
+            # session that spent forty turns writing nine files, running the suite
+            # and getting it green contributes none of the nine, and used to do so
+            # without leaving a trace anywhere in the run. Counted now -- see
+            # `WorldLog.discarded_diffs` for what the silence was hiding.
+            if self.log is not None:
+                self.log.note_discarded_diff(len(ops))
             return None
         fingerprint = stable_hash(tuple(sorted((k, v) for k, v in ops.items())))
         return Diff(diff_id=f"{author}:{fingerprint & 0xFFFFFFFF:08x}:{base_version}",

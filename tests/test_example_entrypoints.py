@@ -337,6 +337,38 @@ def test_completion_for_dispatches_on_provider(provider, factory, monkeypatch):
     assert seen == {factory: {"model": "test-model", "usage": None, "max_tokens": 99}}
 
 
+def test_an_existing_port_parser_still_builds_with_claude_cli_choice():
+    """``claude-cli`` is opt-in on the shared provider list; ports that never
+    asked for ``max_tokens_default`` must keep parsing, and ``--provider
+    claude-cli`` must be accepted rather than rejected as an unknown choice.
+    """
+    from examples.skillopt import skillopt_skill_training as port
+
+    parser = port.build_parser()
+    # Default path unchanged: still ``claude``, still no shared ``--timeout``.
+    defaults = parser.parse_args([])
+    assert defaults.provider == "claude"
+    assert not hasattr(defaults, "timeout")
+    chosen = parser.parse_args(["--provider", "claude-cli"])
+    assert chosen.provider == "claude-cli"
+
+
+def test_completion_for_claude_cli_without_binary_raises_cleanly(monkeypatch):
+    """Missing CLI must not surface as an opaque ``FileNotFoundError``."""
+    import subprocess as sp
+
+    def boom(*_a, **_k):
+        raise FileNotFoundError(2, "No such file or directory", "claude")
+
+    monkeypatch.setattr(sp, "run", boom)
+    args = argparse.Namespace(provider="claude-cli", model="haiku",
+                              no_thinking=False, max_tokens=None, timeout=None,
+                              _concurrency=None)
+    complete = common.completion_for(args)
+    with pytest.raises(RuntimeError, match="not on PATH"):
+        complete("ping")
+
+
 @pytest.mark.parametrize(
     "module",
     [port.module for port in PORTS] + [port_template],

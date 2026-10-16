@@ -60,6 +60,10 @@ agentdescent = ["integrations/*.md", "integrations/*.json"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "slow: takes several seconds (deselect with -m 'not slow'); the default run still includes it",
+    "engine: needs a real container engine (docker/podman) and is skipped without one",
+]
 # Put both the repo root and tests directory on sys.path. The root resolves
 # package imports; tests keeps legacy top-level test helpers importable after
 # making `tests` an explicit package for subprocess-based refs.

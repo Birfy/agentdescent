@@ -77,8 +77,15 @@ class ExtractPhase:
 
     def __init__(self, complete, *, contracts: Sequence[str] = (), max_depth: int = 4,
                  max_nodes: int = 24, root_path: str = "", skip: Sequence[str] = (),
-                 file_chars: int = 6_000, max_files: int = 8):
+                 file_chars: int = 6_000, max_files: int = 8, session=None):
         self._complete = complete
+        #: An :class:`~examples.genesis._roles.ExtractSession`, or None. Given one, a
+        #: node is described by an agent that **reads the code with a tool**, the way
+        #: upstream's ContextExtractor does -- which is the gap the comment in `_ask`
+        #: names: without tools the node's files have to travel in the prompt, capped
+        #: at eight files of six thousand characters, and the run before that cap
+        #: existed invented an API surface off the file names alone.
+        self._session = session
         self._contracts = tuple(contracts)
         self._max_depth = max_depth
         self._max_nodes = max_nodes
@@ -142,14 +149,20 @@ class ExtractPhase:
         # reads what it needs with a tool; an agent here has none, so the node's own
         # files travel in the prompt -- and the first run without them invented an API
         # surface off the file names, swapping what two modules do.
+        situated = world.situate(state, contracts=self._contracts)
+        if self._session is not None:
+            record = self._session(state, path, objective, context=situated)
+            if record is None:
+                self.unparsed += 1
+                return None
+            return self._note_shadowed(record, state, children)
         sources = "\n\n".join(
             f"# {key}\n```\n{_clip(state[key], self._file_chars)}\n```"
             for key in here[:self._max_files]) or "(this node owns no file)"
         try:
             reply = self._complete(EXTRACTOR_PROMPT.format(
                 path=path or "./", objective=objective, listing=listing,
-                sources=sources,
-                context=world.situate(state, contracts=self._contracts))) or ""
+                sources=sources, context=situated)) or ""
         except Exception:  # noqa: BLE001 - one dead call costs one node
             self.unparsed += 1
             return None
@@ -157,6 +170,16 @@ class ExtractPhase:
         if record is None:
             self.unparsed += 1
             return None
+        return self._note_shadowed(record, state, children)
+
+    def _note_shadowed(self, record: str, state: Mapping[str, str],
+                       children: Sequence[str]) -> Optional[str]:
+        """The two things a record must say about the directory as found.
+
+        Both paths -- the completion and the session -- end here, because neither a
+        name collision nor a child missing from the table is something to ask an agent
+        to remember: they are facts about `state` the caller can see.
+        """
         shadowed = [c for c in children if shadowed_by_module(state, c)]
         if record and shadowed:
             # The guard in `_is_node` stops this being *created*; a repository handed
