@@ -98,6 +98,13 @@ class AuditRecord:
     schema_version: int = SCHEMA_VERSION
 
     def __post_init__(self) -> None:
+        # The id is the store's dictionary key and the ticket an oracle
+        # resolves against. A list or dict here would be unhashable and make
+        # the store unopenable (``load``) or leave an unreloadable line on disk
+        # (``append``), so refuse it at construction, before either can happen.
+        if not isinstance(self.record_id, str) or not self.record_id:
+            raise TypeError(
+                f"record_id must be a non-empty str, got {self.record_id!r}")
         if not 0.0 < self.inclusion_prob <= 1.0:
             raise ValueError(
                 f"inclusion_prob must be in (0, 1], got {self.inclusion_prob!r}")
