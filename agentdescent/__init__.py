@@ -50,7 +50,7 @@ from .invariants import (
     check_dependency_graph,
     check_invariants,
 )
-from .fusion import KeepContradictions, ReflectiveFusion, reflective_merge
+from .fusion import KeepContradictions, ReflectiveFusion, LearnableFusionPolicy, reflective_merge
 from .sampling import DifficultyWeighted, ReplaySampler, RoundRobin, TaskSampler
 from .replay import ReplayAwareProposal
 from .selection import (
@@ -236,7 +236,7 @@ from .parallel import (
     shard_round_robin,
 )
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"
 
 __all__ = [
     "Contract",
@@ -267,6 +267,7 @@ __all__ = [
     "TaskSampler",
     "ReflectiveFusion",
     "KeepContradictions",
+    "LearnableFusionPolicy",
     "DefaultConflict",
     "DefaultFusion",
     "reflective_merge",
