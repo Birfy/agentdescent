@@ -402,6 +402,12 @@ def test_a_pure_bias_shift_without_discrimination_is_not_validated():
     assert boost.is_active is False
     assert "constant" in status["reason"]
     assert boost.version_tag() == "boost:inactive"
+    # rejection still exposes the measured baseline (and the MSEs that
+    # justified it) rather than the default "not measured" inf
+    assert math.isfinite(status["error_const"]) and status["error_const"] > 0.0
+    assert math.isfinite(status["error_before"])
+    assert math.isfinite(status["error_after"])
+    assert status["n_train"] > 0 and status["n_val"] > 0
     # the curve is not applied to the ranking layers
     assert boost.cheap_eval(object()) == 0.9
 
@@ -439,7 +445,8 @@ def test_status_exposes_the_constant_baseline_and_keeps_existing_keys():
     from agentdescent.audit import boost as boost_mod
     old = boost_mod.BoostState(False, False, 0, 0, math.inf, math.inf, "x", 0.0)
     assert old.error_const == math.inf
-    # before any fit / after a rejection the baseline is "not measured"
+    # before any fit (or after an early rejection with no measured baseline)
+    # the baseline is "not measured"
     fresh = VerifierBoost(_FakeVerifier(), _store_with([]), auto=False)
     assert fresh.status()["error_const"] == math.inf
 

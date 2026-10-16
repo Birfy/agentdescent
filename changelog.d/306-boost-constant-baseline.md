@@ -6,4 +6,4 @@ slice by `min_gain`, so a verifier with no discriminating power that merely
 reads systematically high or low is rejected ("no discrimination beyond a
 constant") instead of being "validated" and re-ranking candidates. A curve with
 fewer than two distinct fitted levels is rejected too, and `status()` and
-`BoostState` expose the new `error_const` baseline (#306).
+`BoostState` expose the new `error_const` baseline (#306). On rejection via the constant-baseline or bootstrap gate, the measured `error_const` / validation MSEs are retained on the rejected `BoostState` so `status()` can diagnose why the candidate failed.
