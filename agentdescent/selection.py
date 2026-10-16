@@ -645,13 +645,18 @@ class FlatPuct(SingleHead):
         if self.prior_exponent <= 0.0 or not rated:
             return [1.0 / len(rows)] * len(rows)
         fallback = sum(rated) / len(rated)
-        raw = [
-            _safe_pow(
-                (c.prior if c.prior is not None and math.isfinite(c.prior)
-                 and c.prior > 0 else fallback),
-                self.prior_exponent)
+        # Divide by the max before the power so a steep exponent cannot
+        # overflow to +inf and then fall through to a uniform distribution
+        # (which would erase the stronger prior — Codex P2 on #294). The
+        # max factor cancels in the normalisation, so finite in-range
+        # results stay bit-identical to ``base ** exp``.
+        bases = [
+            (c.prior if c.prior is not None and math.isfinite(c.prior)
+             and c.prior > 0 else fallback)
             for c in rows
         ]
+        peak = max(bases) or 1.0
+        raw = [_safe_pow(base / peak, self.prior_exponent) for base in bases]
         total = sum(raw)
         if not total or not math.isfinite(total):
             return [1.0 / len(rows)] * len(rows)

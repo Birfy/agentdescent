@@ -515,6 +515,23 @@ def test_flat_puct_priors_survive_a_steep_prior_exponent():
     priors = FlatPuct(prior_exponent=700)._priors(list(pool))
     assert abs(sum(priors) - 1.0) < 1e-12
     assert all(math.isfinite(p) and p >= 0 for p in priors)
+    # Stronger prior must still win after the overflow-safe path (Codex P2).
+    assert priors[1] > priors[0]
+    assert priors[1] == pytest.approx(1.0)
+
+
+def test_flat_puct_prior_power_matches_naive_when_finite():
+    """Max-normalisation must cancel so finite exponents stay bit-identical."""
+    pool = (
+        _c(0, 0.5, prior=2.0),
+        _c(1, 0.5, prior=8.0),
+        _c(2, 0.5, prior=4.0),
+    )
+    got = FlatPuct(prior_exponent=2.0)._priors(list(pool))
+    raw = [p ** 2 for p in (2.0, 8.0, 4.0)]
+    total = sum(raw)
+    expected = [r / total for r in raw]
+    assert got == expected
 
 
 @pytest.mark.parametrize("kwargs", [
