@@ -95,11 +95,20 @@ class Audit:
 
         When a :class:`~agentdescent.audit.boost.VerifierBoost` is attached,
         it is retrained here too -- a batch of resolved labels is exactly the
-        moment the flywheel should learn from."""
-        rect = self.calibrator.recompute(self.verifier_version)
+        moment the flywheel should learn from. After a retrain that changes
+        ``version_tag``, the reward's fingerprint is refreshed and
+        :meth:`~agentdescent.audit.gate.VerifierWatch.check` runs so the old
+        calibration is withdrawn before the new version is estimated.
+        """
         if self.boost is not None:
-            self.boost.retrain()
-        return rect
+            # Train against labels scored under the version currently in force
+            # (before activation changes the tag).
+            self.boost.retrain(verifier_version=self.verifier_version)
+            prev = self.verifier_version
+            self.reward.refresh_verifier_version()
+            if self.reward.verifier_version != prev:
+                self.watch.check()
+        return self.calibrator.recompute(self.verifier_version)
 
     def rebalance(self, unseen: float, **kw: Any) -> float:
         """Move the calibration share as the improvement pool stops learning.
@@ -242,11 +251,18 @@ def attach(verifier: Callable[[Any, str], float], *,
         if not policy.enabled:
             enabled = False
 
+    if boost is not None and version_extra is None and verifier_version is None:
+        # Live tag so activation changes the audit fingerprint (review #273).
+        version_extra = boost.version_tag
+
     reward = AuditedReward(
         verifier, oracle=oracle, store=store, draw_by=draw_by,
         sample_rate=default_rate, stratify=stratify, rates=rates,
         calibration_fraction=calibration_fraction, seed=seed,
         verifier_version=verifier_version, version_extra=version_extra)
+
+    if boost is not None and boost._version_for_training is None:
+        boost._version_for_training = lambda: reward.verifier_version
 
     calibrator = Calibrator(store, alpha=policy.alpha if policy else 0.05,
                             seed=seed)

@@ -42,10 +42,18 @@ installed.
   actually better is caught twice -- by the bootstrap gate at install time and
   by the calibration of the new version afterwards.
 
-The uncertainy the learned layer reports is raised to the boost's own
-validation residual when active, so the audit spends *less* oracle budget on a
-verifier that demonstrably tracks the oracle and more on one that does not --
-the audit becomes a positive feedback, not a tax.
+The uncertainty the learned layer reports is raised to at least the boost's
+own validation residual (``max(resid_sd, uncertainty)``) when active, so a
+poorly-fitting boost never under-claims uncertainty to the audit's priority
+formula (``blast_radius * uncertainty / trust``). A tight residual leaves a
+larger inner uncertainty unchanged; a loose residual raises the floor. This is
+a safety floor, not a claim that a good boost spends less oracle budget.
+
+**Scale assumption.** The curve is fit on per-unit ``AuditRecord.verifier_score``
+(the audited reward) and applied to artifact-level ``cheap_eval`` /
+``learned_eval``. Callers must ensure those layer scores live on the same
+scale as the audited per-unit reward; for a non-linear ``g``,
+``g(mean f) != mean g(f)``.
 """
 
 from __future__ import annotations
@@ -75,8 +83,9 @@ def isotonic_fit(x: Sequence[float], y: Sequence[float]) -> Tuple[np.ndarray, np
     Pool-adjacent-violators: sort by ``x``, then repeatedly merge adjacent
     blocks whose fitted value has fallen below its predecessor's. Returns the
     block boundary x-coordinates and the fitted step values -- a piecewise
-    constant, monotone curve that preserves score order, which is exactly what
-    a *ranking* correction must do (an arbitrary regressor could invert two
+    constant, monotone curve that never inverts score order (flat PAV blocks may
+    still turn distinct raw scores into ties), which is exactly what a
+    *ranking* correction must do (an arbitrary regressor could invert two
     candidates' order and break the tournament).
 
     Deliberately numpy rather than scipy: the audit package's PPI estimator is
@@ -154,15 +163,21 @@ class VerifierBoost:
         min_labels: int = 50,
         min_val_labels: int = 10,
         validation_frac: float = 0.2,
-        min_gain: float = 0.0,
+        min_gain: float = 0.05,
         seed: int = 0,
         max_records: int = 2000,
         auto: bool = True,
+        version_for_training: Optional[Callable[[], Optional[str]]] = None,
     ) -> None:
         if not (0.0 <= min_gain <= 1.0):
             raise ValueError(f"min_gain must be in [0, 1], got {min_gain}")
         if not (0.0 < validation_frac < 1.0):
             raise ValueError(f"validation_frac must be in (0, 1), got {validation_frac}")
+        if int(min_labels) <= int(min_val_labels):
+            raise ValueError(
+                f"min_labels ({min_labels}) must be greater than "
+                f"min_val_labels ({min_val_labels}) so the training split "
+                f"cannot be emptied by the validation holdout")
         self._inner = verifier
         self.store = store
         self.min_labels = int(min_labels)
@@ -171,30 +186,39 @@ class VerifierBoost:
         self.min_gain = float(min_gain)
         self.seed = int(seed)
         self.max_records = int(max_records)
+        self._version_for_training = version_for_training
         self._xs: Optional[np.ndarray] = None
         self._vals: Optional[np.ndarray] = None
         self._fit_hash: str = ""
         self._resid_sd = math.inf
         self._state = BoostState(False, False, 0, 0, math.inf, math.inf,
                                  "not fitted yet", 0.0)
-        # A wrapper inherits no declaration: state whether the expensive layer
-        # matches ``eval_counts`` by asking the wrapped verifier.
-        self.full_eval_matches_counts = bool(getattr(
-            verifier, "full_eval_matches_counts", True))
+        # Preserve the wrapped verifier's full-set equivalence declaration
+        # (missing / legacy False stay independent measurements -- #273 P1).
+        from ..verifier import shares_eval_counts
+        self.full_eval_matches_counts = shares_eval_counts(verifier)
         if auto:
             self.retrain()
 
     # -- the flywheel ---------------------------------------------------------
 
-    def retrain(self) -> BoostState:
+    def retrain(self, verifier_version: Optional[str] = None) -> BoostState:
         """Refit the calibration curve from the current IMPROVEMENT pool.
 
-        The bootstrap gate: fit on the tail slice, validate on a held-out
+        The bootstrap gate: fit on the train slice, validate on a held-out
         slice, activate only if the corrected validation error beats the raw
         by ``min_gain``. A failed gate deactivates the boost and keeps the
         wrapped verifier raw -- a curve that does not help is recorded as a
-        rejection, not installed."""
-        recs = [r for r in self.store.for_improvement()
+        rejection, not installed.
+
+        ``verifier_version`` (or ``version_for_training``) filters the pool to
+        labels scored by the judge currently under measurement, so an older
+        verifier's labels cannot train the curve for a newer one.
+        """
+        version = verifier_version
+        if version is None and self._version_for_training is not None:
+            version = self._version_for_training()
+        recs = [r for r in self.store.for_improvement(version)
                 if r.resolved and _finite(r.verifier_score)
                 and _finite(r.oracle_score)]
         recs = recs[-self.max_records:]
@@ -206,22 +230,37 @@ class VerifierBoost:
         shuffled = list(recs)
         rng.shuffle(shuffled)
         n_val = max(self.min_val_labels, int(len(shuffled) * self.validation_frac))
+        # Keep at least one training point: n_val must not consume the pool.
+        n_val = min(n_val, len(shuffled) - 1)
         train, val = shuffled[n_val:], shuffled[:n_val]
+        if not train:
+            return self._deactivate("empty training split after validation holdout")
         try:
             xs = np.array([r.verifier_score for r in train], dtype=float)
             ys = np.array([r.oracle_score for r in train], dtype=float)
-            self._xs, self._vals = isotonic_fit(xs, ys)
+            fit_xs, fit_vals = isotonic_fit(xs, ys)
         except Exception as e:  # noqa: BLE001 - a broken fit is a rejection, not a crash
             return self._deactivate(f"isotonic fit failed: {type(e).__name__}: {e}")
+        if fit_xs.size == 0 or fit_vals.size == 0:
+            return self._deactivate("isotonic fit returned an empty curve")
+
+        def _apply_candidate(f: float) -> float:
+            return float(np.interp(float(f), fit_xs, fit_vals,
+                                   left=float(fit_vals[0]),
+                                   right=float(fit_vals[-1])))
+
         error_before = _mse([r.verifier_score for r in val],
                             [r.oracle_score for r in val])
-        error_after = _mse([self._apply(r.verifier_score) for r in val],
+        error_after = _mse([_apply_candidate(r.verifier_score) for r in val],
                            [r.oracle_score for r in val])
-        if error_after <= error_before * (1.0 - self.min_gain) \
-                and len(val) >= self.min_val_labels:
+        if error_after <= error_before * (1.0 - self.min_gain):
             digest = hashlib.sha256(json.dumps({
-                "xs": self._xs.tolist(), "vals": self._vals.tolist(),
+                "xs": fit_xs.tolist(), "vals": fit_vals.tolist(),
                 "n_train": len(train)}, sort_keys=True).encode()).hexdigest()
+            # Assign curve + state together only after the gate passes, so a
+            # concurrent cheap_eval never applies an unvalidated curve under an
+            # older active version_tag.
+            self._xs, self._vals = fit_xs, fit_vals
             self._fit_hash = digest[:12]
             self._resid_sd = math.sqrt(error_after)
             self._state = BoostState(True, True, len(train), len(val),
@@ -296,10 +335,9 @@ class VerifierBoost:
         score, uncertainty = self._inner.learned_eval(artifact)
         if not self._state.active:
             return score, uncertainty
-        # The uncertainty the audit ranks on is raised to the boost's own
-        # validation residual: a verifier that demonstrably tracks the oracle
-        # is trusted to need less oracle spending, one that does not is not
-        # claimed to be better than it is.
+        # Safety floor: never report less uncertainty than the validation
+        # residual. Audit priority rises with uncertainty, so this cannot
+        # claim a poorly-fitting boost needs less oracle spend.
         return self._apply(score), max(self._resid_sd, uncertainty)
 
     def eval_counts(self, artifact: Evolvable,

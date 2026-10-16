@@ -83,6 +83,8 @@ class MeterSnapshot:
     trajectories_dedup: int = 0
     trajectory_write_seconds: float = 0.0
     trajectory_write_failures: int = 0
+    invariant_checked: int = 0
+    invariant_rejections: int = 0
     sandbox_wait_s: float = 0.0
     sandbox_setup_s: float = 0.0
     sandboxes_created: int = 0
@@ -104,6 +106,7 @@ _COUNTERS = frozenset({
     "audit_drain_oracle_errors",
     "trajectories_recorded", "trajectories_dedup",
     "trajectory_write_seconds", "trajectory_write_failures",
+    "invariant_checked", "invariant_rejections",
     "sandbox_wait_s", "sandbox_setup_s", "sandboxes_created",
     "sandboxes_reused", "sandbox_failures", "env_mismatch",
 })
@@ -223,6 +226,12 @@ class Meter:
     trajectories_dedup: int = 0
     trajectory_write_seconds: float = 0.0
     trajectory_write_failures: int = 0
+    #: Governance invariants: candidates whose contract declared rules and were
+    #: checked, and the individual violations that rejected them. A run whose
+    #: artifact declared no invariants reports zeros, which is the honest
+    #: reading "no rules to enforce", not "the gate is broken".
+    invariant_checked: int = 0
+    invariant_rejections: int = 0
 
     #: Sandbox accounting. Zero on the default single-workspace path; filled once
     #: the sandbox pool exists. Kept here from the start so the result schema
@@ -316,6 +325,8 @@ class Meter:
                 trajectories_dedup=self.trajectories_dedup,
                 trajectory_write_seconds=self.trajectory_write_seconds,
                 trajectory_write_failures=self.trajectory_write_failures,
+                invariant_checked=self.invariant_checked,
+                invariant_rejections=self.invariant_rejections,
                 sandbox_wait_s=self.sandbox_wait_s,
                 sandbox_setup_s=self.sandbox_setup_s,
                 sandboxes_created=self.sandboxes_created,

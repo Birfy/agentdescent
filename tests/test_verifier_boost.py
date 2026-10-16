@@ -114,7 +114,8 @@ def test_no_labels_leaves_the_boost_inactive():
 
 def test_too_few_labels_stays_inactive():
     store = _store_with([_record(0.5, 0.3)])
-    boost = VerifierBoost(_FakeVerifier(score=0.5), store, min_labels=10)
+    boost = VerifierBoost(_FakeVerifier(score=0.5), store, min_labels=10,
+                          min_val_labels=3)
     assert boost.is_active is False
 
 
@@ -262,3 +263,104 @@ def test_the_boost_is_a_valid_engine_verifier(tmp_path):
         repo_path=str(tmp_path / "repo"), policies=Policies(verifier=boost))
     assert boost.is_active is False
     assert result.outcomes().get("committed", 0) >= 1
+
+
+# -- review #273 regressions ----------------------------------------------------
+
+
+def test_empty_train_split_does_not_crash():
+    """min_labels > min_val_labels is required; equal values refuse at init
+    (review #273 blocking item 3)."""
+    store = _store_with([_record(0.5, 0.3) for _ in range(10)])
+    with pytest.raises(ValueError, match="min_labels"):
+        VerifierBoost(_FakeVerifier(), store, min_labels=10, min_val_labels=10)
+
+
+def test_training_filters_to_the_current_verifier_version():
+    """Labels from an older verifier must not train the current judge
+    (review #273 blocking item 2)."""
+    # 200 old biased labels + 200 new unbiased labels under different versions.
+    old = [_record(min(1.0, y + 0.4), y, version="old")
+           for y in list(__import__("numpy").linspace(0.1, 0.9, 200))]
+    new = [_record(y, y, version="new")
+           for y in list(__import__("numpy").linspace(0.1, 0.9, 200))]
+    store = _store_with(old + new)
+    # Train only on "new": unbiased data should not activate a correction that
+    # pulls 0.5 toward the old bias.
+    boost = VerifierBoost(
+        _FakeVerifier(score=0.5), store, min_labels=50, min_val_labels=10,
+        seed=1, min_gain=0.0, auto=False,
+        version_for_training=lambda: "new")
+    boost.retrain()
+    # With only unbiased new labels there is nothing useful to learn; either
+    # inactive or a near-identity curve. Critically, g(0.5) must not be the
+    # old-bias correction (~0.1).
+    if boost.is_active:
+        assert abs(boost.cheap_eval(object()) - 0.5) < 0.15
+
+
+def test_audit_version_changes_when_boost_activates(tmp_path):
+    """attach + recompute must refresh verifier_version on activation so
+    VerifierWatch withdraws the old calibration (review #273 blocking item 1)."""
+    y = list(__import__("numpy").linspace(0.1, 0.9, 80))
+    s = _biased_scores(y, bias=0.2)
+    store = _store_with(
+        [_record(score, oracle, version="will-refresh")
+         for score, oracle in zip(s, y)],
+        path=str(tmp_path / "audit.jsonl"))
+    # Pre-seed records under a fingerprint we will replace; attach will set a
+    # live version_extra from the boost tag. Use an explicit store and boost.
+    boost = VerifierBoost(_FakeVerifier(score=0.5), store, min_labels=20,
+                          min_val_labels=5, seed=1, min_gain=0.0, auto=False)
+    audit = attach(verifier=lambda task, output: 0.5,
+                   oracle=lambda task, output: 0.3,
+                   store=store, boost=boost)
+    before = audit.verifier_version
+    assert boost.version_tag() == "boost:inactive"
+    # Retrain against whatever version the reward currently reports; seed the
+    # store with records under that version so the filter finds them.
+    current = audit.verifier_version
+    for score, oracle in zip(s, y):
+        store.append(_record(score, oracle, version=current))
+    audit.recompute()
+    assert boost.is_active is True
+    after = audit.verifier_version
+    assert after != before, (
+        "activation must change the audit fingerprint so the old calibration "
+        f"is withdrawn; before={before} after={after}")
+    assert boost.version_tag().startswith("boost:active:")
+
+
+def test_wrapper_preserves_legacy_false_full_eval_declaration():
+    """A wrapped verifier with oracle_shares_full_set=False must stay
+    independent after wrapping (review #273 P1)."""
+    class Legacy:
+        oracle_shares_full_set = False
+        def rule_eval(self, a): return 0.5
+        def cheap_eval(self, a): return 0.5
+        def learned_eval(self, a): return 0.5, 0.1
+        def eval_counts(self, a, floor=None): return (5, 5)
+        def full_eval(self, a): return 0.4  # independent
+
+    from agentdescent.verifier import shares_eval_counts
+    inner = Legacy()
+    assert shares_eval_counts(inner) is False
+    boost = VerifierBoost(inner, AuditStore(), auto=False)
+    assert shares_eval_counts(boost) is False
+    assert boost.full_eval_matches_counts is False
+
+
+def test_wrapper_preserves_missing_full_eval_declaration():
+    """No declaration on the inner verifier => independent measurements."""
+    class Bare:
+        def rule_eval(self, a): return 0.5
+        def cheap_eval(self, a): return 0.5
+        def learned_eval(self, a): return 0.5, 0.1
+        def eval_counts(self, a, floor=None): return (5, 5)
+        def full_eval(self, a): return 0.5
+
+    from agentdescent.verifier import shares_eval_counts
+    inner = Bare()
+    assert shares_eval_counts(inner) is False
+    boost = VerifierBoost(inner, AuditStore(), auto=False)
+    assert shares_eval_counts(boost) is False

@@ -13,6 +13,8 @@ candidates it is given; one that returns something else is refused rather than
 committed, because a state no rollout produced has never been through the gate.
 """
 
+import math
+
 import pytest
 
 from agentdescent.async_evolve import async_evolve
@@ -20,14 +22,17 @@ from agentdescent.evolution import AppendRules, Task, evolve
 from agentdescent.evolvable import ContractError
 from agentdescent.policies import Policies
 from agentdescent.selection import (
-    Archive, Beam, Candidate, MCTS, MultiHeadUnsupported, ParetoFrontier,
-    SelectionContext, SingleHead, pareto_front,
+    Archive, Beam, Candidate, CostEfficient, FlatPuct, MCTS,
+    MultiHeadUnsupported, ParetoFrontier, SelectionContext, SingleHead,
+    pareto_front, sigmoid_novelty_weights,
 )
 
 
-def _c(version, score=None, per_task=None, selected=0, parent=None):
+def _c(version, score=None, per_task=None, selected=0, parent=None,
+       prior=None, cost=None):
     return Candidate(artifact_id="a", version=version, score=score,
-                     per_task=per_task or {}, selected=selected, parent=parent)
+                     per_task=per_task or {}, selected=selected, parent=parent,
+                     prior=prior, cost=cost)
 
 
 def _ctx(*candidates, head=None, n=4, round=0):
@@ -305,10 +310,161 @@ def test_archive_sampling_is_reproducible():
     assert a == b, "a seeded comparison is meaningless if the archive drifts"
 
 
-@pytest.mark.parametrize("kwargs", [{"sampling": "nope"}, {"temperature": 0.0}])
+
+
+def test_sigmoid_novelty_weights_survive_extreme_negative_scores():
+    """Large negative scores used to OverflowError inside math.exp (#286)."""
+    weights = sigmoid_novelty_weights([-100.0, -1e6, 0.9], [0, 0, 0])
+    assert all(w == w and w >= 0 for w in weights)  # finite, non-negative
+    assert abs(sum(weights) - 1.0) < 1e-12
+    # The extreme negatives are ~0; virtually all mass is on 0.9.
+    assert weights[0] == 0.0 and weights[1] == 0.0
+    assert weights[2] == 1.0
+
+
+def test_sigmoid_novelty_weights_match_naive_formula_on_unit_interval():
+    """Scores in [0, 1] must stay bit-identical so DGM port equivalence holds."""
+    import math
+    scores = [0.0, 0.1, 0.5, 0.9, 1.0]
+    children = [0, 1, 2, 0, 5]
+    got = sigmoid_novelty_weights(scores, children)
+    raw = [(1.0 / (1.0 + math.exp(-10.0 * (s - 0.5)))) * (1.0 / (1.0 + c))
+           for s, c in zip(scores, children)]
+    total = sum(raw) or 1.0
+    expected = [r / total for r in raw]
+    assert got == expected
+
+
+def test_sigmoid_novelty_nonfinite_scores_contribute_zero_weight():
+    """NaN / ±inf must not poison the draw (#286)."""
+    import math
+    weights = sigmoid_novelty_weights(
+        [float("nan"), float("-inf"), float("inf"), 0.5], [0, 0, 0, 0])
+    assert weights[0] == 0.0          # NaN → 0
+    assert weights[1] == 0.0          # -inf → 0 (non-finite convention)
+    assert weights[2] == 0.0          # +inf → 0 (non-finite convention)
+    assert weights[3] == 1.0          # sole finite score takes the mass
+    assert all(math.isfinite(w) for w in weights)
+    assert abs(sum(weights) - 1.0) < 1e-12
+
+
+def test_archive_sigmoid_novelty_selects_with_extreme_and_nan_scores():
+    """Archive(sigmoid_novelty).select must not raise on the #286 inputs."""
+    pool = (_c(0, -100.0), _c(1, float("nan")), _c(2, 0.9))
+    ctx = _ctx(*pool, head=pool[2], n=5)
+    picks = Archive(sampling="sigmoid_novelty", seed=0).select(ctx, 5)
+    assert len(picks) == 5
+    assert {c.version for c in picks} == {2}  # only the finite good score weighs
+
+
+def test_sigmoid_novelty_all_rejected_scores_fall_back_to_uniform():
+    """All-NaN / all-overflowing archives must still be drawable (Codex P2)."""
+    import math
+    weights = sigmoid_novelty_weights(
+        [float("nan"), float("inf"), -1e6], [0, 0, 0])
+    assert weights == [1.0 / 3, 1.0 / 3, 1.0 / 3]
+    pool = (_c(0, float("nan")), _c(1, -1e6), _c(2, float("inf")))
+    ctx = _ctx(*pool, head=pool[0], n=9)
+    picks = Archive(sampling="sigmoid_novelty", seed=0).select(ctx, 9)
+    assert len(picks) == 9
+    assert {c.version for c in picks} == {0, 1, 2}
+
+@pytest.mark.parametrize("kwargs", [
+    {"sampling": "nope"}, {"temperature": 0.0}, {"temperature": -1.0},
+    {"temperature": float("nan")}, {"temperature": float("inf")},
+    {"temperature": "warm"}, {"temperature": "0.5"}, {"temperature": b"0.5"},
+    {"temperature": None},
+])
 def test_archive_arguments_are_checked(kwargs):
     with pytest.raises(ValueError):
         Archive(**kwargs)
+
+
+# -- Archive softmax at the edges of the float range (#284) -------------------
+#
+# The draws below are what `main` at 924c25c produced. The overflow fallback
+# must not move a single one of them: a seeded comparison that drifts is
+# meaningless, and only temperatures that used to *crash* may change behaviour.
+_PINNED_POOL = (_c(1, 0.9, selected=3), _c(2, 0.5), _c(3, 0.7, selected=1),
+                _c(4, None))
+
+
+@pytest.mark.parametrize("sampling,temperature,rnd,expected", [
+    ("performance", 1.0, 0, [4, 3, 1, 1, 1, 2, 2, 4, 3, 2, 2, 1]),
+    ("performance", 1.0, 5, [1, 3, 3, 3, 3, 4, 4, 3, 3, 2, 3, 3]),
+    ("performance", 0.2, 0, [4, 3, 1, 1, 1, 1, 1, 4, 2, 1, 1, 1]),
+    ("performance", 0.2, 5, [1, 3, 1, 1, 2, 3, 4, 2, 2, 1, 2, 1]),
+    ("performance", 0.01, 0, [1] * 12),
+    ("novelty", 1.0, 0, [4, 4, 2, 2, 2, 2, 2, 4, 3, 3, 2, 1]),
+    ("novelty", 1.0, 5, [1, 4, 3, 3, 3, 4, 4, 3, 3, 2, 4, 3]),
+    ("novelty", 0.2, 0, [4, 3, 1, 1, 1, 2, 2, 4, 3, 2, 2, 1]),
+    ("novelty", 0.2, 5, [1, 3, 3, 3, 3, 3, 4, 3, 3, 2, 3, 3]),
+    ("novelty", 0.01, 5, [1] * 12),
+])
+def test_archive_ordinary_temperatures_draw_exactly_as_before(
+        sampling, temperature, rnd, expected):
+    ctx = _ctx(*_PINNED_POOL, round=rnd, n=12)
+    got = Archive(sampling=sampling, temperature=temperature,
+                  seed=7).select(ctx, 12)
+    assert [c.version for c in got] == expected
+
+
+@pytest.mark.parametrize("sampling", ["performance", "novelty"])
+@pytest.mark.parametrize("temperature", [1e-3, 1e-6, 1e-300, 1e-309, 5e-324])
+def test_archive_small_temperature_does_not_overflow(sampling, temperature):
+    """`exp(1 / 0.001)` is past the float range: `select()` used to raise
+    OverflowError. A tiny temperature is near-greedy, so it has to pick the
+    best-scoring candidate."""
+    ctx = _ctx(_c(1, 0.2), _c(2, 0.9), _c(3, 1.0), n=5)
+    got = Archive(sampling=sampling, temperature=temperature,
+                  seed=0).select(ctx, 5)
+    assert [c.version for c in got] == [3] * 5
+
+
+def test_archive_keeps_the_validated_temperature_as_a_float():
+    """An accepted archive must not fail at its first `score / temperature`:
+    what it keeps is the float it checked, and an int divides exactly the
+    same."""
+    arch = Archive(sampling="performance", temperature=1)
+    assert type(arch.temperature) is float and arch.temperature == 1.0
+    pool = (_c(1, 0.9), _c(2, 0.5))
+    assert arch.select(_ctx(*pool, n=3), 3) == \
+        Archive(sampling="performance", temperature=1.0).select(_ctx(*pool, n=3), 3)
+
+
+def test_archive_many_near_top_candidates_do_not_overflow_the_total():
+    """Every weight fits, but 300 of `exp(704)` sum past the float range and
+    `random.choices` refused the total."""
+    pool = [_c(i, 1.0) for i in range(300)]
+    got = Archive(sampling="performance", temperature=0.00142,
+                  seed=0).select(_ctx(*pool, n=50), 50)
+    assert len(got) == 50
+    assert len({c.version for c in got}) > 1, "ties must still be sampled"
+
+
+def test_archive_overflow_fallback_is_the_same_distribution():
+    """The shifted weights are the raw ones divided by one constant."""
+    pool = [_c(1, 0.2, selected=2), _c(2, 0.9), _c(3, 1.0, selected=1)]
+    temperature = 0.05            # representable: raw weights are returned
+    arch = Archive(sampling="novelty", temperature=temperature)
+    raw = arch._weights(pool)
+    top = max(0.2, 0.9, 1.0)
+    shifted = [math.exp((c.score - top) / temperature) / (1 + c.selected)
+               for c in pool]
+    ratios = [r / s for r, s in zip(raw, shifted)]
+    assert all(math.isclose(x, ratios[0], rel_tol=1e-12) for x in ratios)
+
+
+def test_archive_small_temperature_novelty_still_discounts_selected():
+    """In the fallback the novelty divisor is applied after the shift, so two
+    equally scored candidates still split by how often each was used."""
+    pool = [_c(1, 1.0, selected=9), _c(2, 1.0, selected=0), _c(3, 0.0)]
+    got = Archive(sampling="novelty", temperature=1e-4,
+                  seed=0).select(_ctx(*pool, n=200), 200)
+    used = sum(c.version == 1 for c in got)
+    fresh = sum(c.version == 2 for c in got)
+    assert fresh > used > 0
+    assert not any(c.version == 3 for c in got)
 
 
 def test_mcts_tries_an_unvisited_candidate_first():
@@ -415,3 +571,95 @@ def test_the_population_layer_hands_the_policy_a_moving_round():
     assert result.error is None
     assert seen, "the layer never asked"
     assert seen == list(range(len(seen))), f"rounds were not consecutive: {seen}"
+
+
+# -- FlatPuct / CostEfficient / MCTS / Beam knobs (#293) -----------------------
+#
+# CostEfficient used to OverflowError inside cost**alpha; FlatPuct/MCTS/Beam
+# accepted NaN / non-numeric knobs and then either crashed mid-select or
+# silently always-picked index 0.
+
+
+def test_cost_efficient_survives_a_steep_cost_exponent():
+    """cost**alpha used to raise OverflowError mid-select (#293)."""
+    pool = (
+        _c(0, 0.1, cost=1.0),
+        _c(1, 0.5, cost=100.0),
+        _c(2, 0.9, cost=0.01),
+    )
+    ctx = _ctx(*pool, head=pool[0], n=3)
+    factors = CostEfficient(cost_exponent=700).cost_factors(list(pool))
+    assert all(f == f and f > 0 for f in factors)  # finite-or-inf, positive
+    assert any(math.isinf(f) for f in factors) or max(factors) > 1e100
+    picks = CostEfficient(cost_exponent=700).select(ctx, 3)
+    assert len(picks) == 3
+    assert {c.version for c in picks} <= {0, 1, 2}
+
+
+def test_flat_puct_priors_survive_a_steep_prior_exponent():
+    """prior**exponent used to OverflowError inside _priors (#293)."""
+    pool = (
+        _c(0, 0.5, prior=1.0),
+        _c(1, 0.5, prior=100.0),
+    )
+    priors = FlatPuct(prior_exponent=700)._priors(list(pool))
+    assert abs(sum(priors) - 1.0) < 1e-12
+    assert all(math.isfinite(p) and p >= 0 for p in priors)
+    # Stronger prior must still win after the overflow-safe path (Codex P2).
+    assert priors[1] > priors[0]
+    assert priors[1] == pytest.approx(1.0)
+
+
+def test_flat_puct_prior_power_matches_naive_when_finite():
+    """Max-normalisation must cancel so finite exponents stay bit-identical."""
+    pool = (
+        _c(0, 0.5, prior=2.0),
+        _c(1, 0.5, prior=8.0),
+        _c(2, 0.5, prior=4.0),
+    )
+    got = FlatPuct(prior_exponent=2.0)._priors(list(pool))
+    raw = [p ** 2 for p in (2.0, 8.0, 4.0)]
+    total = sum(raw)
+    expected = [r / total for r in raw]
+    assert got == expected
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"c_puct": float("nan")},
+    {"c_puct": float("inf")},
+    {"c_puct": None},
+    {"c_puct": "1"},
+    {"prior_exponent": float("nan")},
+    {"prior_exponent": float("inf")},
+    {"prior_exponent": "0"},
+])
+def test_flat_puct_refuses_non_finite_knobs(kwargs):
+    with pytest.raises(ValueError):
+        FlatPuct(**kwargs)
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"cost_exponent": float("nan")},
+    {"cost_exponent": float("inf")},
+    {"cost_exponent": "1"},
+    {"cost_exponent": None},
+])
+def test_cost_efficient_refuses_non_finite_cost_exponent(kwargs):
+    with pytest.raises(ValueError):
+        CostEfficient(**kwargs)
+
+
+def test_cost_efficient_negative_cost_exponent_still_means_ignore_cost():
+    assert CostEfficient(cost_exponent=-3).cost_exponent == 0.0
+
+
+@pytest.mark.parametrize("exploration", [float("nan"), float("inf"), float("-inf"), "1.4", None, True])
+def test_mcts_refuses_non_finite_exploration(exploration):
+    with pytest.raises(ValueError):
+        MCTS(exploration=exploration)
+
+
+@pytest.mark.parametrize("k", [0, -1, 1.5, float("nan"), True, "2", None])
+def test_beam_refuses_non_integer_or_non_positive_width(k):
+    with pytest.raises(ValueError):
+        Beam(k)

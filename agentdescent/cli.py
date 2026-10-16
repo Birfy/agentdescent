@@ -522,6 +522,21 @@ def _checkpoint_summary(rd: "runstore.RunDir") -> Optional[dict]:
     }
 
 
+def _fmt_reward(value: Any) -> str:
+    """A ``rounds.jsonl`` reward for a text line.
+
+    ``append_round`` stores a non-finite reward as ``null`` (#271), so a row can
+    carry ``None``; ``:.3f`` on that raised ``TypeError`` and took ``status`` /
+    ``watch`` down with it. Anything else that is not a number prints as-is.
+    """
+    if value is None:
+        return "n/a"
+    try:
+        return f"{float(value):.3f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
 def cmd_status(a: argparse.Namespace) -> int:
     if a.run_id:
         rd = runstore.get(a.run_id, store=a.store)
@@ -532,7 +547,7 @@ def cmd_status(a: argparse.Namespace) -> int:
             print(_status_line(st))
             if not a.brief:
                 for r in rd.rounds()[-3:]:
-                    print(f"  round {r['round']:>3}  reward={r['held_out_reward']:.3f}  "
+                    print(f"  round {r['round']:>3}  reward={_fmt_reward(r.get('held_out_reward'))}  "
                           f"+{r['committed']}/-{r['rejected']}  {r.get('reasons', {})}")
                 cp = _checkpoint_summary(rd)
                 if cp:
@@ -569,7 +584,7 @@ def cmd_watch(a: argparse.Namespace) -> int:
     while True:
         rounds = rd.rounds()
         for r in rounds[seen:]:
-            print(f"round {r['round']:>3}  reward={r['held_out_reward']:.3f}  "
+            print(f"round {r['round']:>3}  reward={_fmt_reward(r.get('held_out_reward'))}  "
                   f"+{r['committed']}/-{r['rejected']}  {r.get('reasons', {})}", flush=True)
         seen = len(rounds)
         st = rd.status()

@@ -44,7 +44,11 @@ model rather than a scorer mismatch.
 
 Taking the last number from **both** sides handles `"72"`, `"#### 72"` and
 `"The answer is 72."` alike. Thousands separators and a leading `$` / `£` / `€`
-are handled too.
+are handled too, and so are exponents (`1.5e-3`, `6.02e23`) and a leading
+decimal point (`.5`). Commas group only in threes, so `"1,2,3"` reads as `3`,
+not `123`; a minus glued to a preceding digit or letter is subtraction, so
+`"pages 3-4"` reads as `4`, not `-4`. A figure that overflows a float
+(`1e999`) is not a number.
 
 If the gold contains no number at all, `last_number` raises rather than scoring 0
 forever — a scorer that can never match is a configuration error, not a result.
