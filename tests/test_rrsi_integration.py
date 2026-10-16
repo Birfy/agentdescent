@@ -205,6 +205,59 @@ def test_acceptance_large_gain_cost_rule():
     assert d.category == MergeOutcome.COST_RULE.value
 
 
+def test_a_streak_of_rejections_anneals_the_budget_and_trips_stall():
+    """The annealed round must advance on *every* merge decision, not just
+    accepts: a search that keeps being rejected is spending rounds stuck, and
+    the sparsity anneal plus the stall note are exactly the mechanisms that
+    exist to get it unstuck. Before the fix, ten straight rejections left
+    `round` at 0, the budget at b_max, and `stalled()` False (review)."""
+    st = RRsiState(RRsiConfig(b_min=1, b_max=5, T=4, stall_window=3),
+                   base_score=0.5)
+    acc = RRsiAcceptance(st)
+    for _ in range(10):
+        d = acc.accept(_context(st, base=(5, 5), cand=(3, 7)))
+        assert d.accept is False
+    assert st.round == 10, (
+        f"the round must advance per merge, not per accept; round={st.round}")
+    assert st.budget() <= 2, (
+        "a streak of rejections must anneal the edit budget, not pin it at "
+        f"b_max; budget={st.budget()}")
+    assert st.stalled() is True, (
+        "a flat progress must trip the stall note while the search is stuck")
+
+
+def test_screen_rejections_advance_the_schedule():
+    """The aggregator's screen-rejected path (critic) must advance the anneal
+    too -- it is a merge decision, and the RRSI acceptance policy opts in via
+    on_screen_reject (review: the round advanced only on accepts)."""
+    state = RRsiState(RRsiConfig(b_min=1, b_max=5, T=4))
+    policy = RRsiAcceptance(state)
+    for _ in range(5):
+        policy.on_screen_reject()
+    assert state.round == 5
+    assert state.budget() <= 4   # annealed below b_max after rejections
+
+
+def test_card_cost_is_a_per_rollout_mean_not_a_batch_sum():
+    """The cost rule must not depend on how many cards happened to land in the
+    bucket: `EvidenceCard.cost_tokens` is one proposing rollout's usage, so
+    `_card_cost` is a per-rollout mean, not a sum. Three cards at 100 tokens
+    each must read the same as one card at 100 (review: the sum gave dC=+2.0
+    and rejected on batch size)."""
+    from examples.rrsi.rrsi_policies import _card_cost
+
+    single = _card_cost([_card({"a": "x"}, cost_tokens=100)])
+    batch = _card_cost([_card({"a": "x"}, cost_tokens=100),
+                        _card({"b": "y"}, cost_tokens=100),
+                        _card({"c": "z"}, cost_tokens=100)])
+    assert single == batch == 100.0, (
+        f"per-rollout mean must be batch-size independent; "
+        f"single={single}, batch={batch}")
+    # missing/zero telemetry -> None (dC = 0, the documented behaviour)
+    assert _card_cost([_card({"a": "x"})]) is None
+    assert _card_cost([]) is None
+
+
 def test_acceptance_accepts_an_improvement_and_advances_s_star():
     state = RRsiState(base_score=0.5)
     policy = RRsiAcceptance(state)

@@ -122,9 +122,15 @@ counter — which is what makes them one algorithm rather than three knobs.
 * **`noise_band` is a configured parameter** (default `0.0`, the conservative
   floor `score >= S*`). The paper estimates it by repeatedly evaluating the
   unchanged base harness; set `RRsiConfig.noise_band` from that measurement.
-* **Cost is `EvidenceCard.cost_tokens`** (the proposing rollout's usage, when
-  the caller shares a `Usage` with its adapters). Missing or zero telemetry
-  yields `dC = 0`, matching the pinned upstream behaviour.
+* **Cost is `EvidenceCard.cost_tokens`, averaged per rollout** (the proposing
+  rollout's usage, when the caller shares a `Usage` with its adapters), **not a
+  batch sum** -- summing across a merge's cards would make the cost rule depend
+  on how many cards happened to land in the bucket. This is still a proxy:
+  Algorithm 2's `dC` is the *candidate* harness's cost relative to the
+  incumbent's on the same evaluation, and the proposing rollout runs the
+  incumbent, so the cost rule is approximate until candidate-side held-out
+  telemetry exists. Missing or zero telemetry yields `dC = 0`, matching the
+  pinned upstream behaviour.
 * **Protected strings come from the evolve set only** — never the final
   holdout. The integration tests enforce that discipline by construction.
 

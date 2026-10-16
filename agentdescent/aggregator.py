@@ -1080,7 +1080,8 @@ class Aggregator:
         # policy without one is simply absent from the payload -- the same way
         # the posterior is absent from an aggregator that never had one.
         state = None
-        hook = getattr(self.acceptance_policy, "checkpoint_state", None)
+        hook = getattr(getattr(self, "acceptance_policy", None),
+                       "checkpoint_state", None)
         if callable(hook):
             state = hook()
         return {
@@ -1122,7 +1123,8 @@ class Aggregator:
             self._seen = set(seen)
         acc = state.get("acceptance_state")
         if acc is not None:
-            hook = getattr(self.acceptance_policy, "restore_state", None)
+            hook = getattr(getattr(self, "acceptance_policy", None),
+                           "restore_state", None)
             if callable(hook):
                 try:
                     hook(acc)
@@ -1417,6 +1419,16 @@ class Aggregator:
                     self.meter.add("critic_rejected", len(rejected_screen))
                 self.buffer.settle([c for c, _ in rejected_screen])
                 if not kept:
+                    # A screen rejection is still a merge decision: an annealed
+                    # budget and a stall detector must advance on it, or a search
+                    # that only ever produced screen-rejected bundles would stay
+                    # pinned at b_max and never enter structured exploration
+                    # (RRSI review). The acceptance policy opts in through the
+                    # same per-merge accounting it uses on an accept/reject.
+                    on_reject = getattr(self.acceptance_policy,
+                                        "on_screen_reject", None)
+                    if callable(on_reject):
+                        on_reject()
                     detail = "; ".join(
                         f"{reason} (task {card.trajectory_refs[0].id if card.trajectory_refs else '?'})"
                         for card, reason in rejected_screen)

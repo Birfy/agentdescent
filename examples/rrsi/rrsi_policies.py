@@ -184,6 +184,19 @@ class RRsiState:
         #: ``S*`` after each merge, for stall detection.
         self.progress: List[float] = []
 
+    def record_merge(self) -> None:
+        """Advance the schedule by one merge, whatever its outcome.
+
+        ``round`` and ``progress`` are the anneal and the stall detector, and
+        both must move on **every** merge decision -- a rejection is a round the
+        search spent stuck, and the sparsity anneal is exactly what makes a
+        stuck search try smaller bundles, while a flat ``progress`` is what
+        makes :meth:`stalled` trip into structured exploration. Advancing only
+        on accepts left the budget pinned at ``b_max`` and ``stalled()`` False
+        through a streak of rejections (review)."""
+        self.round += 1
+        self.progress.append(self.best_score)
+
     def budget(self) -> int:
         """The annealed edit budget for the current round (``b_t``)."""
         return edit_budget(self.round, self.config.T,
@@ -475,9 +488,22 @@ class RRsiProposalPolicy:
 
 
 def _card_cost(cards: Sequence[Any]) -> Optional[float]:
-    """The candidate's measured policy-token cost, or ``None`` when unknown."""
-    total = sum(int(getattr(card, "cost_tokens", 0) or 0) for card in cards)
-    return total if total > 0 else None
+    """The candidate's measured policy-token cost, or ``None`` when unknown.
+
+    A **per-rollout mean**, not a batch sum: `EvidenceCard.cost_tokens` is one
+    proposing rollout's usage, so summing across a merge's cards would scale
+    with however many cards happened to land in the bucket and reject a
+    candidate purely for batch size (review). The mean is still a proxy --
+    Algorithm 2's ``dC`` is the *candidate* harness's cost relative to the
+    incumbent's on the same evaluation, and the proposing rollout runs the
+    incumbent -- so this is a documented deviation; callers who share a
+    ``Usage`` get an approximate, batch-size-independent cost signal, and
+    missing/zero telemetry yields ``dC = 0`` (the pinned upstream behaviour).
+    """
+    costs = [int(getattr(card, "cost_tokens", 0) or 0) for card in cards]
+    if not costs:
+        return None
+    return sum(costs) / len(costs) if any(costs) else None
 
 
 class RRsiAcceptance:
@@ -514,6 +540,11 @@ class RRsiAcceptance:
             candidate, incumbent, self.state.best_score, config.noise_band,
             selection_config, dict(self.state.attempts))
 
+        # The schedule advances on *every* decision this policy makes -- a
+        # rejection is a round the search spent stuck, not a free one (see
+        # RRsiState.record_merge). best_score is advanced only on an accept.
+        self.state.record_merge()
+
         if not decision.admissible:
             self.state.record_measurement(ctx.diff, delta_score=observed,
                                           delta_cost=decision.delta_cost or 0.0,
@@ -529,8 +560,6 @@ class RRsiAcceptance:
         self.state.record_measurement(ctx.diff, delta_score=observed,
                                       delta_cost=decision.delta_cost or 0.0,
                                       accepted=True)
-        self.state.round += 1
-        self.state.progress.append(self.state.best_score)
         return AcceptDecision(True, "", decision.reason,
                               p_improve=max(0.0, observed), observed_delta=observed)
 
@@ -540,6 +569,17 @@ class RRsiAcceptance:
 
     def restore_state(self, data: dict) -> None:
         self.state.restore(data)
+
+    def on_screen_reject(self) -> None:
+        """Advance the schedule when the aggregator's screen rejected a batch.
+
+        The screen (critic) runs in ``Aggregator._prepare``, before this policy's
+        ``accept`` is ever reached, so a batch the screen rejects would otherwise
+        leave the anneal and the stall detector frozen even though a merge was
+        decided. The aggregator calls this hook once per screen-rejected batch;
+        ``record_merge`` advances ``round``/``progress`` exactly as an acceptance
+        decision does (review: the round must advance on every merge)."""
+        self.state.record_merge()
 
 
 # -- the bundle -----------------------------------------------------------------
