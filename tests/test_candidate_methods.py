@@ -25,6 +25,7 @@ from examples.agent0.agent0_tool_curriculum import calculator
 from examples.aflow.aflow_workflow_search import SoftMixed
 from examples.promptbreeder.promptbreeder_genetic_prompts import BinaryTournament
 from examples.sica.sica_self_edit import compile_policy
+from tests.test_gskill import gskill_fake_completion
 from examples.voyager.voyager_skill_library import simulate as voyager_simulate
 import examples.sica.sica_self_edit as sica_module
 import examples.godel_agent.godel_agent_self_modify as godel_module
@@ -191,6 +192,9 @@ def self_improvement_prompt(source, feedback):
     if "produce their union" in lower:
         return ("Merged union: work the problem step by step and state the "
                 "number last, keeping every proposed rule.")
+    gskill_reply = gskill_fake_completion(prompt)
+    if gskill_reply is not None:
+        return gskill_reply
     answer = _money_answer(prompt)
     if answer is not None:
         return answer
