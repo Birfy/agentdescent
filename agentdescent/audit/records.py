@@ -42,7 +42,7 @@ from typing import Any, Callable, Dict, Optional
 SCHEMA_VERSION = 2
 #: On-disk versions this build can load. ``1`` is migrated in place; anything
 #: else raises.
-_SUPPORTED_SCHEMA_VERSIONS = frozenset({1, SCHEMA_VERSION})
+SUPPORTED_SCHEMA_VERSIONS = frozenset({1, SCHEMA_VERSION})
 
 
 class Purpose(str, Enum):
@@ -164,7 +164,7 @@ class AuditRecord:
     def from_dict(cls, d: Dict[str, Any]) -> "AuditRecord":
         d = dict(d)
         version = d.get("schema_version")
-        if version not in _SUPPORTED_SCHEMA_VERSIONS:
+        if version not in SUPPORTED_SCHEMA_VERSIONS:
             raise ValueError(
                 f"audit record schema_version={version!r}, this build reads "
                 f"{SCHEMA_VERSION} (and migrates v1). Refusing to guess at "
@@ -175,8 +175,10 @@ class AuditRecord:
         d.setdefault("scorer_version", "")
         d["schema_version"] = SCHEMA_VERSION
         d["purpose"] = Purpose(d["purpose"])
-        known = set(cls.__dataclass_fields__)
-        return cls(**{k: v for k, v in d.items() if k in known})
+        # No silent filtering: an unknown key (say a misspelt ``strtaum``) is a
+        # malformed line, not a record to load under default values -- the
+        # ``TypeError`` it raises sends it down the store's corrupt-line path.
+        return cls(**d)
 
 
 def new_record_id() -> str:

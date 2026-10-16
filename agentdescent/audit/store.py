@@ -28,7 +28,8 @@ import threading
 import time
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 
-from .records import SCHEMA_VERSION, AuditRecord, Purpose
+from .records import (SCHEMA_VERSION, SUPPORTED_SCHEMA_VERSIONS, AuditRecord,
+                      Purpose)
 
 #: Marks a JSONL line as a moments snapshot rather than an audit record. Absent
 #: on every record ever written, so a file from before this existed still loads.
@@ -189,8 +190,11 @@ class AuditStore:
                 return True
         except (KeyError, TypeError, ValueError, AttributeError):
             return False
-        if payload.get("schema_version") != SCHEMA_VERSION:
+        if payload.get("schema_version") not in SUPPORTED_SCHEMA_VERSIONS:
             AuditRecord.from_dict(payload)          # raises on schema drift
+        # Every supported version (v1 is migrated) goes through the guarded
+        # construction below, so a malformed v1 line is one corrupt line rather
+        # than an unopenable store.
         try:
             rec = AuditRecord.from_dict(payload)
         except (KeyError, TypeError, ValueError):

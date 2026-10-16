@@ -2502,7 +2502,7 @@ AuditRecord(
     dispatched_at: float = <factory>,
     resolved_at: Optional[float] = None,
     sampler_seed: int = 0,
-    schema_version: int = 1,
+    schema_version: int = 2,
     scorer_version: str = ''
 ) -> None
 ```
@@ -3889,7 +3889,7 @@ One rollout, described completely enough to run somewhere else.
 
 ### `SCHEMA_VERSION`
 
-Bumped when the on-disk shape of a record changes incompatibly. A reader that meets a record it does not understand must say so rather than guess -- see `load`.
+Bumped when the on-disk shape of a record changes incompatibly. A reader that meets a record it does not understand must say so rather than guess -- see `load`. Version 2 adds optional `scorer_version`; this build still migrates version-1 lines. Stamp the new marker whenever the persisted shape is one an older v1-only reader cannot decode, so that reader hits its explicit unsupported-version path instead of treating a valid line as corrupt and silently skipping pending work (#315).
 
 ### `SCORERS`
 

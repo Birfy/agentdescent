@@ -539,3 +539,54 @@ def test_old_reader_contract_rejects_v2_explicitly_not_as_corrupt():
         return True
     with pytest.raises(TypeError, match="scorer_version"):
         old_ctor(**{**broken, "purpose": "calibration"})
+
+
+@pytest.mark.parametrize("drop", ["purpose", "task_id", "verifier_score"])
+def test_a_malformed_v1_line_is_one_corrupt_line_not_an_unopenable_store(
+        tmp_path, drop):
+    """A v1 line that parses but cannot construct a record is skipped and
+    counted, exactly like a malformed current-schema line (Codex P1 on #324)."""
+    path = _path(tmp_path)
+    bad = dict(_record("bad").to_dict(), schema_version=1)
+    bad.pop(drop)
+    good = _record("good")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(bad) + "\n")
+        fh.write(json.dumps(good.to_dict()) + "\n")
+    store = AuditStore(path)
+    assert store.corrupt == 1
+    assert [r.record_id for r in store] == ["good"]
+
+
+def test_a_v1_line_with_an_invalid_inclusion_prob_is_counted_corrupt(tmp_path):
+    path = _path(tmp_path)
+    bad = dict(_record("bad").to_dict(), schema_version=1, inclusion_prob=0.0)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(bad) + "\n")
+    store = AuditStore(path)
+    assert store.corrupt == 1
+    assert list(store) == []
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_an_unknown_field_is_corrupt_not_silently_defaulted(tmp_path, version):
+    """A misspelt optional key must not load under the default value (Codex P2
+    on #324): ``strtaum`` would otherwise land the record in stratum "all"."""
+    path = _path(tmp_path)
+    bad = _record("typo").to_dict()
+    bad["schema_version"] = version
+    bad["strtaum"] = bad.pop("stratum")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(bad) + "\n")
+    store = AuditStore(path)
+    assert store.corrupt == 1
+    assert list(store) == []
+
+
+def test_an_unknown_schema_version_still_raises(tmp_path):
+    path = _path(tmp_path)
+    future = dict(_record("future").to_dict(), schema_version=3)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(future) + "\n")
+    with pytest.raises(ValueError, match="schema_version=3"):
+        AuditStore(path)
