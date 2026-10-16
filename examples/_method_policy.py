@@ -332,6 +332,24 @@ class MethodPolicy:
     #: A method whose artifact is skill-layer context and whose upstream keeps
     #: every update (Dynamic Cheatsheet) declares ``0.2``, like ACE.
     blast_radius: float = 0.6
+    #: Size of the engine's cheap ranking layer, in held-out tasks. ``None`` keeps
+    #: the engine default (a stable random 8). The audit that sits in front of the
+    #: acceptance policy lowers its trust in the cheap layer whenever cheap and
+    #: full held-out disagree about a candidate's direction, and below 0.75 trust
+    #: it opens for **any** blast radius -- so an accept-everything policy can
+    #: still be vetoed after one disagreement. Passing the full held-out size
+    #: makes the two layers the same measurement (the evaluation cache returns
+    #: identical numbers), so they cannot disagree and the audit never opens.
+    cheap_eval_tasks: Optional[int] = None
+    #: Opt-in test-time learning. When true, the runner scores the **test split as
+    #: a sequential stream** after the engine finishes: solve, score, then call
+    #: ``propose`` on that answer and apply the resulting diff to an in-memory
+    #: copy of the artifact before the next task. Only for strategies whose
+    #: ``Diff.ops`` are key -> value replacements. The stream uses its own
+    #: ``stream:`` phases, so the proposal budget check is unchanged, and the
+    #: evolved artifact in the ledger is never touched. Default ``False``: the
+    #: test split is scored with a frozen artifact, as for every other port.
+    test_time_learning: bool = False
     #: Optional replacement for the shared population layer, for a method whose
     #: paper specifies population dynamics the generic archive does not have.
     #: Takes a :class:`PopulationContext`, returns an ``aggregator_factory``.
