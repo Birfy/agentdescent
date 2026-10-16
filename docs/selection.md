@@ -103,6 +103,15 @@ on a re-run makes a seeded comparison meaningless. Pass `rng=` instead when the
 caller owns the stream: a port migrating off a hand-written rule has to keep
 drawing from *its* rng in *its* order, or every number it published moves.
 
+**`temperature` can go as low as you like.** `performance` and `novelty` use the
+raw `exp(score / temperature)` weights whenever they fit in a float, so seeded
+draws at ordinary temperatures never move. Below about `temperature = 1/709`
+those weights overflow, and the archive switches to the max-shifted
+`exp((score - best) / temperature)`. That is the same distribution, so a tiny
+temperature is simply near-greedy instead of an `OverflowError` mid-run.
+`temperature` has to be a positive finite number. `NaN` and `inf` are refused
+when the archive is constructed.
+
 ### `CladeThompson` — HGM's clade-metaproductivity sampling
 
 The [Huxley-Gödel Machine](https://arxiv.org/abs/2510.21614) (ICLR 2026;

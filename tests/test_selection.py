@@ -369,12 +369,102 @@ def test_sigmoid_novelty_all_rejected_scores_fall_back_to_uniform():
     assert len(picks) == 9
     assert {c.version for c in picks} == {0, 1, 2}
 
-
-
-@pytest.mark.parametrize("kwargs", [{"sampling": "nope"}, {"temperature": 0.0}])
+@pytest.mark.parametrize("kwargs", [
+    {"sampling": "nope"}, {"temperature": 0.0}, {"temperature": -1.0},
+    {"temperature": float("nan")}, {"temperature": float("inf")},
+    {"temperature": "warm"}, {"temperature": "0.5"}, {"temperature": b"0.5"},
+    {"temperature": None},
+])
 def test_archive_arguments_are_checked(kwargs):
     with pytest.raises(ValueError):
         Archive(**kwargs)
+
+
+# -- Archive softmax at the edges of the float range (#284) -------------------
+#
+# The draws below are what `main` at 924c25c produced. The overflow fallback
+# must not move a single one of them: a seeded comparison that drifts is
+# meaningless, and only temperatures that used to *crash* may change behaviour.
+_PINNED_POOL = (_c(1, 0.9, selected=3), _c(2, 0.5), _c(3, 0.7, selected=1),
+                _c(4, None))
+
+
+@pytest.mark.parametrize("sampling,temperature,rnd,expected", [
+    ("performance", 1.0, 0, [4, 3, 1, 1, 1, 2, 2, 4, 3, 2, 2, 1]),
+    ("performance", 1.0, 5, [1, 3, 3, 3, 3, 4, 4, 3, 3, 2, 3, 3]),
+    ("performance", 0.2, 0, [4, 3, 1, 1, 1, 1, 1, 4, 2, 1, 1, 1]),
+    ("performance", 0.2, 5, [1, 3, 1, 1, 2, 3, 4, 2, 2, 1, 2, 1]),
+    ("performance", 0.01, 0, [1] * 12),
+    ("novelty", 1.0, 0, [4, 4, 2, 2, 2, 2, 2, 4, 3, 3, 2, 1]),
+    ("novelty", 1.0, 5, [1, 4, 3, 3, 3, 4, 4, 3, 3, 2, 4, 3]),
+    ("novelty", 0.2, 0, [4, 3, 1, 1, 1, 2, 2, 4, 3, 2, 2, 1]),
+    ("novelty", 0.2, 5, [1, 3, 3, 3, 3, 3, 4, 3, 3, 2, 3, 3]),
+    ("novelty", 0.01, 5, [1] * 12),
+])
+def test_archive_ordinary_temperatures_draw_exactly_as_before(
+        sampling, temperature, rnd, expected):
+    ctx = _ctx(*_PINNED_POOL, round=rnd, n=12)
+    got = Archive(sampling=sampling, temperature=temperature,
+                  seed=7).select(ctx, 12)
+    assert [c.version for c in got] == expected
+
+
+@pytest.mark.parametrize("sampling", ["performance", "novelty"])
+@pytest.mark.parametrize("temperature", [1e-3, 1e-6, 1e-300, 1e-309, 5e-324])
+def test_archive_small_temperature_does_not_overflow(sampling, temperature):
+    """`exp(1 / 0.001)` is past the float range: `select()` used to raise
+    OverflowError. A tiny temperature is near-greedy, so it has to pick the
+    best-scoring candidate."""
+    ctx = _ctx(_c(1, 0.2), _c(2, 0.9), _c(3, 1.0), n=5)
+    got = Archive(sampling=sampling, temperature=temperature,
+                  seed=0).select(ctx, 5)
+    assert [c.version for c in got] == [3] * 5
+
+
+def test_archive_keeps_the_validated_temperature_as_a_float():
+    """An accepted archive must not fail at its first `score / temperature`:
+    what it keeps is the float it checked, and an int divides exactly the
+    same."""
+    arch = Archive(sampling="performance", temperature=1)
+    assert type(arch.temperature) is float and arch.temperature == 1.0
+    pool = (_c(1, 0.9), _c(2, 0.5))
+    assert arch.select(_ctx(*pool, n=3), 3) == \
+        Archive(sampling="performance", temperature=1.0).select(_ctx(*pool, n=3), 3)
+
+
+def test_archive_many_near_top_candidates_do_not_overflow_the_total():
+    """Every weight fits, but 300 of `exp(704)` sum past the float range and
+    `random.choices` refused the total."""
+    pool = [_c(i, 1.0) for i in range(300)]
+    got = Archive(sampling="performance", temperature=0.00142,
+                  seed=0).select(_ctx(*pool, n=50), 50)
+    assert len(got) == 50
+    assert len({c.version for c in got}) > 1, "ties must still be sampled"
+
+
+def test_archive_overflow_fallback_is_the_same_distribution():
+    """The shifted weights are the raw ones divided by one constant."""
+    pool = [_c(1, 0.2, selected=2), _c(2, 0.9), _c(3, 1.0, selected=1)]
+    temperature = 0.05            # representable: raw weights are returned
+    arch = Archive(sampling="novelty", temperature=temperature)
+    raw = arch._weights(pool)
+    top = max(0.2, 0.9, 1.0)
+    shifted = [math.exp((c.score - top) / temperature) / (1 + c.selected)
+               for c in pool]
+    ratios = [r / s for r, s in zip(raw, shifted)]
+    assert all(math.isclose(x, ratios[0], rel_tol=1e-12) for x in ratios)
+
+
+def test_archive_small_temperature_novelty_still_discounts_selected():
+    """In the fallback the novelty divisor is applied after the shift, so two
+    equally scored candidates still split by how often each was used."""
+    pool = [_c(1, 1.0, selected=9), _c(2, 1.0, selected=0), _c(3, 0.0)]
+    got = Archive(sampling="novelty", temperature=1e-4,
+                  seed=0).select(_ctx(*pool, n=200), 200)
+    used = sum(c.version == 1 for c in got)
+    fresh = sum(c.version == 2 for c in got)
+    assert fresh > used > 0
+    assert not any(c.version == 3 for c in got)
 
 
 def test_mcts_tries_an_unvisited_candidate_first():
