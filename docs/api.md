@@ -2900,7 +2900,7 @@ LearnableFusionPolicy(
 | method | what it does |
 |---|---|
 | `bind(verifier: Any) -> None` | Forward the verifier to the inner tournament and the union path. |
-| `select(artifact: Evolvable, diffs: List[Diff]) -> Tuple[Diff, Evolvable, bool]` | Learn or predict: skip the ranking sweep when the union provably wins. |
+| `select(artifact: Evolvable, diffs: List[Diff]) -> Tuple[Diff, Evolvable, bool]` | Learn or predict: skip the ranking sweep when the union is confidently predicted to win (a learned logistic, not a proof). |
 
 ### `ReflectiveFusion(...)`
 

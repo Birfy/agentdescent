@@ -56,7 +56,6 @@ for and correctly declines to merge it with itself.
 
 from __future__ import annotations
 
-import collections
 import math
 import random
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -398,6 +397,12 @@ class LearnableFusionPolicy:
             raise ValueError("epsilon must be in [0, 1]")
         if max_wrong_skips < 1:
             raise ValueError("max_wrong_skips must be >= 1")
+        if not (isinstance(min_trials, int) and min_trials >= 1):
+            raise ValueError("min_trials must be an int >= 1")
+        for name, value in (("lr", lr), ("reg", reg), ("max_logit", max_logit)):
+            if not (isinstance(value, (int, float)) and math.isfinite(value)
+                    and value > 0.0):
+                raise ValueError(f"{name} must be a finite number > 0")
         self.inner = inner or DefaultFusion(tournament=tournament)
         #: The engine's budget governor flips this when tokens run low
         #: (``aggregator.fusion_policy.tournament = should``); turning it off
@@ -415,6 +420,11 @@ class LearnableFusionPolicy:
         self._model = _FusionModel(n_features=5, lr=lr, reg=reg,
                                    max_logit=max_logit)
         self._union_policy = DefaultFusion(tournament=False)
+        #: The budget-degraded union path records unranked trials, and those
+        #: must land on the **same** list the engine reads -- otherwise
+        #: ``fusion_stats`` goes silent exactly when the governor flipped the
+        #: tournament off, which is the one time it should still speak.
+        self._union_policy.trials = self.inner.trials
         self._skip_enabled = True
         #: Consecutive counterfactual merges the model would have skipped but
         #: the tournament ranked a single instead (a wrong skip in a row).
@@ -438,7 +448,8 @@ class LearnableFusionPolicy:
 
     def select(self, artifact: Evolvable,
                diffs: List[Diff]) -> Tuple[Diff, Evolvable, bool]:
-        """Learn or predict: skip the ranking sweep when the union provably wins."""
+        """Learn or predict: skip the ranking sweep when the union is
+        confidently predicted to win (a learned logistic, not a proof)."""
         if not self.tournament:
             return self._union_policy.select(artifact, diffs)
         union, _reason = self._union_of(diffs)
@@ -462,18 +473,23 @@ class LearnableFusionPolicy:
         return result
 
     def _observe(self, features: Tuple[float, ...], fused: bool) -> None:
+        # Snapshot the **pre-update** prediction first. The rollback question
+        # is "would the rule that was in force have skipped this merge?" -- and
+        # a negative label immediately drags the logistic down, often below the
+        # confidence cut in one step, so scoring after the update misses exactly
+        # the confident-and-wrong counterfactual the guard exists for.
+        predicted_skip = self._model.predict(features) >= 1.0 - self.threshold
         self._model.update(features, fused)
         if self._model.n_obs < self.min_trials:
             return
-        # Would the learned rule have skipped this merge? Skipping is right iff
-        # the tournament also picked the union (``fused``). The rollback guard
-        # is deliberately unforgiving: a counterfactual merge that the model
-        # was *confident* about skipping but the tournament ranked a single
-        # instead breaks the trust, and after ``max_wrong_skips`` such events
-        # (default one) skipping is retired permanently. The cost of a false
-        # alarm is merely losing the saving; the cost of a wrong skip is
-        # committing a worse merge. Conservative is correct here.
-        predicted_skip = self._model.predict(features) >= 1.0 - self.threshold
+        # Skipping is right iff the tournament also picked the union
+        # (``fused``). The rollback guard is deliberately unforgiving: a
+        # counterfactual merge the model was *confident* about skipping but the
+        # tournament ranked a single instead breaks the trust, and after
+        # ``max_wrong_skips`` such events (default one) skipping is retired
+        # permanently. The cost of a false alarm is merely losing the saving;
+        # the cost of a wrong skip is committing a worse merge. Conservative is
+        # correct here.
         if predicted_skip and not fused:
             self._wrong_skips += 1
             if self._wrong_skips >= self.max_wrong_skips:
@@ -483,19 +499,15 @@ class LearnableFusionPolicy:
 
     # -- features (diff-only, zero verifier calls) -----------------------------
 
-    @staticmethod
-    def _union_of(diffs: List[Diff]) -> Tuple[Optional[Diff], str]:
-        from .aggregator import diffs_contradict, fuse_diffs
+    def _union_of(self, diffs: List[Diff]) -> Tuple[Optional[Diff], str]:
+        """The fused candidate, via the inner policy's own rule.
 
-        if len(diffs) <= 1:
-            return None, "single-candidate"
-        if any(diffs_contradict(a, b)
-               for i, a in enumerate(diffs) for b in diffs[i + 1:]):
-            return None, "contradiction"
-        union = fuse_diffs(diffs)
-        if any(union.ops == d.ops for d in diffs):
-            return None, "nothing-to-fuse"
-        return union, ""
+        Deliberately delegated rather than copied: ``DefaultFusion._union_of``
+        is the single source of the three-way "nothing-to-fuse" rule, and a
+        byte-for-byte copy here would silently drift if that rule ever changed
+        again. The inner is the tournament policy the learner wraps; it must
+        have a ``_union_of`` (``DefaultFusion`` does)."""
+        return self.inner._union_of(diffs)
 
     @staticmethod
     def _features(diffs: List[Diff], union: Optional[Diff]) -> Tuple[float, ...]:
@@ -518,21 +530,30 @@ class LearnableFusionPolicy:
         )
 
     def status(self) -> dict:
+        # The skip fraction's denominator is *all* merges decided (skipped or
+        # ranked) -- "skips / tournament_runs" would climb past 1.0 on a
+        # warm skip-heavy run and read as an occupancy instead of a fraction.
+        decided = self.skipped + self.tournament_runs
         return {
             "skipped": self.skipped,
             "tournament_runs": self.tournament_runs,
             "model_observations": self._model.n_obs,
             "skip_enabled": self._skip_enabled,
-            "skips_per_merge": (self.skipped / self.tournament_runs
-                                if self.tournament_runs else 0.0),
+            "skips_per_merge": (self.skipped / decided
+                                if decided else 0.0),
         }
 
 
 class _FusionModel:
-    """A tiny online logistic over the fusion features (mirrors the allocator's
-    ``LearningValueModel``: momentum learning rate, L2, logit clip). None of
-    this is a research contribution -- it is the smallest thing that learns
-    without diverging on one noisy run."""
+    """A tiny online logistic over the fusion features.
+
+    Deliberately a private twin of the allocator's
+    :class:`~agentdescent.allocator.LearningValueModel` rather than a reuse:
+    same idea (momentum learning rate, L2, logit clip), different feature count
+    and weight layout (bias at ``[-1]`` here), and sharing the allocator's
+    hard-coded three-feature class would force this module's five features into
+    a layout that does not fit. None of this is a research contribution -- it
+    is the smallest thing that learns without diverging on one noisy run."""
 
     def __init__(self, n_features: int, lr: float = 0.2, reg: float = 0.05,
                  max_logit: float = 3.0) -> None:

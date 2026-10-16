@@ -54,13 +54,14 @@ def test_default_is_the_tournament_verbatim():
 
 def test_features_are_diff_only_and_zero_verifier_calls():
     base, diffs = _setup()
-    union, _ = LearnableFusionPolicy._union_of(diffs)
+    policy = LearnableFusionPolicy(seed=0)
+    union, _ = policy._union_of(diffs)
     f = LearnableFusionPolicy._features(diffs, union)
     assert len(f) == 5
     assert f[0] > 0                          # log1p(n_candidates)
     assert 0.0 <= f[1] <= 1.0                # overlap fraction
     assert f[4] == 1.0                       # a union exists
-    none, _ = LearnableFusionPolicy._union_of(diffs[:1])
+    none, _ = policy._union_of(diffs[:1])
     f2 = LearnableFusionPolicy._features(diffs[:1], none)
     assert f2[4] == 0.0
 
@@ -130,7 +131,30 @@ def test_turning_the_tournament_off_degrades_to_the_union_path():
     assert out[2] is True                      # the plain union
     assert policy.skipped == 0
     assert policy.tournament_runs == 0
-    assert policy.trials == []
+    # the unranked trial still lands on the list the engine reads: a budget
+    # governor that turned the tournament off must not make fusion_stats silent
+    assert len(policy.trials) == 1
+    assert policy.trials[0].ranked is False
+
+
+def test_the_guard_scores_the_pre_update_prediction():
+    # The rollback question is "would the rule *in force* have skipped this
+    # merge?". A negative label drags the logistic down -- often below the
+    # confidence cut in one step -- so scoring after the update misses the
+    # confident-and-wrong counterfactual. Inject barely-confident weights
+    # (p ~ 0.86 pre-update, ~0.84 after one negative label) and prove the
+    # guard still fires.
+    base, diffs = _setup()
+    policy = LearnableFusionPolicy(seed=0, min_trials=5)
+    union, _ = policy._union_of(diffs)
+    features = policy._features(diffs, union)
+    # bias = logit for p = 0.86: ln(0.86/0.14) ~ 1.815, all feature weights 0
+    import math as _m
+    policy._model._w = [0.0, 0.0, 0.0, 0.0, _m.log(0.86 / 0.14)]
+    assert abs(policy._model.predict(features) - 0.86) < 0.02   # barely confident
+    policy._model.n_obs = policy.min_trials                     # past warm-up
+    policy._observe(features, False)                            # a wrong skip
+    assert policy.status()["skip_enabled"] is False
 
 
 def test_bind_forwards_the_verifier_to_the_inner_tournament():
