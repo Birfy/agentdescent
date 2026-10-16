@@ -85,11 +85,12 @@ class PopulationAggregator(Aggregator):
 
     def __init__(self, ledger, verifier, audit, config, staleness_policy=None,
                  *, selection: SelectionPolicy, artifact_id: str, meter=None,
-                 conflict=None, fusion=None, acceptance=None, promotion=None):
+                 conflict=None, fusion=None, acceptance=None, promotion=None,
+                 screen=None):
         super().__init__(ledger, verifier, audit, config,
                          staleness_policy=staleness_policy, meter=meter,
                          conflict=conflict, fusion=fusion, acceptance=acceptance,
-                         promotion=promotion)
+                         promotion=promotion, screen=screen)
         self.selection = selection
         self.population_artifact = artifact_id
         self._archive: List[Dict[str, object]] = []
@@ -526,7 +527,7 @@ class PopulationAggregator(Aggregator):
 
 def population_factory(selection: SelectionPolicy, artifact_id: str, *,
                        meter=None, conflict=None, fusion=None, acceptance=None,
-                       promotion=None):
+                       promotion=None, screen=None):
     """The ``aggregator_factory=`` adapter for one run.
 
     The factory path bypasses the engine's default-aggregator construction, so
@@ -541,6 +542,6 @@ def population_factory(selection: SelectionPolicy, artifact_id: str, *,
             ledger, verifier, audit, config, staleness_policy,
             selection=selection, artifact_id=artifact_id, meter=meter,
             conflict=conflict, fusion=fusion, acceptance=acceptance,
-            promotion=promotion)
+            promotion=promotion, screen=screen)
 
     return build
