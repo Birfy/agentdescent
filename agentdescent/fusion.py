@@ -403,7 +403,13 @@ class LearnableFusionPolicy:
             if not (isinstance(value, (int, float)) and math.isfinite(value)
                     and value > 0.0):
                 raise ValueError(f"{name} must be a finite number > 0")
-        self.inner = inner or DefaultFusion(tournament=tournament)
+        #: The label-producing delegate must always rank, whatever the outer
+        #: flag started as: ``tournament`` here only chooses *which path*
+        #: ``select`` takes (ranked vs the budget-degraded union path), and the
+        #: flag can flip at runtime. A default inner built from the initial
+        #: flag would stay unranked after ``False -> True`` and hand the
+        #: learner an unranked union to train on (#302).
+        self.inner = inner or DefaultFusion(tournament=True)
         #: The engine's budget governor flips this when tokens run low
         #: (``aggregator.fusion_policy.tournament = should``); turning it off
         #: degrades to the union path, no labels collected.
@@ -465,8 +471,27 @@ class LearnableFusionPolicy:
     def _run_tournament(self, artifact: Evolvable,
                         diffs: List[Diff]) -> Tuple[Diff, Evolvable, bool]:
         """Rank the candidates (the label-producing path), then observe."""
+        inner = self.inner
+        # A caller-supplied (or earlier-mutated) inner may be sitting at
+        # ``tournament=False``, which returns an unranked union. The ranking
+        # must actually happen on this path, so force it for the call only and
+        # restore the caller's setting afterwards.
+        forced = getattr(inner, "tournament", True) is False
+        if forced:
+            inner.tournament = True
+        before = len(inner.trials) if hasattr(inner, "trials") else 0
+        try:
+            result = inner.select(artifact, diffs)
+        finally:
+            if forced:
+                inner.tournament = False
+        # Never train on, or count, a merge that was not actually ranked: an
+        # inner that still answered with an unranked trial produced a union,
+        # not a measured winner.
+        new = list(getattr(inner, "trials", ()))[before:]
+        if new and not any(getattr(t, "ranked", True) for t in new):
+            return result
         self.tournament_runs += 1
-        result = self.inner.select(artifact, diffs)
         fused = bool(result[2])
         union, _reason = self._union_of(diffs)
         self._observe(self._features(diffs, union), fused)
