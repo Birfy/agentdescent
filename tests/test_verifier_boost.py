@@ -557,3 +557,96 @@ def test_wrapped_and_unwrapped_independent_gates_refuse_the_same_regression(
     assert plain.committed_version is None, plain.category
     assert wrapped.committed_version is None
     assert wrapped.category == plain.category
+
+
+# -- the gate must beat a constant predictor (#306) ------------------------------
+
+
+class _ListStore:
+    """The slice of AuditStore the boost reads: just ``for_improvement``."""
+
+    def __init__(self, recs):
+        self._recs = recs
+
+    def for_improvement(self, version=None, scorer_version=None):
+        return self._recs
+
+
+def _namespace_records(pairs):
+    import types
+    return [types.SimpleNamespace(resolved=True, verifier_score=f, oracle_score=y)
+            for f, y in pairs]
+
+
+def test_a_pure_bias_shift_without_discrimination_is_not_validated():
+    """Score = noise in [0.8, 1.0], oracle passes 30% of the time, uncorrelated.
+
+    The raw verifier is badly biased (MSE ~0.58), so *any* curve that moves the
+    mean down beats it -- yet the curve carries no ranking information and is
+    worse than predicting the training mean. The gate must say so."""
+    import random
+
+    rng = random.Random(1)
+    recs = _namespace_records(
+        (0.8 + 0.2 * rng.random(), 1.0 if rng.random() < 0.3 else 0.0)
+        for _ in range(400))
+    boost = VerifierBoost(_FakeVerifier(score=0.9), _ListStore(recs))
+    status = boost.status()
+    assert boost.is_active is False
+    assert "constant" in status["reason"]
+    assert boost.version_tag() == "boost:inactive"
+    # rejection still exposes the measured baseline (and the MSEs that
+    # justified it) rather than the default "not measured" inf
+    assert math.isfinite(status["error_const"]) and status["error_const"] > 0.0
+    assert math.isfinite(status["error_before"])
+    assert math.isfinite(status["error_after"])
+    assert status["n_train"] > 0 and status["n_val"] > 0
+    # the curve is not applied to the ranking layers
+    assert boost.cheap_eval(object()) == 0.9
+
+
+def test_a_biased_but_informative_verifier_still_activates():
+    """Control: monotone-informative yet miscalibrated (oracle = 1 iff f > 0.9,
+    scores in [0.8, 1.0]) is the case the boost exists for."""
+    import random
+
+    rng = random.Random(2)
+    pairs = []
+    for _ in range(400):
+        f = 0.8 + 0.2 * rng.random()
+        pairs.append((f, 1.0 if f > 0.9 else 0.0))
+    boost = VerifierBoost(_FakeVerifier(score=0.95), _ListStore(_namespace_records(pairs)))
+    status = boost.status()
+    assert boost.is_active is True, status["reason"]
+    assert status["error_after"] <= status["error_const"] * (1.0 - boost.min_gain)
+    assert status["error_after"] <= status["error_before"] * (1.0 - boost.min_gain)
+    assert boost.version_tag().startswith("boost:active:")
+    assert boost.cheap_eval(object()) > 0.5      # f=0.95 is in the passing region
+
+
+def test_status_exposes_the_constant_baseline_and_keeps_existing_keys():
+    y = list(np.linspace(0.1, 0.9, 24))
+    s = _biased_scores(y, bias=0.2)
+    store = _store_with([_record(score, oracle) for score, oracle in zip(s, y)])
+    boost = VerifierBoost(_FakeVerifier(score=0.5), store, min_labels=10,
+                          min_val_labels=3, seed=1)
+    status = boost.status()
+    assert {"active", "fitted", "n_train", "n_val", "error_before", "error_after",
+            "resid_sd", "reason", "fit_at", "version_tag"} <= set(status)
+    assert math.isfinite(status["error_const"]) and status["error_const"] > 0.0
+    # a state built the old way (no baseline) reports "not measured"
+    from agentdescent.audit import boost as boost_mod
+    old = boost_mod.BoostState(False, False, 0, 0, math.inf, math.inf, "x", 0.0)
+    assert old.error_const == math.inf
+    # before any fit (or after an early rejection with no measured baseline)
+    # the baseline is "not measured"
+    fresh = VerifierBoost(_FakeVerifier(), _store_with([]), auto=False)
+    assert fresh.status()["error_const"] == math.inf
+
+
+def test_a_degenerate_single_level_curve_is_rejected_with_a_reason():
+    # min_gain=0 lets a one-level (constant) curve tie the constant baseline.
+    recs = _namespace_records([(0.5 + 0.001 * i, 0.5) for i in range(100)])
+    boost = VerifierBoost(_FakeVerifier(), _ListStore(recs), min_gain=0.0)
+    assert boost.is_active is False
+    assert "degenerate" in boost.status()["reason"]
