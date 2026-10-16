@@ -1294,6 +1294,7 @@ AuditedReward(
 |---|---|
 | `calibration_set() -> list` | Resolved CALIBRATION records for *this* verifier version. |
 | `pending() -> list` | Audited units still waiting on truth. |
+| `refresh_verifier_version() -> str` | Re-derive `verifier_version` from a live `version_extra`. |
 
 ### `RenderTap(run: Callable[[str, Any], str]) -> None`
 
