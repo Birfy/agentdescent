@@ -368,7 +368,7 @@ def run_port(
         "strategy": policy.strategy,
         "artifact_id": f"candidate-{policy.name}",
         "initial_state": policy.strategy.initial(),
-        "blast_radius": 0.6,
+        "blast_radius": policy.blast_radius,
         "n_workers": workers,
         "self_verify": policy.self_verify,
         "held_out_frac": policy.held_out_frac,

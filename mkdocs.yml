@@ -118,6 +118,7 @@ nav:
     - MethodPolicy porting checklist: porting-methodpolicy.md
     - Port fidelity: port-fidelity.md
     - ACE — context evolution: algo-ace.md
+    - Dynamic Cheatsheet — test-time memory: algo-dynamic-cheatsheet.md
     - GEPA — prompt evolution: algo-gepa.md
     - EvoSkill — skill discovery: algo-evoskill.md
     - SkillOpt — skill-document training: algo-skillopt.md
