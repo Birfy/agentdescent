@@ -17,9 +17,8 @@ rewrite is kept only if validation did not get worse
   ``CONSTRAINT_PROMPT_ADDITION`` + ``TGD_PROMPT_SUFFIX`` under
   ``OPTIMIZER_SYSTEM_PROMPT``. The new value is whatever sits between
   ``<IMPROVED_VARIABLE>`` tags, as ``new_text.split(tag0)[1].split(tag1)[0]``.
-* ``run_validation_revert`` -> the engine's held-out acceptance gate, unchanged.
-  Upstream keeps the new prompt iff ``val_performance >= previous`` -- which is
-  what the default aggregator's gate does with a numeric score.
+* ``run_validation_revert`` -> the engine's held-out acceptance gate, with the
+  stricter rule declared below. No ``aggregator_factory`` is needed.
 
 So a proposal is **two model calls** (``proposal_calls_per_candidate=2``): the
 gradient, then the step. The loss TextGrad backpropagates is often free-form
@@ -30,6 +29,14 @@ is for its QA tasks.
 
 Declared departures, each stated rather than implied:
 
+* **The gate is stricter than upstream's revert.** ``run_validation_revert``
+  reverts only when ``val_performance < previous``, so a rewrite that *ties* the
+  previous validation score is **kept**. The engine's default gate accepts a
+  candidate only when the Beta posterior ``P(candidate_rate > base_rate)``
+  clears an annealed threshold, and a tie is resolved by rejecting: ties and
+  marginal gains are refused, increasingly so as the version grows. Matching
+  upstream exactly would take a thin ``aggregator_factory``; this port documents
+  the difference instead.
 * **Minibatch of one per worker.** Upstream sums ``batch_size=3`` losses before
   one ``backward()``. Here a proposal is one rollout, so each worker's gradient
   is a batch of one and concurrent workers' rewrites meet in the shared
@@ -219,8 +226,10 @@ class TextVariable(ValidatedSlot):
     Differs from :class:`ValidatedSlot` in two ways that are TextGrad's own.
     A step whose rewrite equals the current value changes nothing, so it is a
     **no-op** -- no diff, counted in ``noop_steps`` -- and the diff id is
-    **content-addressed**, so two workers whose critiques lead to the same text
-    produce the same id for the same base version rather than competing.
+    **content-addressed** -- the id hashes the text, not the order it arrived
+    in, so one author's repeated critiques to the same text give one id for a
+    base version. The id still carries the author, so two *workers* proposing the
+    same text are distinct diffs, as for every other slot in this repository.
     """
 
     noop_steps: int = 0
@@ -288,19 +297,23 @@ def build(seed: int, *, dry_run: bool = False) -> MethodPolicy:
 
     with _committed_sample(dry_run):
         train, held_out, test = gsm8k_splits(seed)
+    dry_run_note = (
+        "dry-run: the splits are the committed GSM8K sample "
+        f"({len(train)}/{len(held_out)}/{len(test)}); nothing was fetched. A "
+        "live run loads GSM8K and uses 64/64/64.",) if dry_run else ()
     return MethodPolicy(
         name="textgrad",
         fidelity=FIDELITY,
         notes=(
             f"Traced against {UPSTREAM}: evaluation/prompt_optimization.py, textgrad/optimizer/optimizer.py (TextualGradientDescent), optimizer_prompts.py, autograd/llm_backward_prompts.py.",
             "loss.backward() maps to a gradient call (the base-case backward prompt under BACKWARD_SYSTEM_PROMPT); optimizer.step() maps to a TGD call whose rewrite is read from <IMPROVED_VARIABLE> tags; the two are the proposal's two reserved calls.",
-            "run_validation_revert maps to the engine's held-out gate: a rewrite is kept only if validation does not get worse.",
+            "run_validation_revert maps to the engine's held-out gate, which is stricter: upstream keeps a rewrite that ties the previous validation score (it reverts only on val < previous), while the Beta-posterior gate needs P(candidate > base) above an annealed threshold, so ties and marginal gains are rejected.",
             "The score gating the port is GSM8K's last-number match; the free-form critique is the loss text, not the gate.",
             "A minibatch is one rollout per worker; concurrent workers' rewrites meet in the reflective merge rather than being summed as tg.sum does.",
             "A correct attempt proposes nothing, as the backward system prompt asks the gradient engine to give no feedback to a working variable.",
             "A reply missing the improved-variable tags is an invalid proposal, counted and never substituted; upstream raises IndexError.",
             "Multi-module systems, gradient memory, momentum and the molecule / code / solution demos are out of scope; the textgrad package is never imported.",
-        ),
+        ) + dry_run_note,
         strategy=TextVariable(initial_value=STARTING_INSTRUCTION,
                               validator=_instruction),
         train_tasks=tuple(train),
@@ -315,16 +328,8 @@ def build(seed: int, *, dry_run: bool = False) -> MethodPolicy:
 
 
 def main(argv=None) -> int:
-    planned = []
-    status = standard_main(
-        build, argv,
-        build_kwargs=lambda a: (planned.append(a.dry_run),
-                                {"dry_run": a.dry_run})[1])
-    if status == 0 and any(planned):
-        print("[dry-run] textgrad: correction to the line above -- the splits "
-              "came from the committed GSM8K sample and nothing was fetched; "
-              "a live run loads GSM8K.")
-    return status
+    return standard_main(build, argv,
+                         build_kwargs=lambda a: {"dry_run": a.dry_run})
 
 
 if __name__ == "__main__":

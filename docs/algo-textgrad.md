@@ -7,7 +7,7 @@ description: A runnable microport of TextGrad's textual-gradient prompt optimiza
 > **Reflection / refinement, by backpropagated critique.** An LLM writes a
 > natural-language "gradient" on a prompt variable from how it performed, a
 > second call rewrites the variable from that critique, and the rewrite is kept
-> only if validation did not get worse. Runs through the shared
+> only if validation did not get worse (upstream's rule; the engine's gate is stricter, see Boundaries). Runs through the shared
 > [`MethodPolicy`](policies.md) runner. Example:
 > [`examples/textgrad/textgrad_prompt_optimization.py`](https://github.com/Birfy/agentdescent/blob/main/examples/textgrad/textgrad_prompt_optimization.py).
 
@@ -35,7 +35,7 @@ for feedback on how the variable should change (a textual gradient, explicitly
 not a new version of it); `optimizer.step()` (`TextualGradientDescent`) asks an
 *optimizer* LLM to rewrite the variable from that feedback and reads the result
 between `<IMPROVED_VARIABLE>` tags. The prompt-optimization script then keeps
-the rewrite only if validation did not drop (`run_validation_revert`).
+the rewrite unless validation dropped (`run_validation_revert`: a tie is kept).
 
 TextGrad's loss is often a free-form critique rather than a number. Here the
 **gate stays a real metric** — GSM8K's last-number match on a held-out split —
@@ -49,9 +49,9 @@ output is for its QA tasks.
 |---|---|
 | `loss.backward()` on the prompt Variable | the proposal's first call: `backward_prompt`, the base-case backward prompt under `BACKWARD_SYSTEM_PROMPT` |
 | `TextualGradientDescent.step()` | the second call: `tgd_prompt` under `OPTIMIZER_SYSTEM_PROMPT`; `extract_improved` reads the `<IMPROVED_VARIABLE>` span |
-| The prompt `Variable` | `TextVariable`, a `ValidatedSlot` whose diff id is content-addressed; an unchanged rewrite is a counted no-op |
+| The prompt `Variable` | `TextVariable`, a `ValidatedSlot` whose diff id hashes the text (per author and base version); an unchanged rewrite is a counted no-op |
 | `constraints=[...]` | `CONSTRAINTS`: a rewrite may not bake this conversation's numbers into a prompt read against other questions |
-| `run_validation_revert` | the engine's held-out acceptance gate (default aggregator) — no `aggregator_factory`, no new core contract |
+| `run_validation_revert` | the engine's held-out acceptance gate (default aggregator), **which is stricter** — see the first boundary; no `aggregator_factory`, no new core contract |
 | `tg.sum(losses)` over a minibatch | concurrent workers' rewrites meeting in the shared reflective merge (see below) |
 
 The proposal is two reserved calls (`proposal_calls_per_candidate=2`): gradient,
@@ -59,6 +59,15 @@ then step.
 
 ## Boundaries
 
+- **The gate is stricter than upstream's revert.** `run_validation_revert`
+  reverts only when `val_performance < previous`, so a rewrite that **ties** the
+  previous validation score is **kept**. The engine's default gate accepts only
+  when the Beta posterior `P(candidate_rate > base_rate)` clears an annealed
+  threshold (low at version 1, rising with the version), and a tie resolves by
+  rejecting. Ties and marginal gains are refused here that upstream would keep.
+  Matching upstream exactly would take a thin
+  [`aggregator_factory`](aggregator-factory.md); this port documents the
+  difference instead.
 - **Minibatch of one per worker.** Upstream sums `batch_size=3` losses before a
   single `backward()`; here a proposal is one rollout, and the sum is replaced by
   the reflective merge of concurrent workers' rewrites. Same intent, not the same
@@ -95,7 +104,8 @@ python -m examples.textgrad.textgrad_prompt_optimization --yes --seed 0 \
 ```
 
 `--dry-run` makes **zero network and zero model calls**: it reads the committed
-96-row GSM8K slice instead of fetching, says so, and does not leave the switch
+96-row GSM8K slice instead of fetching (so its splits are 32/32/32 rather than
+the live 64/64/64, and it says so in its plan), and does not leave the switch
 on. A live run loads the real benchmark and never falls back to the slice.
 
 Flags: [the MethodPolicy command line](self-evolution-examples.md#the-methodpolicy-command-line).

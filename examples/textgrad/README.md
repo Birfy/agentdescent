@@ -10,7 +10,7 @@ Port onto the AgentDescent engine, as a declarative
 | Paper | "Optimizing generative AI by backpropagating language model feedback", Yuksekgonul et al., *Nature* 2025 ([doi](https://www.nature.com/articles/s41586-025-08661-4)); [arXiv:2406.07496](https://arxiv.org/abs/2406.07496) |
 | Upstream code | [zou-group/textgrad@75e912e2](https://github.com/zou-group/textgrad/tree/75e912e210864b61999781778cdf756d4468120f) |
 | Domain | GSM8K (64/64/64 windows) |
-| Definition plug-ins | `TextVariable` (content-addressed single slot); two-call backward → TGD-step proposal; reflective merge |
+| Definition plug-ins | `TextVariable` (single slot, text-hashed diff id); two-call backward → TGD-step proposal; reflective merge |
 
 ## Run
 
@@ -20,7 +20,7 @@ python -m examples.textgrad.textgrad_prompt_optimization --provider openai --mod
 ```
 
 `--dry-run` prints the configuration and returns with **zero network access
-and no API key** (the `textgrad` package is never imported, and no model is
+and no API key** (it reads the committed 96-row GSM8K sample, so its splits are 32/32/32 and not the live 64/64/64; the `textgrad` package is never imported, and no model is
 called).
 
 ## What is in here

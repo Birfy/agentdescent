@@ -128,7 +128,9 @@ def test_a_rewrite_equal_to_the_current_text_is_a_noop():
     assert strategy.invalid_proposals == 0
 
 
-def test_identical_critiques_give_the_same_content_addressed_diff():
+def test_identical_critiques_give_the_same_text_hashed_diff_per_author():
+    """The id hashes the text, per author and base version. Two *workers* still
+    get distinct ids for the same text, like every other slot's diffs."""
     policy = tg.build(0)
     strategy = policy.strategy
     state = strategy.initial()
@@ -139,6 +141,7 @@ def test_identical_critiques_give_the_same_content_addressed_diff():
     assert a.diff_id == b.diff_id and a.ops == b.ops
     other = strategy.to_diff(state, "Show every step, then the number.", "w0", 3, "a")
     assert other.diff_id != a.diff_id
+    assert strategy.to_diff(state, first, "w1", 3, "a").diff_id != a.diff_id
 
 
 # -- the held-out gate -------------------------------------------------------------
@@ -147,9 +150,12 @@ _BETTER = "Work step by step and end with the final number."
 _WORSE = "Answer from memory without any working."
 
 
-def _model(rewrite):
+def _model(rewrite, seed_solves_even=False):
     """Solves a task iff the instruction in force says 'step by step'; the
-    gradient and step calls are the scripted ones."""
+    gradient and step calls are the scripted ones.
+
+    ``seed_solves_even`` lets the *seed* instruction solve the items whose gold
+    answer is even, so a rewrite can do strictly worse than the head."""
     gold = {}
     for split in ("train", "test"):
         for row in load_split(split):
@@ -165,15 +171,18 @@ def _model(rewrite):
             if question in prompt:
                 if "step by step" in lower:
                     return f"Working it through, the answer is {answer}"
+                if seed_solves_even and int(answer) % 2 == 0 \
+                        and _WORSE not in prompt:
+                    return f"The answer is {answer}"
                 return f"The answer is {int(answer) + 1}"
         return "I do not know."
 
     return complete
 
 
-def _run(rewrite, capsys):
+def _run(rewrite, capsys, seed_solves_even=False):
     usage = Usage()
-    recorder = Recorder(metered(_model(rewrite), usage), usage)
+    recorder = Recorder(metered(_model(rewrite, seed_solves_even), usage), usage)
     policy = tg.build(0)
     payload = run_port(policy, recorder, mode="sync_parallel", seed=0,
                        workers=2, candidate_budget=4, max_seconds=60.0,
@@ -182,16 +191,28 @@ def _run(rewrite, capsys):
     return policy, payload, artifact
 
 
-def test_a_rewrite_that_fails_the_heldout_gate_is_rejected(capsys):
-    """The seed instruction does not say 'step by step', so the stub model is
-    wrong on every item; a rewrite that keeps it wrong cannot beat the head."""
-    policy, payload, artifact = _run(_WORSE, capsys)
-    # rewrites really were proposed (two calls each), so this is the gate saying
-    # no and not an idle run
+def test_a_rewrite_that_regresses_heldout_quality_is_rejected(capsys):
+    """A true regression: the seed solves the even-answer items and the rewrite
+    solves none, so validation drops. Upstream's `run_validation_revert` would
+    revert this too."""
+    policy, payload, artifact = _run(_WORSE, capsys, seed_solves_even=True)
+    assert payload["baseline_validation_quality"] > 0.0
     assert payload["budget"]["observed_proposal_calls"] >= 2
     assert payload["accepted"] == 0
     assert payload["validation_quality"] == payload["baseline_validation_quality"]
     assert artifact.strip().startswith(STARTING_INSTRUCTION)
+    assert _WORSE not in artifact
+
+
+def test_a_rewrite_that_only_ties_heldout_quality_is_also_rejected(capsys):
+    """A declared departure, pinned: upstream's revert rule keeps a rewrite whose
+    validation score *ties* the previous one (it reverts only on `val <
+    previous`); the engine's Beta-posterior gate resolves a tie by rejecting.
+    Here the seed and the rewrite both score zero on every item."""
+    policy, payload, artifact = _run(_WORSE, capsys)
+    assert payload["budget"]["observed_proposal_calls"] >= 2   # a real proposal
+    assert payload["validation_quality"] == payload["baseline_validation_quality"]
+    assert payload["accepted"] == 0
     assert _WORSE not in artifact
     assert payload["final_quality"] == payload["baseline_quality"]
 
@@ -225,6 +246,7 @@ def test_dry_run_needs_no_network_and_no_api_key(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "textgrad [mechanism_microport]" in out
     assert "proposal calls=4" in out
+    assert "committed GSM8K sample" in out and "correction" not in out
     # the sample is scoped to the build, not left switched on
     import os
     assert "AGENTDESCENT_GSM8K_SAMPLE" not in os.environ
