@@ -31,7 +31,7 @@ __all__ = ["exact_match", "contains", "last_number", "numeric_close",
            "SCORERS", "scorer", "command_scorer", "GraderError"]
 
 #: A number as a model or a grader writes it. Understands an exponent
-#: (``1.5e-3``, Python's ``1e-05``), a leading decimal point (``.5``) and
+#: (``1.5e-3``, ``1.e-3``, Python's ``1e-05``), a leading decimal point (``.5``) and
 #: thousands groups of exactly three digits (``1,234.5``, so ``1,2,3`` is three
 #: numbers, not ``123``). A ``-``/``+`` is a sign only when it is not glued to
 #: a preceding digit, letter or closing bracket, so ``pages 3-4`` reads ``4``,
@@ -39,8 +39,8 @@ __all__ = ["exact_match", "contains", "last_number", "numeric_close",
 _NUMBER = re.compile(
     r"(?<![\d.])"                          # not in the middle of another number
     r"(?:(?<![0-9A-Za-z)\]}])[-+])?"       # a sign, unless it is a binary minus
-    r"(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?"     # thousands-grouped
-    r"|\d+(?:\.\d+)?"                      # plain
+    r"(?:\d{1,3}(?:,\d{3})+(?:\.\d*)?"     # thousands-grouped
+    r"|\d+(?:\.\d*)?"                      # plain; ``1.`` / ``1.e-3`` too
     r"|\.\d+)"                              # leading decimal point
     r"(?:[eE][-+]?\d+)?"                    # exponent
     r"(?!\d)"

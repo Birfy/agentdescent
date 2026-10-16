@@ -18,6 +18,9 @@ from agentdescent.rewards import (GraderError, _last_number_in, command_scorer,
     ("1.5e-3", 0.0015),
     ("6.02e23", 6.02e23),
     ("6.02E+23", 6.02e23),
+    ("1.e-3", 0.001),
+    ("2.E5", 2e5),
+    ("1,234.e2", 123400.0),
     ("Answer: 1e-05", 1e-05),
     (".5", 0.5),
     ("-.25", -0.25),
@@ -45,7 +48,7 @@ def test_last_number_in_reads_the_written_figure(text, want):
     assert _last_number_in(text) == pytest.approx(want)
 
 
-@pytest.mark.parametrize("text", ["", "no digits here", "1e999", "-1e999"])
+@pytest.mark.parametrize("text", ["", "no digits here", "1e999", "-1e999", "1.e999"])
 def test_last_number_in_has_no_finite_number(text):
     assert _last_number_in(text) is None
 
@@ -90,3 +93,6 @@ def test_command_scorer_refuses_an_overflowing_score():
     # 1e999 is inf; it used to clamp to a perfect 1.0
     with pytest.raises(GraderError):
         _grader("print('1e999')")(_task("x"), "out")
+    # a trailing decimal point before the exponent must not split it into 999
+    with pytest.raises(GraderError):
+        _grader("print('1.e999')")(_task("x"), "out")
