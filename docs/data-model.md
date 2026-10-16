@@ -159,7 +159,8 @@ world moved underneath it, and what happens next is the
 ## `Contract` — the interface that must not silently change
 
 ```python
-Contract(input_schema="task", output_schema="text", side_effects=(), major=1)
+Contract(input_schema="task", output_schema="text", side_effects=(), major=1,
+         depends_on=())
 ```
 
 Artifacts depend on each other's *interfaces*, not their contents. A change that
@@ -168,8 +169,14 @@ contract an artifact was **registered** with and refuses any later commit whose
 major disagrees — a breaking change has to be re-registered deliberately rather
 than merged like an ordinary diff.
 
-In a single-artifact `evolve()` run this never fires; it exists for the
-multi-artifact library the design targets. Until recently it never fired at all:
+`depends_on` names the artifact ids whose **contracts** this artifact relies on.
+It is what turns a breaking change into an atomic adaptation transaction: when a
+registered artifact commits a contract-breaking diff, the engine routes it
+through `Ledger.commit_atomic` and re-measures every artifact whose `depends_on`
+names it (their cached scores were taken under the superseded contract).
+
+In a single-artifact `evolve()` run none of this fires; it exists for
+`evolve(extra_artifacts=...)`. Until recently it never fired at all:
 `Contract`, `is_compatible_with` and `ContractRejected` all existed and nothing
 called any of them, while the docstrings described the enforcement as if it were
 there.

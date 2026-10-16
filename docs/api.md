@@ -260,7 +260,8 @@ evolve(
     allocator: Optional[Any] = None,
     record_trajectories: bool = False,
     trajectory_store: Optional['TrajectoryStore'] = None,
-    contract: Optional[Contract] = None
+    contract: Optional[Contract] = None,
+    extra_artifacts: Optional[Dict[str, 'EvolvingArtifact']] = None
 ) -> EvolutionResult
 ```
 
@@ -320,6 +321,7 @@ evolve(
 | `record_trajectories` | `bool` | `False` | Persist every rollout and gate evaluation as a `Trajectory` under `<repo_path>/trajectories/` -- what the run provider saw, what it returned, what that earned, against which artifact version and environment. Off by default: a throwaway repo's records die with it, so the write cost is pure overhead there, and recording is a deliberate choice about keeping a run's evidence. The store is the durable base every learning-type increment reads -- process-supervised reflection, offline re-weighting, audit replay -- and it is what an `EvidenceCard.trace_ids` entry points at. Pass `trajectory_store=` with a store you built to control where records land instead. |
 | `trajectory_store` | `Optional['TrajectoryStore']` | `None` | An explicit `TrajectoryStore` to record into. Pass one to control where records land (a shared store, a custom root, a custom privacy configuration) without going through the `<repo_path>/trajectories/` default. The explicit store wins over `record_trajectories`; `None` + `record_trajectories` builds the default store. |
 | `contract` | `Optional[Contract]` | `None` | The artifact's contract -- the externally-visible interface, and where governance invariants are declared. Pass `Contract(invariants=(Invariant("mutable_keys", ("a", "b")),))` and the aggregator enforces each rule **before** a candidate is measured (see `invariants`); a diff that breaks one reports a `violates-invariant` outcome and never buys a held-out sweep. `None` (the default) is the reference skill contract, which declares nothing and enforces nothing -- the untouched path exactly. |
+| `extra_artifacts` | `Optional[Dict[str, 'EvolvingArtifact']]` | `None` | Additional artifacts to register alongside the primary (`artifact_id`), as `{aid: EvolvingArtifact}`. The primary is the one the worker loop rolls out and proposes on; each extra is registered in the ledger and the worker proposes against it too, so a proposal can name one of them as a diff target and the aggregator merges it there (the evidence buffer already buckets by `diff.target`). `depends_on` on an extra's `Contract` declares which artifacts it relies on: a contract-breaking change to one re-measures its dependents (their cached scores were taken under the superseded contract) and lands atomically via `Ledger.commit_atomic`. Empty (the default) is the old single-artifact behaviour exactly. |
 
 ### `reflector(...)`
 
@@ -971,7 +973,8 @@ Contract(
     output_schema: str = 'any',
     side_effects: Tuple[str, ...] = (),
     major: int = 1,
-    invariants: Tuple[Any, ...] = ()
+    invariants: Tuple[Any, ...] = (),
+    depends_on: Tuple[str, ...] = ()
 ) -> None
 ```
 
@@ -1133,6 +1136,7 @@ The vocabulary of `category`.
 | `CAS_CONFLICT` | `'cas-conflict'` |
 | `UNKNOWN_ARTIFACT` | `'unknown-artifact'` |
 | `VIOLATES_INVARIANT` | `'violates-invariant'` |
+| `MISSING_ADAPTERS` | `'missing-adapters'` |
 | `CRITIC_REJECTED` | `'critic-rejected'` |
 | `NOISE_FLOOR` | `'noise-floor'` |
 | `COST_RULE` | `'cost-rule'` |
@@ -3142,6 +3146,7 @@ EvolveSpec(
     policies: Dict[str, Any] = <factory>,
     agg_config: Dict[str, Any] = <factory>,
     evolve: Dict[str, Any] = <factory>,
+    extra_artifacts: Dict[str, Any] = <factory>,
     allow: Sequence[str] = (),
     version: int = 1
 ) -> None
@@ -3245,7 +3250,8 @@ async_evolve(
     allocator: Optional[Any] = None,
     record_trajectories: bool = False,
     trajectory_store: Optional[Any] = None,
-    contract: Optional[Contract] = None
+    contract: Optional[Contract] = None,
+    extra_artifacts: Optional[Dict[str, 'EvolvingArtifact']] = None
 ) -> EvolutionResult
 ```
 
@@ -3304,6 +3310,7 @@ async_evolve(
 | `record_trajectories` | `bool` | `False` | Exactly as in `evolve`: persist every rollout and gate evaluation as a `Trajectory` under `<repo_path>/trajectories/`. Off by default; pass `trajectory_store=` to control where records land. |
 | `trajectory_store` | `Optional[Any]` | `None` | An explicit `TrajectoryStore` to record into. `None` + `record_trajectories` builds the default store at `<repo_path>/trajectories`. |
 | `contract` | `Optional[Contract]` | `None` | Exactly as in `evolve`: the artifact's contract, where governance invariants are declared. `None` (the default) is the reference skill contract, which declares nothing and enforces nothing. |
+| `extra_artifacts` | `Optional[Dict[str, 'EvolvingArtifact']]` | `None` | Exactly as in `evolve`: additional artifacts to register alongside the primary, as `{aid: EvolvingArtifact}`. The barrier-free worker proposes against each of them too (no parallel strategy, so it is the primary plus every extra), and the aggregator merges their diffs by target. Empty (the default) is the old single-artifact behaviour exactly. |
 
 ---
 
@@ -3799,7 +3806,7 @@ The exception tuple a caller catches to treat any ledger problem as recoverable.
 
 ### `LedgerProtocol`
 
-Seven methods: four the aggregator calls, three more the engine calls.
+Eight methods: four the aggregator calls, four more the engine calls.
 
 ### `LocalWorkspaceSandbox`
 

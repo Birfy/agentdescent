@@ -136,6 +136,19 @@ class MemoryCache:
         if self._meter is not None:
             self._meter.add(counter)
 
+    def invalidate(self, rendered: str, fingerprint: str = "") -> None:
+        """Drop every cached evaluation whose rendered prompt is ``rendered``.
+
+        Coarse on purpose: the key is ``(rendered, task_id, fingerprint)``, so
+        all tasks measured on this render are invalidated at once. Used by the
+        engine when an artifact's dependencies' contracts change -- the cached
+        scores were taken under the old contract and must be re-measured.
+        """
+        with self._lock:
+            for key in [k for k in self._values if k[0] == rendered
+                        and (not fingerprint or k[2] == fingerprint)]:
+                self._values.pop(key, None)
+
 
 class FileCache:
     """A directory of evaluations, so separate processes can share them.
@@ -156,6 +169,32 @@ class FileCache:
 
     def attach_meter(self, meter: Any) -> None:
         self._memory.attach_meter(meter)
+
+    def invalidate(self, rendered: str, fingerprint: str = "") -> None:
+        """Drop evaluations cached for ``rendered`` in this process.
+
+        File entries are keyed by content, so a re-evaluation would read the
+        stale file back from disk; delete them too, so the re-measure is real."""
+        self._memory.invalidate(rendered, fingerprint)
+        for name in os.listdir(self.directory):
+            path = os.path.join(self.directory, name)
+            if not os.path.isfile(path):
+                continue
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    payload = json.load(fh)
+                key = payload.get("key")
+                # Keys are (rendered, task_id, fingerprint); invalidate every
+                # task measured on this render, optionally narrowed by the
+                # fingerprint -- the same match MemoryCache uses. Prefix
+                # comparison against [rendered, fingerprint] would compare the
+                # *task id* to the fingerprint and delete nothing (review).
+                if (key and isinstance(key, list)
+                        and key[0] == rendered
+                        and (not fingerprint or key[2] == fingerprint)):
+                    os.remove(path)
+            except (OSError, ValueError, KeyError, TypeError, IndexError):
+                continue
 
     def _path(self, key: Any) -> str:
         import hashlib
