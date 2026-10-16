@@ -324,6 +324,14 @@ class MethodPolicy:
     engine: Policies = field(default_factory=Policies)
     reflective: bool = True
     self_verify: bool = False
+    #: The artifact's blast radius, which also decides its governance layer:
+    #: above ``governance.FAST_MAX`` (0.3) every commit is *audited* against the
+    #: full held-out set and vetoed unless it improved -- a blocking gate that
+    #: sits **in front of** the acceptance policy, so a method that installs an
+    #: accept-everything ``AcceptancePolicy`` is still gated at the default 0.6.
+    #: A method whose artifact is skill-layer context and whose upstream keeps
+    #: every update (Dynamic Cheatsheet) declares ``0.2``, like ACE.
+    blast_radius: float = 0.6
     #: Optional replacement for the shared population layer, for a method whose
     #: paper specifies population dynamics the generic archive does not have.
     #: Takes a :class:`PopulationContext`, returns an ``aggregator_factory``.
