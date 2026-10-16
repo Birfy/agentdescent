@@ -57,6 +57,13 @@ class PolicyUnboundError(ContractError, RuntimeError):
     """
 
 
+def _check_accept_samples(n: Optional[int]) -> None:
+    """``accept_samples < 1`` would divide by zero in the first merge; refuse it
+    when the policy is built / configured instead."""
+    if n is not None and int(n) < 1:
+        raise ValueError(f"accept_samples must be >= 1, got {n!r}")
+
+
 def _unbound(policy: object, what: str, hook: str) -> PolicyUnboundError:
     name = type(policy).__name__
     return PolicyUnboundError(
@@ -329,6 +336,7 @@ class DefaultAcceptance:
     def __init__(self, base_delta: Optional[float] = None,
                  anneal_half_life: Optional[int] = None,
                  accept_samples: Optional[int] = None) -> None:
+        _check_accept_samples(accept_samples)
         self.base_delta = base_delta
         self.anneal_half_life = anneal_half_life
         self.accept_samples = accept_samples
@@ -345,6 +353,7 @@ class DefaultAcceptance:
         if self.anneal_half_life is None:
             self.anneal_half_life = config.anneal_half_life
         if self.accept_samples is None:
+            _check_accept_samples(config.accept_samples)
             self.accept_samples = config.accept_samples
 
     def accept(self, ctx: MergeContext) -> AcceptDecision:

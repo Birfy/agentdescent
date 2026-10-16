@@ -1060,3 +1060,36 @@ def test_finalize_does_not_promote_rendered_artifacts_as_ids(tmp_path):
     assert promoted, "the spy never fired; the test proves nothing"
     assert set(promoted) == {"artifact"}, (
         f"rendered artifacts reached _promote as ids: {promoted}")
+
+
+def test_reference_aggregator_restore_skips_non_finite_and_negative_counts():
+    """A NaN/inf posterior hangs the next merge's ``prob_improvement`` and a
+    negative one crashes it, so ``restore`` skips them like any malformed entry
+    (fresh prior for that artifact) while valid siblings still load (#305)."""
+    from collections import defaultdict as dd
+
+    from agentdescent.aggregator import Aggregator
+    from agentdescent.stats import BetaPosterior
+
+    agg = Aggregator.__new__(Aggregator)
+    agg._posteriors = dd(BetaPosterior)
+    agg._promoted_at = {}
+    agg._seen = set()
+
+    # json.loads accepts NaN / Infinity, exactly as a damaged checkpoint.json would.
+    state = json.loads(
+        '{"posteriors": {'
+        '"nan": {"successes": NaN, "failures": 0},'
+        '"inf": {"successes": Infinity, "failures": 0},'
+        '"ninf": {"successes": 0, "failures": -Infinity},'
+        '"neg": {"successes": -5, "failures": 0},'
+        '"negf": {"successes": 1, "failures": -0.5},'
+        '"strinf": {"successes": "inf", "failures": 0},'
+        '"strnan": {"successes": "nan", "failures": 0},'
+        '"ok": {"successes": 2.0, "failures": 1.0},'
+        '"zero": {"successes": 0, "failures": 0}}}')
+    agg.restore(state)
+
+    assert set(agg._posteriors) == {"ok", "zero"}
+    assert agg._posteriors["ok"].successes == 2.0
+    assert agg._posteriors["ok"].failures == 1.0

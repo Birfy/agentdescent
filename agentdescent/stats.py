@@ -33,6 +33,16 @@ class BetaPosterior:
     successes: float = 0.0
     failures: float = 0.0
 
+    def __post_init__(self) -> None:
+        # Counts are evidence; a NaN / infinite / negative one makes ``alpha`` or
+        # ``beta`` unsampleable (``gammavariate(nan, 1)`` never returns), so it is
+        # refused where it is built rather than found mid-merge.
+        for name in ("successes", "failures"):
+            v = getattr(self, name)
+            if not math.isfinite(v) or v < 0:
+                raise ValueError(
+                    f"BetaPosterior.{name} must be finite and >= 0, got {v!r}")
+
     @property
     def alpha(self) -> float:
         return self.successes + 1.0
@@ -46,6 +56,9 @@ class BetaPosterior:
         return self.alpha / (self.alpha + self.beta)
 
     def update(self, success: bool, weight: float = 1.0) -> None:
+        if not math.isfinite(weight) or weight < 0:
+            raise ValueError(
+                f"BetaPosterior.update weight must be finite and >= 0, got {weight!r}")
         if success:
             self.successes += weight
         else:
@@ -56,12 +69,28 @@ class BetaPosterior:
 
         Positive delta -> evidence of success, negative -> failure.  The
         magnitude scales the pseudo-count so a large measured improvement counts
-        for more than a marginal one."""
+        for more than a marginal one.  A NaN ``delta`` carries no evidence either
+        way and is ignored (it is not a failure of weight 1)."""
+        if math.isnan(delta):
+            return
         w = min(1.0, abs(delta) * 4.0) + 1e-6
         self.update(delta > 0, weight=w)
 
     def sample(self, rng: random.Random) -> float:
         return _beta_sample(self.alpha, self.beta, rng)
+
+
+def _check_posterior(p: BetaPosterior, name: str) -> None:
+    """Refuse a posterior :func:`random.gammavariate` cannot sample.
+
+    ``gammavariate(nan, 1.0)`` / ``gammavariate(inf, 1.0)`` spin in a rejection
+    loop forever, so this must run *before* any sampling.  The fields are plain
+    mutable floats, so the constructor check alone is not enough."""
+    for label, v in (("alpha", p.alpha), ("beta", p.beta)):
+        if not math.isfinite(v) or v <= 0:
+            raise ValueError(
+                f"{name} posterior has a non-finite or non-positive {label} "
+                f"({v!r}); counts must be finite and >= 0")
 
 
 def prob_improvement(
@@ -70,7 +99,15 @@ def prob_improvement(
     samples: int = 4000,
     seed: int = 0,
 ) -> float:
-    """Monte-Carlo estimate of ``P(candidate_rate > baseline_rate)``."""
+    """Monte-Carlo estimate of ``P(candidate_rate > baseline_rate)``.
+
+    Raises :class:`ValueError` for ``samples < 1`` or a posterior that cannot be
+    sampled (non-finite / non-positive ``alpha`` or ``beta``)."""
+    samples = int(samples)
+    if samples < 1:
+        raise ValueError(f"samples must be >= 1, got {samples}")
+    _check_posterior(candidate, "candidate")
+    _check_posterior(baseline, "baseline")
     rng = random.Random(seed)
     wins = 0
     for _ in range(samples):

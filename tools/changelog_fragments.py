@@ -17,6 +17,7 @@ import argparse
 import datetime
 import os
 import re
+import stat
 import sys
 import textwrap
 import tempfile
@@ -212,14 +213,48 @@ def cut_release(text, version, date):
     return "\n".join(lines), True
 
 
+#: Directory-descriptor operations (``open`` on a directory + ``fsync``) and
+#: POSIX permission bits are only relied on where ``os.name == "posix"``. On
+#: other platforms (notably Windows, where a directory cannot be opened this
+#: way and file modes are not POSIX permission bits) the parent-directory sync
+#: and the mode copy are skipped explicitly; the file itself is still staged,
+#: fsynced and atomically replaced.
+_POSIX = os.name == "posix"
+
+
+class _DirectorySyncError(OSError):
+    """The replacement happened, but syncing its parent directory failed.
+
+    Unlike every earlier failure, ``CHANGELOG.md`` may already hold the new
+    text when this is raised, so the caller must not claim it is unchanged.
+    """
+
+
+def _fsync_directory(directory):
+    """Flush ``directory``'s entries (the rename) to stable storage (POSIX)."""
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    fd = os.open(str(directory), flags)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def _atomic_write(path, data):
     """Write ``data`` (``str`` or ``bytes``) to ``path`` via a sibling temp file.
 
     The replacement is only applied after the staged file has been fully written,
-    flushed, and closed. Same-filesystem ``os.replace`` keeps readers from seeing
-    a truncated CHANGELOG.md if the process dies mid-write. On any failure before
-    replace succeeds the original file is left untouched and the temp file is
-    removed when possible.
+    flushed, fsynced, and closed. Same-filesystem ``os.replace`` keeps readers
+    from seeing a truncated CHANGELOG.md if the process dies mid-write. On any
+    failure before replace succeeds the original file is left untouched and the
+    temp file is removed when possible.
+
+    On POSIX, an existing destination's permission bits are copied onto the
+    staged file before it is published (``mkstemp`` would otherwise leave a
+    private 0600 file), and after the replace the parent directory is fsynced so
+    the rename itself survives a system crash. If that directory sync fails,
+    :class:`_DirectorySyncError` is raised: the destination may *already* have
+    been replaced. Non-POSIX platforms skip both steps (see ``_POSIX``).
     """
     path = Path(path)
     if isinstance(data, str):
@@ -234,10 +269,23 @@ def _atomic_write(path, data):
             suffix=".tmp",
             dir=str(path.parent),
         )
+        mode = None
+        if _POSIX:
+            try:
+                mode = stat.S_IMODE(os.stat(path).st_mode)
+            except FileNotFoundError:
+                pass  # new file: keep mkstemp's private default
         with os.fdopen(fd, "wb") as handle:
             fd = None  # ownership transferred to the file object
             handle.write(payload)
             handle.flush()
+            if mode is not None:
+                # After the write: Linux clears setuid/setgid when an
+                # unprivileged process writes to a file, so applying the mode
+                # earlier would lose those bits. Still before the fsync and,
+                # above all, before publication, so the file never appears at
+                # the destination name with the wrong mode.
+                os.fchmod(handle.fileno(), mode)
             os.fsync(handle.fileno())
         os.replace(tmp_name, path)
         tmp_name = None
@@ -252,6 +300,14 @@ def _atomic_write(path, data):
                 os.unlink(tmp_name)
             except OSError:
                 pass
+    if _POSIX:
+        try:
+            _fsync_directory(path.parent)
+        except OSError as exc:
+            raise _DirectorySyncError(
+                f"could not sync directory {path.parent} after replacing "
+                f"{path.name}: {exc}"
+            ) from exc
 
 
 def run_check(root, out=None, err=None):
@@ -290,9 +346,22 @@ def run_release(root, version=None, date=None, out=None, err=None):
         # before the new bytes are durable; a crash there would leave an empty
         # (or partial) history while fragments were still on disk — or worse,
         # after a partial delete. On any failure before replace succeeds the
-        # original file and every fragment stay untouched.
+        # original file and every fragment stay untouched; if only the
+        # parent-directory sync after replace fails, fragments are still kept.
         try:
             _atomic_write(path, new)
+        except _DirectorySyncError as exc:
+            # The replace already happened, so unlike the failure below
+            # CHANGELOG.md may hold the folded text. Keep every fragment (the
+            # rename is not known durable) and say so honestly; a retry after
+            # reviewing CHANGELOG.md may fold duplicates, which is recoverable.
+            print(
+                f"error: {CHANGELOG_NAME} may already have been replaced, but "
+                f"its directory entry could not be made durable ({exc}); "
+                "fragments were kept. Review CHANGELOG.md before re-running.",
+                file=err,
+            )
+            return 1
         except OSError as exc:
             print(
                 f"error: failed to write {CHANGELOG_NAME} ({exc}); "
