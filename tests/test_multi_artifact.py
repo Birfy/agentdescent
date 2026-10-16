@@ -533,3 +533,71 @@ def test_commit_atomic_is_all_or_nothing(tmp_path):
                              contract=Contract(depends_on=("a",)))
     _, vv = led.commit_atomic([a_new, b_new], base)
     assert vv["a"] == 2 and vv["b"] == 2
+
+
+def _run_trajectory_probe(tmp_path, *, asynchronous=False):
+    """Run evolve/async_evolve with an extra artifact and a trajectory store,
+    returning the store. skill-b carries a distinctive state marker so its
+    records can be told apart from the primary's by render."""
+    from agentdescent.trajectory import TrajectoryStore
+
+    extra = {"skill-b": EvolvingArtifact(
+        "skill-b", {"seed": "SKILLB-MARKER"}, blast_radius=0.2)}
+    store = TrajectoryStore(str(tmp_path / "traj"))
+    kw = dict(extra_artifacts=extra, trajectory_store=store,
+              repo_path=str(tmp_path / "repo"))
+    if asynchronous:
+        from agentdescent.async_evolve import async_evolve
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            async_evolve(_tasks(), _reward, agent=_Reflector(),
+                         n_workers=2, max_iters=8, max_seconds=2.0,
+                         held_out_frac=0.5, **kw)
+    else:
+        _run(extra_artifacts=extra, trajectory_store=store,
+             repo_path=str(tmp_path / "repo"))
+    return store
+
+
+def _extra_records(store):
+    """Rollout/self-verify records whose rendered text is the extra's."""
+    from agentdescent.trajectory import (PURPOSE_ROLLOUT,
+                                         PURPOSE_SELF_VERIFY)
+    out = []
+    for r in store.iter_records():
+        if r.purpose in (PURPOSE_ROLLOUT, PURPOSE_SELF_VERIFY) \
+                and "SKILLB-MARKER" in r.rendered:
+            out.append(r)
+    return out
+
+
+def test_sync_rollout_records_attribute_extras_to_the_extra(tmp_path):
+    """The sync worker loop records an extra's rollout under the *extra's* id,
+    not the primary's: `_record_rollout` is called once per target `aid`, so
+    an extra's records must carry `artifact_id=aid` and a version vector keyed
+    by it, matching the async path (review: both calls hard-coded the primary
+    id, so skill-b's evidence was attributed to 'artifact')."""
+    store = _run_trajectory_probe(tmp_path)
+    extra_recs = _extra_records(store)
+    assert extra_recs, "premise: skill-b must be rolled out and recorded"
+    assert all(r.artifact_id == "skill-b" for r in extra_recs), (
+        "every record whose render is the extra's must carry the extra's id, "
+        f"got {sorted({r.artifact_id for r in extra_recs})}")
+    # the primary's records stay on the primary
+    from agentdescent.trajectory import PURPOSE_ROLLOUT
+    primary_recs = [r for r in store.iter_records(purpose=PURPOSE_ROLLOUT)
+                    if "SKILLB-MARKER" not in r.rendered]
+    assert primary_recs and all(r.artifact_id == "artifact"
+                                for r in primary_recs), (
+        "the primary's rollout records must stay attributed to the primary")
+
+
+def test_async_rollout_records_attribute_extras_to_the_extra(tmp_path):
+    """Async twin: the barrier-free worker already attributes extras correctly;
+    pin it so the two engines cannot drift again (review)."""
+    store = _run_trajectory_probe(tmp_path, asynchronous=True)
+    extra_recs = _extra_records(store)
+    assert extra_recs, "premise: skill-b must be rolled out and recorded"
+    assert all(r.artifact_id == "skill-b" for r in extra_recs), (
+        "every record whose render is the extra's must carry the extra's id, "
+        f"got {sorted({r.artifact_id for r in extra_recs})}")

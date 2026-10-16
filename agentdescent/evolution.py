@@ -3546,8 +3546,8 @@ def evolve(
             # is off (or the write deduped/failed) -- that empty is what the
             # card's trace_ids below will carry.
             trace = eng._record_rollout(
-                artifact_id=artifact_id, rendered=rendered, task=task,
-                base_version={artifact_id: mine_v}, purpose="rollout",
+                artifact_id=aid, rendered=rendered, task=task,
+                base_version={aid: mine_v}, purpose="rollout",
                 output=output, reward=score, wallclock=outcome.seconds,
                 worker_id=f"w{unit.worker}", lease_id=outcome.lease_id)
             sampler.record(task.id, score)               # learn which tasks carry signal
@@ -3634,8 +3634,8 @@ def evolve(
                 # provider's output, not just the score -- the same contract as
                 # the rollout path.
                 self_trace = eng._record_rollout(
-                    artifact_id=artifact_id, rendered=rendered_after, task=task,
-                    base_version={artifact_id: mine_v}, purpose="self_verify",
+                    artifact_id=aid, rendered=rendered_after, task=task,
+                    base_version={aid: mine_v}, purpose="self_verify",
                     output=after_output, reward=after, wallclock=time.time() - t_self,
                     worker_id=f"w{unit.worker}")
             else:
