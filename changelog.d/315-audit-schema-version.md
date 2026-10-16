@@ -1,0 +1,2 @@
+Fixed
+Audit records that carry a nonempty `scorer_version` (VerifierBoost identity) now persist `schema_version=2`. The previous release kept `SCHEMA_VERSION=1` while adding the field, so an older v0.6.0 reader hit `TypeError` on the unknown keyword, counted the line corrupt, and silently skipped pending work. The new reader still migrates v1 lines (unstamped and the mistaken early stamp); unsupported versions keep raising explicitly (#315). Scorer-identity behaviour from #304/#312 is unchanged.

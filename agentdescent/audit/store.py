@@ -131,7 +131,8 @@ class AuditStore:
         A line that parses but carries an unknown ``schema_version`` **raises**:
         that is a different build's file, the fields do not mean what this code
         thinks they mean, and continuing would produce numbers rather than an
-        error.
+        error. Version 1 lines (pre-``scorer_version``) are migrated on read;
+        version 2 is current (#315).
         """
         if not self.path:
             return
