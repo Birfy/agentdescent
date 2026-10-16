@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-342 public names across 56 modules.
+343 public names across 56 modules.
 
 ---
 
@@ -2876,6 +2876,31 @@ Combine competing values for the same key, when a dict update cannot. &nbsp;·&n
 ### `KeepContradictions()`
 
 A conflict policy that leaves contradicting diffs for fusion to resolve.
+
+### `LearnableFusionPolicy(...)`
+
+A fusion policy that learns when merging wins -- and stops paying for the ranking it cannot change.
+
+```python
+LearnableFusionPolicy(
+    inner: Optional[Any] = None,
+    *,
+    tournament: bool = True,
+    seed: int = 0,
+    min_trials: int = 20,
+    uncertainty_threshold: float = 0.15,
+    epsilon: float = 0.1,
+    max_wrong_skips: int = 1,
+    lr: float = 0.2,
+    reg: float = 0.05,
+    max_logit: float = 3.0
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `bind(verifier: Any) -> None` | Forward the verifier to the inner tournament and the union path. |
+| `select(artifact: Evolvable, diffs: List[Diff]) -> Tuple[Diff, Evolvable, bool]` | Learn or predict: skip the ranking sweep when the union is confidently predicted to win (a learned logistic, not a proof). |
 
 ### `ReflectiveFusion(...)`
 
