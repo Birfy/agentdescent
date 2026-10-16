@@ -188,6 +188,11 @@ def self_improvement_prompt(source, feedback):
         )
     ):
         return "Work the problem step by step, then state the number last."
+    if "you are the gradient (feedback) engine" in lower:
+        return "The prompt never asks for the working; add step by step."
+    if "you are part of an optimization system that improves text" in lower:
+        return ("<IMPROVED_VARIABLE>Work the problem step by step, then state "
+                "the number last.</IMPROVED_VARIABLE>")
     if "produce their union" in lower:
         return ("Merged union: work the problem step by step and state the "
                 "number last, keeping every proposed rule.")
