@@ -932,22 +932,39 @@ class CladeThompson(SingleHead):
 
     def __init__(self, cool_down_beta: float = 0.0, max_tau: float = 1e3,
                  seed: int = 0, rng: Optional["random.Random"] = None) -> None:
-        if cool_down_beta < 0:
-            raise ValueError("cool_down_beta must be >= 0")
-        if max_tau < 1:
-            raise ValueError("max_tau must be >= 1")
+        # `not (x >= 0)` also rejects NaN, which slips past a plain `x < 0`.
+        if not (math.isfinite(float(cool_down_beta)) and cool_down_beta >= 0):
+            raise ValueError("cool_down_beta must be finite and >= 0")
+        # A non-finite cap would let an exhausted budget hand
+        # `random.betavariate` an infinite tau.
+        if not (math.isfinite(float(max_tau)) and max_tau >= 1):
+            raise ValueError("max_tau must be finite and >= 1")
         self.cool_down_beta = cool_down_beta
         self.max_tau = max_tau
         self.seed = seed
         self.rng = rng
 
     def tau(self, budget_remaining: float) -> float:
+        """``budget_remaining ** (-cool_down_beta)``, clamped to ``[1, max_tau]``.
+
+        ``budget_remaining`` is read the way :class:`CostEfficient` reads it:
+        NaN and ``+inf`` (no ceiling) mean a full budget, so ``tau = 1``; only
+        ``<= 0`` means exhausted, so ``tau = max_tau`` (#280). The power is
+        taken in log space and capped before exponentiating, because a small
+        but legal fraction with a steep ``cool_down_beta`` overflows a float
+        ``**`` (which raises rather than returning ``inf``).
+        """
         if self.cool_down_beta == 0:
             return 1.0
         b = float(budget_remaining)
-        if not math.isfinite(b) or b <= 0:
+        if math.isnan(b) or b >= 1.0:
+            return 1.0
+        if b <= 0:
             return self.max_tau
-        return min(self.max_tau, max(1.0, min(b, 1.0) ** (-self.cool_down_beta)))
+        log_tau = -self.cool_down_beta * math.log(b)
+        if log_tau >= math.log(self.max_tau):
+            return self.max_tau
+        return min(self.max_tau, max(1.0, math.exp(log_tau)))
 
     @staticmethod
     def _eligible(c: Candidate) -> bool:

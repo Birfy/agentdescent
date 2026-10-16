@@ -121,7 +121,9 @@ the argmax; `n > 1` draws with replacement.
 - **`τ`** is `1` by default (upstream `cool_down: false`). `cool_down_beta=β`
   maps upstream's cool-down multiplier onto `SelectionContext.budget_remaining`
   as `τ = budget_remaining ** -β`, capped at `max_tau`, so the draws tighten
-  onto the most metaproductive clade as the budget runs out.
+  onto the most metaproductive clade as the budget runs out. As in
+  `CostEfficient`, a NaN or `+inf` budget reads as full (`τ = 1`) and only
+  `<= 0` as exhausted (`τ = max_tau`).
 - **Seeded** with `seed=` or `rng=`, like `Archive`.
 
 Fidelity notes: only HGM's *expansion* policy is ported; its evaluation policy

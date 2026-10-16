@@ -136,3 +136,40 @@ def test_tau_schedule():
     assert p.tau(1e-9) == 50
     with pytest.raises(ValueError):
         CladeThompson(cool_down_beta=-1)
+
+
+def test_tau_reads_non_finite_budget_like_cost_efficient():
+    """+inf (no ceiling) and NaN mean a full budget, not an exhausted one;
+    only <= 0 / -inf means exhausted (#280)."""
+    p = CladeThompson(cool_down_beta=1.0, max_tau=50)
+    assert p.tau(float("inf")) == 1.0
+    assert p.tau(float("nan")) == 1.0
+    assert p.tau(2.0) == 1.0
+    assert p.tau(float("-inf")) == 50
+    assert p.tau(-0.5) == 50
+
+
+def test_tau_steep_beta_on_small_fraction_caps_instead_of_overflowing():
+    """`b ** -beta` overflows a float for a small legal fraction and a steep
+    beta; the cap must apply before exponentiating (#280)."""
+    p = CladeThompson(cool_down_beta=40.0, max_tau=1e3, seed=1)
+    assert p.tau(1e-9) == 1e3
+    assert p.tau(5e-324) == 1e3
+    # Just below the cap still tracks the schedule.
+    q = CladeThompson(cool_down_beta=1.0, max_tau=1e3)
+    assert q.tau(0.002) == pytest.approx(500.0)
+    tree = _mismatch_tree()
+    picked = p.select(_ctx(*tree, budget=1e-9), 2)
+    assert len(picked) == 2
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"cool_down_beta": float("nan")},
+    {"cool_down_beta": float("inf")},
+    {"max_tau": float("nan")},
+    {"max_tau": float("inf")},
+    {"max_tau": 0.5},
+])
+def test_constructor_rejects_non_finite_knobs(kwargs):
+    with pytest.raises(ValueError):
+        CladeThompson(**kwargs)
