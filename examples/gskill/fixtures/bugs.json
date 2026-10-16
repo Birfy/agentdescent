@@ -1,0 +1,144 @@
+[
+ {
+  "id": "in_window",
+  "convention": "half-open",
+  "file": "kvtools/ranges.py",
+  "old": "    return lo <= x < hi\n",
+  "new": "    return lo <= x <= hi\n",
+  "issue": "`kvtools.ranges.in_window` gives the wrong answer at the edge of a window: the booking calendar and this helper disagree on whether the end slot belongs to the window.",
+  "fail_to_pass": [
+   "test_ranges::test_in_window_excludes_upper_edge"
+  ]
+ },
+ {
+  "id": "window_len",
+  "convention": "half-open",
+  "file": "kvtools/ranges.py",
+  "old": "    return max(0, hi - lo)\n",
+  "new": "    return hi - lo + 1\n",
+  "issue": "`kvtools.ranges.window_len` does not agree with the number of slots the allocator reserves for a window, and empty or inverted windows report nonsense.",
+  "fail_to_pass": [
+   "test_ranges::test_window_len_basic",
+   "test_ranges::test_window_len_empty",
+   "test_ranges::test_window_len_inverted_is_empty"
+  ]
+ },
+ {
+  "id": "overlaps",
+  "convention": "half-open",
+  "file": "kvtools/ranges.py",
+  "old": "    return a_lo < b_hi and b_lo < a_hi\n",
+  "new": "    return a_lo <= b_hi and b_lo <= a_hi\n",
+  "issue": "`kvtools.ranges.overlaps` flags windows that merely touch as conflicting, so back-to-back bookings are rejected.",
+  "fail_to_pass": [
+   "test_ranges::test_overlaps_adjacent_is_disjoint"
+  ]
+ },
+ {
+  "id": "parse_port",
+  "convention": "config-error",
+  "file": "kvtools/parse.py",
+  "old": "        raise ConfigError(f\"port is not a number: {text!r}\")\n    if not 1 <= port <= 65535:\n        raise ConfigError(f\"port out of range: {port}\")\n",
+  "new": "        raise ValueError(f\"port is not a number: {text!r}\")\n    if not 1 <= port <= 65535:\n        raise ValueError(f\"port out of range: {port}\")\n",
+  "issue": "Bad port values surface from `kvtools.parse.parse_port` as a raw error instead of the error our config loader reports to the user.",
+  "fail_to_pass": [
+   "test_parse::test_parse_port_not_a_number",
+   "test_parse::test_parse_port_too_big",
+   "test_parse::test_parse_port_zero"
+  ]
+ },
+ {
+  "id": "parse_bool",
+  "convention": "config-error",
+  "file": "kvtools/parse.py",
+  "old": "    raise ConfigError(f\"not a boolean: {text!r}\")\n",
+  "new": "    raise KeyError(text)\n",
+  "issue": "`kvtools.parse.parse_bool` crashes the config loader on an unrecognised value instead of reporting it properly.",
+  "fail_to_pass": [
+   "test_parse::test_parse_bool_empty",
+   "test_parse::test_parse_bool_unknown"
+  ]
+ },
+ {
+  "id": "parse_ratio",
+  "convention": "config-error",
+  "file": "kvtools/parse.py",
+  "old": "    except ValueError:\n        raise ConfigError(f\"ratio parts are not numbers: {text!r}\")\n",
+  "new": "    except ValueError:\n        return None\n",
+  "issue": "A malformed ratio such as `a:b` silently produces no value from `kvtools.parse.parse_ratio`, and the loader carries on with a missing setting.",
+  "fail_to_pass": [
+   "test_parse::test_parse_ratio_not_numbers"
+  ]
+ },
+ {
+  "id": "pages_needed",
+  "convention": "partial-counts",
+  "file": "kvtools/pages.py",
+  "old": "    return -(-nbytes // page_size)\n",
+  "new": "    return nbytes // page_size\n",
+  "issue": "`kvtools.pages.pages_needed` under-allocates: a buffer that spills a few bytes onto the next page is not given that page.",
+  "fail_to_pass": [
+   "test_pages::test_pages_needed_one_byte",
+   "test_pages::test_pages_needed_partial_counts"
+  ]
+ },
+ {
+  "id": "chunk_count",
+  "convention": "partial-counts",
+  "file": "kvtools/pages.py",
+  "old": "    return (total + chunk - 1) // chunk\n",
+  "new": "    return (total + chunk) // chunk\n",
+  "issue": "`kvtools.pages.chunk_count` is off for some sizes: an exact multiple and an empty input both report the wrong number of chunks.",
+  "fail_to_pass": [
+   "test_pages::test_chunk_count_exact",
+   "test_pages::test_chunk_count_zero"
+  ]
+ },
+ {
+  "id": "bucket_count",
+  "convention": "partial-counts",
+  "file": "kvtools/pages.py",
+  "old": "    return math.ceil(n_items / per_bucket)\n",
+  "new": "    return round(n_items / per_bucket)\n",
+  "issue": "`kvtools.pages.bucket_count` disagrees with the sharding job on some sizes and leaves items without a bucket.",
+  "fail_to_pass": [
+   "test_pages::test_bucket_count_just_over_half_rounds_up",
+   "test_pages::test_bucket_count_just_under_half_still_rounds_up"
+  ]
+ },
+ {
+  "id": "lookup",
+  "convention": "missing-is-none",
+  "file": "kvtools/store.py",
+  "old": "    return mapping.get(key)\n",
+  "new": "    return mapping.get(key, \"\")\n",
+  "issue": "`kvtools.store.lookup` on a key that is not there hands back a value callers cannot tell apart from a stored empty string.",
+  "fail_to_pass": [
+   "test_store::test_lookup_missing_is_none"
+  ]
+ },
+ {
+  "id": "first_or_none",
+  "convention": "missing-is-none",
+  "file": "kvtools/store.py",
+  "old": "    return items[0] if items else None\n",
+  "new": "    return items[0]\n",
+  "issue": "`kvtools.store.first_or_none` fails for an empty list in the report generator.",
+  "fail_to_pass": [
+   "test_store::test_first_or_none_empty"
+  ]
+ },
+ {
+  "id": "dig",
+  "convention": "missing-is-none",
+  "file": "kvtools/store.py",
+  "old": "            return None\n        current = current[part]\n",
+  "new": "            raise KeyError(path)\n        current = current[part]\n",
+  "issue": "`kvtools.store.dig` raises for a path that does not exist, which breaks optional settings.",
+  "fail_to_pass": [
+   "test_store::test_dig_missing_leaf",
+   "test_store::test_dig_missing_root",
+   "test_store::test_dig_through_non_mapping"
+  ]
+ }
+]

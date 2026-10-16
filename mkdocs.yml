@@ -122,6 +122,7 @@ nav:
     - GEPA — prompt evolution: algo-gepa.md
     - EvoSkill — skill discovery: algo-evoskill.md
     - SkillOpt — skill-document training: algo-skillopt.md
+    - gskill — repository skill: algo-gskill.md
     - ADAS — meta agent search: algo-adas.md
     - DGM — Darwin Gödel Machine: algo-dgm.md
     - OpenEvolve — program evolution: algo-openevolve.md

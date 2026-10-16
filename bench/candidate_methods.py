@@ -34,6 +34,7 @@ from examples.aflow import aflow_workflow_search
 from examples.agent0 import agent0_tool_curriculum
 from examples.dynamic_cheatsheet import dynamic_cheatsheet_cumulative
 from examples.godel_agent import godel_agent_self_modify
+from examples.gskill import gskill_repo_skill
 from examples.promptbreeder import promptbreeder_genetic_prompts
 from examples.r_zero import r_zero_challenger_solver
 from examples.reflexion import reflexion_episodic_memory
@@ -59,6 +60,7 @@ _MODULES = (
     sica_self_edit,
     godel_agent_self_modify,
     dynamic_cheatsheet_cumulative,
+    gskill_repo_skill,
     textgrad_prompt_optimization,
 )
 
