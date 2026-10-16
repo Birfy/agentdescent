@@ -1276,7 +1276,8 @@ AuditedReward(
     calibration_fraction: float = 0.7,
     seed: int = 0,
     verifier_version: Optional[str] = None,
-    version_extra: Any = None
+    version_extra: Any = None,
+    correction_extra: Any = None
 ) -> None
 ```
 
@@ -1293,6 +1294,7 @@ AuditedReward(
 | `seed` | `int` | `0` | Base seed for the inclusion draw. |
 | `verifier_version` | `Optional[str]` | `None` | Overrides the fingerprint derived from `verifier`. Pass one when the verifier is an agent whose behaviour lives in a prompt or a model id rather than in the source of the function. |
 | `version_extra` | `Any` | `None` | Mixed into the derived fingerprint. The cheaper way to say the same thing: `version_extra={"model": "...", "prompt_sha": "..."}`. |
+| `correction_extra` | `Any` | `None` | A live tag (a callable, e.g. `VerifierBoost.version_tag`) for a correction layered on the scorer. It is mixed into `verifier_version` -- so the audit re-measures when the correction changes -- but not into `scorer_version`, which keeps naming the scorer alone. |
 
 | method | what it does |
 |---|---|
@@ -1428,7 +1430,7 @@ Records on disk, indexed in memory.
 | `all() -> List[AuditRecord]` | Every record, in the order first seen. |
 | `flush() -> None` | Persist the moments now. Call it when a run ends. |
 | `for_calibration(verifier_version: str) -> List[AuditRecord]` | Resolved CALIBRATION records for one verifier version, and nothing else. |
-| `for_improvement(verifier_version: Optional[str] = None) -> List[AuditRecord]` | Resolved IMPROVEMENT records -- the pool you are allowed to look at. |
+| `for_improvement(...)` | Resolved IMPROVEMENT records -- the pool you are allowed to look at. |
 | `load() -> None` | Re-read the file, last-occurrence-wins. |
 | `observe_skipped(verifier_version: str, stratum: str) -> None` | Count one unit the tap dropped, without its score. |
 | `observe_unlabelled(verifier_version: str, stratum: str, score: float) -> None` | Fold one un-audited score into its stratum's running moments. |
@@ -2500,7 +2502,8 @@ AuditRecord(
     dispatched_at: float = <factory>,
     resolved_at: Optional[float] = None,
     sampler_seed: int = 0,
-    schema_version: int = 1
+    schema_version: int = 1,
+    scorer_version: str = ''
 ) -> None
 ```
 
