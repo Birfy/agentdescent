@@ -77,6 +77,7 @@ so they share a runner, a budget contract and a command line. Port author:
 | **R-Zero** | `inference_analogue` | self-play carts | `AdvantageAcceptance` (GRPO shape), `DifficultyWeighted` | [→](algo-r-zero.md) |
 | **Agent0** | `inference_analogue` | self-play carts | `DifficultyWeighted`; calculator stop-and-go | [→](algo-agent0.md) |
 | **gskill** (port author `chendanyang`) | `mechanism_microport` | vendored bug-fix repo (not SWE-smith) | `FileTree` skill dir + `skill_dir` validator; strict held-out acceptance | [→](algo-gskill.md) |
+| **TextGrad** | `mechanism_microport` | GSM8K | two-call textual gradient → TGD rewrite; `TextVariable` single slot; held-out gate (stricter than upstream's revert) | [→](algo-textgrad.md) |
 
 ### Added since: Dynamic Cheatsheet, the ACE precursor
 
@@ -331,7 +332,7 @@ port:
 | Mechanism | Benchmark-faithful | Microports / analogues |
 |---|---|---|
 | Evolution / program search | [OpenEvolve](algo-openevolve.md) | [PromptBreeder](algo-promptbreeder.md), [AFlow](algo-aflow.md) |
-| Reflection / refinement | [GEPA](algo-gepa.md) (reflective) | [Reflexion](algo-reflexion.md), [Self-Refine](algo-self-refine.md) |
+| Reflection / refinement | [GEPA](algo-gepa.md) (reflective) | [Reflexion](algo-reflexion.md), [Self-Refine](algo-self-refine.md), [TextGrad](algo-textgrad.md) |
 | Skills / lifelong learning | [EvoSkill](algo-evoskill.md), [SkillOpt](algo-skillopt.md), [ACE](algo-ace.md) | [Voyager](algo-voyager.md), [SkillWeaver](algo-skillweaver.md), [gskill](algo-gskill.md), [Dynamic Cheatsheet](algo-dynamic-cheatsheet.md) (DC-Cu, the ACE precursor microport) |
 | Self-play / unlabeled data | — | [Absolute Zero](algo-absolute-zero.md), [R-Zero](algo-r-zero.md), [Agent0](algo-agent0.md) |
 | Self-modifying code / harness | [DGM](algo-dgm.md), [ADAS](algo-adas.md) | [SICA](algo-sica.md), [Gödel Agent](algo-godel-agent.md) |
@@ -339,7 +340,8 @@ port:
 The label-free path now exists — the three self-play ports derive reward from a
 grounded local verifier with no gold labels — but only as inference analogues:
 a benchmark-faithful label-free port (real RL updates, real task domains)
-remains open. TextGrad remains unimplemented in the reflection family.
+remains open. The reflection family now carries TextGrad's textual-gradient
+step too ([TextGrad](algo-textgrad.md): offline-tested, not yet measured live).
 
 ### Deferred pending released code
 

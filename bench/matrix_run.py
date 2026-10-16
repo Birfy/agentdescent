@@ -156,6 +156,8 @@ ROWS = [
          dataset="self-edit (analogue)", width_flag="--workers", size=[], method_policy=True),
     dict(name="godel_agent", module="examples.godel_agent.godel_agent_self_modify",
          dataset="self-edit (analogue)", width_flag="--workers", size=[], method_policy=True),
+    dict(name="textgrad", module="examples.textgrad.textgrad_prompt_optimization",
+         dataset="GSM8K (mechanism microport)", width_flag="--workers", size=[], method_policy=True),
 ]
 
 #: The expected answer in the "semantics changed" column, for every row and every
@@ -365,6 +367,16 @@ SEMANTICS = {
     },
     "godel_agent": {
         "serial": "Godel Agent as a declared `self_edit_analogue` -- see "
+                  "docs/port-fidelity.md for what that class claims and does "
+                  "not. **Serial here is not a one-worker loop**: these express "
+                  "it as `max_concurrency=1` over the same `candidates // "
+                  "workers` rounds, so the arm runs identical work without "
+                  "concurrency rather than a narrower algorithm",
+        "parallel": SCHEDULING_ONLY,
+        "async": SCHEDULING_ONLY,
+    },
+    "textgrad": {
+        "serial": "TextGrad as a declared `mechanism_microport` -- see "
                   "docs/port-fidelity.md for what that class claims and does "
                   "not. **Serial here is not a one-worker loop**: these express "
                   "it as `max_concurrency=1` over the same `candidates // "
