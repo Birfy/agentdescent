@@ -202,6 +202,65 @@ def _evaluate(policy: MethodPolicy, llm: PhasedLLM, rendered: str,
         return sum(pool.map(one, tasks)) / len(tasks)
 
 
+def _stream_test(policy: MethodPolicy, solve_llm: PhasedLLM,
+                 curate_llm: PhasedLLM, state: Dict[str, str],
+                 tasks: Sequence[Task]) -> Dict[str, object]:
+    """Score ``tasks`` as an ordered stream the artifact learns from.
+
+    For each task: render the *current* in-memory state, solve, score, then ask
+    the method's own ``propose`` to revise the artifact from that answer and apply
+    its diff before the next task -- Gen then Cur, the test-time-learning loop.
+    Strictly sequential (a stream has an order), and the reward is handed to
+    ``propose`` exactly as the engine hands it; whether a method reads it is the
+    method's business. A refused proposal leaves the state as it was -- no
+    substitution -- and a backend failure costs that one step, scored 0 or
+    skipped, the same in-band verdict :func:`_evaluate` gives.
+    """
+    state = dict(state)
+    scores: List[float] = []
+    curated = refused = unchanged = 0
+    for index, task in enumerate(tasks):
+        rendered = policy.strategy.render(state)
+        try:
+            output = policy.solve(solve_llm, rendered, task)
+            score = policy.reward(task, output)
+        except Exception as e:  # noqa: BLE001 - a backend failure
+            print(f"[stream] task {task.id} failed, scored 0: "
+                  f"{type(e).__name__}: {str(e)[:120]}", flush=True)
+            scores.append(0.0)
+            continue
+        scores.append(score)
+        try:
+            proposal = policy.propose(curate_llm, rendered, task, output, score)
+        except Exception as e:  # noqa: BLE001 - a backend failure
+            print(f"[stream] update after {task.id} failed, memory unchanged: "
+                  f"{type(e).__name__}: {str(e)[:120]}", flush=True)
+            continue
+        if proposal is None:
+            continue
+        invalid_before = policy.invalid_proposals
+        diff = policy.strategy.to_diff(state, proposal, f"stream-{index}",
+                                       index, f"candidate-{policy.name}")
+        if diff is None:
+            # A strategy counts what it *refuses*; a rewrite equal to the
+            # current state is no diff but not a refusal.
+            if policy.invalid_proposals > invalid_before:
+                refused += 1
+            else:
+                unchanged += 1
+            continue
+        state.update(diff.ops)
+        curated += 1
+    return {
+        "quality": sum(scores) / len(scores) if scores else 0.0,
+        "tasks": len(scores),
+        "curated": curated,
+        "refused": refused,
+        "unchanged": unchanged,
+        "rendered": policy.strategy.render(state),
+    }
+
+
 def _fusion_summary(result: EvolutionResult) -> Dict[str, object]:
     stats = getattr(result, "fusion_stats", None)
     if not callable(stats):
@@ -374,6 +433,9 @@ def run_port(
         "held_out_frac": policy.held_out_frac,
         "solved_threshold": 1.1,
         "eval_concurrency": gate_concurrency,
+        # `None` is the engine's own default, so a port that does not ask for a
+        # different cheap layer runs exactly as before.
+        "cheap_eval_tasks": policy.cheap_eval_tasks,
         # Batches sized to the worker count so concurrent proposals actually
         # meet in one merge -- with batch_trigger=1 every batch is a single
         # card and no merge machinery (union or reflective) ever runs.
@@ -427,6 +489,27 @@ def run_port(
         raise RuntimeError(result.error)
     final_quality = _evaluate(policy, eval_llm, result.rendered,
                               policy.test_tasks, concurrency=_eval_conc)
+    # Opt-in only (`MethodPolicy.test_time_learning`). Counted *before* the
+    # stream, because a refused update there is not a refused candidate.
+    invalid_candidates = policy.invalid_proposals
+    stream = None
+    if policy.test_time_learning:
+        # Keep final_quality as the frozen evaluation so quality_gain stays
+        # apples-to-apples with baseline_quality (both freeze the artifact).
+        # Streamed learning is reported only under framework.test_stream.
+        stream = _stream_test(
+            policy, PhasedLLM(recorder, f"stream:{policy.name}:solve"),
+            PhasedLLM(recorder, f"stream:{policy.name}:curate"),
+            result.state, policy.test_tasks)
+        streamed_quality = float(stream["quality"])
+        # The run's product, printed like the ledger's artifact; never stored in
+        # the result, which keeps aggregate metrics only.
+        streamed_artifact = stream.pop("rendered")
+        stream["frozen_quality"] = final_quality
+        print(f"[stream] test quality {final_quality:.3f} frozen -> "
+              f"{streamed_quality:.3f} streamed, {stream['curated']} updates, "
+              f"{stream['refused']} refused", flush=True)
+        print("[final streamed artifact]\n" + str(streamed_artifact), flush=True)
     # The evolved artifact is the run's product; a summary that reports its
     # score and discards its content answers "how much" and hides "what".
     print("[final artifact]\n" + result.rendered, flush=True)
@@ -491,7 +574,7 @@ def run_port(
         accepted=int(result.outcomes().get("committed", 0)),
         stale_considered=result.stale_considered,
         stale_discarded=result.stale_discarded,
-        invalid_candidates=policy.invalid_proposals,
+        invalid_candidates=invalid_candidates,
         model_usage=usage_dict(recorder.usage),
         actor_usage=usage_dict(actor_usage),
         phase_summary=recorder.phase_summary(),
@@ -532,6 +615,9 @@ def run_port(
             "stale_discarded": result.stale_discarded,
             "retired_workers": result.retired_workers,
             "history": history,
+            # Present only for a port that opted in, so every other port's
+            # record is byte-identical to before.
+            **({"test_stream": stream} if stream is not None else {}),
         },
         budget=budget,
         notes=policy.notes,

@@ -91,7 +91,7 @@ then step.
 recorded, so there is deliberately no number here. When one is, it goes in
 [`bench/results/`](https://github.com/Birfy/agentdescent/tree/main/bench/results)
 and in the
-[all-ports table](self-evolution-examples.md#measured-results-all-twenty).
+[all-ports table](self-evolution-examples.md#measured-results-all-twenty-three).
 
 ## Run it
 
