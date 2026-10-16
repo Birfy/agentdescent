@@ -84,8 +84,28 @@ def _money_answer(prompt):
     return None
 
 
+def _dynamic_cheatsheet_reply(prompt, lower):
+    """Dynamic Cheatsheet's two actors: the curator writes a cheatsheet that
+    carries the brute-force tip, and the generator solves Game of 24 only when
+    its cheatsheet already holds that tip (the headroom a run has to find)."""
+    if "cheatsheet reference curator" in lower:
+        return ("<cheatsheet>\nVersion: 1\nGENERAL META-REASONING STRATEGIES\n"
+                "<memory_item>Use brute force search over every expression "
+                "tree instead of mental arithmetic.</memory_item>\n"
+                "</cheatsheet>")
+    from examples.dynamic_cheatsheet.game24 import reference_answers
+    numbers = re.findall(r"Input: ([\d ]+)", prompt)[-1].strip()
+    cheatsheet = prompt.split("CHEATSHEET:", 1)[1].split("Now it is time", 1)[0]
+    expression = (reference_answers()[numbers]
+                  if "brute force" in cheatsheet.lower() else "1 + 1")
+    return f"Working it out.\nFINAL ANSWER:\n<answer>\n{expression}\n</answer>"
+
+
 def fake_completion(prompt):
     lower = prompt.lower()
+    if ("cheatsheet reference curator" in lower
+            or "# generator (problem solver)" in lower):
+        return _dynamic_cheatsheet_reply(prompt, lower)
     # PromptBreeder's nine operators and its population seeding all end with one
     # of three JSON contracts, so the fake answers the contract rather than each
     # operator's wording. Keying on the wording is how this stub silently stopped

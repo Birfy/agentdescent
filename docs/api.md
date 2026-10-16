@@ -2355,7 +2355,7 @@ ppi_mean_stratified(
 
 ### `t_ppf(p: float, df: float) -> float`
 
-Quantile of Student's t, via the Cornish-Fisher expansion in `1/df`.
+Quantile of Student's t, accurate for every `df > 0`.
 
 ---
 

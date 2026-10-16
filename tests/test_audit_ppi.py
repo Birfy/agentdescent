@@ -318,8 +318,16 @@ def _t_cdf(t, df):
 
 
 def _t_ppf_exact(p, df):
+    """Independent reference: bisection on `_t_cdf` (kept apart from the library
+    on purpose, so the implementation is not checked against itself). The upper
+    bracket grows rather than saturating -- at df < 1 the quantile is in the
+    hundreds, and a fixed ceiling silently returned the ceiling."""
     lo, hi = -60.0, 60.0
-    for _ in range(200):
+    while _t_cdf(hi, df) < p:
+        hi *= 2.0
+    while _t_cdf(lo, df) > p:
+        lo *= 2.0
+    for _ in range(300):
         mid = 0.5 * (lo + hi)
         if _t_cdf(mid, df) < p:
             lo = mid
@@ -337,6 +345,55 @@ def test_t_ppf_is_accurate_where_the_estimator_uses_it():
     worst = max(abs(t_ppf(0.975, df) - _t_ppf_exact(0.975, df))
                 for df in (9, 10, 12, 15, 20, 30, 50, 100, 500))
     assert worst < 1.4e-5, f"worst error {worst:.2e}"
+
+
+@pytest.mark.parametrize("p", [0.9, 0.975, 0.995])
+@pytest.mark.parametrize("df", [0.5, 1, 1.5, 2, 3, 5, 8, 9, 30, 1000])
+def test_t_ppf_matches_the_exact_quantile_at_every_df_the_estimator_can_reach(p, df):
+    """Cluster-robust intervals have `groups - 1` degrees of freedom, so df 1-3
+    is an ordinary early state. The expansion alone was 11% narrow at df = 1
+    (36% at p = 0.995) and returned 63.9 for an exact 164.6 at df = 0.5."""
+    exact = _t_ppf_exact(p, df)
+    assert t_ppf(p, df) == pytest.approx(exact, rel=1e-6 if df >= 30 else 1e-9)
+    assert t_ppf(1.0 - p, df) == pytest.approx(-exact, rel=1e-6 if df >= 30 else 1e-9)
+
+
+def test_t_ppf_closed_forms_and_symmetry():
+    assert t_ppf(0.975, 1.0) == pytest.approx(12.706204736174694, rel=1e-12)
+    assert t_ppf(0.995, 1.0) == pytest.approx(63.65674116287, rel=1e-11)
+    assert t_ppf(0.975, 2.0) == pytest.approx(4.302652729749462, rel=1e-12)
+    for df in (0.3, 1.0, 2.0, 4.5):
+        assert t_ppf(0.5, df) == 0.0
+        assert t_ppf(0.2, df) == pytest.approx(-t_ppf(0.8, df), rel=1e-12)
+
+
+def test_t_ppf_does_not_saturate_for_tiny_df():
+    """The bracket grows: df = 0.1 has a 97.5% quantile far above 60."""
+    q = t_ppf(0.975, 0.1)
+    assert q > 1e4
+    assert _t_cdf(q, 0.1) == pytest.approx(0.975, abs=1e-9)
+
+
+def test_t_ppf_is_continuous_across_the_series_threshold():
+    below, above = t_ppf(0.975, 29.999999), t_ppf(0.975, 30.0)
+    assert abs(below - above) < 1e-7
+    assert above == pytest.approx(_t_ppf_exact(0.975, 30.0), rel=1e-7)
+
+
+@pytest.mark.parametrize("n_clusters", [2, 3])
+def test_interval_half_width_is_the_exact_t_quantile_at_the_reported_df(n_clusters):
+    """End to end: the estimator's own `halfwidth / se` at the small df that
+    clustering produces equals the exact quantile, not the expansion's."""
+    rng = np.random.default_rng(1)
+    n = 10
+    f = rng.random(n)
+    y = f + rng.normal(0, 0.2, n)
+    groups = [i * n_clusters // n for i in range(n)]
+    s = Stratum("a", 1.0, f, y, f_unlab=rng.random(200), clusters_lab=groups)
+    r = ppi_mean_stratified([s])
+    assert r.df < 5
+    half = 0.5 * (r.ci[1] - r.ci[0])
+    assert half / r.se == pytest.approx(_t_ppf_exact(0.975, r.df), rel=1e-9)
 
 
 def test_t_ppf_is_wider_than_the_normal_quantile_and_converges_like_one_over_df():
