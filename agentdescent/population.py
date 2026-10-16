@@ -118,6 +118,11 @@ class PopulationAggregator(Aggregator):
         #: The fork names this aggregator has created, in creation order.
         #: ``head_for_worker`` cycles through them.
         self._forks: List[str] = []
+        #: Per-branch lineage tip: the ``Candidate.version`` last selected onto
+        #: that branch. The next *new* state admitted from the branch's head is
+        #: recorded as a child of that tip (#275). Absent / ``None`` means the
+        #: branch has never had a selection, so the next admit stays a root.
+        self._branch_parent: Dict[str, Optional[int]] = {}
 
     def head_for_worker(self, worker_id: int = 0) -> str:
         """The branch a worker should snapshot.
@@ -133,21 +138,40 @@ class PopulationAggregator(Aggregator):
 
     # -- the archive ---------------------------------------------------------
 
-    def _admit(self, artifact, version: int) -> None:
+    def _admit(self, artifact, version: int,
+               branch: str = Ledger.DEV) -> None:
         key = artifact.render()
         with self._archive_lock:
             if key in self._keys:
                 return
             self._keys.add(key)
+            # Lineage tip for this branch: the version last selected onto it.
+            # Seed / pre-selection admits keep parent=None; a later mutation of
+            # a selected parent records that tip (#275).
+            parent = self._branch_parent.get(branch)
         # The gate has just evaluated a committed candidate on the full
         # held-out set, so this is a cache hit, not a new evaluation.
         score = self.verifier.eval_fn(artifact, list(self.verifier.held_out))
         with self._archive_lock:
+            # ``version`` is the archive's node id, and every lineage lookup
+            # (``parent``, ``_branch_parent``, ``_bump_selected``, FlatPuct's
+            # ``by_version``) keys on it, so it must be unique. The ledger
+            # version alone is not: forks taken from one snapshot each count
+            # up from the same base, so ``head/0`` and ``head/1`` can both
+            # commit a *different* state at version 5. Keep the ledger version
+            # when it is free (the common, single-head case) and otherwise
+            # take a fresh id past every id in use, so selecting one fork's
+            # candidate can never bump or parent the other's.
+            node = int(version)
+            used = {int(e["version"]) for e in self._archive}
+            if node in used:
+                node = max(used) + 1
             self._archive.append({
                 "state": dict(getattr(artifact, "state", {}) or {}),
                 "score": float(score),
-                "version": int(version),
+                "version": node,
                 "selected": 0,
+                "parent": (int(parent) if parent is not None else None),
             })
 
     def _candidates(self) -> List[Candidate]:
@@ -158,6 +182,9 @@ class PopulationAggregator(Aggregator):
                           state=dict(entry["state"]),
                           score=float(entry["score"]),
                           selected=int(entry["selected"]),
+                          parent=(int(entry["parent"])
+                                  if entry.get("parent") is not None
+                                  else None),
                           # A deterministic cost proxy: the artifact's rendered
                           # content size, which dominates the prompt and so the
                           # input tokens of expanding it. It is not the measured
@@ -226,6 +253,26 @@ class PopulationAggregator(Aggregator):
             "SelectionContext.candidates; it cannot invent one, because a state "
             "that was never a committed head has never been scored by the gate.")
 
+    def _bump_selected(self, version: int) -> None:
+        """Increment ``selected`` on ``version`` and every ancestor.
+
+        FlatPuct / CostEfficient require subtree visit counts: upstream
+        backpropagates every expansion up the parent chain. A cycle or a
+        dangling parent stops the walk (same guard FlatPuct.select uses).
+        """
+        with self._archive_lock:
+            by_version = {int(e["version"]): e for e in self._archive}
+            seen: Set[int] = set()
+            node: Optional[int] = int(version)
+            while node is not None and node not in seen:
+                seen.add(node)
+                entry = by_version.get(node)
+                if entry is None:
+                    break
+                entry["selected"] = int(entry["selected"]) + 1
+                parent = entry.get("parent")
+                node = int(parent) if parent is not None else None
+
     # -- AggregatorProtocol --------------------------------------------------
 
     def step(self, n_workers: int = 1) -> List[MergeReport]:
@@ -236,7 +283,8 @@ class PopulationAggregator(Aggregator):
         pre_head = before.get(self.population_artifact)
         if pre_head is not None:
             self._admit(pre_head,
-                        before.version.get(self.population_artifact, 0))
+                        before.version.get(self.population_artifact, 0),
+                        branch=Ledger.DEV)
         reports = super().step()
         # Admit the head of **every** live branch, not just dev. In a multi-head
         # run, workers commit their proposals back to their own fork, so the
@@ -251,7 +299,8 @@ class PopulationAggregator(Aggregator):
             branch_head = snap.get(self.population_artifact)
             if branch_head is not None:
                 self._admit(branch_head,
-                            snap.version.get(self.population_artifact, 0))
+                            snap.version.get(self.population_artifact, 0),
+                            branch=branch_name)
                 any_head = True
         if not any_head:
             return reports
@@ -300,12 +349,14 @@ class PopulationAggregator(Aggregator):
         self._offered(chosen[0], candidates)
         for slot, cand in enumerate(chosen):
             target = dict(cand.state)
-            with self._archive_lock:
-                for entry in self._archive:
-                    if dict(entry["state"]) == target:
-                        entry["selected"] = int(entry["selected"]) + 1
-                        break
+            # Subtree visit counts: bump the chosen node *and* every ancestor
+            # (cycle-guarded), so Candidate.selected matches FlatPuct's
+            # contract under evolve() (#275). Archive(novelty) then sees the
+            # same subtree signal the tree policies need; port-equivalence
+            # tests build Candidate.selected by hand and stay unchanged.
+            self._bump_selected(int(cand.version))
             if slot == 0:
+                branch_name = Ledger.DEV
                 version = self._commit_state(target, "population: select parent")
             else:
                 fork_name = f"head/{slot - 1}"
@@ -313,6 +364,9 @@ class PopulationAggregator(Aggregator):
                 self._commit_state(target, f"population: head/{slot - 1}",
                                    branch=fork_name)
                 self._forks.append(fork_name)
+                branch_name = fork_name
+            # Next new state admitted from this branch is a child of cand.
+            self._branch_parent[branch_name] = int(cand.version)
         if version is not None:
             reports.append(MergeReport(
                 self.population_artifact, None, False, 0, 0, 0, 0, 0.0, version,
@@ -366,6 +420,10 @@ class PopulationAggregator(Aggregator):
                 "archive": [dict(entry) for entry in self._archive],
                 "keys": sorted(self._keys),
                 "selections": self._selections,
+                "branch_parent": {
+                    str(k): (int(v) if v is not None else None)
+                    for k, v in getattr(self, "_branch_parent", {}).items()
+                },
             }
         if parent is not None:
             own.update(parent)
@@ -402,16 +460,52 @@ class PopulationAggregator(Aggregator):
             if not isinstance(st, dict):
                 continue
             try:
+                parent_raw = entry.get("parent", None)
                 restored.append({
                     "state": dict(st),
                     "score": float(entry.get("score", 0.0)),
                     "version": int(entry.get("version", 0)),
                     "selected": int(entry.get("selected", 0)),
+                    # Pre-#275 checkpoints have no parent field → roots.
+                    "parent": (int(parent_raw)
+                               if parent_raw is not None else None),
                 })
             except (TypeError, ValueError):
                 continue
+        # ``version`` is the archive's node id and must be unique (see
+        # ``_admit``). A checkpoint written before ids were de-duplicated can
+        # hold two distinct fork states that share one ledger version; restored
+        # verbatim, ``_bump_selected`` / ``by_version`` would only ever reach
+        # one of them. Migration policy, applied in saved order: the first row
+        # with a given id keeps it, every later duplicate gets a fresh id past
+        # all ids in use. Saved ``parent`` / ``branch_parent`` references were
+        # written against the ambiguous id, so they keep resolving to the row
+        # that kept it (first claimant) -- the same first-wins rule the tree
+        # policies' ``by_version`` lookups already apply.
+        used: Set[int] = set()
+        duplicates: List[Dict[str, object]] = []
+        for entry in restored:
+            node = int(entry["version"])
+            if node in used:
+                duplicates.append(entry)
+            else:
+                used.add(node)
+        for entry in duplicates:
+            fresh_id = max(used) + 1
+            entry["version"] = fresh_id
+            used.add(fresh_id)
         with self._archive_lock:
             self._archive = restored
+            branch_parent = state.get("branch_parent")
+            restored_bp: Dict[str, Optional[int]] = {}
+            if isinstance(branch_parent, dict):
+                for k, v in branch_parent.items():
+                    try:
+                        restored_bp[str(k)] = (
+                            int(v) if v is not None else None)
+                    except (TypeError, ValueError):
+                        continue
+            self._branch_parent = restored_bp
             # The dedup keys `_admit` reserves on. `seen_keys` is read as a
             # fallback for a checkpoint written before this layer had a set of
             # its own. Absent both, `_keys` stays empty and the archive can
