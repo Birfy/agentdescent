@@ -22,6 +22,7 @@ have been asked and not yet answered.
 from __future__ import annotations
 
 import json
+import math
 import os
 import threading
 import time
@@ -118,10 +119,19 @@ class AuditStore:
 
         A line that will not parse as JSON is **skipped** and counted in
         :attr:`corrupt`: that is a torn write from a killed process, and the
-        records before it are fine. A line that parses but carries an unknown
-        ``schema_version`` **raises**: that is a different build's file, the
-        fields do not mean what this code thinks they mean, and continuing would
-        produce numbers rather than an error.
+        records before it are fine. The same goes for a line torn inside a
+        multi-byte character (the file is read as bytes and decoded per line, so
+        one bad line cannot make the whole store unopenable), a line that parses
+        to something other than an object, a side-record missing the keys it
+        needs, and a current-schema record whose fields will not construct one.
+        A line holding a non-finite number -- the ``NaN`` / ``Infinity`` tokens
+        an older build wrote, or a literal like ``1e999`` that overflows -- is
+        skipped and counted the same way: folded in, one ``nan`` score would
+        poison every residual, moment and interval computed from the store.
+        A line that parses but carries an unknown ``schema_version`` **raises**:
+        that is a different build's file, the fields do not mean what this code
+        thinks they mean, and continuing would produce numbers rather than an
+        error.
         """
         if not self.path:
             return
@@ -132,32 +142,60 @@ class AuditStore:
             self._skipped.clear()
             self._priorities.clear()
             self._corrupt = 0
-            with open(self.path, encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
+            with open(self.path, "rb") as fh:
+                for raw in fh:
+                    raw = raw.strip()
+                    if not raw:
                         continue
                     try:
-                        payload = json.loads(line)
-                    except json.JSONDecodeError:
+                        payload = json.loads(raw.decode("utf-8"),
+                                             parse_constant=_refuse_constant,
+                                             parse_float=_finite_float)
+                    except (UnicodeDecodeError, ValueError):
+                        # ValueError covers JSONDecodeError (a torn write) and
+                        # a non-finite number in a line an older build wrote.
                         self._corrupt += 1
                         continue
-                    if payload.get("kind") == PRIORITY_KIND:
-                        self._priorities = dict(payload["priorities"])
+                    if not isinstance(payload, dict):
+                        self._corrupt += 1
                         continue
-                    if payload.get("kind") == WATCH_KIND:
-                        self._fingerprint = payload.get("fingerprint")
-                        continue
-                    if payload.get("kind") == MOMENTS_KIND:
-                        # Last snapshot wins, exactly as for records: a later
-                        # line supersedes an earlier one for the same key.
-                        key = (payload["verifier_version"], payload["stratum"])
-                        self._moments[key] = _Welford.from_dict(payload["moments"])
-                        # Absent in stores written before the tap could skip.
-                        self._skipped[key] = int(payload.get("skipped", 0))
-                        continue
-                    rec = AuditRecord.from_dict(payload)   # raises on schema drift
-                    self._remember(rec)
+                    if not self._load_line(payload):
+                        self._corrupt += 1
+
+    def _load_line(self, payload: Dict[str, Any]) -> bool:
+        """Fold one parsed line into memory. ``False`` if it is malformed.
+
+        Raises only on an unknown ``schema_version`` -- see :meth:`load`.
+        """
+        kind = payload.get("kind")
+        try:
+            if kind == PRIORITY_KIND:
+                self._priorities = {str(k): float(v) for k, v
+                                    in dict(payload["priorities"]).items()}
+                return True
+            if kind == WATCH_KIND:
+                self._fingerprint = payload.get("fingerprint")
+                return True
+            if kind == MOMENTS_KIND:
+                # Last snapshot wins, exactly as for records: a later
+                # line supersedes an earlier one for the same key.
+                key = (payload["verifier_version"], payload["stratum"])
+                moments = _Welford.from_dict(payload["moments"])
+                # Absent in stores written before the tap could skip.
+                skipped = int(payload.get("skipped", 0))
+                self._moments[key] = moments
+                self._skipped[key] = skipped
+                return True
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return False
+        if payload.get("schema_version") != SCHEMA_VERSION:
+            AuditRecord.from_dict(payload)          # raises on schema drift
+        try:
+            rec = AuditRecord.from_dict(payload)
+        except (KeyError, TypeError, ValueError):
+            return False
+        self._remember(rec)
+        return True
 
     @property
     def corrupt(self) -> int:
@@ -184,8 +222,11 @@ class AuditStore:
 
     def append(self, record: AuditRecord) -> AuditRecord:
         with self._lock:
-            self._remember(record)
+            # Disk first, memory second: a write that raises (a full disk, a
+            # read-only file, a non-finite score `allow_nan=False` refuses)
+            # must leave the index agreeing with what a fresh load would see.
             self._write(record)
+            self._remember(record)
             self._flush_moments()
         return record
 
@@ -203,13 +244,17 @@ class AuditStore:
         Called for every unit the sampler passed over, which is nearly all of
         them, so it has to stay O(1) in both time and space. It does: three
         floats per stratum, whatever the run's length.
+
+        A non-finite score raises ``ValueError``: folded in, it would make the
+        stratum's mean and variance ``nan`` for every later read.
         """
+        score = _finite_score(score, "score")
         with self._lock:
             key = (verifier_version, stratum)
             acc = self._moments.get(key)
             if acc is None:
                 acc = self._moments[key] = _Welford()
-            acc.observe(float(score))
+            acc.observe(score)
             self._unflushed += 1
             if self._unflushed >= self.FLUSH_EVERY:
                 self._flush_moments()
@@ -290,8 +335,8 @@ class AuditStore:
         with self._lock:
             if fingerprint == self._fingerprint:
                 return                      # nothing changed; do not grow the file
-            self._fingerprint = fingerprint
             self._write_line({"kind": WATCH_KIND, "fingerprint": fingerprint})
+            self._fingerprint = fingerprint
 
     def remember_priorities(self, priorities: Dict[str, float]) -> None:
         """Record what the merge path thought was worth auditing.
@@ -305,10 +350,10 @@ class AuditStore:
         merge path's ranking exists and has never been read.
         """
         with self._lock:
-            self._priorities.update(
-                {str(k): float(v) for k, v in priorities.items()})
-            self._write_line({"kind": PRIORITY_KIND,
-                              "priorities": dict(self._priorities)})
+            merged = dict(self._priorities)
+            merged.update({str(k): float(v) for k, v in priorities.items()})
+            self._write_line({"kind": PRIORITY_KIND, "priorities": merged})
+            self._priorities = merged
 
     @property
     def priorities(self) -> Dict[str, float]:
@@ -337,7 +382,11 @@ class AuditStore:
         calibration set depend on how many times a batch file was replayed, and
         replaying a batch file is exactly what people do when a job half-failed.
         Call :meth:`reopen` first if a result really has to be corrected.
+
+        A non-finite ``oracle_score`` raises ``ValueError``: it would flow into
+        every residual and estimator as ``nan``.
         """
+        oracle_score = _finite_score(oracle_score, "oracle_score")
         with self._lock:
             rec = self._records.get(record_id)
             if rec is None:
@@ -346,10 +395,10 @@ class AuditStore:
                 raise ValueError(
                     f"{record_id} already resolved with oracle_score="
                     f"{rec.oracle_score!r}; refusing to overwrite. Use reopen().")
-            updated = _replace(rec, oracle_score=float(oracle_score),
+            updated = _replace(rec, oracle_score=oracle_score,
                                resolved_at=time.time() if at is None else at)
-            self._remember(updated)
             self._write(updated)
+            self._remember(updated)
             return True
 
     def reopen(self, record_id: str) -> bool:
@@ -359,8 +408,8 @@ class AuditStore:
             if rec is None or not rec.resolved:
                 return False
             updated = _replace(rec, oracle_score=None, resolved_at=None)
-            self._remember(updated)
             self._write(updated)
+            self._remember(updated)
             return True
 
     # -- queries -------------------------------------------------------------
@@ -435,13 +484,50 @@ class AuditStore:
         self._write_line(record.to_dict())
 
     def _write_line(self, payload: Dict[str, Any]) -> None:
+        """Append one JSON line.
+
+        Encoded before the file is touched, with ``allow_nan=False`` so the
+        non-standard ``NaN`` / ``Infinity`` tokens never reach disk: a payload
+        that cannot be encoded raises with the file unchanged. If the file ends
+        in a torn fragment (a process killed mid-line), a newline is written
+        first so the fragment stays its own skipped line instead of swallowing
+        this one.
+        """
+        data = (json.dumps(payload, ensure_ascii=False, allow_nan=False)
+                + "\n").encode("utf-8")
         if not self.path:
             return
         parent = os.path.dirname(os.path.abspath(self.path))
         if parent:
             os.makedirs(parent, exist_ok=True)
-        with open(self.path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        with open(self.path, "ab+") as fh:
+            fh.seek(0, os.SEEK_END)
+            if fh.tell() > 0:
+                fh.seek(-1, os.SEEK_END)
+                if fh.read(1) != b"\n":
+                    data = b"\n" + data
+            fh.write(data)
+
+
+def _finite_score(value: Any, name: str) -> float:
+    """``float(value)``, refusing ``nan`` / ``inf`` with a ``ValueError``."""
+    x = float(value)
+    if not math.isfinite(x):
+        raise ValueError(f"{name} must be finite, got {value!r}")
+    return x
+
+
+def _refuse_constant(token: str) -> float:
+    """``json`` hook for ``NaN`` / ``Infinity`` / ``-Infinity``: refuse them."""
+    raise ValueError(f"non-finite JSON constant {token!r}")
+
+
+def _finite_float(text: str) -> float:
+    """``json`` hook for float literals: refuse one that overflows to ``inf``."""
+    x = float(text)
+    if not math.isfinite(x):
+        raise ValueError(f"non-finite JSON number {text!r}")
+    return x
 
 
 def _replace(rec: AuditRecord, **changes) -> AuditRecord:
