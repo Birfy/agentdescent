@@ -90,16 +90,6 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
-- `selection.Archive` no longer crashes at small temperatures (#284).
-  `performance` / `novelty` computed `exp(score / temperature)` raw, so below
-  about `temperature = 1/709` `select()` raised `OverflowError`. Just above
-  that, a few hundred near-top candidates summed to `inf` and
-  `random.choices` refused the total. The raw weights are still used,
-  bit-for-bit, whenever they are representable, so seeded draws do not move.
-  When they overflow, or their total is not a positive finite number, the
-  max-shifted softmax (the same distribution) is used instead. A `NaN`,
-  infinite or non-numeric `temperature` is now rejected with `ValueError` at
-  construction rather than failing at the first `select()`.
 - `audit.AuditStore` keeps its crash-safety contract (#274). A torn tail left
   by a killed process gets a newline before the next append, so the record
   written after the crash is no longer glued onto the fragment and lost; the
@@ -135,7 +125,6 @@ All notable changes to AgentDescent are documented here. The format follows
   non-finite scores contribute weight 0, matching this mode's unscored
   convention. Scores in the normal `[0, 1]` band stay bit-identical to the
   previous formula so DGM port equivalence is unchanged.
-
 
 - `runstore` rounds/status no longer break on a non-finite reward or a torn
   `rounds.jsonl` line (#271). `append_round` encodes with `allow_nan=False` and
