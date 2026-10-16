@@ -101,6 +101,15 @@ All notable changes to AgentDescent are documented here. The format follows
   infinite or non-numeric `temperature` is now rejected with `ValueError` at
   construction rather than failing at the first `select()`.
 
+- `sigmoid_novelty_weights` / `Archive(sampling='sigmoid_novelty')` no longer
+  raise `OverflowError` on large negative scores, and a non-finite score no
+  longer poisons the weight total (#286). The sigmoid is evaluated in a
+  numerically stable form (large negatives contribute ~0, matching `-inf`);
+  non-finite scores contribute weight 0, matching this mode's unscored
+  convention. Scores in the normal `[0, 1]` band stay bit-identical to the
+  previous formula so DGM port equivalence is unchanged.
+
+
 - `runstore` rounds/status no longer break on a non-finite reward or a torn
   `rounds.jsonl` line (#271). `append_round` encodes with `allow_nan=False` and
   writes non-finite floats as `null`; `rounds()` skips malformed lines instead
