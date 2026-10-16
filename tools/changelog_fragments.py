@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import os
 import re
 import sys
 import textwrap
+import tempfile
 from pathlib import Path
 
 # Keep a Changelog order; also the order new headings are created in.
@@ -210,6 +212,48 @@ def cut_release(text, version, date):
     return "\n".join(lines), True
 
 
+def _atomic_write(path, data):
+    """Write ``data`` (``str`` or ``bytes``) to ``path`` via a sibling temp file.
+
+    The replacement is only applied after the staged file has been fully written,
+    flushed, and closed. Same-filesystem ``os.replace`` keeps readers from seeing
+    a truncated CHANGELOG.md if the process dies mid-write. On any failure before
+    replace succeeds the original file is left untouched and the temp file is
+    removed when possible.
+    """
+    path = Path(path)
+    if isinstance(data, str):
+        payload = data.encode("utf-8")
+    else:
+        payload = data
+    fd = None
+    tmp_name = None
+    try:
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            dir=str(path.parent),
+        )
+        with os.fdopen(fd, "wb") as handle:
+            fd = None  # ownership transferred to the file object
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_name, path)
+        tmp_name = None
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        if tmp_name is not None:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+
+
 def run_check(root, out=None, err=None):
     out, err = out or sys.stdout, err or sys.stderr
     fragments, errors = collect(root)
@@ -241,10 +285,25 @@ def run_release(root, version=None, date=None, out=None, err=None):
         print(f"error: {exc}; no changes made", file=err)
         return 1
     if new != text:
-        with open(path, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(new)
-    # Delete only after CHANGELOG.md is written: a crash leaves duplicates to
-    # remove, never lost entries.
+        # Stage the complete replacement in a sibling temp file, fsync+close,
+        # then os.replace. Opening with mode "w" would truncate CHANGELOG.md
+        # before the new bytes are durable; a crash there would leave an empty
+        # (or partial) history while fragments were still on disk — or worse,
+        # after a partial delete. On any failure before replace succeeds the
+        # original file and every fragment stay untouched.
+        try:
+            _atomic_write(path, new)
+        except OSError as exc:
+            print(
+                f"error: failed to write {CHANGELOG_NAME} ({exc}); "
+                "no changes made",
+                file=err,
+            )
+            return 1
+    # Delete fragments only after CHANGELOG.md was replaced successfully.
+    # A crash mid-unlink can leave duplicate entries on the next release;
+    # that is recoverable. Lost entries are not. Multi-file transactional
+    # deletion is out of scope for this tool.
     for fragment in fragments:
         (Path(root) / FRAGMENT_DIR / fragment.name).unlink()
     if fragments:
