@@ -472,3 +472,90 @@ def test_an_inner_rule_that_keeps_both_does_not_spin():
     kept, dropped = AdvantageConflict(KeepsBoth()).resolve(
         None, [card("x"), card("y")])
     assert dropped == 0 and len(kept) == 2
+
+
+# -- 2b. every move is a move, and a reversal never loosens (#282) ----------
+
+
+@pytest.mark.parametrize("floor_ops", [1, 2])
+def test_a_tightened_op_cap_can_widen_again(floor_ops):
+    """``round(2 * 1.25) == 2`` and ``round(1 * 1.25) == 1``: with the default
+    widen factor the op cap used to be stuck at its floor after two reversals,
+    while ``chars`` kept growing and ``history`` kept saying it moved."""
+    region = AdaptiveTrustRegion(window=1,
+                                 initial=TrustRegion(ops=floor_ops, chars=8_000))
+    region.observe("committed")
+    assert region.current.ops == floor_ops + 1
+    for _ in range(10):
+        region.observe("committed")
+    assert region.current.ops > floor_ops + 5
+
+
+def test_two_reversals_then_clean_windows_recover_the_default_cap():
+    region = AdaptiveTrustRegion(window=1)
+    region.observe("oracle-rejected")
+    region.observe("rolled-back")
+    assert region.current.ops == 2
+    for _ in range(4):
+        region.observe("committed")
+    assert [r.ops for r in region.history] == [6, 3, 2, 3, 4, 5, 6]
+
+
+def test_tightening_moves_by_at_least_one_unit():
+    region = AdaptiveTrustRegion(window=1, tighten=0.9,
+                                 initial=TrustRegion(ops=3, chars=20_000))
+    region.observe("oracle-rejected")
+    # round(3 * 0.9) == 3 would have been "tightened" to the same cap.
+    assert region.current == TrustRegion(ops=2, chars=18_000)
+
+
+def test_a_reversal_never_loosens_a_cap_below_the_minimum():
+    """``initial`` below ``minimum`` (as the #224/#226 regressions build it):
+    clamping a tighten to ``minimum`` used to *quadruple* the char cap on a
+    rollback."""
+    region = AdaptiveTrustRegion(window=1,
+                                 initial=TrustRegion(ops=3, chars=500))
+    region.observe("oracle-rejected")
+    assert region.current.chars == 500
+    assert region.current.ops == 2
+    region.observe("rolled-back")
+    assert region.current.chars == 500 and region.current.ops == 1
+
+
+def test_a_widen_still_respects_the_maximum():
+    region = AdaptiveTrustRegion(window=1, widen=1.01,
+                                 maximum=TrustRegion(7, 32_001))
+    region.observe("committed")
+    assert region.current == TrustRegion(7, 32_001)
+    region.observe("committed")
+    assert region.current == TrustRegion(7, 32_001)
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"window": 0}, {"window": -1}, {"window": 2.5}, {"window": True},
+    {"widen": 0.5}, {"widen": float("inf")}, {"widen": float("nan")},
+    {"tighten": 0.0}, {"tighten": 1.5}, {"tighten": float("nan")},
+    {"accept_rate_to_widen": -0.1}, {"accept_rate_to_widen": 1.1},
+    {"accept_rate_to_widen": float("nan")},
+    {"minimum": TrustRegion(0, 2_000)},
+    {"maximum": TrustRegion(64, 0)},
+    {"minimum": TrustRegion(1.5, 2_000)},
+])
+def test_invalid_knobs_are_refused_at_construction(kwargs):
+    with pytest.raises(ValueError):
+        AdaptiveTrustRegion(**kwargs)
+
+
+def test_neutral_factors_are_allowed_and_hold_the_region():
+    region = AdaptiveTrustRegion(window=1, widen=1.0, tighten=1.0)
+    start = region.current
+    region.observe("committed")
+    region.observe("oracle-rejected")
+    assert region.current == start and region.history == [start]
+
+
+def test_a_maximum_below_the_default_minimum_still_caps_a_tighten():
+    """``maximum`` wins where the bounds disagree, as before #282."""
+    region = AdaptiveTrustRegion(window=1, maximum=TrustRegion(8, 1_000))
+    region.observe("oracle-rejected")
+    assert region.current == TrustRegion(3, 1_000)
