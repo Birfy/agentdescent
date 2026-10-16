@@ -22,6 +22,7 @@ the harness per domain is two places for the frozen-file restore to drift.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import shutil
@@ -41,8 +42,39 @@ from ._delegation import Brief, Delegation, Edit
 from ._spatial import SITUATED_EDIT_PROTOCOL, parse_situated_edits
 from ._world import CONTEXT_FILE, ROUTING_HEADING, SKILLS_DIR, normalise
 
-__all__ = ["CRASHED", "PYTHON_MODULE_SKILL", "Suite", "TestSuite", "llm_executor",
-           "llm_manager", "reward", "reward_test", "run_cases", "run_test"]
+__all__ = ["CRASHED", "PYTHON_MODULE_SKILL", "Suite", "TEST_FILE_GLOBS", "TestSuite",
+           "is_implementation_file", "is_test_file", "llm_executor", "llm_manager",
+           "reward", "reward_test", "run_cases", "run_test"]
+
+#: What counts as *a test file* in `own_review` / `own_test_failures`. Matched with
+#: `fnmatch` against the file's **basename** only (the directory is the node's business,
+#: not the name's), and only for ``.py`` files: the two spellings pytest itself collects
+#: by default. A file that matches none of these is not a test, whatever it contains.
+TEST_FILE_GLOBS: Tuple[str, ...] = ("test_*.py", "*_test.py")
+
+#: Python files that are code but are not *implementation* -- there is nothing in them to
+#: test, so writing only these does not oblige a node to write a test. Package markers
+#: and pytest's own `conftest.py` (basename globs), and machine-generated modules
+#: (basename globs, plus anything under a `__pycache__` / `build` / `generated` directory).
+NON_IMPLEMENTATION_GLOBS: Tuple[str, ...] = ("__init__.py", "conftest.py",
+                                             "*_pb2.py", "*_pb2_grpc.py")
+GENERATED_DIRS: Tuple[str, ...] = ("__pycache__", "build", "generated")
+
+
+def is_test_file(path: str) -> bool:
+    """Is ``path`` a test file? ``test_*.py`` or ``*_test.py``, by basename."""
+    name = path.rsplit("/", 1)[-1]
+    return any(fnmatch.fnmatchcase(name, glob) for glob in TEST_FILE_GLOBS)
+
+
+def is_implementation_file(path: str) -> bool:
+    """Python the agents wrote that is neither a test, a package marker, nor generated."""
+    if not path.endswith(".py") or is_test_file(path):
+        return False
+    *directories, name = path.split("/")
+    if any(fnmatch.fnmatchcase(name, glob) for glob in NON_IMPLEMENTATION_GLOBS):
+        return False
+    return not any(part in GENERATED_DIRS for part in directories)
 
 #: One human-written skill, shared by the formation domains because the advice
 #: is about writing a Python module rather than about either language. Shipped so
@@ -990,9 +1022,7 @@ class TestSuite:
     def _implementation_files(state, under: str = "") -> List[str]:
         """Python the agents wrote that is neither a test nor a package marker."""
         return [path for path in state
-                if path.endswith(".py")
-                and not path.rsplit("/", 1)[-1].startswith("test_")
-                and "__init__" not in path
+                if is_implementation_file(path)
                 and (not under or path == under or path.startswith(under + "/"))]
 
     def own_test_failures(self, state, under: str = "",
@@ -1019,8 +1049,7 @@ class TestSuite:
         such as a parent reviewing a child that legitimately returned no code yet.
         """
         owned = {path: body for path, body in state.items()
-                 if path.endswith(".py")
-                 and path.rsplit("/", 1)[-1].startswith("test_")
+                 if path.endswith(".py") and is_test_file(path)
                  and (not under or path == under or path.startswith(under + "/"))}
         if not owned:
             if require_tests and self._implementation_files(state, under):
@@ -1046,6 +1075,18 @@ class TestSuite:
         finished either: upstream every node is accountable for its own subtree and
         tests are the definition of done, so a node with untested code is a node whose
         parent has nothing to run.
+
+        The terms are explicit, not "looks like a test":
+
+        * a **test file** is a ``.py`` file whose basename matches one of
+          :data:`TEST_FILE_GLOBS` (``test_*.py`` or ``*_test.py``);
+        * an **implementation file** is any other ``.py`` file the child wrote, except
+          package markers / ``conftest.py`` / generated modules
+          (:data:`NON_IMPLEMENTATION_GLOBS`, :data:`GENERATED_DIRS`) -- a child that
+          returns only those owes no test;
+        * the test has to be **anywhere under the parent's node** (``parent.world.path``),
+          so a test a sibling node already wrote counts, and one outside the node does
+          not. Deleting a file never creates an obligation.
         """
 
         def review(parent, returned):
@@ -1061,11 +1102,8 @@ class TestSuite:
                 return ("rework", "your own tests fail: " + "; ".join(failures[:3]))
             if require_tests:
                 wrote = [e.path for e in returned
-                         if e.content is not None and e.path.endswith(".py")
-                         and not e.path.rsplit("/", 1)[-1].startswith("test_")
-                         and "__init__" not in e.path]
-                tested = any(p.endswith(".py")
-                             and p.rsplit("/", 1)[-1].startswith("test_")
+                         if e.content is not None and is_implementation_file(e.path)]
+                tested = any(is_test_file(p)
                              and (not path or p == path or p.startswith(path + "/"))
                              for p in candidate)
                 if wrote and not tested:

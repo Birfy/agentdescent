@@ -115,7 +115,7 @@ from ._sandbox import LocalSandbox, SessionSandbox
 from ._session import session_home, set_session_limit
 from ._skills import SkillExtractor
 from ._suite import TEST_FAILURE
-from ._suite import cold_start, preflight
+from ._suite import cold_start, is_test_file, preflight
 from ._octopus import OctopusConflict, git_available
 from ._spatial import SpatialContract
 from ._worktree import Rollout, WorktreeLedger, git_worktrees_available
@@ -967,8 +967,7 @@ def main(argv=None) -> None:
                 spec, "REQUIRES_MODEL", False) and not hasattr(spec, "reference_tree"):
             # A blind domain's repository suite is the agents' own, so there is no
             # denominator from `tasks` to report it against -- count what is there.
-            written = sum(1 for p in state if p.endswith(".py")
-                          and p.rsplit("/", 1)[-1].startswith("test_"))
+            written = sum(1 for p in state if is_test_file(p))
             print(f"their own suite : {written} test file(s), "
                   + ("all passing" if not failures else f"{len(failures)} failing:\n    "
                      + "\n    ".join(failures[:6])))

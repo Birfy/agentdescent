@@ -241,6 +241,7 @@ be:
 | `spec/CONTEXT.md` | the goal, in prose and formulas. Unavoidable: something has to say what to build. |
 | `tests/**` | the scoring. Upstream's equivalents are c-testsuite, LLVM and Csmith — also human-supplied, also frozen. |
 | `md.py` / `jqx.py` | a frozen entry point, so the result is a program rather than a package nobody can invoke. A choice, and a defensible one. |
+| `fly.py` | **not supplied, not frozen.** The `fly` domain freezes only `REQUIREMENTS.md`; the entry point's calling convention is written into the requirement (its section 4) and the agents write `fly.py` themselves. See the recorded deviations. |
 | `CONTEXT.md` **per node, with routing tables** | …this one is not defensible. |
 
 Six of md's fifteen files are `CONTEXT.md` records that name the nodes and what
@@ -1392,6 +1393,36 @@ so would a reader of this page without this paragraph.
   the upstream role in full: there is no fan-out to `subagent_investigator`, because
   fanning out read-only sub-agents is what a manager with read tools of its own is for,
   and that is the port's session work.
+* **The `fly` domain does not freeze its entry point (`fly.py`), and that is a realignment
+  toward upstream, not a deviation from it.** `md` and `jqx` freeze a human-written driver
+  (`md.py`, `jqx.py`) so the result is a program rather than a package nobody can invoke;
+  the table above calls that "a choice, and a defensible one" — it is a choice of this
+  port's, not something upstream has: an upstream Mode B run is handed a one-sentence
+  objective, and nothing in the repository is frozen for it. `fly` therefore freezes only
+  `REQUIREMENTS.md` (`FROZEN = ("REQUIREMENTS.md",)`, also the only entry in `CONTRACTS`).
+  Whoever uses the simulator needs a calling convention, and for a fly simulator nothing
+  implies one the way "a C compiler" implies `cc -o foo foo.c`, so the convention is
+  stated as a *requirement* (section 4 of `REQUIREMENTS.md`: the four names `fly.py`
+  imports) and `fly.py` itself is written by the agents. The cost is real: a run can now
+  fail to produce an entry point at all, which a frozen driver made impossible, so
+  `fly` runs are not directly comparable to `md` / `jqx` numbers.
+* **The `fly` acceptance suite is blind and lives outside the repository — a realignment
+  with how upstream is evaluated, and a deviation from this port's other domains.**
+  In `md`, `jqx`, `minilang` and `stackvm` the human writes the suite, it sits in the
+  frozen `tests/**`, and the failing test's *source* is pasted into the agent's prompt. In
+  upstream the agents write their own tests and run them ("tests are the definition of
+  done", `agents/manager.ex`); the external benchmarks (c-testsuite, LLVM, Csmith) are
+  applied by the experimenter afterwards and never enter the inner loop. `fly` follows
+  that: the `hidden` suite drives `evolve()` but is merged into a scratch copy only while
+  one evaluation runs, the prompt carries the requirement heading and the assertion's
+  *name* (no threshold, no inputs, no source), and a second `audit` set is sealed and
+  measured afterwards. The repository's own tests are the agents' and are enforced by
+  `own_review` (a child's failing own tests, or implementation code with no test under its
+  node, sends the work back — *test file* means a `.py` basename matching `test_*.py` or
+  `*_test.py`; see `TEST_FILE_GLOBS`). What this does **not** reproduce is upstream's human
+  merge, nor its benchmarks: the hidden suite is still this port's own, written by the
+  port's author, so the realignment is of *where the tests sit relative to the agents*, not
+  of what they measure.
 
 ## Run it
 

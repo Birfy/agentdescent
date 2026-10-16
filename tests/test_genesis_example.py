@@ -35,6 +35,39 @@ from examples.genesis import _md as md
 from examples.genesis import _stackvm as stackvm
 
 
+@pytest.fixture(autouse=True)
+def _offline(request, monkeypatch):
+    """Everything in this module runs without a network, a container engine or `claude`.
+
+    Enforced rather than assumed: a test that opens an internet socket, or spawns
+    `docker` / `podman` / `claude`, fails here instead of passing on a developer machine
+    that happens to have them. The one test marked ``engine`` talks to a real engine on
+    purpose and is skipped where there is none.
+    """
+    import socket
+
+    real_connect = socket.socket.connect
+
+    def connect(self, address):
+        if self.family in (socket.AF_INET, socket.AF_INET6):
+            raise AssertionError(f"test_genesis_example must stay offline: {address!r}")
+        return real_connect(self, address)
+
+    monkeypatch.setattr(socket.socket, "connect", connect)
+    if request.node.get_closest_marker("engine") is None:
+        real_init = subprocess.Popen.__init__
+
+        def guarded(self, args, *a, **kw):
+            argv = args if isinstance(args, (list, tuple)) else [args]
+            # a *bare* name is a lookup on PATH, i.e. the real binary; the tests' fakes
+            # are always run by path
+            if argv and str(argv[0]) in ("docker", "podman", "claude"):
+                raise AssertionError(f"test_genesis_example must not run {argv[0]!r}")
+            return real_init(self, args, *a, **kw)
+
+        monkeypatch.setattr(subprocess.Popen, "__init__", guarded)
+
+
 def _no_engine() -> bool:
     """Is there a container engine answering? Asked once, at collection."""
     from examples.genesis._sandbox import sandbox_engine
@@ -1274,6 +1307,7 @@ def test_a_cold_started_world_writes_the_decomposition_it_was_not_given():
     assert log.contract_violations == 0
 
 
+@pytest.mark.slow
 def test_the_md_suite_rejects_every_deliberately_wrong_implementation():
     """A suite is only as good as what it refuses, and nothing else here checked that.
 
@@ -1886,6 +1920,77 @@ def test_a_node_that_wrote_code_and_no_test_is_sent_back():
     assert "your own tests fail" in verdict[1]
 
 
+class _ReviewParent:
+    def __init__(self, state, path):
+        self.state, self.world = state, LocalWorld(version=0, path=path)
+
+
+_PASSING = "def test_x():\n    assert 1\n"
+
+
+@pytest.mark.parametrize("path,expected", [
+    ("src/a/test_kc.py", True), ("test_kc.py", True), ("src/a/kc_test.py", True),
+    ("src/a/kc.py", False), ("src/a/test_kc.txt", False), ("src/a/testkc.py", False),
+    ("src/test_dir/kc.py", False), ("src/a/latest.py", False),
+])
+def test_a_test_file_is_defined_by_glob_on_the_basename(path, expected):
+    """`test_*.py` / `*_test.py`, `.py` only, and the *name* -- not the directory."""
+    from examples.genesis._suite import is_test_file
+    assert is_test_file(path) is expected
+
+
+@pytest.mark.parametrize("path,expected", [
+    ("src/a/kc.py", True), ("src/a/my__init__helper.py", True),
+    ("src/a/__init__.py", False), ("src/a/conftest.py", False),
+    ("src/a/kc_pb2.py", False), ("src/a/generated/kc.py", False),
+    ("src/a/__pycache__/kc.py", False), ("src/a/test_kc.py", False),
+    ("src/a/notes.md", False),
+])
+def test_an_implementation_file_excludes_markers_generated_and_tests(path, expected):
+    from examples.genesis._suite import is_implementation_file
+    assert is_implementation_file(path) is expected
+
+
+def test_a_test_in_a_sibling_node_satisfies_the_rule_but_only_under_the_parent():
+    """The rule is "a test anywhere under the parent's node", not "next to the file"."""
+    review = _blind_suite().own_review()
+    wrote = [Edit("src/a", "src/a/kc.py", "X = 1\n")]
+    # a sibling node already wrote a test, and it is under the parent's path
+    sibling = {CONTEXT_FILE: "# root\n", "src/a/b/test_other.py": _PASSING}
+    assert review(_ReviewParent(sibling, "src/a"), wrote) is None
+    # a test outside the parent's subtree does not count
+    outside = {CONTEXT_FILE: "# root\n", "src/z/test_other.py": _PASSING}
+    verdict = review(_ReviewParent(outside, "src/a"), wrote)
+    assert verdict is not None and verdict[0] == "rework"
+    # and a root-level parent (path "") sees every test in the repository
+    assert review(_ReviewParent(outside, ""), wrote) is None
+
+
+def test_a_node_that_wrote_only_markers_or_generated_files_owes_no_test():
+    review = _blind_suite().own_review()
+    state = {CONTEXT_FILE: "# root\n"}
+    for returned in (
+        [Edit("src/a", "src/a/__init__.py", "")],
+        [Edit("src/a", "src/a/conftest.py", "import pytest\n")],
+        [Edit("src/a", "src/a/kc_pb2.py", "X = 1\n")],
+        [Edit("src/a", "src/a/generated/kc.py", "X = 1\n")],
+        [Edit("src/a", "src/a/README.md", "notes\n")],
+        [Edit("src/a", "src/a/old.py", None)],        # a deletion creates no obligation
+    ):
+        assert review(_ReviewParent(state, "src/a"), returned) is None, returned
+    # one real implementation file next to the markers still does
+    mixed = [Edit("src/a", "src/a/__init__.py", ""), Edit("src/a", "src/a/kc.py", "X = 1\n")]
+    verdict = review(_ReviewParent(state, "src/a"), mixed)
+    assert verdict is not None and "src/a/kc.py" in verdict[1]
+
+
+def test_a_star_test_py_file_counts_as_the_nodes_test():
+    review = _blind_suite().own_review()
+    returned = [Edit("src/a", "src/a/kc.py", "X = 1\n"),
+                Edit("src/a", "src/a/kc_test.py", _PASSING)]
+    assert review(_ReviewParent({CONTEXT_FILE: "# root\n"}, "src/a"), returned) is None
+
+
 def test_the_run_reports_how_many_model_calls_were_in_flight_at_once():
     """`usage.seconds / wallclock` looks like it answers this and does not.
 
@@ -2461,6 +2566,7 @@ time.sleep(120)
 '''
 
 
+@pytest.mark.slow
 def test_a_session_that_runs_out_of_wall_keeps_what_it_wrote(tmp_path):
     """The wall is an interruption, not a verdict.
 
@@ -2498,6 +2604,7 @@ time.sleep(120)
 '''
 
 
+@pytest.mark.slow
 def test_a_session_does_not_outlive_the_episode_that_started_it(tmp_path):
     """The group is killed, not the process.
 
@@ -2804,6 +2911,36 @@ def test_no_secret_value_reaches_the_container_argv():
     assert f"HOME={CONTAINER_HOME}" in forwarded
 
 
+def test_a_non_allowlisted_secret_never_appears_when_the_cli_is_signed_in_only():
+    """Signed in rather than keyed: `ANTHROPIC_API_KEY` is not in play, and must stay out.
+
+    `signed_in_only()` is the case where the host holds no key at all, so a key that
+    shows up anyway (a stray export, a `.env` loaded late) is exactly the one that must
+    not reach the argv, by value or by name, and neither may anything off the allowlist.
+    """
+    from examples.genesis._sandbox import CONTAINER_HOME, Workspace, signed_in_only
+
+    signed_in = {"CLAUDE_CODE_REMOTE": "true"}
+    assert signed_in_only(signed_in)
+    space = Workspace("/host/ws", prefix=["docker", "exec", "-w", "/work", "cid"],
+                      env={"HOME": CONTAINER_HOME}, binary="/opt/pkg/bin/claude",
+                      binary_names=("claude",))
+    host = dict(signed_in, OPENAI_API_KEY="sk-SECRET-A", GITHUB_TOKEN="ghp_SECRET-B",
+                AWS_SECRET_ACCESS_KEY="SECRET-C", CLAUDE_CODE_SESSION_ID="host-sess")
+    got = space.command(["claude", "-p", "hi"], host)
+    joined = "\0".join(got)
+    for leaked in ("SECRET-A", "SECRET-B", "SECRET-C", "host-sess", "OPENAI_API_KEY",
+                   "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "CLAUDE_CODE_REMOTE",
+                   "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
+        assert leaked not in joined, leaked
+    # and a key that *is* present crosses by name only, never by value
+    keyed = dict(host, ANTHROPIC_API_KEY="sk-ant-SECRET-D")
+    assert not signed_in_only(keyed)
+    got = space.command(["claude", "-p", "hi"], keyed)
+    assert "sk-ant-SECRET-D" not in "\0".join(got)
+    assert got[got.index("--env") + 1] == "ANTHROPIC_API_KEY"
+
+
 def test_a_shared_toolchain_directory_is_not_mounted():
     """`/usr/bin/claude` would mean mounting the host's system directories.
 
@@ -2850,6 +2987,8 @@ def test_without_an_engine_the_run_says_so_rather_than_pretending(tmp_path):
     assert "can read this machine" in local.summary()
 
 
+@pytest.mark.engine
+@pytest.mark.slow
 @pytest.mark.skipif(_no_engine(), reason="needs a container engine")
 def test_a_sandboxed_session_cannot_read_the_machine_it_runs_on(tmp_path):
     """The claim, checked against a real engine rather than against the flags.
