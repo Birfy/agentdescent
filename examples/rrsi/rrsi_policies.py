@@ -574,12 +574,13 @@ class RRsiAcceptance:
         self.state.restore(data)
 
     def on_screen_reject(self) -> None:
-        """Advance the schedule when the aggregator's screen rejected a batch.
+        """Advance the schedule on a pre-measurement merge refusal.
 
-        The screen (critic) runs in ``Aggregator._prepare``, before this policy's
-        ``accept`` is ever reached, so a batch the screen rejects would otherwise
-        leave the anneal and the stall detector frozen even though a merge was
-        decided. The aggregator calls this hook once per screen-rejected batch;
+        The screen (critic) and the governance invariant gate both run in
+        ``Aggregator._prepare``, before this policy's ``accept`` is ever reached.
+        Without this hook a streak of screen-rejected or violates-invariant
+        batches would leave the anneal and the stall detector frozen even though
+        a merge was decided. The aggregator calls this once per such refusal;
         ``record_merge`` advances ``round``/``progress`` exactly as an acceptance
         decision does (review: the round must advance on every merge)."""
         self.state.record_merge()

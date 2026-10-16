@@ -1482,6 +1482,14 @@ class Aggregator:
             if self.meter is not None:
                 self.meter.add("invariant_rejections", len(violations))
             self.buffer.settle(survivors)
+            # Same per-merge accounting as the all-screen-rejected path: an
+            # annealed budget / stall detector must advance on a governance
+            # refusal too, or a streak of violates-invariant decisions freezes
+            # the RRSI schedule at b_max (review #254 P2).
+            on_reject = getattr(self.acceptance_policy,
+                                "on_screen_reject", None)
+            if callable(on_reject):
+                on_reject()
             return MergeReport(artifact_id, None, False, n_considered,
                                len(survivors), len(discarded), conflicts, 0.0,
                                None, "; ".join(violations),

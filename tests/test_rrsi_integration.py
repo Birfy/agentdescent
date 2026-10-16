@@ -13,6 +13,7 @@ Every fixture here is offline and deterministic.
 
 import pytest
 
+from agentdescent import Contract, Invariant
 from agentdescent.aggregator import MergeOutcome
 from agentdescent.evolution import SingleSlot, Task, evolve
 from agentdescent.evolvable import Diff, EvidenceCard
@@ -400,3 +401,32 @@ def test_resume_preserves_the_historical_best_floor(tmp_path):
            rounds=1, n_workers=2, repo_path=repo, policies=bundle2,
            checkpointing=True)
     assert state2.best_score == pytest.approx(state1.best_score)
+
+
+def test_invariant_rejections_advance_the_rrsi_schedule(tmp_path):
+    """A violates-invariant refusal is still a merge decision: the RRSI anneal
+    and stall detector must advance once per rejection (review #254 P2). A
+    one-op SingleSlot proposal passes the critic but fails mutable_keys that
+    only permit an unrelated key; after a streak, round/progress move and
+    stall trips, without inventing reward/cost measurements."""
+    run, reward = _offline_actors()
+    cfg = RRsiConfig(b_min=1, b_max=5, T=4, stall_window=3)
+    bundle, state = build_rrsi_bundle(_complete_factory(), protected=("t3",),
+                                      config=cfg)
+    contract = Contract(invariants=(Invariant("mutable_keys", ("other",)),))
+    result = evolve(_tasks(), reward, run=run,
+                    strategy=SingleSlot(initial_value="seed"), rounds=3,
+                    n_workers=2, repo_path=str(tmp_path / "repo"),
+                    policies=bundle, contract=contract)
+    assert result.outcomes().get("violates-invariant", 0) >= 1
+    assert result.outcomes().get("committed", 0) == 0
+    n_rej = result.outcomes().get("violates-invariant", 0)
+    assert state.round == n_rej, (
+        f"exactly one schedule advance per invariant refusal; "
+        f"round={state.round} rejections={n_rej}")
+    assert state.best_score == 0.0, "S* must stay at base (no invented measurement)"
+    assert len(state.progress) == n_rej
+    assert all(p == 0.0 for p in state.progress)
+    if n_rej >= 3:
+        assert state.stalled() is True
+    assert state.budget() < 5, "rejection streak must anneal the edit budget"
