@@ -84,5 +84,11 @@ mkdocs build --strict   # must pass with no warnings (CI enforces this)
 
 1. Branch from `main`.
 2. `pytest -q` and `mkdocs build --strict` both pass.
-3. Update `CHANGELOG.md` under **[Unreleased]**.
+3. Add a changelog fragment: one new file `changelog.d/<number>-<slug>.md`
+   whose first line is the category (`Added`, `Changed`, `Deprecated`,
+   `Removed`, `Fixed`, `Security`) and whose remaining lines are the entry text.
+   Do **not** edit `CHANGELOG.md` in a PR: a shared edit point makes every open
+   PR conflict whenever one merges. Maintainers fold fragments into
+   `CHANGELOG.md` at release time. See [`changelog.d/README.md`](changelog.d/README.md);
+   `pytest -q` validates your fragment.
 4. Open the PR with a clear description of *what* changed and *why*.

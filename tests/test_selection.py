@@ -13,6 +13,8 @@ candidates it is given; one that returns something else is refused rather than
 committed, because a state no rollout produced has never been through the gate.
 """
 
+import math
+
 import pytest
 
 from agentdescent.async_evolve import async_evolve
@@ -20,14 +22,17 @@ from agentdescent.evolution import AppendRules, Task, evolve
 from agentdescent.evolvable import ContractError
 from agentdescent.policies import Policies
 from agentdescent.selection import (
-    Archive, Beam, Candidate, MCTS, MultiHeadUnsupported, ParetoFrontier,
-    SelectionContext, SingleHead, pareto_front, sigmoid_novelty_weights,
+    Archive, Beam, Candidate, CostEfficient, FlatPuct, MCTS,
+    MultiHeadUnsupported, ParetoFrontier, SelectionContext, SingleHead,
+    pareto_front, sigmoid_novelty_weights,
 )
 
 
-def _c(version, score=None, per_task=None, selected=0, parent=None):
+def _c(version, score=None, per_task=None, selected=0, parent=None,
+       prior=None, cost=None):
     return Candidate(artifact_id="a", version=version, score=score,
-                     per_task=per_task or {}, selected=selected, parent=parent)
+                     per_task=per_task or {}, selected=selected, parent=parent,
+                     prior=prior, cost=cost)
 
 
 def _ctx(*candidates, head=None, n=4, round=0):
@@ -476,3 +481,95 @@ def test_the_population_layer_hands_the_policy_a_moving_round():
     assert result.error is None
     assert seen, "the layer never asked"
     assert seen == list(range(len(seen))), f"rounds were not consecutive: {seen}"
+
+
+# -- FlatPuct / CostEfficient / MCTS / Beam knobs (#293) -----------------------
+#
+# CostEfficient used to OverflowError inside cost**alpha; FlatPuct/MCTS/Beam
+# accepted NaN / non-numeric knobs and then either crashed mid-select or
+# silently always-picked index 0.
+
+
+def test_cost_efficient_survives_a_steep_cost_exponent():
+    """cost**alpha used to raise OverflowError mid-select (#293)."""
+    pool = (
+        _c(0, 0.1, cost=1.0),
+        _c(1, 0.5, cost=100.0),
+        _c(2, 0.9, cost=0.01),
+    )
+    ctx = _ctx(*pool, head=pool[0], n=3)
+    factors = CostEfficient(cost_exponent=700).cost_factors(list(pool))
+    assert all(f == f and f > 0 for f in factors)  # finite-or-inf, positive
+    assert any(math.isinf(f) for f in factors) or max(factors) > 1e100
+    picks = CostEfficient(cost_exponent=700).select(ctx, 3)
+    assert len(picks) == 3
+    assert {c.version for c in picks} <= {0, 1, 2}
+
+
+def test_flat_puct_priors_survive_a_steep_prior_exponent():
+    """prior**exponent used to OverflowError inside _priors (#293)."""
+    pool = (
+        _c(0, 0.5, prior=1.0),
+        _c(1, 0.5, prior=100.0),
+    )
+    priors = FlatPuct(prior_exponent=700)._priors(list(pool))
+    assert abs(sum(priors) - 1.0) < 1e-12
+    assert all(math.isfinite(p) and p >= 0 for p in priors)
+    # Stronger prior must still win after the overflow-safe path (Codex P2).
+    assert priors[1] > priors[0]
+    assert priors[1] == pytest.approx(1.0)
+
+
+def test_flat_puct_prior_power_matches_naive_when_finite():
+    """Max-normalisation must cancel so finite exponents stay bit-identical."""
+    pool = (
+        _c(0, 0.5, prior=2.0),
+        _c(1, 0.5, prior=8.0),
+        _c(2, 0.5, prior=4.0),
+    )
+    got = FlatPuct(prior_exponent=2.0)._priors(list(pool))
+    raw = [p ** 2 for p in (2.0, 8.0, 4.0)]
+    total = sum(raw)
+    expected = [r / total for r in raw]
+    assert got == expected
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"c_puct": float("nan")},
+    {"c_puct": float("inf")},
+    {"c_puct": None},
+    {"c_puct": "1"},
+    {"prior_exponent": float("nan")},
+    {"prior_exponent": float("inf")},
+    {"prior_exponent": "0"},
+])
+def test_flat_puct_refuses_non_finite_knobs(kwargs):
+    with pytest.raises(ValueError):
+        FlatPuct(**kwargs)
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"cost_exponent": float("nan")},
+    {"cost_exponent": float("inf")},
+    {"cost_exponent": "1"},
+    {"cost_exponent": None},
+])
+def test_cost_efficient_refuses_non_finite_cost_exponent(kwargs):
+    with pytest.raises(ValueError):
+        CostEfficient(**kwargs)
+
+
+def test_cost_efficient_negative_cost_exponent_still_means_ignore_cost():
+    assert CostEfficient(cost_exponent=-3).cost_exponent == 0.0
+
+
+@pytest.mark.parametrize("exploration", [float("nan"), float("inf"), float("-inf"), "1.4", None, True])
+def test_mcts_refuses_non_finite_exploration(exploration):
+    with pytest.raises(ValueError):
+        MCTS(exploration=exploration)
+
+
+@pytest.mark.parametrize("k", [0, -1, 1.5, float("nan"), True, "2", None])
+def test_beam_refuses_non_integer_or_non_positive_width(k):
+    with pytest.raises(ValueError):
+        Beam(k)

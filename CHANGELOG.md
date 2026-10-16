@@ -96,6 +96,17 @@ All notable changes to AgentDescent are documented here. The format follows
   small fraction with a steep `cool_down_beta` no longer raises
   `OverflowError` mid-`select()`. Non-finite `cool_down_beta` / `max_tau` are
   rejected with `ValueError`.
+- `FlatPuct` / `CostEfficient` / `MCTS` / `Beam` no longer crash or silently
+  poison `select()` on bad knobs (#293). `CostEfficient.cost_factors` and
+  `FlatPuct._priors` used to raise `OverflowError` on a steep
+  `cost_exponent` / `prior_exponent` against a wide ratio; both now use a
+  safe power that returns `+inf` instead of raising, so an expensive
+  candidate loses exploration rather than aborting the round. Non-finite
+  `c_puct` / `prior_exponent` / `exploration` / `cost_exponent` are refused
+  with `ValueError` at construction (a negative `cost_exponent` still clamps
+  to 0 = ignore cost). `Beam(k=...)` now requires an integer `>= 1`, so
+  `nan` / `1.5` / `True` no longer construct and then `TypeError` on the
+  first slice.
 
 - `sigmoid_novelty_weights` / `Archive(sampling='sigmoid_novelty')` no longer
   raise `OverflowError` on large negative scores, and a non-finite score no
