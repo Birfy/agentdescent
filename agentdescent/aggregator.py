@@ -1605,9 +1605,13 @@ class Aggregator:
         # this artifact's contract has to land adapted in the same commit, and
         # a stray adapter for an unrelated artifact would leave a real
         # dependent registered against the superseded contract while pretending
-        # the transaction is complete.
+        # the transaction is complete. The guard runs whenever *either* side is
+        # nonempty: an artifact with no declared dependents must not carry
+        # adapters either -- a breaking change to it has nothing to land with,
+        # and committing an unrelated adapter would silently change an artifact
+        # no gate asked it to touch.
         required = set(self.contract_dependents.get(c.artifact_id, ()))
-        if c.diff.contract_breaking and required:
+        if c.diff.contract_breaking:
             adapters = list(getattr(c, "adapters", None) or ())
             adapter_ids = [a.id for a in adapters]
             missing = sorted(required - set(adapter_ids))

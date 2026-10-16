@@ -331,6 +331,42 @@ def test_contract_breaking_with_unrelated_adapter_is_refused(tmp_path):
     assert "extra ['x']" in report.reason, report.reason
 
 
+def test_contract_breaking_with_adapters_but_no_dependents_is_refused(tmp_path):
+    """An artifact with *no* declared dependents must not carry adapters in a
+    breaking commit either: the exact-set guard is the invariant, and an empty
+    required set with a nonempty adapter set is as exact a violation as a
+    partial one. Committing the stray adapter would change an artifact no gate
+    asked this diff to touch (PR #197 review: the guard only ran when the
+    required set was nonempty)."""
+    from agentdescent.aggregator import _Candidate
+    lg, agg = _agg_with_dependents(tmp_path, extra_ids=("artifact", "x"),
+                                   dependents={})
+    snap = lg.snapshot(Ledger.DEV)
+    base = snap.get("artifact")
+    cand = base.apply(Diff(diff_id="d", target="artifact", ops={"k": "v"},
+                           author="w", contract_breaking=True))
+    x_adapted = snap.get("x").apply(Diff(diff_id="adapter", target="x",
+                                         ops={"unexpected": "committed"},
+                                         author="w"))
+    c = _Candidate(
+        artifact_id="artifact", artifact=base, candidate=cand,
+        diff=Diff(diff_id="d", target="artifact", ops={"k": "v"},
+                  author="w", contract_breaking=True),
+        cards=[], survivor_cards=[], head=snap.version,
+        fused=False, considered=1, survived=1, discarded=0, conflicts=0,
+        adapters=[x_adapted],
+        base_counts=(2.0, 0.0), cand_counts=(3.0, 0.0),
+        base_cheap=1.0, cand_cheap=1.0)
+    report = agg._decide(c)
+    assert report.category == "missing-adapters", (
+        f"adapters with no declared dependents must be refused, "
+        f"got {report.category}")
+    assert report.committed_version is None
+    assert "extra ['x']" in report.reason, report.reason
+    assert lg.head_version(Ledger.DEV).get("x") == 1, (
+        "the unrelated adapter must not land")
+
+
 def test_contract_breaking_with_duplicate_adapters_is_refused(tmp_path):
     """Duplicating one dependent's adapter while another stays missing must be
     refused, not treated as coverage."""
