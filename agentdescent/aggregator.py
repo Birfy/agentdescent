@@ -38,8 +38,8 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import (Any, Callable, Deque, Dict, List, Optional, Protocol, Tuple,
-                    Union, runtime_checkable)
+from typing import (Any, Callable, Deque, Dict, List, Optional, Protocol, Sequence,
+                    Tuple, Union, runtime_checkable)
 
 from .evolvable import (
     ContractError, Diff, EvidenceCard, Evolvable, VersionVector,
@@ -229,6 +229,13 @@ class MergeOutcome(str, Enum):
     #: so a policy-violating proposal never buys a held-out sweep. The
     #: reflector (or the contract) is the thing to look at.
     VIOLATES_INVARIANT = "violates-invariant"
+    #: A contract-breaking diff landed on an artifact with declared dependents
+    #: (``Contract.depends_on``), but the worker supplied no adapted dependent
+    #: states to land in the same ``commit_atomic``. The atomic adaptation
+    #: transaction would otherwise silently commit only the breaking artifact,
+    #: leaving dependents registered against a superseded contract. Explicitly
+    #: rejected rather than half-applied.
+    MISSING_ADAPTERS = "missing-adapters"
 
     def __str__(self) -> str:            # so f-strings render the value, not the name
         return self.value
@@ -346,6 +353,11 @@ class _Candidate:
     oversized: int = 0
     #: The ledger branch this candidate was proposed against.
     branch: Optional[str] = None
+    #: Adapted states of the dependents that must land in the *same* atomic
+    #: commit as a contract-breaking change (the design's atomic adaptation
+    #: transaction). ``None``/empty when the diff is not contract-breaking, or
+    #: when the artifact has no declared dependents.
+    adapters: Optional[Sequence[Evolvable]] = None
 
     #: Filled by `Aggregator._measure`. `None` until then, which is what makes a
     #: candidate that skipped the phase fail loudly rather than commit on zeros.
@@ -713,6 +725,13 @@ class Aggregator:
         #: evaluations were taken under the superseded contract). Optional --
         #: ``None`` keeps the old behaviour of not noticing.
         self.on_contract_change: Optional[Callable[[str], None]] = None
+        #: Reverse contract-dependency graph: ``changed_artifact_id ->
+        #: [dependents]``, wired by the engine from the registered artifacts'
+        #: ``Contract.depends_on``. Used to refuse a contract-breaking commit
+        #: that would land without adapted dependents (see
+        #: :data:`MergeOutcome.MISSING_ADAPTERS`). Empty (single-artifact runs)
+        #: keeps the old behaviour.
+        self.contract_dependents: Dict[str, List[str]] = {}
         self._posteriors: Dict[str, BetaPosterior] = defaultdict(BetaPosterior)
         #: How many queued audits the L-value consumer drained and ran against
         #: the oracle. Zero when ``audit_drain_per_step`` is 0 (the default).
@@ -1286,10 +1305,18 @@ class Aggregator:
         """
         attempts = max(1, self.config.cas_attempts)
         for attempt in range(attempts):
-            base_vv = {artifact_id: head.get(artifact_id, 0)}
+            if diff.contract_breaking:
+                # `commit_atomic` CAS-checks *every* state it writes, so the
+                # base vector must name each one (candidate + adapters) with the
+                # version it was measured against. `head` is the merge's full
+                # version vector (from the branch snapshot), so every id is
+                # there; a missing entry means "new artifact, base 0".
+                new_states = [candidate] + list(adapters or ())
+                base_vv = {s.id: head.get(s.id, 0) for s in new_states}
+            else:
+                base_vv = {artifact_id: head.get(artifact_id, 0)}
             try:
                 if diff.contract_breaking:
-                    new_states = [candidate] + list(adapters or ())
                     _, vv = self.ledger.commit_atomic(
                         new_states, base_vv, branch=Ledger.DEV,
                         message=f"merge {diff.diff_id} -> {artifact_id} (contract)")
@@ -1558,11 +1585,31 @@ class Aggregator:
         # -- commit (section 4.1): CAS on dev --------------------------------
         # The candidate was prepared against its branch's own head (`c.head`),
         # so it must commit to *that* branch -- a fork candidate going to `dev`
-        # would overwrite the confirmed branch and leave the fork unchanged
-        # (PR #196 review). Empty branch means `dev`, the single-head default.
+        # would overwrite the confirmed branch and leave the fork unchanged.
+        # Empty branch means `dev`, the single-head default.
+        # A contract-breaking change must land **with** its adapted dependents
+        # in the same atomic commit -- the design's "atomic adaptation
+        # transaction". The worker produces the breaking diff; the adapted
+        # dependent states are what make it safe. If this artifact has declared
+        # dependents (`Contract.depends_on`) and the worker supplied none,
+        # committing just the breaking artifact would leave them registered
+        # against a superseded contract. Refuse rather than half-apply: the
+        # worker that wants the break must also produce the adapters.
+        if (c.diff.contract_breaking
+                and self.contract_dependents.get(c.artifact_id)
+                and not getattr(c, "adapters", None)):
+            _observe_outcome(False)
+            return report(None, None,
+                          f"contract-breaking change to {c.artifact_id} has "
+                          f"declared dependents "
+                          f"{sorted(self.contract_dependents[c.artifact_id])} "
+                          "but no adapted states to land with it; supply them "
+                          "as the same atomic commit's adapters",
+                          MergeOutcome.MISSING_ADAPTERS)
         new_version = self._commit_with_retry(
             c.artifact_id, c.candidate, c.diff, c.head,
-            branch=c.branch or Ledger.DEV)
+            branch=c.branch or Ledger.DEV,
+            adapters=getattr(c, "adapters", None))
         committed = new_version is not None
         _observe_outcome(committed)
         if not committed:

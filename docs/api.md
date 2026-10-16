@@ -1133,6 +1133,7 @@ The vocabulary of `category`.
 | `CAS_CONFLICT` | `'cas-conflict'` |
 | `UNKNOWN_ARTIFACT` | `'unknown-artifact'` |
 | `VIOLATES_INVARIANT` | `'violates-invariant'` |
+| `MISSING_ADAPTERS` | `'missing-adapters'` |
 
 ### `MergeReport(...)`
 
