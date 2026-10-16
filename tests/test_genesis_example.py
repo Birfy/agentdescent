@@ -395,8 +395,22 @@ def test_a_signed_in_run_is_told_a_container_cannot_authenticate():
     # The reason is only reached when the engine and the toolchain are both fine, so
     # the constructor is exercised for the shape of the check rather than its verdict
     # on this machine: keyed, the sign-in branch must not be the one that fires.
-    with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "k"}):
-        assert "signed in" not in SessionSandbox().reason
+    # No real engine, no real binary: the engine probe is `docker info` on a machine
+    # that has docker, and this test must not depend on whether it does.
+    from examples.genesis import _sandbox
+
+    with mock.patch.object(_sandbox, "sandbox_engine", return_value="docker"), \
+            mock.patch.object(_sandbox, "toolchain_root", return_value="/opt/claude"), \
+            mock.patch.object(_sandbox, "_Provider") as provider:
+        provider.return_value.reap.return_value = 0
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "k"}):
+            assert "signed in" not in SessionSandbox().reason
+        keyless = {k: v for k, v in os.environ.items()
+                   if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}
+        keyless["CLAUDE_CODE_REMOTE"] = "true"
+        with mock.patch.dict(os.environ, keyless, clear=True):
+            sandbox = SessionSandbox()
+            assert "signed in" in sandbox.reason and not sandbox.available
 
 
 def test_a_signed_in_run_declares_its_toolset_instead_of_shipping_forty_two():
