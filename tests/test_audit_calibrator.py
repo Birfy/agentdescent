@@ -527,3 +527,46 @@ def test_pooling_two_strata_adds_their_skipped_counts():
     both = pool({"n": 2, "mean": 0.2, "var": 0.1, "skipped": 1},
                 {"n": 2, "mean": 0.8, "var": 0.1, "skipped": 2})
     assert both["skipped"] == 3 and both["n"] == 4
+
+
+# -- alpha and the "never raises" contract (#314) ----------------------------
+
+@pytest.mark.parametrize("alpha", [0.0, -0.05, 1.0, 2.0, float("nan"),
+                                   float("inf"), "0.05", None])
+def test_an_invalid_alpha_is_refused_at_construction(alpha):
+    """Fails at setup instead of mid-merge (or, at 1.0, as a zero-width interval)."""
+    store, _ = _populated(n=40, n_unlab=40)
+    with pytest.raises(ValueError):
+        Calibrator(store, alpha=alpha)
+
+
+def test_a_valid_alpha_is_kept_as_given():
+    store, _ = _populated(n=40, n_unlab=40)
+    assert Calibrator(store, alpha=0.1).alpha == 0.1
+
+
+def test_an_unexpected_estimator_failure_becomes_a_stale_rectification():
+    """`current()` is documented as never raising: its caller is a merge."""
+    store, _ = _populated()
+    cal = Calibrator(store)
+    assert not cal.current("v1").is_stale
+
+    class Boom(Exception):
+        pass
+
+    def explode(*a, **k):
+        raise Boom("surprise")
+
+    cal._estimate = explode
+    r = cal.recompute("v1")
+    assert r.is_stale and "Boom" in r.stale_reason and "surprise" in r.stale_reason
+    assert cal.current("v1").is_stale
+
+
+def test_a_bad_alpha_set_after_construction_cannot_escape_the_merge_path():
+    store, _ = _populated()
+    cal = Calibrator(store)
+    for bad in (0.0, 1.0, float("nan")):
+        cal.alpha = bad
+        r = cal.recompute("v1")
+        assert r.is_stale, bad

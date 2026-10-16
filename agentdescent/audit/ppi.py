@@ -273,6 +273,39 @@ def t_ppf(p: float, df: float) -> float:
     return t if p > 0.5 else -t
 
 
+def _require_finite(owner: str, name: str, value: Any) -> None:
+    """Raise :class:`PPIError` unless every element of ``value`` is a finite number.
+
+    NaN is the case that matters: it compares false against everything, so
+    ``nan < 0`` and ``abs(nan - 1) > 1e-6`` both pass a range check and the NaN
+    travels on into ``theta`` and the interval, where it looks like a result.
+    """
+    try:
+        ok = bool(np.all(np.isfinite(np.asarray(value, dtype=float))))
+    except (TypeError, ValueError) as exc:
+        raise PPIError(f"{owner}: {name} is not numeric ({exc})") from None
+    if not ok:
+        raise PPIError(f"{owner}: {name} must be finite (no NaN or inf), "
+                       f"got {value!r}" if np.ndim(value) == 0 else
+                       f"{owner}: {name} contains NaN or inf")
+
+
+def _require_alpha(alpha: Any) -> float:
+    """``alpha`` as a float in the open interval (0, 1), else :class:`PPIError`.
+
+    ``0`` and below used to escape as ``statistics.StatisticsError`` from the
+    normal quantile, ``1`` returned a zero-width interval, and NaN returned a NaN
+    one.
+    """
+    if isinstance(alpha, bool) or not isinstance(alpha, (int, float, np.number)):
+        raise PPIError(f"alpha must be a number in (0, 1), got {alpha!r}")
+    a = float(alpha)
+    if not (math.isfinite(a) and 0.0 < a < 1.0):
+        raise PPIError(f"alpha must be finite and satisfy 0 < alpha < 1, "
+                       f"got {alpha!r}")
+    return a
+
+
 @dataclass(frozen=True)
 class Stratum:
     """One layer of the sampling design, with its labelled and unlabelled halves.
@@ -338,18 +371,33 @@ class Stratum:
                     f"stratum {self.name!r}: {len(groups)} cluster ids for "
                     f"{self.f_lab.size} labelled units")
             object.__setattr__(self, "clusters_lab", groups)
+        owner = f"stratum {self.name!r}"
+        _require_finite(owner, "weight", self.weight)
         if self.weight < 0.0:
             raise PPIError(f"stratum {self.name!r}: weight {self.weight!r} < 0")
+        _require_finite(owner, "f_lab", self.f_lab)
+        _require_finite(owner, "y_lab", self.y_lab)
         if self.f_unlab is not None:
             arr = np.asarray(self.f_unlab, dtype=float)
+            _require_finite(owner, "f_unlab", arr)
             object.__setattr__(self, "f_unlab", arr)
             object.__setattr__(self, "n_unlab", int(arr.size))
             object.__setattr__(self, "mean_unlab",
                                float(np.mean(arr)) if arr.size else 0.0)
             object.__setattr__(self, "var_unlab",
                                float(np.var(arr, ddof=1)) if arr.size >= 2 else 0.0)
-        elif self.n_unlab < 0:
-            raise PPIError(f"stratum {self.name!r}: n_unlab {self.n_unlab!r} < 0")
+        else:
+            _require_finite(owner, "n_unlab", self.n_unlab)
+            if float(self.n_unlab) != int(self.n_unlab):
+                raise PPIError(
+                    f"stratum {self.name!r}: n_unlab {self.n_unlab!r} is not an "
+                    "integer count")
+            object.__setattr__(self, "n_unlab", int(self.n_unlab))
+            if self.n_unlab < 0:
+                raise PPIError(
+                    f"stratum {self.name!r}: n_unlab {self.n_unlab!r} < 0")
+            _require_finite(owner, "mean_unlab", self.mean_unlab)
+            _require_finite(owner, "var_unlab", self.var_unlab)
         if self.var_unlab < 0.0:
             raise PPIError(
                 f"stratum {self.name!r}: var_unlab {self.var_unlab!r} < 0")
@@ -365,7 +413,7 @@ class Stratum:
         produces a plausible number rather than an error.
         """
         return cls(name=name, weight=weight, f_lab=f_lab, y_lab=y_lab,
-                   f_unlab=None, n_unlab=int(n_unlab),
+                   f_unlab=None, n_unlab=n_unlab,
                    mean_unlab=float(mean_unlab), var_unlab=float(var_unlab),
                    clusters_lab=clusters_lab)
 
@@ -611,15 +659,22 @@ def ppi_mean_stratified(strata: Sequence[Stratum], *, alpha: float = 0.05,
     ------
     PPIError
         When no estimate is possible: no strata, a layer with fewer than two
-        labels, or weights that do not sum to 1. The last is strict on purpose
-        -- weights that are off are a bug in the sampler that recorded them, and
-        normalising them silently would produce a plausible answer to the wrong
-        question.
+        labels, an ``alpha`` outside the open interval (0, 1) or NaN, a
+        ``k_folds`` below 2, or weights that do not sum to 1 (a NaN or infinite
+        weight fails this too). Non-finite scores, moments or weights are
+        refused earlier, by :class:`Stratum` itself. The weight check is strict
+        on purpose -- weights that are off are a bug in the sampler that
+        recorded them, and normalising them silently would produce a plausible
+        answer to the wrong question.
     """
+    alpha = _require_alpha(alpha)
+    if isinstance(k_folds, bool) or not isinstance(k_folds, (int, np.integer)) \
+            or k_folds < 2:
+        raise PPIError(f"k_folds must be an integer >= 2, got {k_folds!r}")
     if not strata:
         raise PPIError("no strata")
     total_w = sum(s.weight for s in strata)
-    if abs(total_w - 1.0) > 1e-6:
+    if not math.isfinite(total_w) or abs(total_w - 1.0) > 1e-6:
         raise PPIError(
             f"stratum weights sum to {total_w!r}, not 1. They are population "
             "shares recorded at sampling time; a mismatch means the sampler and "

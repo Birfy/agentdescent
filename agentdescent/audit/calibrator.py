@@ -48,7 +48,8 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .ppi import MIN_N_DOMINANT, PPIError, Stratum, ppi_mean_stratified
+from .ppi import (MIN_N_DOMINANT, PPIError, Stratum, _require_alpha,
+                  ppi_mean_stratified)
 from .store import AuditStore
 
 __all__ = ["Calibrator", "Rectification", "STALE_INFLATION",
@@ -170,6 +171,10 @@ class Calibrator:
     ----------
     store:
         Where the audited pairs and the unlabelled moments live.
+    alpha:
+        ``1 - alpha`` is the nominal coverage of the interval. Must satisfy
+        ``0 < alpha < 1``; anything else raises ``ValueError`` here, at
+        construction, rather than on the first merge.
     min_labels:
         Below this many resolved calibration labels the result is stale rather
         than wide. A very wide interval and "we do not know yet" are different
@@ -194,6 +199,13 @@ class Calibrator:
                  seed: int = 0, min_labels: int = 30,
                  min_per_stratum: int = 5,
                  cluster_by: Optional[str] = "task_id") -> None:
+        # Refused here, at setup, rather than discovered mid-merge: an `alpha`
+        # outside (0, 1) used to surface as `StatisticsError` from the normal
+        # quantile (or a zero-width interval at 1.0) on the first `recompute`.
+        try:
+            alpha = _require_alpha(alpha)
+        except PPIError as exc:
+            raise ValueError(f"Calibrator: {exc}") from None
         self.store = store
         self.alpha = alpha
         self.seed = seed
@@ -229,6 +241,14 @@ class Calibrator:
             result = self._estimate(verifier_version)
         except PPIError as exc:
             result = Rectification.stale(verifier_version, str(exc))
+        except Exception as exc:  # noqa: BLE001 -- the contract is "never raises"
+            # Defence in depth. `current()` promises a rectification because its
+            # caller is a merge decision; an estimator or store failure we did
+            # not anticipate must degrade the gate to conservative, not abort the
+            # merge. The type is kept in the reason so it is not silently lost.
+            result = Rectification.stale(
+                verifier_version,
+                f"estimator failed unexpectedly: {type(exc).__name__}: {exc}")
         with self._lock:
             self._stale_reason = None
             self._cache[verifier_version] = result
