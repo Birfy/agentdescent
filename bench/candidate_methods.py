@@ -41,6 +41,7 @@ from examples.reflexion import reflexion_episodic_memory
 from examples.self_refine import self_refine_feedback_loop
 from examples.sica import sica_self_edit
 from examples.skillweaver import skillweaver_web_apis
+from examples.textgrad import textgrad_prompt_optimization
 from examples.voyager import voyager_skill_library
 
 
@@ -60,6 +61,7 @@ _MODULES = (
     godel_agent_self_modify,
     dynamic_cheatsheet_cumulative,
     gskill_repo_skill,
+    textgrad_prompt_optimization,
 )
 
 ALGORITHMS: Dict[str, Tuple[str, PolicyBuilder]] = {

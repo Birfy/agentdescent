@@ -23,6 +23,7 @@ DISPLAY_NAMES = {
     "agent0": "Agent0",
     "sica": "SICA",
     "godel_agent": "Godel Agent",
+    "textgrad": "TextGrad",
 }
 
 UPSTREAMS = {
@@ -69,6 +70,10 @@ UPSTREAMS = {
     "godel_agent": (
         "Arvid-pku/Godel_Agent@bbb50879",
         "https://github.com/Arvid-pku/Godel_Agent/tree/bbb508796be31c7140cdfc7106efd830a1324242",
+    ),
+    "textgrad": (
+        "zou-group/textgrad@75e912e2",
+        "https://github.com/zou-group/textgrad/tree/75e912e210864b61999781778cdf756d4468120f",
     ),
 }
 
@@ -446,6 +451,7 @@ def render_report(payload: Mapping[str, Any], *, input_path: Path) -> str:
         "agent0": ("curriculum/executor co-evolution and multi-turn tools", "calculator environment and memory instead of RL post-training"),
         "sica": ("real Python self-edit and measured utility gate", "one AST-gated policy function instead of SWE-bench Docker"),
         "godel_agent": ("artifact-owned solve and recursive self-improvement functions", "AST-gated replacement instead of full monkey-patched scaffold"),
+        "textgrad": ("backward textual gradient, TGD rewrite, validation revert", "one prompt Variable and a minibatch of one instead of compound systems"),
     }
     for algorithm in algorithms:
         label, url = UPSTREAMS[algorithm]

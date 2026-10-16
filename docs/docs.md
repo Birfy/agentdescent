@@ -10,7 +10,7 @@ Choose the route that matches what you want to do. Each guide links to the deepe
   <a href="../install/"><span>01 / START</span><strong>Use it in your agent</strong><small>Install AgentDescent, connect Claude Code, Codex, OpenCode or DeepSeek Harness, and review your first change.</small><b>Open Quickstart ↗</b></a>
   <a href="../#demo"><span>02 / TRY</span><strong>See the interaction</strong><small>Walk through a sample agent conversation in the interactive demo on the homepage.</small><b>Try the demo ↗</b></a>
   <a href="../modules/"><span>03 / BUILD</span><strong>Compose an evolution loop</strong><small>Find strategies, actors, rewards, policies, workers, and the replaceable optimizer.</small><b>Explore the module map ↗</b></a>
-  <a href="../self-evolution-examples/"><span>04 / STUDY</span><strong>Browse 22 algorithm ports</strong><small>See how published methods fit different artifact types and algorithm choices.</small><b>Browse methods ↗</b></a>
+  <a href="../self-evolution-examples/"><span>04 / STUDY</span><strong>Browse 23 algorithm ports</strong><small>See how published methods fit different artifact types and algorithm choices.</small><b>Browse methods ↗</b></a>
 </div>
 
 ## Go deeper

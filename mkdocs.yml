@@ -131,6 +131,7 @@ nav:
     - AFlow — workflow search: algo-aflow.md
     - Reflexion — episodic memory: algo-reflexion.md
     - Self-Refine — feedback refinement: algo-self-refine.md
+    - TextGrad — textual gradients: algo-textgrad.md
     - Voyager — skill library: algo-voyager.md
     - SkillWeaver — web APIs: algo-skillweaver.md
     - Absolute Zero — zero-data self-play: algo-absolute-zero.md

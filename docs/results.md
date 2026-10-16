@@ -11,7 +11,7 @@ so you can reproduce it.
 ## The algorithm ports
 
 The measured port results live in one place — **[measured results, all
-twenty-two](self-evolution-examples.md#measured-results-all-twenty-two)** — with each
+twenty-three](self-evolution-examples.md#measured-results-all-twenty-three)** — with each
 row linked to the page that carries its full setup, its caveats and the run file
 it came from. They are not repeated here: a second copy of a number is a copy
 that goes stale, and this page's copy did.
