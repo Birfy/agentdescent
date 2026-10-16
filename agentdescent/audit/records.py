@@ -34,8 +34,15 @@ from typing import Any, Callable, Dict, Optional
 
 #: Bumped when the on-disk shape of a record changes incompatibly. A reader that
 #: meets a record it does not understand must say so rather than guess -- see
-#: :meth:`AuditStore.load`.
-SCHEMA_VERSION = 1
+#: :meth:`AuditStore.load`. Version 2 adds optional ``scorer_version``; this
+#: build still migrates version-1 lines. Stamp the new marker whenever the
+#: persisted shape is one an older v1-only reader cannot decode, so that reader
+#: hits its explicit unsupported-version path instead of treating a valid line
+#: as corrupt and silently skipping pending work (#315).
+SCHEMA_VERSION = 2
+#: On-disk versions this build can load. ``1`` is migrated in place; anything
+#: else raises.
+SUPPORTED_SCHEMA_VERSIONS = frozenset({1, SCHEMA_VERSION})
 
 
 class Purpose(str, Enum):
@@ -144,19 +151,33 @@ class AuditRecord:
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
         d["purpose"] = self.purpose.value
+        # Always stamp the current marker. Unstamped (empty scorer) lines still
+        # omit the field so a pure v1 file that never saw a boost stays small;
+        # the version bump alone is what makes an old reader refuse rather than
+        # TypeError-skip a stamped line (#315).
+        d["schema_version"] = SCHEMA_VERSION
         if not d["scorer_version"]:
-            del d["scorer_version"]     # keep pre-existing lines byte-identical
+            del d["scorer_version"]
         return d
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "AuditRecord":
         d = dict(d)
         version = d.get("schema_version")
-        if version != SCHEMA_VERSION:
+        if version not in SUPPORTED_SCHEMA_VERSIONS:
             raise ValueError(
                 f"audit record schema_version={version!r}, this build reads "
-                f"{SCHEMA_VERSION}. Refusing to guess at the difference.")
+                f"{SCHEMA_VERSION} (and migrates v1). Refusing to guess at "
+                f"the difference.")
+        # v1: pre-scorer shape. Also accept a mistaken early stamp that wrote
+        # ``scorer_version`` under schema_version=1 (the #312/#315 bug): keep
+        # the field and promote the marker so a re-write is v2.
+        d.setdefault("scorer_version", "")
+        d["schema_version"] = SCHEMA_VERSION
         d["purpose"] = Purpose(d["purpose"])
+        # No silent filtering: an unknown key (say a misspelt ``strtaum``) is a
+        # malformed line, not a record to load under default values -- the
+        # ``TypeError`` it raises sends it down the store's corrupt-line path.
         return cls(**d)
 
 
