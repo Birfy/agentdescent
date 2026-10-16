@@ -118,6 +118,35 @@ def _betacf(a: float, b: float, x: float) -> float:
     return h
 
 
+def _t_split(t: float, df: float):
+    """``(x, 1-x, log x, log(1-x))`` for ``x = df / (df + t**2)``, each accurate.
+
+    Computed from ``r = t**2 / df`` in log space, for two reasons. ``1 - x`` is
+    kept as its own number because for tiny ``t`` the subtraction would round to
+    zero and lose the probability displacement from the median; and ``t**2``
+    itself overflows near 1e154, which fractional ``df < 0.1`` reaches at
+    ordinary levels (``t_ppf(0.99, 0.01)`` is about 1e169).
+    """
+    lr = 2.0 * math.log(t) - math.log(df)
+    if lr > 0.0:
+        e = math.exp(-lr)                       # 1 / r
+        lx = -(lr + math.log1p(e))
+        return math.exp(lx), 1.0 / (1.0 + e), lx, -math.log1p(e)
+    r = math.exp(lr)
+    lx = -math.log1p(r)
+    return 1.0 / (1.0 + r), r / (1.0 + r), lx, lr + lx
+
+
+def _ibeta(a: float, b: float, x: float, omx: float, lx: float, lomx: float) -> float:
+    """Regularized incomplete beta ``I_x(a, b)`` with ``1 - x`` supplied exactly."""
+    lbeta = math.lgamma(a) + math.lgamma(b) - math.lgamma(a + b)
+    if x < (a + 1.0) / (a + b + 2.0):
+        front = math.exp(a * lx + b * lomx - lbeta)
+        return front * _betacf(a, b, x) / a
+    front = math.exp(a * lx + b * lomx - lbeta)
+    return 1.0 - front * _betacf(b, a, omx) / b
+
+
 def _t_sf(t: float, df: float) -> float:
     """Upper tail ``P(T > t)`` of Student's t for ``t >= 0``.
 
@@ -127,46 +156,61 @@ def _t_sf(t: float, df: float) -> float:
     """
     if t <= 0.0:
         return 0.5
-    a, b = df / 2.0, 0.5
-    x = df / (df + t * t)
-    if x <= 0.0:
+    x, omx, lx, lomx = _t_split(t, df)
+    return 0.5 * _ibeta(df / 2.0, 0.5, x, omx, lx, lomx)
+
+
+def _t_central(t: float, df: float) -> float:
+    """``P(|T| < t)`` for ``t >= 0``, accurate when it is tiny.
+
+    ``I_y(1/2, df/2)`` with ``y = t**2 / (df + t**2)``. Near the median this is
+    the quantity that carries information: ``0.5 - tail`` rounds to the same
+    double over a whole interval of ``t``.
+    """
+    if t <= 0.0:
         return 0.0
-    lbeta = math.lgamma(a) + math.lgamma(b) - math.lgamma(a + b)
-    front = math.exp(a * math.log(x) + b * math.log1p(-x) - lbeta) if x < 1.0 else 0.0
-    if x < (a + 1.0) / (a + b + 2.0):
-        ib = front * _betacf(a, b, x) / a
-    else:
-        ib = 1.0 - front * _betacf(b, a, 1.0 - x) / b
-    return 0.5 * ib
+    x, omx, lx, lomx = _t_split(t, df)
+    return _ibeta(0.5, df / 2.0, omx, x, lomx, lx)
 
 
 def _t_pdf(t: float, df: float) -> float:
     lc = (math.lgamma((df + 1.0) / 2.0) - math.lgamma(df / 2.0)
           - 0.5 * math.log(df * math.pi))
-    return math.exp(lc - (df + 1.0) / 2.0 * math.log1p(t * t / df))
+    if t <= 0.0:
+        return math.exp(lc)
+    _, _, lx, _ = _t_split(t, df)
+    return math.exp(lc + (df + 1.0) / 2.0 * lx)
 
 
-def _t_upper_quantile_exact(q: float, df: float) -> float:
-    """The ``t > 0`` with ``P(T > t) = q``, for ``0 < q < 0.5``.
+def _t_quantile_exact(prob: float, df: float, central: bool) -> float:
+    """The ``t > 0`` with ``P(T > t) = prob`` (or ``P(|T| < t) = prob`` if ``central``).
 
-    Safeguarded Newton on the exact tail inside a bracket whose upper end grows
-    until it encloses the root (a fixed ceiling would saturate for df < 1, where
-    the quantile is in the hundreds or more).
+    Safeguarded Newton on the exact function inside a bracket whose upper end
+    grows until it encloses the root (a fixed ceiling would saturate for
+    df < 1, where the quantile is in the hundreds or more). ``central`` is used
+    near the median, where the tail form cannot resolve the root.
     """
+    fn = _t_central if central else _t_sf
+    sign = 1.0 if central else -1.0           # d fn / dt = sign * w * pdf
+    w = 2.0 if central else 1.0
+
+    def below(t: float) -> bool:              # is the root above t?
+        return (fn(t, df) < prob) if central else (fn(t, df) > prob)
+
     lo, hi = 0.0, 1.0
-    while _t_sf(hi, df) > q:
+    while below(hi):
         lo, hi = hi, hi * 2.0
-        if hi > 1e150:                  # q is below double-precision resolution
+        if hi > 1e300:                        # beyond the largest finite double
             return math.inf
     t = 0.5 * (lo + hi)
     for _ in range(200):
-        err = _t_sf(t, df) - q
-        if err > 0.0:
+        err = fn(t, df) - prob
+        if below(t):
             lo = t
         else:
             hi = t
         pdf = _t_pdf(t, df)
-        nxt = t + err / pdf if pdf > 0.0 else -1.0       # d sf / dt = -pdf
+        nxt = t - err / (sign * w * pdf) if pdf > 0.0 else -1.0
         if not lo < nxt < hi:
             nxt = 0.5 * (lo + hi)
         if abs(nxt - t) <= 1e-15 * abs(nxt):
@@ -213,12 +257,19 @@ def t_ppf(p: float, df: float) -> float:
     if p == 0.5:
         return 0.0
     q = min(p, 1.0 - p)                     # work in the upper tail, mirror after
+    c = abs(2.0 * p - 1.0)                  # centered probability; exact in floats
     if df == 1.0:
         t = 1.0 / math.tan(math.pi * q)     # = tan(pi (1/2 - q))
+        if c < 0.5:                         # near the median q is ~0.5 and
+            t = math.tan(0.5 * math.pi * c)  # loses c, which tan keeps
     elif df == 2.0:
         t = (1.0 - 2.0 * q) / math.sqrt(2.0 * q * (1.0 - q))
+        if c < 0.5:
+            t = c * math.sqrt(2.0 / (1.0 - c * c))
+    elif c < 0.5:
+        t = _t_quantile_exact(c, df, central=True)
     else:
-        t = _t_upper_quantile_exact(q, df)
+        t = _t_quantile_exact(q, df, central=False)
     return t if p > 0.5 else -t
 
 
