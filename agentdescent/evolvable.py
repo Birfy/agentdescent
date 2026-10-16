@@ -88,6 +88,14 @@ class Contract:
     (the default) is the untouched path exactly -- no rule, no check, no
     overhead. Because the check is part of the merge pipeline, a contract that
     declares a rule can never silently stop enforcing it.
+
+    ``depends_on`` names the artifact ids whose **contracts** this artifact
+    relies on. It is what turns a single-artifact commit into an atomic
+    adaptation transaction: when one of those artifacts commits a contract-
+    breaking change, this artifact must land (re-registered) in the *same* git
+    commit, via :meth:`~agentdescent.ledger.Ledger.commit_atomic`. Empty means
+    the artifact depends on nothing and a breaking change elsewhere never
+    touches it.
     """
 
     input_schema: str = "any"
@@ -95,6 +103,7 @@ class Contract:
     side_effects: Tuple[str, ...] = ()
     major: int = 1
     invariants: Tuple[Any, ...] = ()
+    depends_on: Tuple[str, ...] = ()
 
     def is_compatible_with(self, other: "Contract") -> bool:
         return self.major == other.major

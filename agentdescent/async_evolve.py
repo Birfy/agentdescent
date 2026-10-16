@@ -166,6 +166,12 @@ def async_evolve(
     #: the reference skill contract, which declares nothing and enforces
     #: nothing.
     contract: Optional[Contract] = None,
+    #: Additional artifacts to register alongside the primary. Each value is an
+    #: :class:`EvolvingArtifact` with its own ``id``, ``blast_radius`` and
+    #: ``strategy``. The worker loop proposes against each of them too, and the
+    #: aggregator buckets their diffs by target. Empty (the default) is the old
+    #: single-artifact behaviour exactly.
+    extra_artifacts: Optional[Dict[str, "EvolvingArtifact"]] = None,
 ) -> EvolutionResult:
     """Evolve an artifact **without a round barrier**.
 
@@ -421,6 +427,13 @@ def async_evolve(
         contract, where governance invariants are declared. ``None`` (the
         default) is the reference skill contract, which declares nothing and
         enforces nothing.
+    extra_artifacts:
+        Exactly as in :func:`~agentdescent.evolution.evolve`: additional
+        artifacts to register alongside the primary, as ``{aid: EvolvingArtifact}``.
+        The barrier-free worker proposes against each of them too (no parallel
+        strategy, so it is the primary plus every extra), and the aggregator
+        merges their diffs by target. Empty (the default) is the old
+        single-artifact behaviour exactly.
 
     Returns
     -------
@@ -467,7 +480,8 @@ def async_evolve(
         usage=usage, verifier=_pol.verifier, ledger_impl=_pol.ledger,
         policies_bundle=_pol, checkpointing=checkpointing,
         allocator=allocator, record_trajectories=record_trajectories,
-        trajectory_store=trajectory_store, contract=contract)
+        trajectory_store=trajectory_store, contract=contract,
+        extra_artifacts=extra_artifacts)
     eng.meter.start()
     # The cost-aware governor for the async path. The merger loop has no round
     # barrier, so the governor checks per sweep (after each merge, before the
@@ -756,85 +770,98 @@ def async_evolve(
             predicted = estimator.estimate(cost) if estimator is not None else 0.0
             t_start = time.time()
             try:
-                # Render once: the same string feeds the provider, the sampler
-                # and the trajectory record, so all three agree by construction.
-                rendered = artifact.render()
-                output = eng.run(rendered, task)
-                score = _checked_reward(eng.reward(task, output), task)
-                eng.meter.add("rollouts")
-                eng.meter.add("rollout_seconds", time.time() - t_start)
-                # Record the rollout before anything downstream decides it does
-                # not matter: the trajectory is the run's evidence. None when
-                # recording is off / deduped / the write failed -- that empty is
-                # what the card's trace_ids carry.
-                trace = eng._record_rollout(
-                    artifact_id=eng.artifact_id, rendered=rendered,
-                    task=task, base_version={eng.artifact_id: base_v},
-                    purpose="rollout", output=output, reward=score,
-                    wallclock=time.time() - t_start, worker_id=f"w{wid}")
-                sampler.record(task.id, score)     # learn which tasks carry signal
-                # Before the solved-task branch, for the same reason as on the
-                # synchronous path: a group that only saw the failures has no
-                # variance to standardise against.
-                adv = advantage.observe(
-                    advantage.key(base_v, str(task.meta.get("cluster", ""))), score)
-                if score < solved_threshold:
-                    # o1-style test-time scaling: see evolve() for the reasoning.
-                    if call_budget is not None:
-                        call_budget.allocate(score, governor.remaining_fraction())
-                    proposal = _checked_proposal(
-                        eng.propose(artifact.render(), task, output, score), task)
-                    if proposal:
-                        diff = eng.strategy.to_diff(artifact.state, proposal,
-                                                    f"w{wid}", base_v, eng.artifact_id)
-                        if diff is not None:
-                            # Optional local self-verify: re-run the trajectory with the
-                            # diff applied for a before/after signal. Faithful repos that
-                            # only score the candidate on held-out (e.g. EvoSkill) pass
-                            # self_verify=False to skip this extra rollout.
-                            # With an allocator installed the decision becomes
-                            # per-candidate once the budget is tight (see
-                            # :mod:`agentdescent.allocator`).
-                            if self_verify and governor.candidate_worth(
-                                    _async_allocator_context(
-                                        diff, adv,
-                                        getattr(artifact, "blast_radius", 0.2))):
-                                t_self = time.time()
-                                # The candidate's render is computed once for
-                                # both the rollout and the record, so the
-                                # trajectory and the measurement agree.
-                                rendered_after = artifact.apply(diff).render()
-                                after_output = eng.run(rendered_after, task)
-                                after = _checked_reward(
-                                    eng.reward(task, after_output), task)
-                                delta = after - score
-                                self_trace = eng._record_rollout(
-                                    artifact_id=eng.artifact_id,
-                                    rendered=rendered_after,
-                                    task=task, base_version={eng.artifact_id: base_v},
-                                    purpose="self_verify", output=after_output,
-                                    reward=after, wallclock=time.time() - t_self,
-                                    worker_id=f"w{wid}")
-                            else:
-                                delta = 0.0
-                                self_trace = None
-                            card = EvidenceCard(
-                                diff=diff, base_version={eng.artifact_id: base_v},
-                                touched=[eng.artifact_id], before_after_delta=delta,
-                                trajectory_refs=[task],
-                                branch=worker_branch,
-                                trace_ids=tuple(
-                                    t for t in (trace, self_trace)
-                                    if t is not None),
-                                # Same signal as the synchronous path, and the
-                                # reason `GroupAdvantage` accumulates rather than
-                                # batching at a barrier: there is no barrier here,
-                                # so a batched version would silently record
-                                # nothing on exactly the runtime the project is
-                                # making claims about.
-                                advantage=adv)
-                            with intake_lock:
-                                intake.append(card)
+                # Which artifacts this worker proposes for. PP stages are not a
+                # thing on the barrier-free path (no parallel strategy), so it is
+                # the primary plus every registered extra -- one rollout each,
+                # the same cross-product the synchronous worker makes.
+                targets = [(eng.artifact_id, artifact, base_v)] + [
+                    (aid, snap.get(aid), snap.version.get(aid, 0))
+                    for aid in eng.extra_artifact_ids]
+                for aid, art, art_v in targets:
+                    if art is None:
+                        continue
+                    # Render once: the same string feeds the provider, the
+                    # sampler and the trajectory record, so all three agree by
+                    # construction.
+                    rendered = art.render()
+                    output = eng.run(rendered, task)
+                    score = _checked_reward(eng.reward(task, output), task)
+                    eng.meter.add("rollouts")
+                    eng.meter.add("rollout_seconds", time.time() - t_start)
+                    # Record the rollout before anything downstream decides it
+                    # does not matter: the trajectory is the run's evidence.
+                    # None when recording is off / deduped / the write failed --
+                    # that empty is what the card's trace_ids carry.
+                    trace = eng._record_rollout(
+                        artifact_id=aid, rendered=rendered,
+                        task=task, base_version={aid: art_v},
+                        purpose="rollout", output=output, reward=score,
+                        wallclock=time.time() - t_start, worker_id=f"w{wid}")
+                    sampler.record(task.id, score)     # learn which tasks carry signal
+                    # Before the solved-task branch, for the same reason as on the
+                    # synchronous path: a group that only saw the failures has no
+                    # variance to standardise against.
+                    adv = advantage.observe(
+                        advantage.key(art_v, str(task.meta.get("cluster", ""))), score)
+                    if score < solved_threshold:
+                        # o1-style test-time scaling: see evolve() for the reasoning.
+                        if call_budget is not None:
+                            call_budget.allocate(score, governor.remaining_fraction())
+                        proposal = _checked_proposal(
+                            eng.propose(art.render(), task, output, score), task)
+                        if proposal:
+                            strat = eng.artifact_strategies.get(aid, eng.strategy)
+                            diff = strat.to_diff(art.state, proposal,
+                                                 f"w{wid}", art_v, aid)
+                            if diff is not None:
+                                # Optional local self-verify: re-run the trajectory with the
+                                # diff applied for a before/after signal. Faithful repos that
+                                # only score the candidate on held-out (e.g. EvoSkill) pass
+                                # self_verify=False to skip this extra rollout.
+                                # With an allocator installed the decision becomes
+                                # per-candidate once the budget is tight (see
+                                # :mod:`agentdescent.allocator`).
+                                if self_verify and governor.candidate_worth(
+                                        _async_allocator_context(
+                                            diff, adv,
+                                            getattr(art, "blast_radius", 0.2))):
+                                    t_self = time.time()
+                                    # The candidate's render is computed once
+                                    # for both the rollout and the record, so
+                                    # the trajectory and the measurement agree.
+                                    rendered_after = art.apply(diff).render()
+                                    after_output = eng.run(rendered_after, task)
+                                    after = _checked_reward(
+                                        eng.reward(task, after_output), task)
+                                    delta = after - score
+                                    self_trace = eng._record_rollout(
+                                        artifact_id=aid,
+                                        rendered=rendered_after,
+                                        task=task, base_version={aid: art_v},
+                                        purpose="self_verify",
+                                        output=after_output, reward=after,
+                                        wallclock=time.time() - t_self,
+                                        worker_id=f"w{wid}")
+                                else:
+                                    delta = 0.0
+                                    self_trace = None
+                                card = EvidenceCard(
+                                    diff=diff, base_version={aid: art_v},
+                                    touched=[aid], before_after_delta=delta,
+                                    trajectory_refs=[task],
+                                    branch=worker_branch,
+                                    trace_ids=tuple(
+                                        t for t in (trace, self_trace)
+                                        if t is not None),
+                                    # Same signal as the synchronous path, and the
+                                    # reason `GroupAdvantage` accumulates rather than
+                                    # batching at a barrier: there is no barrier here,
+                                    # so a batched version would silently record
+                                    # nothing on exactly the runtime the project is
+                                    # making claims about.
+                                    advantage=adv)
+                                with intake_lock:
+                                    intake.append(card)
             except ContractError as e:
                 # a caller-contract violation, not a flaky backend: stop at once.
                 with counter_lock:
@@ -970,7 +997,12 @@ def async_evolve(
         # and the collect-only sweeps above would otherwise take one every 5ms.
         if batch:
             snap = eng.ledger.snapshot(Ledger.DEV)
-            head_vv, head_art = snap.version, snap.get(eng.artifact_id)
+            head_vv = snap.version
+            # Each card targets its own artifact; the rebase branch re-applies
+            # against *that* artifact's head, not the primary's (they can differ
+            # in a multi-artifact run).
+            def _head_art(card):
+                return snap.get(card.diff.target)
 
         def _discarded() -> None:
             """Record a card this gate is dropping, denominator included.
@@ -997,6 +1029,10 @@ def async_evolve(
             if action is StaleAction.ACCEPT:
                 eng.aggregator.ingest(card if eta == 0 else card.rebased_onto(head_vv))
             elif action is StaleAction.REBASE:
+                head_art = _head_art(card)
+                if head_art is None:
+                    _discarded()
+                    continue
                 cand = head_art.apply(card.diff)         # cheap re-verify on current head
                 # Gate work, and easy to forget it is: `evidence_eval` runs the
                 # agent on the card's trajectories, so the "cheap" re-verify is

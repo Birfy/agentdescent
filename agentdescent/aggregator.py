@@ -701,12 +701,18 @@ class Aggregator:
                        self.acceptance_policy, self.promotion_policy):
             install_policy(policy, verifier, cfg)
         self.buffer = EvidenceBuffer()
-        #: Optional value allocator (see :mod:`agentdescent.allocator`), wired
-        #: by the engine so the merge path can feed commit outcomes back into
-        #: it. ``None`` keeps the old behaviour; the aggregator never consults
-        #: the allocator for a decision (the worker does, through the budget
-        #: governor), it only reports what happened.
+        #: Optional value allocator (see :mod:`agentdescent/allocator.py`),
+        #: wired by the engine so the merge path can feed commit outcomes back
+        #: into it. ``None`` keeps the old behaviour; the aggregator never
+        #: consults the allocator for a decision (the worker does, through the
+        #: budget governor), it only reports what happened.
         self.allocator: Optional[Any] = None
+        #: Called after a **contract-breaking** commit lands, with the changed
+        #: artifact id. The engine wires it to re-measure artifacts whose
+        #: ``Contract.depends_on`` names the changed artifact (their cached
+        #: evaluations were taken under the superseded contract). Optional --
+        #: ``None`` keeps the old behaviour of not noticing.
+        self.on_contract_change: Optional[Callable[[str], None]] = None
         self._posteriors: Dict[str, BetaPosterior] = defaultdict(BetaPosterior)
         #: How many queued audits the L-value consumer drained and ran against
         #: the oracle. Zero when ``audit_drain_per_step`` is 0 (the default).
@@ -1246,7 +1252,7 @@ class Aggregator:
         return False
 
     def _commit_with_retry(self, artifact_id, candidate, diff, head,
-                           branch: str = Ledger.DEV):
+                           branch: str = Ledger.DEV, adapters=None):
         """CAS, rebasing onto whatever landed first. ``None`` when it kept losing.
 
         With one writer a conflict cannot happen: every commit goes through a
@@ -1267,11 +1273,27 @@ class Aggregator:
         measurement is what the retry is trying to preserve. A diff whose value
         depends on which of two commits landed first is a diff the staleness
         policy should have caught.
+
+        A **contract-breaking** diff is committed atomically: ``commit`` refuses
+        a contract change via ``_assert_contract`` (it has to be re-registered
+        deliberately, not merged), while ``commit_atomic`` skips that guard --
+        which is the point of the atomic path (design doc section 6, the "atomic
+        adaptation transaction"). So the sanctioned route for a breaking change
+        is exactly the one the ledger offers but no engine path used. ``adapters``
+        are the dependent artifacts that must land in the same git commit (their
+        states already adapted to the new contract); ``None`` is a single-artifact
+        breaking change, which is still atomic by being one commit.
         """
         attempts = max(1, self.config.cas_attempts)
         for attempt in range(attempts):
             base_vv = {artifact_id: head.get(artifact_id, 0)}
             try:
+                if diff.contract_breaking:
+                    new_states = [candidate] + list(adapters or ())
+                    _, vv = self.ledger.commit_atomic(
+                        new_states, base_vv, branch=Ledger.DEV,
+                        message=f"merge {diff.diff_id} -> {artifact_id} (contract)")
+                    return vv[artifact_id]
                 _, new_version = self.ledger.commit(
                     candidate, base_vv, branch=branch,
                     message=merge_commit_message(diff, artifact_id))
@@ -1548,5 +1570,8 @@ class Aggregator:
             return report(None, None, "CAS conflict", MergeOutcome.CAS_CONFLICT)
 
         prior.update(True, weight=2.0)  # a committed improvement is strong evidence.
+
+        if c.diff.contract_breaking and self.on_contract_change is not None:
+            self.on_contract_change(c.artifact_id)
 
         return report(c.diff, new_version, "committed", MergeOutcome.COMMITTED)

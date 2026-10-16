@@ -770,22 +770,39 @@ def _resolve_sections(parallel, strategy) -> Dict[str, int]:
     return assign_key_sections(keys, n_sections)
 
 
-def _reject_pipeline_parallel(parallel) -> None:
-    """PP is a multi-artifact paradigm; ``evolve()`` evolves exactly one artifact.
+def _reject_pipeline_parallel(parallel, extra_artifacts: Optional[Dict[str, "EvolvingArtifact"]],
+                              artifact_id: str = "artifact") -> None:
+    """PP is a multi-artifact paradigm; ``evolve()`` evolves one artifact.
 
     ``WorkUnit.stage`` -- the only thing distinguishing PP's units, since it hands
     every worker the whole task list -- was never read by the driver, so passing
     ``parallel=PipelineParallel(...)`` silently degraded to n_workers all rolling
-    out the same tasks: strictly worse than the default, with no signal. Say so."""
-    if type(parallel).__name__ == "PipelineParallel" or getattr(parallel, "name", "") == "PP":
+    out the same tasks: strictly worse than the default, with no signal. Say so.
+    With ``extra_artifacts`` registered the stages have somewhere to live, so the
+    refusal lifts -- and each stage must name a registered artifact, or the worker
+    loop would propose against an id the ledger has never heard of."""
+    if type(parallel).__name__ != "PipelineParallel" and getattr(parallel, "name", "") != "PP":
+        return
+    registered = set(extra_artifacts or {}) | {artifact_id}
+    stages = getattr(parallel, "stages", None) or ()
+    unknown = [s for s in stages if s not in registered]
+    if not extra_artifacts:
         raise ValueError(
-            "evolve() cannot run PipelineParallel: it evolves a single artifact_id, "
-            "while PP needs one artifact per stage. Passing it used to be accepted "
-            "and quietly ignored (every worker got the whole task list and the "
-            "stage was never read), which is worse than the DataParallel default. "
-            "The PP primitives are still usable directly -- see "
-            "agentdescent.parallel.PipelineChain for stage ordering and upstream "
-            "blame attribution.")
+            "evolve() cannot run PipelineParallel: it evolves a single "
+            "artifact_id, while PP needs one artifact per stage. "
+            "Pass extra_artifacts={...} to register the stages' artifacts. "
+            "Passing PP without extra_artifacts used to be accepted "
+            "and quietly ignored (every worker got the whole task list and "
+            "the stage was never read), which is worse than the "
+            "DataParallel default. The PP primitives are still usable "
+            "directly -- see agentdescent.parallel.PipelineChain for stage "
+            "ordering and upstream blame attribution.")
+    if unknown:
+        raise ValueError(
+            f"PipelineParallel stages must name registered artifacts; unknown "
+            f"stage(s) {sorted(unknown)}. Registered: "
+            f"{sorted(registered)}. Each stage is an artifact the worker loop "
+            "proposes against.")
 
 
 def _safe_log(ledger: Ledger, limit: int = 40) -> List[str]:
@@ -1854,6 +1871,46 @@ class _Engine:
     train_ids: List[str]
     artifact_id: str
     blast_radius: float
+    #: The extra artifacts registered alongside the primary, in declaration
+    #: order. Empty for a single-artifact run. The worker loop proposes against
+    #: each of these too, and the aggregator buckets their diffs by target.
+    extra_artifact_ids: Tuple[str, ...] = ()
+    #: The strategies registered per artifact id -- extras may carry their own
+    #: (an :class:`EvolvingArtifact` holds one), so ``to_diff`` must use the
+    #: target's strategy, not the primary's. ``engine.strategy`` remains the
+    #: primary's, for the callers that already read it.
+    artifact_strategies: Dict[str, Strategy] = field(default_factory=dict)
+    #: Reverse contract dependency graph: ``changed_artifact_id -> [dependents]``.
+    #: When artifact A commits a contract-breaking diff, every B in this list
+    #: (whose ``Contract.depends_on`` names A) has cached evaluations taken under
+    #: the old contract, so the engine re-measures them.
+    contract_dependents: Dict[str, List[str]] = field(default_factory=dict)
+
+    def invalidate_dependents(self, changed_artifact_id: str) -> None:
+        """Drop cached evaluations of artifacts that depend on ``changed``.
+
+        Called when a contract-breaking diff commits on ``changed_artifact_id``:
+        every artifact whose ``Contract.depends_on`` names it was measured under
+        the superseded contract, so its cached scores no longer mean what they
+        said. Re-measuring is forced by evicting those cache entries -- the
+        dependent's render may not have changed, which is exactly why a plain
+        ``(rendered, task)`` cache cannot see the staleness on its own.
+
+        ``None`` when no cache invalidation hook exists (a custom cache that
+        predates it simply re-measures nothing and stays correct, only slower to
+        notice the change)."""
+        dependents = self.contract_dependents.get(changed_artifact_id) or ()
+        if not dependents:
+            return
+        snap = self.ledger.snapshot(Ledger.DEV)
+        invalidate = getattr(self.runtime.cache, "invalidate", None)
+        if not callable(invalidate):
+            return
+        for aid in dependents:
+            art = snap.get(aid)
+            if art is None:
+                continue
+            invalidate(art.render())
     #: Where rollouts run. Always present, defaulting to this process, so the
     #: round body has one path rather than one per substrate.
     executor: Any = None
@@ -2051,7 +2108,8 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
                   allocator: Optional[Any] = None,
                   record_trajectories: bool = False,
                   trajectory_store: Optional[Any] = None,
-                  contract: Optional[Contract] = None) -> _Engine:
+                  contract: Optional[Contract] = None,
+                  extra_artifacts: Optional[Dict[str, "EvolvingArtifact"]] = None) -> _Engine:
     """Wire the ledger, runtime, verifier and aggregator (shared by
     :func:`evolve` and :func:`~agentdescent.async_evolve.async_evolve`)."""
     import tempfile
@@ -2193,6 +2251,18 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
             out["contract"] = contract_to_dict(contract)
         return out
 
+    #: Strategies per registered artifact id. Extras carry their own (an
+    #: :class:`EvolvingArtifact` holds one); the primary uses ``strategy``. A
+    #: snapshot deserialises each artifact through its OWN strategy, so a diff
+    #: targeting an extra is rendered/applied by the rules that artifact was
+    #: registered under -- not the primary's, which is what ``apply`` would
+    #: otherwise do.
+    artifact_strategies: Dict[str, Strategy] = {artifact_id: strategy}
+    for _aid, _art in (extra_artifacts or {}).items():
+        if _aid == artifact_id:
+            continue
+        artifact_strategies[_aid] = getattr(_art, "_strategy", None) or strategy
+
     def deserialize(aid: str, version: int, state: dict) -> EvolvingArtifact:
         # The gate and _assert_contract must read the *operator-supplied*
         # contract, not whatever a previous run serialized. On a fresh run the
@@ -2210,7 +2280,8 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
             resolved = contract_from_dict(state["contract"])
         return EvolvingArtifact(aid, state.get("state", {}), version,
                                 state.get("blast_radius", blast_radius), runtime,
-                                strategy, contract=resolved)
+                                artifact_strategies.get(aid, strategy),
+                                contract=resolved)
 
     scratch: Optional[str] = None
     if repo_path:
@@ -2289,6 +2360,32 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
             raise GovernanceError(
                 f"artifact {artifact_id!r} declares an invalid contract: "
                 + "; ".join(violations))
+    # Register any extra artifacts the caller declared. The primary is the one
+    # the worker loop runs on; extras exist so a proposal can name them as a
+    # diff target and the aggregator can merge into them. ``commit_atomic`` is
+    # the path a contract-breaking diff that touches both takes.
+    for aid, art in (extra_artifacts or {}).items():
+        if aid == artifact_id:
+            continue                    # the primary, already registered
+        ledger.register(art)
+
+    # Build the reverse contract-dependency graph from the declared contracts.
+    # ``Contract.depends_on`` names the artifacts whose contracts a dependent
+    # relies on; when one of those commits a contract-breaking diff, the
+    # dependents' cached evaluations are stale (measured under the superseded
+    # contract), so the engine re-measures them. This is the seam the design
+    # calls the atomic adaptation transaction's consumer side: the breaking diff
+    # itself already lands atomically via ``commit_atomic``.
+    contract_dependents: Dict[str, List[str]] = {}
+    for aid, art in (extra_artifacts or {}).items():
+        if aid == artifact_id:
+            continue
+        deps = tuple(getattr(getattr(art, "contract", None), "depends_on", ()) or ())
+        for dep in deps:
+            if dep in contract_dependents:
+                contract_dependents[dep].append(aid)
+            else:
+                contract_dependents[dep] = [aid]
 
     # The cheap layer must actually be cheap. It used to be pinned to the full
     # held-out set (`rule_subset=len(held_out)`) with zero noise, on the reasoning
@@ -2492,12 +2589,25 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     attach = getattr(executor, "attach_meter", None)
     if callable(attach):
         attach(meter)
-    return _Engine(ledger, runtime, verifier, aggregator, strategy, run, reward,
-                   propose, train, held_out, {t.id: t for t in train},
-                   [t.id for t in train], artifact_id, blast_radius,
-                   executor=executor, meter=meter, scratch_repo=scratch,
-                   checkpoint_payload=_cp_payload, checkpointing=checkpointing,
-                   checkpoint_round_base=_cp_round_base)
+    eng = _Engine(ledger, runtime, verifier, aggregator, strategy, run, reward,
+                  propose, train, held_out, {t.id: t for t in train},
+                  [t.id for t in train], artifact_id, blast_radius,
+                  extra_artifact_ids=tuple(
+                      aid for aid in (extra_artifacts or {}) if aid != artifact_id),
+                  artifact_strategies=artifact_strategies,
+                  contract_dependents=contract_dependents,
+                  executor=executor, meter=meter, scratch_repo=scratch,
+                  checkpoint_payload=_cp_payload, checkpointing=checkpointing,
+                  checkpoint_round_base=_cp_round_base)
+    # A contract-breaking commit lands atomically (commit_atomic); this is the
+    # consumer side -- re-measure the artifacts that depended on the changed
+    # contract. Wired here, after the engine exists, so the callback has
+    # somewhere to read the ledger from.
+    try:
+        aggregator.on_contract_change = eng.invalidate_dependents
+    except AttributeError:      # a custom aggregator without the slot
+        pass
+    return eng
 
 
 def evolve(
@@ -2629,6 +2739,13 @@ def evolve(
     #: (the default) is the reference skill contract, which declares nothing and
     #: enforces nothing -- the untouched path exactly.
     contract: Optional[Contract] = None,
+    #: Additional artifacts to register alongside the primary. Each value is an
+    #: :class:`EvolvingArtifact` with its own ``id``, ``blast_radius`` and
+    #: ``strategy``. The primary (``artifact_id``) is the one the worker loop
+    #: runs and proposes on; these are registered so ``propose`` can return a
+    #: diff whose ``target`` names one of them, and the aggregator merges it.
+    #: Empty (the default) is the old single-artifact behaviour exactly.
+    extra_artifacts: Optional[Dict[str, "EvolvingArtifact"]] = None,
 ) -> EvolutionResult:
     """Evolve an artifact. Provide either ``agent`` (with ``solve``/``propose``)
     or the ``run`` / ``propose`` callables directly.
@@ -2993,6 +3110,18 @@ def evolve(
         ``violates-invariant`` outcome and never buys a held-out sweep.
         ``None`` (the default) is the reference skill contract, which declares
         nothing and enforces nothing -- the untouched path exactly.
+    extra_artifacts:
+        Additional artifacts to register alongside the primary
+        (``artifact_id``), as ``{aid: EvolvingArtifact}``. The primary is the
+        one the worker loop rolls out and proposes on; each extra is registered
+        in the ledger and the worker proposes against it too, so a proposal can
+        name one of them as a diff target and the aggregator merges it there
+        (the evidence buffer already buckets by ``diff.target``). ``depends_on``
+        on an extra's ``Contract`` declares which artifacts it relies on: a
+        contract-breaking change to one re-measures its dependents (their cached
+        scores were taken under the superseded contract) and lands atomically via
+        ``Ledger.commit_atomic``. Empty (the default) is the old single-artifact
+        behaviour exactly.
 
     Returns
     -------
@@ -3079,7 +3208,8 @@ def evolve(
             efficiency_floor=efficiency_floor,
             call_budget=call_budget, allocator=allocator,
             record_trajectories=record_trajectories,
-            trajectory_store=trajectory_store, contract=contract)
+            trajectory_store=trajectory_store, contract=contract,
+            extra_artifacts=extra_artifacts)
 
     if pipelined_gate:
         # The mirror of the block above, and the same reasoning: a knob accepted
@@ -3120,7 +3250,7 @@ def evolve(
     # rollout: an incompatible pairing used to be discovered one diff at a time, by
     # silently discarding it.
     section_map = _resolve_sections(parallel, strategy)
-    _reject_pipeline_parallel(parallel)
+    _reject_pipeline_parallel(parallel, extra_artifacts, artifact_id)
     # Resolved once: the round body is the hot path, and a strategy either has
     # the hook for the whole run or does not.
     observe_plan = getattr(parallel, "observe", None)
@@ -3140,7 +3270,8 @@ def evolve(
         usage=usage, verifier=_pol.verifier, ledger_impl=_pol.ledger,
         policies_bundle=_pol, checkpointing=checkpointing,
         allocator=allocator, record_trajectories=record_trajectories,
-        trajectory_store=trajectory_store, contract=contract)
+        trajectory_store=trajectory_store, contract=contract,
+        extra_artifacts=extra_artifacts)
     # Start the clock after the wiring, before the first unit of work: setup
     # is not what a time-to-quality number is asking about.
     eng.meter.start()
@@ -3364,13 +3495,35 @@ def evolve(
                     print(f"round {r:>3}  worker {unit.worker} failed: "
                           f"{type(e).__name__}: {str(e)[:100]}")
 
-        def _run_unit_inner(unit) -> None:
-            if not unit.keys:
+        def _artifact_targets(unit) -> List[str]:
+            """The artifacts this worker proposes for in one unit.
+
+            Under PP each worker owns one stage, and a stage *is* an artifact id
+            (``PipelineParallel(stages=["skill-a", "skill-b"])`` -- the reason
+            PP was refused while ``evolve()`` could register only one artifact).
+            Otherwise the worker rolls out the primary and also proposes for every
+            registered extra, so one rollout's lesson reaches the whole library.
+            """
+            if getattr(parallel, "name", "") == "PP" or type(parallel).__name__ == "PipelineParallel":
+                stages = getattr(parallel, "stages", None)
+                if stages:
+                    return [stages[unit.stage % len(stages)]]
+                return [artifact_id]
+            return [artifact_id] + list(eng.extra_artifact_ids)
+
+        def _propose_one(unit, task, aid: str) -> None:
+            """Roll out artifact ``aid``, propose against it, file its card."""
+            if aid == artifact_id:
+                mine, mine_v, mine_branch = _snapshot_for(unit.worker)
+            else:
+                # Extras are read from the round snapshot; they have no per-worker
+                # staleness mechanism of their own yet (Phase 1), so a worker sees
+                # the head it was given this round, on `dev`.
+                mine = snap.get(aid)
+                mine_v = snap.version.get(aid, 0)
+                mine_branch = Ledger.DEV
+            if mine is None:
                 return
-            # This worker's own view of the artifact. Identical to the round's
-            # under the default `refresh_interval=1`; older, by design, above it.
-            mine, mine_v, mine_branch = _snapshot_for(unit.worker)
-            task = by_id[sampler.pick(unit.keys, r)]     # a task from this worker's shard
             # The rollout is the part that can move elsewhere. Everything around
             # it -- which task, what the output implies, who is told about it --
             # reads or writes state that has to stay in this process.
@@ -3400,7 +3553,7 @@ def evolve(
             # `None`, which is worse than not having it.
             adv = advantage.observe(
                 advantage.key(mine_v, str(task.meta.get("cluster", ""))), score)
-            if observe_plan is not None:
+            if aid == artifact_id and observe_plan is not None:
                 # ...and let the parallel strategy learn too, if it wants to.
                 # `plan` alone is a pure function of its arguments, which is
                 # enough to shard and not enough to schedule: UCB over task
@@ -3424,15 +3577,17 @@ def evolve(
                 propose(mine.render(), task, output, score), task)
             if not proposal:
                 return
-            diff = strategy.to_diff(mine.state, proposal, f"w{unit.worker}", mine_v, artifact_id)
+            strat = eng.artifact_strategies.get(aid, strategy)
+            diff = strat.to_diff(mine.state, proposal, f"w{unit.worker}", mine_v, aid)
             if diff is None:
                 return
             # Tensor parallelism means each worker owns a disjoint *section* of the
             # artifact, which is what makes the merge a conflict-free union. The
             # plan assigns the section; enforce it here, or the guarantee is only a
             # comment: without this every worker could edit the same hot key and TP
-            # degenerated into differently-sharded DP.
-            if unit.section is not None:
+            # degenerated into differently-sharded DP. Extras are whole-artifact
+            # proposals, so the check applies to the primary only.
+            if unit.section is not None and aid == artifact_id:
                 outside = [k for k in diff.ops
                            if section_map.get(k) != unit.section]
                 if outside:
@@ -3481,7 +3636,7 @@ def evolve(
                 delta = 0.0
                 self_trace = None
             aggregator.ingest(EvidenceCard(
-                diff=diff, base_version={artifact_id: mine_v}, touched=[artifact_id],
+                diff=diff, base_version={aid: mine_v}, touched=[aid],
                 before_after_delta=delta, trajectory_refs=[task],
                 branch=mine_branch,
                 # The records that justify this card, when recording is on: the
@@ -3495,6 +3650,13 @@ def evolve(
                 # computed when something consumes it can never be looked at to
                 # decide whether anything should.
                 advantage=adv))
+
+        def _run_unit_inner(unit) -> None:
+            if not unit.keys:
+                return
+            task = by_id[sampler.pick(unit.keys, r)]     # a task from this worker's shard
+            for aid in _artifact_targets(unit):
+                _propose_one(unit, task, aid)
 
         try:
             # the parallel strategy assigns this round's tasks to workers; they run
@@ -3666,8 +3828,8 @@ def evolve(
             f"one successfully read: {type(e).__name__}: {str(e)[:160]}")
     if final is None:                 # nothing was ever read: hand back the seed
         final = EvolvingArtifact(artifact_id, dict(initial_state or strategy.initial()),
-                                 blast_radius=blast_radius, runtime=eng.runtime,
-                                 strategy=strategy)
+                                     blast_radius=blast_radius, runtime=eng.runtime,
+                                     strategy=strategy)
     # Scoring runs the agent, so a dead backend must not raise out of the driver
     # and discard everything already committed.
     try:
