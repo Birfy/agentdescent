@@ -77,6 +77,17 @@ so they share a runner, a budget contract and a command line. Port author:
 | **R-Zero** | `inference_analogue` | self-play carts | `AdvantageAcceptance` (GRPO shape), `DifficultyWeighted` | [→](algo-r-zero.md) |
 | **Agent0** | `inference_analogue` | self-play carts | `DifficultyWeighted`; calculator stop-and-go | [→](algo-agent0.md) |
 
+### Added since: Dynamic Cheatsheet, the ACE precursor
+
+One more `MethodPolicy` microport, listed on its own so the table above keeps
+describing the eleven it was measured with. It runs in the same
+[runtime matrix](matrix-overview.md) (`bench.candidate_methods`) and shares the
+same runner and command line.
+
+| Algorithm | Fidelity class | Domain | Mechanism seams | Page |
+|---|---|---|---|---|
+| **Dynamic Cheatsheet** (DC-Cu) | `mechanism_microport` | Game of 24 (36 vendored puzzles, offline) | whole-value `CheatsheetSlot`; label-free curator; online `CommitEveryUpdate` acceptance or `--gated`; `blast_radius=0.2` | [→](algo-dynamic-cheatsheet.md) |
+
 ### The twentieth: Genesis, at the standard seams
 
 One port is a mechanism microport that is **not** a `MethodPolicy`: its algorithm
@@ -320,7 +331,7 @@ port:
 |---|---|---|
 | Evolution / program search | [OpenEvolve](algo-openevolve.md) | [PromptBreeder](algo-promptbreeder.md), [AFlow](algo-aflow.md) |
 | Reflection / refinement | [GEPA](algo-gepa.md) (reflective) | [Reflexion](algo-reflexion.md), [Self-Refine](algo-self-refine.md) |
-| Skills / lifelong learning | [EvoSkill](algo-evoskill.md), [SkillOpt](algo-skillopt.md), [ACE](algo-ace.md) | [Voyager](algo-voyager.md), [SkillWeaver](algo-skillweaver.md) |
+| Skills / lifelong learning | [EvoSkill](algo-evoskill.md), [SkillOpt](algo-skillopt.md), [ACE](algo-ace.md) | [Voyager](algo-voyager.md), [SkillWeaver](algo-skillweaver.md), [Dynamic Cheatsheet](algo-dynamic-cheatsheet.md) (DC-Cu, the ACE precursor microport) |
 | Self-play / unlabeled data | — | [Absolute Zero](algo-absolute-zero.md), [R-Zero](algo-r-zero.md), [Agent0](algo-agent0.md) |
 | Self-modifying code / harness | [DGM](algo-dgm.md), [ADAS](algo-adas.md) | [SICA](algo-sica.md), [Gödel Agent](algo-godel-agent.md) |
 
