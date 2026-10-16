@@ -21,7 +21,7 @@ from agentdescent.evolvable import ContractError
 from agentdescent.policies import Policies
 from agentdescent.selection import (
     Archive, Beam, Candidate, MCTS, MultiHeadUnsupported, ParetoFrontier,
-    SelectionContext, SingleHead, pareto_front,
+    SelectionContext, SingleHead, pareto_front, sigmoid_novelty_weights,
 )
 
 
@@ -303,6 +303,67 @@ def test_archive_sampling_is_reproducible():
     a = [c.version for c in Archive(seed=3).select(ctx, 8)]
     b = [c.version for c in Archive(seed=3).select(ctx, 8)]
     assert a == b, "a seeded comparison is meaningless if the archive drifts"
+
+
+
+
+def test_sigmoid_novelty_weights_survive_extreme_negative_scores():
+    """Large negative scores used to OverflowError inside math.exp (#286)."""
+    weights = sigmoid_novelty_weights([-100.0, -1e6, 0.9], [0, 0, 0])
+    assert all(w == w and w >= 0 for w in weights)  # finite, non-negative
+    assert abs(sum(weights) - 1.0) < 1e-12
+    # The extreme negatives are ~0; virtually all mass is on 0.9.
+    assert weights[0] == 0.0 and weights[1] == 0.0
+    assert weights[2] == 1.0
+
+
+def test_sigmoid_novelty_weights_match_naive_formula_on_unit_interval():
+    """Scores in [0, 1] must stay bit-identical so DGM port equivalence holds."""
+    import math
+    scores = [0.0, 0.1, 0.5, 0.9, 1.0]
+    children = [0, 1, 2, 0, 5]
+    got = sigmoid_novelty_weights(scores, children)
+    raw = [(1.0 / (1.0 + math.exp(-10.0 * (s - 0.5)))) * (1.0 / (1.0 + c))
+           for s, c in zip(scores, children)]
+    total = sum(raw) or 1.0
+    expected = [r / total for r in raw]
+    assert got == expected
+
+
+def test_sigmoid_novelty_nonfinite_scores_contribute_zero_weight():
+    """NaN / ±inf must not poison the draw (#286)."""
+    import math
+    weights = sigmoid_novelty_weights(
+        [float("nan"), float("-inf"), float("inf"), 0.5], [0, 0, 0, 0])
+    assert weights[0] == 0.0          # NaN → 0
+    assert weights[1] == 0.0          # -inf → 0 (non-finite convention)
+    assert weights[2] == 0.0          # +inf → 0 (non-finite convention)
+    assert weights[3] == 1.0          # sole finite score takes the mass
+    assert all(math.isfinite(w) for w in weights)
+    assert abs(sum(weights) - 1.0) < 1e-12
+
+
+def test_archive_sigmoid_novelty_selects_with_extreme_and_nan_scores():
+    """Archive(sigmoid_novelty).select must not raise on the #286 inputs."""
+    pool = (_c(0, -100.0), _c(1, float("nan")), _c(2, 0.9))
+    ctx = _ctx(*pool, head=pool[2], n=5)
+    picks = Archive(sampling="sigmoid_novelty", seed=0).select(ctx, 5)
+    assert len(picks) == 5
+    assert {c.version for c in picks} == {2}  # only the finite good score weighs
+
+
+def test_sigmoid_novelty_all_rejected_scores_fall_back_to_uniform():
+    """All-NaN / all-overflowing archives must still be drawable (Codex P2)."""
+    import math
+    weights = sigmoid_novelty_weights(
+        [float("nan"), float("inf"), -1e6], [0, 0, 0])
+    assert weights == [1.0 / 3, 1.0 / 3, 1.0 / 3]
+    pool = (_c(0, float("nan")), _c(1, -1e6), _c(2, float("inf")))
+    ctx = _ctx(*pool, head=pool[0], n=9)
+    picks = Archive(sampling="sigmoid_novelty", seed=0).select(ctx, 9)
+    assert len(picks) == 9
+    assert {c.version for c in picks} == {0, 1, 2}
+
 
 
 @pytest.mark.parametrize("kwargs", [{"sampling": "nope"}, {"temperature": 0.0}])
