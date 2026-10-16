@@ -89,6 +89,19 @@ def _take_signature() -> str:
     return signature
 
 
+
+def _resolve_version_extra(extra: Any) -> Any:
+    """Call a live ``version_extra`` (e.g. ``boost.version_tag``) before fingerprinting.
+
+    ``verifier_fingerprint`` stringifies ``extra`` via ``repr``. A bound method's
+    ``repr`` does not change with the boost's state, so a callable must be
+    evaluated first or activation would be invisible to the audit.
+    """
+    if callable(extra):
+        return extra()
+    return extra
+
+
 class AuditedReward:
     """A cheap verifier that hands a sampled minority of its work to the truth.
 
@@ -185,8 +198,12 @@ class AuditedReward:
         self.rates = dict(rates or {})
         self.calibration_fraction = calibration_fraction
         self.seed = seed
+        # Keep the ingredients so a live ``version_extra`` (e.g. a boost's
+        # ``version_tag``) can be re-fingerprinted when the boost activates.
+        self._version_extra = version_extra
+        self._explicit_verifier_version = verifier_version
         self.verifier_version = verifier_version or verifier_fingerprint(
-            verifier, extra=version_extra)
+            verifier, extra=_resolve_version_extra(version_extra))
         #: Units seen, and units audited. A sample rate that never fires is the
         #: quiet failure this makes loud.
         self._warn_about_the_rates()
@@ -196,6 +213,20 @@ class AuditedReward:
         #: `_maybe_audit`. Zero unless `rates` actually differ between strata.
         self.skipped = 0
         self._lock = threading.Lock()
+
+    def refresh_verifier_version(self) -> str:
+        """Re-derive ``verifier_version`` from a live ``version_extra``.
+
+        Used when an attached :class:`~agentdescent.audit.boost.VerifierBoost`
+        activates: its ``version_tag`` changes and the audit's fingerprint
+        (gate, watch, store filter) must follow, or the old calibration keeps
+        applying to a judge that has moved.
+        """
+        if self._explicit_verifier_version is not None:
+            return self.verifier_version
+        self.verifier_version = verifier_fingerprint(
+            self.verifier, extra=_resolve_version_extra(self._version_extra))
+        return self.verifier_version
 
     # -- the Reward contract -------------------------------------------------
 

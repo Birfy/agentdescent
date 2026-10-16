@@ -217,3 +217,69 @@ def test_observe_ignores_none_and_missing_cost_rounds():
     g.spend(0); g.observe(None)
     g.spend(0); g.observe(0.5)      # no tokens -> no sample
     assert g._efficiencies == []
+
+
+# --- diminishing returns: degenerate inputs (#242) ---
+
+
+_PRODUCTIVE_THEN_FLAT = [(0.1, 100), (0.3, 300), (0.4, 400), (0.5, 500),
+                         (0.51, 600), (0.51, 700), (0.51, 800)]
+
+
+def _feed(g, rounds):
+    for rew, tok in rounds:
+        g.spend(tok)
+        g.observe(rew)
+    return g
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_reward_is_skipped_like_none(bad):
+    """A NaN/inf reward is a failed measurement: it records no sample and the
+    next finite round is differenced against the last finite one -- the same
+    samples, and the same verdict, as the run with that round reported as None."""
+    with_bad = list(_PRODUCTIVE_THEN_FLAT)
+    with_bad.insert(1, (bad, 200))
+    with_none = list(_PRODUCTIVE_THEN_FLAT)
+    with_none.insert(1, (None, 200))
+
+    g_bad = _feed(BudgetGovernor(max_tokens=10_000, stop_on_diminishing=True),
+                  with_bad)
+    g_none = _feed(BudgetGovernor(max_tokens=10_000, stop_on_diminishing=True),
+                   with_none)
+    assert g_bad._efficiencies == g_none._efficiencies
+    assert all(e == e and abs(e) != float("inf") for e in g_bad._efficiencies)
+    # The run did flatten out, so the stop must still fire (a leading NaN used
+    # to disable it for good).
+    assert g_bad.diminishing_returns()
+
+
+def test_inf_reward_does_not_stop_a_productive_run():
+    """An `inf` peak used to make `recent < floor * inf` true for any run."""
+    g = BudgetGovernor(max_tokens=10_000, stop_on_diminishing=True)
+    g.spend(100); g.observe(0.1)
+    g.spend(200); g.observe(float("inf"))
+    for i in range(3, 9):          # steady 0.1 reward per 100 tokens
+        g.spend(100 * i)
+        g.observe(0.1 * i)
+    assert not g.diminishing_returns()
+
+
+def test_single_sample_at_its_peak_does_not_fire():
+    """With `min_efficiency_samples=1` the one sample *is* the peak; dividing a
+    one-sample window by 2 read it as having halved."""
+    g = BudgetGovernor(max_tokens=10_000, stop_on_diminishing=True,
+                       min_efficiency_samples=1, efficiency_floor=0.6)
+    g.spend(100); g.observe(0.1)
+    g.spend(200); g.observe(0.2)
+    assert len(g._efficiencies) == 1
+    assert not g.diminishing_returns()
+
+
+@pytest.mark.parametrize("min_samples", [0, -1])
+def test_no_samples_with_non_positive_minimum_does_not_crash(min_samples):
+    g = BudgetGovernor(max_tokens=10_000, stop_on_diminishing=True,
+                       min_efficiency_samples=min_samples)
+    assert not g.diminishing_returns()          # used to be max([]) -> ValueError
+    g.spend(100); g.observe(0.1)
+    assert not g.diminishing_returns()          # still no sample after one round

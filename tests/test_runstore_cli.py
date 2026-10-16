@@ -7,6 +7,7 @@ agent. Everything uses the stub workspace agent from `test_evolvespec.py`.
 """
 
 import json
+from pathlib import Path
 import os
 import subprocess
 import sys
@@ -15,6 +16,7 @@ import time
 import pytest
 
 from agentdescent import cli, runstore
+from agentdescent.evolution import RoundInfo
 from agentdescent.runstore import RunStoreError, RunStatus
 
 from tests.test_evolvespec import _WORDS, _dir_spec  # noqa: F401  (shared fixtures)
@@ -85,6 +87,171 @@ def test_status_is_replaced_atomically(store, tmp_path):
     rd.update_status(round=2, best_reward=0.5)
     assert not [f for f in os.listdir(rd.path) if f.endswith(".tmp")]
     assert rd.status().round == 2
+
+
+def _round(reward=0.5, n=0):
+    return RoundInfo(round=n, held_out_reward=reward, n_items=1,
+                     committed=0, rejected=0)
+
+
+def test_append_round_writes_null_not_nan_for_nonfinite_reward(store, tmp_path):
+    """A NaN/inf reward must not land as the non-portable NaN token (#271)."""
+    _, spec = _spec_file(tmp_path)
+    rd = runstore.create(spec.to_dict(), store=store)
+    rd.append_round(_round(float("nan")))
+    rd.append_round(_round(float("inf"), n=1))
+    raw = Path(rd.rounds_path).read_text()
+    assert "NaN" not in raw and "Infinity" not in raw
+    rows = rd.rounds()
+    assert len(rows) == 2
+    assert rows[0]["held_out_reward"] is None
+    assert rows[1]["held_out_reward"] is None
+    # Strict JSON: browsers and jq parse every line.
+    for line in raw.splitlines():
+        json.loads(line)
+
+
+def test_rounds_skips_a_torn_line_and_keeps_the_rest(store, tmp_path):
+    """One corrupt JSONL line must not hide every other round (#271)."""
+    _, spec = _spec_file(tmp_path)
+    rd = runstore.create(spec.to_dict(), store=store)
+    rd.append_round(_round(0.25, n=0))
+    with open(rd.rounds_path, "a", encoding="utf-8") as fh:
+        fh.write('{"round": 1, "held_out_rew')          # torn
+        fh.write("\n")
+    rd.append_round(_round(0.75, n=2))
+    rows = rd.rounds()
+    assert [r["round"] for r in rows] == [0, 2]
+    assert [r["held_out_reward"] for r in rows] == [0.25, 0.75]
+
+
+def test_append_after_a_torn_tail_without_newline_keeps_the_next_round(
+        store, tmp_path):
+    """A killed writer leaves no newline; the next append must not glue on (#271)."""
+    _, spec = _spec_file(tmp_path)
+    rd = runstore.create(spec.to_dict(), store=store)
+    rd.append_round(_round(0.25, n=0))
+    with open(rd.rounds_path, "a", encoding="utf-8") as fh:
+        fh.write('{"round": 1, "held_out_rew')          # torn, no newline
+    rd.append_round(_round(0.75, n=2))
+    rows = rd.rounds()
+    assert [r["round"] for r in rows] == [0, 2]
+    assert [r["held_out_reward"] for r in rows] == [0.25, 0.75]
+
+
+def test_rounds_survives_a_tear_inside_a_multibyte_character(store, tmp_path):
+    _, spec = _spec_file(tmp_path)
+    rd = runstore.create(spec.to_dict(), store=store)
+    rd.append_round(_round(0.25, n=0))
+    with open(rd.rounds_path, "ab") as fh:
+        fh.write('{"round": 1, "note": "é'.encode("utf-8")[:-1])
+    rd.append_round(_round(0.75, n=2))
+    assert [r["round"] for r in rd.rounds()] == [0, 2]
+
+
+def test_text_status_and_watch_print_null_rewards(store, tmp_path):
+    """A non-finite reward is stored as null; text status/watch must not crash."""
+    _, spec = _spec_file(tmp_path)
+    rd = runstore.create(spec.to_dict(), store=store)
+    rid = os.path.basename(rd.path)
+    rd.append_round(_round(float("nan"), n=0))
+    rd.append_round(_round(0.5, n=1))
+    code, out = _cli("--store", store, "status", rid)
+    assert code == 0, out
+    assert "reward=n/a" in out and "reward=0.500" in out
+    code, out = _cli("--store", store, "watch", rid, "--interval", "0")
+    assert "round   0  reward=n/a" in out and "reward=0.500" in out
+
+
+def test_finite_or_none_and_sanitize_strip_nonfinite_floats():
+    """Helpers used by append_round / on_round / the panel (#271)."""
+    assert runstore._finite_or_none(1.5) == 1.5
+    assert runstore._finite_or_none(float("nan")) is None
+    assert runstore._finite_or_none(float("-inf")) is None
+    assert runstore._finite_or_none("x") == "x"
+    cleaned = runstore._sanitize_jsonable(
+        {"best": float("nan"), "nested": [1.0, float("inf")], "ok": 0.2})
+    assert cleaned == {"best": None, "nested": [1.0, None], "ok": 0.2}
+    # Order-dependence that status used to inherit from max(best):
+    assert max([1.0, float("nan")]) == 1.0
+    assert str(max([float("nan"), 1.0])) == "nan"
+
+
+def test_status_and_panel_payload_stay_strict_json_after_nan_rounds(store, tmp_path):
+    """Finite-only best tracking + sanitize keep status/panel portable (#271)."""
+    _, spec = _spec_file(tmp_path)
+    rd = runstore.create(spec.to_dict(), store=store)
+    best = []
+    for n, reward in enumerate(
+            (float("nan"), 0.4, float("inf"), 0.9)):
+        rd.append_round(_round(reward, n=n))
+        finite = runstore._finite_or_none(reward)
+        if finite is not None:
+            best.append(finite)
+        rd.update_status(
+            round=n + 1, last_reward=finite,
+            best_reward=max(best) if best else None)
+    st = rd.status()
+    assert st.best_reward == 0.9 and st.last_reward == 0.9
+    raw_status = Path(rd.status_path).read_text()
+    assert "NaN" not in raw_status and "Infinity" not in raw_status
+    body = json.dumps(
+        runstore._sanitize_jsonable(
+            {**st.to_dict(), "rounds": rd.rounds()}),
+        default=str, allow_nan=False)
+    json.loads(body)
+    assert "NaN" not in body and "Infinity" not in body
+
+class _RaiseOnStr:
+    def __str__(self):
+        raise TypeError("cannot stringify for status")
+
+
+def test_unencodable_status_write_leaves_no_orphan_tmp(store, tmp_path):
+    """A serializer refusal must not leave status.json.<uuid>.tmp behind (#267)."""
+    _, spec = _spec_file(tmp_path)
+    rd = runstore.create(spec.to_dict(), store=store)
+    before = set(os.listdir(rd.path))
+    with pytest.raises(TypeError, match="cannot stringify"):
+        rd.update_status(error=_RaiseOnStr())
+    after = set(os.listdir(rd.path))
+    assert after == before
+    assert not [f for f in after if f.endswith(".tmp")]
+    # Prior status remains readable and unchanged.
+    assert rd.status().state == "created"
+
+
+def test_failed_replace_still_removes_the_sibling_tmp(store, tmp_path, monkeypatch):
+    """os.replace failure must clean the sibling, not leave an orphan (#267)."""
+    _, spec = _spec_file(tmp_path)
+    rd = runstore.create(spec.to_dict(), store=store)
+    real_replace = os.replace
+
+    def boom(src, dst):
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr(runstore.os, "replace", boom)
+    with pytest.raises(OSError, match="simulated replace failure"):
+        rd.update_status(round=9, best_reward=0.9)
+    assert not [f for f in os.listdir(rd.path) if f.endswith(".tmp")]
+    # Old status untouched.
+    assert rd.status().round == 0
+
+    monkeypatch.setattr(runstore.os, "replace", real_replace)
+    rd.update_status(round=3)
+    assert rd.status().round == 3
+    assert not [f for f in os.listdir(rd.path) if f.endswith(".tmp")]
+
+
+def test_encode_refusal_never_creates_a_tmp(tmp_path):
+    """json.dumps must run before open(tmp); a raise leaves zero new files (#267)."""
+    path = str(tmp_path / "status.json")
+    before = set(os.listdir(tmp_path))
+    with pytest.raises(TypeError, match="cannot stringify"):
+        runstore._write_json(path, {"error": _RaiseOnStr()})
+    assert set(os.listdir(tmp_path)) == before
+    assert not os.path.exists(path)
+    assert not [f for f in os.listdir(tmp_path) if f.endswith(".tmp")]
 
 
 def test_a_dead_pid_reads_as_failed_not_running(store, tmp_path):

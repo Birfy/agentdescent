@@ -18,6 +18,7 @@ Bring your own for anything else; these are a convenience, not a contract.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shlex
@@ -29,7 +30,22 @@ from .evolvable import ContractError
 __all__ = ["exact_match", "contains", "last_number", "numeric_close",
            "SCORERS", "scorer", "command_scorer", "GraderError"]
 
-_NUMBER = re.compile(r"-?\d[\d,]*\.?\d*")
+#: A number as a model or a grader writes it. Understands an exponent
+#: (``1.5e-3``, ``1.e-3``, Python's ``1e-05``), a leading decimal point (``.5``) and
+#: thousands groups of exactly three digits (``1,234.5``, so ``1,2,3`` is three
+#: numbers, not ``123``). A ``-``/``+`` is a sign only when it is not glued to
+#: a preceding digit, letter or closing bracket, so ``pages 3-4`` reads ``4``,
+#: not ``-4``; a match never starts inside another number, yet a figure
+#: glued to an ellipsis (``Total...42``) is still read (#288).
+_NUMBER = re.compile(
+    r"(?<!\d)(?<!\d\.)"                    # not in the middle of another number
+    r"(?:(?<![0-9A-Za-z)\]}])[-+])?"       # a sign, unless it is a binary minus
+    r"(?:\d{1,3}(?:,\d{3})+(?:\.\d*)?"     # thousands-grouped
+    r"|\d+(?:\.\d*)?"                      # plain; ``1.`` / ``1.e-3`` too
+    r"|(?<![.\d])\.\d+)"                   # leading decimal point, not out of "..."
+    r"(?:[eE][-+]?\d+)?"                    # exponent
+    r"(?!\d)"
+)
 
 
 def _gold(task, gold_key: str) -> str:
@@ -98,8 +114,9 @@ def last_number(gold_key: str = "gold", *, tolerance: float = 0.0) -> Callable:
         if want is None:
             raise ValueError(
                 f"task {getattr(task, 'id', '?')!r}: meta[{gold_key!r}] contains no "
-                f"number, so last_number() can never match it. Use exact_match() or "
-                f"contains(), or point gold_key= at the right column.")
+                f"number (none that is finite), so last_number() can never match "
+                f"it. Use exact_match() or contains(), or point gold_key= at the "
+                f"right column.")
         found = _NUMBER.findall(output or "")
         got = _to_float(found[-1]) if found else None
         if got is None:
@@ -122,10 +139,15 @@ def _last_number_in(text: str) -> Optional[float]:
 
 
 def _to_float(text: str) -> Optional[float]:
+    """Parse one :data:`_NUMBER` match; ``None`` if it is not a finite float.
+
+    An exponent can overflow (``1e999``): reading that as ``inf`` would let
+    :func:`command_scorer` clamp it to a perfect ``1.0``, so it is refused."""
     try:
-        return float(str(text).replace(",", "").lstrip("$£€").strip())
+        value = float(str(text).replace(",", "").lstrip("$£€").strip())
     except (TypeError, ValueError):
         return None
+    return value if math.isfinite(value) else None
 
 
 #: Named scorers accepted by :func:`scorer`. Pass a callable for anything else.

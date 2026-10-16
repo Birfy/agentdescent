@@ -33,6 +33,7 @@ spent, never whether the run's numbers mean anything.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
@@ -260,10 +261,18 @@ class BudgetGovernor:
         A round that spent no tokens records nothing: ``Δreward / 0`` is not
         infinity, it is a round whose cost was not measured, and letting it into
         the sample would make an unmeasured run look infinitely efficient.
+
+        A non-finite reward (``NaN`` or ``inf``) is a failed measurement too, and
+        is skipped exactly like ``None``: the next finite round is differenced
+        against the last finite one. Letting it through would poison the peak
+        -- a leading ``NaN`` peak disables the stop for the rest of the run, an
+        ``inf`` one fires it on a run that is still paying for itself.
         """
         if reward is None or not isinstance(reward, (int, float)):
             return
         reward = float(reward)
+        if not math.isfinite(reward):
+            return
         if self._prev_reward is None:
             self._prev_reward = reward
             self._prev_spent = self._spent
@@ -293,12 +302,18 @@ class BudgetGovernor:
         if not self.stop_on_diminishing or self.max_tokens is None:
             return False
         samples = self._efficiencies
-        if len(samples) < self.min_efficiency_samples:
+        # `not samples` as well as the threshold: `min_efficiency_samples <= 0`
+        # must not reach `max([])`.
+        if not samples or len(samples) < self.min_efficiency_samples:
             return False
         peak = max(samples)
         if peak <= 0:
             return False
-        recent = sum(samples[-2:]) / 2.0
+        # The recent rate is the mean of the last (up to) two samples, divided
+        # by how many there actually are -- with one sample, a fixed `/ 2`
+        # reads a run at its own peak as having halved.
+        window = samples[-2:]
+        recent = sum(window) / len(window)
         return recent < self.efficiency_floor * peak
 
     # -- what the run reports --------------------------------------------------
@@ -348,8 +363,9 @@ class CallBudget:
     ``base`` is the default the adapter was constructed with. The engine never
     raises ``next`` above ``base`` (a model call that costs more than the
     caller's configured ceiling is a bill the caller did not agree to), and
-    never drops it below ``base // 4`` (a reasoning model starved below a
-    quarter of its budget returns empty content — measured, see
+    never drops it below ``floor`` — by default ``max(256, base // 4)``
+    capped at ``base`` (a reasoning model starved below a quarter of its
+    budget returns empty content — measured, see
     :func:`agentdescent.agents.claude`).
     """
 
@@ -362,12 +378,23 @@ class CallBudget:
     next: Optional[int] = None
     #: The floor: a reasoning model below this returns nothing. Measured on
     #: deepseek-v4-flash at 1024: four of eight reflection prompts came back
-    #: empty. ``base // 4`` is the conservative reading of that.
+    #: empty. The default is ``max(256, base // 4)``, **capped at** ``base`` so
+    #: a small configured ceiling (``base < 256``) cannot be silently raised
+    #: above what the caller agreed to (#234).
     floor: Optional[int] = None
 
     def __post_init__(self) -> None:
+        if self.base < 1:
+            raise ValueError(f"base must be >= 1, got {self.base}")
         if self.floor is None:
-            self.floor = max(256, self.base // 4)
+            # Cap at base: an absolute 256 floor above a smaller configured
+            # ceiling would make every allocate() overspend (#234).
+            self.floor = min(self.base, max(256, self.base // 4))
+        elif self.floor < 1:
+            raise ValueError(f"floor must be >= 1, got {self.floor}")
+        elif self.floor > self.base:
+            raise ValueError(
+                f"floor ({self.floor}) cannot exceed base ({self.base})")
 
     def allocate(self, score: float, budget_remaining: float,
                  *, max_boost: float = 1.0) -> None:

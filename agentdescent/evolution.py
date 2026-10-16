@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import atexit
 import hashlib
+import json
 import math
 import os
 import re
@@ -347,12 +348,18 @@ class EvolvingArtifact:
     def __init__(self, id: str, state: Optional[Dict[str, str]] = None,
                  version: int = 1, blast_radius: float = 0.2,
                  runtime: Optional["_Runtime"] = None,
-                 strategy: Optional[Strategy] = None) -> None:
+                 strategy: Optional[Strategy] = None,
+                 contract: Optional[Contract] = None) -> None:
         self.id = id
         self.state: Dict[str, str] = dict(state or {})
         self.version = version
         self.blast_radius = blast_radius
-        self.contract = Contract(input_schema="task", output_schema="text", major=1)
+        #: The artifact's contract. A caller passes one to declare governance
+        #: invariants (``Contract(invariants=(...))``, see
+        #: :mod:`agentdescent.invariants`); the default is the reference skill
+        #: contract, which declares nothing and enforces nothing.
+        self.contract = contract or Contract(
+            input_schema="task", output_schema="text", major=1)
         self._rt = runtime
         self._strategy = strategy or AppendRules()
 
@@ -384,7 +391,7 @@ class EvolvingArtifact:
             else:
                 new_state[key] = value
         return EvolvingArtifact(self.id, new_state, self.version + 1, self.blast_radius,
-                                self._rt, self._strategy)
+                                self._rt, self._strategy, contract=self.contract)
 
     def _signature(self):
         """The evaluation-cache key: what the artifact *renders to*.
@@ -607,6 +614,13 @@ class _Runtime:
     #: question.
     env_fingerprint: str = ""
 
+    #: Durable rollout-record store, when the run records trajectories. ``None``
+    #: (the default) is the untouched path exactly: every evaluation that used
+    #: to run still runs, and nothing is written. When set, every cache-miss
+    #: evaluation here (held-out scoring and each acceptance measurement) lands
+    #: in the store as a ``purpose="eval"`` record.
+    trajectory_store: Optional["TrajectoryStore"] = None
+
     #: Has this run already reported an evidence card with nothing to score?
     #: Lives here rather than on the artifact because artifacts are rebuilt from
     #: the ledger constantly, and rather than at module scope because "once" has
@@ -618,9 +632,14 @@ class _Runtime:
 
         def _measure() -> float:
             for attempt in range(self.ATTEMPTS):
+                t0 = time.time()
                 try:
-                    return _checked_reward(
-                        self.reward(task, self.run(artifact.render(), task)), task)
+                    rendered = artifact.render()
+                    output = self.run(rendered, task)
+                    value = _checked_reward(self.reward(task, output), task)
+                    self._record_eval(artifact, task, rendered, output, value,
+                                      time.time() - t0)
+                    return value
                 except ContractError:
                     raise            # a caller bug: retrying cannot help
                 except Exception:  # noqa: BLE001 - a backend transient
@@ -638,6 +657,39 @@ class _Runtime:
             # Includes hits (near-zero) on purpose: `eval_seconds` is what the
             # gate cost the run, and a hit costing nothing is the point.
             self.meter.add("eval_seconds", time.time() - t0)
+
+    def _record_eval(self, artifact: EvolvingArtifact, task: Task,
+                     rendered: str, output: str, value: float,
+                     wallclock: float) -> None:
+        """Persist one gate evaluation, when a store is attached.
+
+        Runs inside :meth:`eval_one`'s retry loop, on the successful attempt:
+        a rollout that was retried is recorded once, with the attempt that
+        actually produced the output. ``rendered`` is the exact text the run
+        provider was shown (computed once in ``_measure``, so the record and
+        the rollout agree by construction) and ``output`` is the *reward's*
+        input, which is the raw provider output -- the trajectory keeps the
+        same object the scorer saw, not a re-render.
+
+        Deliberately quiet: the store's own write is best-effort and a failure
+        is counted, never raised -- a full disk must not fail a gate that
+        already has its answer."""
+        store = self.trajectory_store
+        if store is None:
+            return
+        from .trajectory import PURPOSE_EVAL, Trajectory
+        store.record(Trajectory(
+            artifact_id=artifact.id, task_id=task.id,
+            env_fingerprint=self.env_fingerprint,
+            rendered=rendered, purpose=PURPOSE_EVAL,
+            # Version attribution: the gate measured *this* artifact version,
+            # and a downstream gate/audit consumer has to know which one. The
+            # rollout records get the worker's base_version; the gate gets the
+            # artifact's own version, which is what the candidate being scored
+            # actually was.
+            base_version=json.dumps({artifact.id: artifact.version},
+                                    sort_keys=True),
+            output=output, reward=value, cost_wallclock=wallclock))
 
 
 # ---------------------------------------------------------------------------
@@ -718,22 +770,39 @@ def _resolve_sections(parallel, strategy) -> Dict[str, int]:
     return assign_key_sections(keys, n_sections)
 
 
-def _reject_pipeline_parallel(parallel) -> None:
-    """PP is a multi-artifact paradigm; ``evolve()`` evolves exactly one artifact.
+def _reject_pipeline_parallel(parallel, extra_artifacts: Optional[Dict[str, "EvolvingArtifact"]],
+                              artifact_id: str = "artifact") -> None:
+    """PP is a multi-artifact paradigm; ``evolve()`` evolves one artifact.
 
     ``WorkUnit.stage`` -- the only thing distinguishing PP's units, since it hands
     every worker the whole task list -- was never read by the driver, so passing
     ``parallel=PipelineParallel(...)`` silently degraded to n_workers all rolling
-    out the same tasks: strictly worse than the default, with no signal. Say so."""
-    if type(parallel).__name__ == "PipelineParallel" or getattr(parallel, "name", "") == "PP":
+    out the same tasks: strictly worse than the default, with no signal. Say so.
+    With ``extra_artifacts`` registered the stages have somewhere to live, so the
+    refusal lifts -- and each stage must name a registered artifact, or the worker
+    loop would propose against an id the ledger has never heard of."""
+    if type(parallel).__name__ != "PipelineParallel" and getattr(parallel, "name", "") != "PP":
+        return
+    registered = set(extra_artifacts or {}) | {artifact_id}
+    stages = getattr(parallel, "stages", None) or ()
+    unknown = [s for s in stages if s not in registered]
+    if not extra_artifacts:
         raise ValueError(
-            "evolve() cannot run PipelineParallel: it evolves a single artifact_id, "
-            "while PP needs one artifact per stage. Passing it used to be accepted "
-            "and quietly ignored (every worker got the whole task list and the "
-            "stage was never read), which is worse than the DataParallel default. "
-            "The PP primitives are still usable directly -- see "
-            "agentdescent.parallel.PipelineChain for stage ordering and upstream "
-            "blame attribution.")
+            "evolve() cannot run PipelineParallel: it evolves a single "
+            "artifact_id, while PP needs one artifact per stage. "
+            "Pass extra_artifacts={...} to register the stages' artifacts. "
+            "Passing PP without extra_artifacts used to be accepted "
+            "and quietly ignored (every worker got the whole task list and "
+            "the stage was never read), which is worse than the "
+            "DataParallel default. The PP primitives are still usable "
+            "directly -- see agentdescent.parallel.PipelineChain for stage "
+            "ordering and upstream blame attribution.")
+    if unknown:
+        raise ValueError(
+            f"PipelineParallel stages must name registered artifacts; unknown "
+            f"stage(s) {sorted(unknown)}. Registered: "
+            f"{sorted(registered)}. Each stage is an artifact the worker loop "
+            "proposes against.")
 
 
 def _safe_log(ledger: Ledger, limit: int = 40) -> List[str]:
@@ -781,7 +850,7 @@ def _publish_stable(aggregator) -> None:
 _WIRED_POLICIES = ("task_sampler", "selection", "proposal", "conflict", "fusion",
                    "acceptance", "promotion", "staleness", "verifier", "ledger",
                    "aggregator_factory", "eval_cache", "sandbox_spec", "evaluator",
-                   "executor")
+                   "executor", "screen")
 
 #: The same bundle, minus the one field the barrier-free loop does not read.
 #: `async_evolve`'s worker calls `eng.run` directly; there is no executor seam in
@@ -871,7 +940,8 @@ def undescribable_actor(which: str = "run"):
         "docs/execution.md).")
 
 
-def _spec_for(engine: "_Engine", artifact, task: Task):
+def _spec_for(engine: "_Engine", artifact, task: Task,
+              rendered: Optional[str] = None):
     """Describe one rollout, as completely as `evolve()`'s arguments allow.
 
     Everything the far side needs is here except the two things `evolve()` was
@@ -879,12 +949,15 @@ def _spec_for(engine: "_Engine", artifact, task: Task):
     resolved, rather than as a plausible-looking default: a spec that quietly
     names *some* actor turns "this executor cannot be driven from `evolve()`"
     into a finished run measuring the wrong thing.
-    """
+
+    ``rendered`` may be passed in so the worker records exactly the string the
+    executor ships, instead of rendering twice for the same snapshot."""
     from .policies import SandboxSpec
     from .workspec import Ref, RolloutSpec
 
     return RolloutSpec(
-        rendered=artifact.render(), task=task,
+        rendered=artifact.render() if rendered is None else rendered,
+        task=task,
         run=Ref("agentdescent.evolution:undescribable_actor", {"which": "run"}),
         reward=Ref("agentdescent.evolution:undescribable_actor", {"which": "reward"}),
         sandbox=engine.sandbox_spec or SandboxSpec())
@@ -1052,8 +1125,16 @@ def _cost_fields(meter: Meter) -> Dict[str, Any]:
         "redispatched": m.redispatched,
         "duplicates_dropped": m.duplicates_dropped,
         "cas_conflicts": m.cas_conflicts,
+        "invariant_checked": m.invariant_checked,
+        "invariant_rejections": m.invariant_rejections,
+        "critic_checked": m.critic_checked,
+        "critic_rejected": m.critic_rejected,
         "cache_hits": m.cache_hits,
         "cache_misses": m.cache_misses,
+        "trajectories_recorded": m.trajectories_recorded,
+        "trajectories_dedup": m.trajectories_dedup,
+        "trajectory_write_seconds": m.trajectory_write_seconds,
+        "trajectory_write_failures": m.trajectory_write_failures,
         "sandbox_wait_s": m.sandbox_wait_s,
         "sandbox_setup_s": m.sandbox_setup_s,
         "sandboxes_created": m.sandboxes_created,
@@ -1405,11 +1486,38 @@ class EvolutionResult:
     #: Commits that lost a compare-and-swap race and rebased. Zero with one
     #: writer by construction.
     cas_conflicts: int = 0
+    #: Pre-evaluation screens: cards passed through a screen policy, and cards
+    #: it rejected (settled without a held-out sweep). A run with no screen
+    #: reports zeros -- the honest reading "no screen installed".
+    critic_checked: int = 0
+    critic_rejected: int = 0
     #: Evaluation cache. ``misses`` is the number of evaluations actually
     #: performed; the ratio is the duplicate-computation figure a multi-process
     #: run has to report.
     cache_hits: int = 0
     cache_misses: int = 0
+    #: Rollout-trajectory records written, skipped as duplicates, lost to a
+    #: filesystem failure, and the seconds those writes took. A run without a
+    #: trajectory store reports zeros -- the honest reading "recording was
+    #: off". ``trajectories_dedup`` is the number of evaluations that were
+    #: already on disk, so the pair says how much unique evidence the run
+    #: actually produced.
+    trajectories_recorded: int = 0
+    trajectories_dedup: int = 0
+    trajectory_write_seconds: float = 0.0
+    trajectory_write_failures: int = 0
+    #: Where this run's trajectory records live, when recording was on:
+    #: ``<repo_path>/trajectories``. ``None`` when no store was attached --
+    #: reading the counters against it tells "recording was off" from "records
+    #: exist somewhere". Filled by the drivers from the engine's runtime.
+    trajectories_path: Optional[str] = None
+    #: Governance invariants: candidates whose contract declared rules and
+    #: were checked, and the individual violations that rejected them (each
+    #: rejected merge reports a ``violates-invariant`` outcome too, so
+    #: ``outcomes()`` carries the merge-level count). A run that declared no
+    #: invariants reports zeros -- the honest reading "no rules to enforce".
+    invariant_checked: int = 0
+    invariant_rejections: int = 0
     #: Sandbox accounting. Zero on the default single-workspace path: there is
     #: no pool to wait for and no image to warm. They exist here so that when a
     #: pool does appear, "8 workers only bought 2x" can be attributed to queueing
@@ -1770,6 +1878,49 @@ class _Engine:
     train_ids: List[str]
     artifact_id: str
     blast_radius: float
+    #: The extra artifacts registered alongside the primary, in declaration
+    #: order. Empty for a single-artifact run. The worker loop proposes against
+    #: each of these too, and the aggregator buckets their diffs by target.
+    extra_artifact_ids: Tuple[str, ...] = ()
+    #: The strategies registered per artifact id -- extras may carry their own
+    #: (an :class:`EvolvingArtifact` holds one), so ``to_diff`` must use the
+    #: target's strategy, not the primary's. ``engine.strategy`` remains the
+    #: primary's, for the callers that already read it.
+    artifact_strategies: Dict[str, Strategy] = field(default_factory=dict)
+    #: Reverse contract dependency graph: ``changed_artifact_id -> [dependents]``.
+    #: When artifact A commits a contract-breaking diff, every B in this list
+    #: (whose ``Contract.depends_on`` names A) has cached evaluations taken under
+    #: the old contract, so the engine re-measures them.
+    contract_dependents: Dict[str, List[str]] = field(default_factory=dict)
+
+    def invalidate_dependents(self, changed_artifact_id: str,
+                              branch: str = Ledger.DEV) -> None:
+        """Drop cached evaluations of artifacts that depend on ``changed``.
+
+        Called when a contract-breaking diff commits on ``changed_artifact_id``
+        (on ``branch`` -- a fork's dependents are measured against the fork's
+        head, so evicting the *fork's* renders is what forces their re-measure):
+        every artifact whose ``Contract.depends_on`` names it was measured under
+        the superseded contract, so its cached scores no longer mean what they
+        said. Re-measuring is forced by evicting those cache entries -- the
+        dependent's render may not have changed, which is exactly why a plain
+        ``(rendered, task)`` cache cannot see the staleness on its own.
+
+        ``None`` when no cache invalidation hook exists (a custom cache that
+        predates it simply re-measures nothing and stays correct, only slower to
+        notice the change)."""
+        dependents = self.contract_dependents.get(changed_artifact_id) or ()
+        if not dependents:
+            return
+        snap = self.ledger.snapshot(branch)
+        invalidate = getattr(self.runtime.cache, "invalidate", None)
+        if not callable(invalidate):
+            return
+        for aid in dependents:
+            art = snap.get(aid)
+            if art is None:
+                continue
+            invalidate(art.render())
     #: Where rollouts run. Always present, defaulting to this process, so the
     #: round body has one path rather than one per substrate.
     executor: Any = None
@@ -1799,6 +1950,34 @@ class _Engine:
     #: reports ``round 0`` for a search 40 rounds deep, and hands
     #: ``_prune_round_files`` a history that no longer sorts.
     checkpoint_round_base: int = 0
+
+    def _record_rollout(self, *, artifact_id: str, rendered: str, task: Task,
+                        base_version: VersionVector, purpose: str,
+                        output: Optional[str], reward: float, wallclock: float,
+                        worker_id: Optional[str] = None,
+                        lease_id: Optional[str] = None) -> Optional[str]:
+        """Persist one worker rollout, returning its ``trace_id`` or ``None``.
+
+        ``None`` means either no store is attached (recording off) or the
+        write deduped/failed -- all three are "nothing to point at", which is
+        exactly what an ``EvidenceCard.trace_ids`` entry wants: consumers read
+        the empty tuple as "recording was off or the record did not land",
+        never as "there was no rollout".
+
+        ``rendered`` is the exact text the provider saw (for the self-verify
+        path, the diff-applied render); ``base_version`` is the version vector
+        the worker held, stored JSON-encoded for attribution."""
+        store = self.runtime.trajectory_store
+        if store is None:
+            return None
+        from .trajectory import Trajectory
+        return store.record(Trajectory(
+            artifact_id=artifact_id, task_id=task.id,
+            env_fingerprint=self.runtime.env_fingerprint,
+            rendered=rendered, purpose=purpose,
+            base_version=json.dumps(base_version, sort_keys=True),
+            output=output, reward=reward, cost_wallclock=wallclock,
+            worker_id=worker_id, lease_id=lease_id))
 
     def record_round(self, *, index: int, reward: float, n_items: int,
                      reports: Sequence[Any],
@@ -1936,7 +2115,11 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
                   ledger_impl: Optional[Any] = None,
                   policies_bundle: Optional[Policies] = None,
                   checkpointing: bool = False,
-                  allocator: Optional[Any] = None) -> _Engine:
+                  allocator: Optional[Any] = None,
+                  record_trajectories: bool = False,
+                  trajectory_store: Optional[Any] = None,
+                  contract: Optional[Contract] = None,
+                  extra_artifacts: Optional[Dict[str, "EvolvingArtifact"]] = None) -> _Engine:
     """Wire the ledger, runtime, verifier and aggregator (shared by
     :func:`evolve` and :func:`~agentdescent.async_evolve.async_evolve`)."""
     import tempfile
@@ -1945,8 +2128,12 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     if agent is not None:
         run = run or agent.solve
         propose = propose or agent.propose
-    if run is None or propose is None:
-        raise ValueError("provide agent=, or both run= and propose=")
+    if run is None or (propose is None and
+                       (policies_bundle is None or policies_bundle.proposal is None)):
+        raise ValueError(
+            "provide agent=, or both run= and propose=, or a proposal policy "
+            "through Policies(proposal=...): the engine needs a way to turn a "
+            "rollout into a candidate change.")
     if policies_bundle is not None and policies_bundle.proposal is not None:
         # A mutable cell filled after the aggregator is built below, so the
         # propose adapter can read the settled-evidence pool for the task it is
@@ -2066,11 +2253,49 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
                                         else ""))
 
     def serialize(a: EvolvingArtifact) -> dict:
-        return {"state": a.state, "blast_radius": a.blast_radius}
+        # The contract rides in the payload because the merge gate enforces it:
+        # an artifact whose invariants evaporated on the ledger round-trip is a
+        # governance rule that silently stopped running. ``None`` (no explicit
+        # contract) is stored as absent, so old payloads and the untouched path
+        # read back to the caller's default contract.
+        out = {"state": a.state, "blast_radius": a.blast_radius}
+        contract = getattr(a, "contract", None)
+        if contract is not None:
+            from .invariants import contract_to_dict
+            out["contract"] = contract_to_dict(contract)
+        return out
+
+    #: Strategies per registered artifact id. Extras carry their own (an
+    #: :class:`EvolvingArtifact` holds one); the primary uses ``strategy``. A
+    #: snapshot deserialises each artifact through its OWN strategy, so a diff
+    #: targeting an extra is rendered/applied by the rules that artifact was
+    #: registered under -- not the primary's, which is what ``apply`` would
+    #: otherwise do.
+    artifact_strategies: Dict[str, Strategy] = {artifact_id: strategy}
+    for _aid, _art in (extra_artifacts or {}).items():
+        if _aid == artifact_id:
+            continue
+        artifact_strategies[_aid] = getattr(_art, "_strategy", None) or strategy
 
     def deserialize(aid: str, version: int, state: dict) -> EvolvingArtifact:
+        # The gate and _assert_contract must read the *operator-supplied*
+        # contract, not whatever a previous run serialized. On a fresh run the
+        # stored contract is the supplied one, so they agree; on a resume with a
+        # tightened/loosened `contract=`, reading the stored rules would enforce
+        # the old rules (or halve the run at the first commit with a
+        # ContractRejected when the gate passed under rules _assert_contract now
+        # refuses) -- the operator's contract is the source of truth (review).
+        # `contract` here is the engine's `contract=` param, in closure.
+        resolved = None
+        if contract is not None and aid == artifact_id:
+            resolved = contract
+        elif state.get("contract"):
+            from .invariants import contract_from_dict
+            resolved = contract_from_dict(state["contract"])
         return EvolvingArtifact(aid, state.get("state", {}), version,
-                                state.get("blast_radius", blast_radius), runtime, strategy)
+                                state.get("blast_radius", blast_radius), runtime,
+                                artifact_strategies.get(aid, strategy),
+                                contract=resolved)
 
     scratch: Optional[str] = None
     if repo_path:
@@ -2094,6 +2319,37 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
         ledger, scratch = ledger_impl, None
     else:
         ledger = Ledger(repo, serialize, deserialize)
+    # Attach the trajectory store now that `repo` exists. The runtime was built
+    # above, before the repo's home was known; a store is built from the repo's
+    # own directory (``<repo>/trajectories``, excluded from the ledger index)
+    # when recording is on, or handed in whole when the caller owns one.
+    # Explicit `trajectory_store=` wins over the boolean: a caller who built a
+    # store somewhere else has already decided where records live, and
+    # `record_trajectories=True` alongside it would quietly record twice into
+    # different homes.
+    _traj_store = trajectory_store
+    if _traj_store is not None:
+        # An explicit store may carry its own meter (a shared store outlives
+        # the run and reports into its own totals); leave one that is already
+        # set. Without one, attach the run's meter so `result` accounts for
+        # writes/dedup/failures exactly as it does for a store the engine
+        # builds -- a run that recorded three trajectories and reported zero
+        # recorded would be indistinguishable from one that recorded nothing.
+        #
+        # The attach distinguishes *engine-injected* meters from *caller-owned*
+        # ones, so reusing an unmetered store across runs swaps in this run's
+        # meter instead of mistaking the previous run's for a caller's (the
+        # review's meter-lifetime bug: run 2 reported zero while run 1's meter
+        # absorbed both runs' writes).
+        try:
+            _traj_store._attach_run_meter(meter)
+        except AttributeError:            # a store without a meter slot
+            pass
+    elif record_trajectories:
+        from .trajectory import TrajectoryStore
+        _traj_store = TrajectoryStore(os.path.join(repo, "trajectories"),
+                                      meter=meter)
+    runtime.trajectory_store = _traj_store
     # `register` is a no-op when the artifact already exists, which is what makes
     # re-using a repo_path resume the run -- but it also means a supplied
     # initial_state would be discarded without a word. Say so.
@@ -2105,7 +2361,45 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
             "to start over.", RuntimeWarning, stacklevel=3)
     ledger.register(EvolvingArtifact(artifact_id, initial_state or strategy.initial(),
                                      blast_radius=blast_radius, runtime=runtime,
-                                     strategy=strategy))
+                                     strategy=strategy, contract=contract))
+    # Registration-time governance: a contract that declares a self-referential
+    # or cyclic dependency graph is refused before the run starts, not after
+    # the first merge trips over it. (Depends_on is duck-typed, so this is a
+    # no-op on today's single-artifact contracts and becomes load-bearing with
+    # multi-artifact dependencies.)
+    if contract is not None:
+        from .invariants import check_dependency_graph
+        violations = check_dependency_graph({artifact_id: contract})
+        if violations:
+            raise GovernanceError(
+                f"artifact {artifact_id!r} declares an invalid contract: "
+                + "; ".join(violations))
+    # Register any extra artifacts the caller declared. The primary is the one
+    # the worker loop runs on; extras exist so a proposal can name them as a
+    # diff target and the aggregator can merge into them. ``commit_atomic`` is
+    # the path a contract-breaking diff that touches both takes.
+    for aid, art in (extra_artifacts or {}).items():
+        if aid == artifact_id:
+            continue                    # the primary, already registered
+        ledger.register(art)
+
+    # Build the reverse contract-dependency graph from the declared contracts.
+    # ``Contract.depends_on`` names the artifacts whose contracts a dependent
+    # relies on; when one of those commits a contract-breaking diff, the
+    # dependents' cached evaluations are stale (measured under the superseded
+    # contract), so the engine re-measures them. This is the seam the design
+    # calls the atomic adaptation transaction's consumer side: the breaking diff
+    # itself already lands atomically via ``commit_atomic``.
+    contract_dependents: Dict[str, List[str]] = {}
+    for aid, art in (extra_artifacts or {}).items():
+        if aid == artifact_id:
+            continue
+        deps = tuple(getattr(getattr(art, "contract", None), "depends_on", ()) or ())
+        for dep in deps:
+            if dep in contract_dependents:
+                contract_dependents[dep].append(aid)
+            else:
+                contract_dependents[dep] = [aid]
 
     # The cheap layer must actually be cheap. It used to be pinned to the full
     # held-out set (`rule_subset=len(held_out)`) with zero noise, on the reasoning
@@ -2182,7 +2476,8 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     # behaviour. The task/proposal/eval-cache halves of `Policies` are read above
     # and are unaffected, so only the merge side is named.
     if aggregator_factory is not None:
-        dropped = [name for name in ("conflict", "fusion", "acceptance", "promotion")
+        dropped = [name for name in ("conflict", "fusion", "acceptance", "promotion",
+                                     "screen")
                    if getattr(pol, name, None) is not None]
         if dropped:
             warnings.warn(
@@ -2195,7 +2490,8 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     def _default_aggregator(ledger, verifier, audit, config, policy):
         return Aggregator(ledger, verifier, audit, config, staleness_policy=policy,
                           meter=meter, conflict=pol.conflict, fusion=pol.fusion,
-                          acceptance=pol.acceptance, promotion=pol.promotion)
+                          acceptance=pol.acceptance, promotion=pol.promotion,
+                          screen=pol.screen)
 
     # A declared selection policy is what asks for a population layer -- the rule
     # the port runner already used, moved here so it is the engine's rule rather
@@ -2205,7 +2501,8 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
         from .population import population_factory
         aggregator_factory = population_factory(
             selection, artifact_id, meter=meter, conflict=pol.conflict,
-            fusion=pol.fusion, acceptance=pol.acceptance, promotion=pol.promotion)
+            fusion=pol.fusion, acceptance=pol.acceptance, promotion=pol.promotion,
+            screen=pol.screen)
 
     # `None` defers to whatever the config already says, so `agg_config=` keeps
     # working and the two cannot silently disagree; an explicit True or False
@@ -2309,12 +2606,28 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     attach = getattr(executor, "attach_meter", None)
     if callable(attach):
         attach(meter)
-    return _Engine(ledger, runtime, verifier, aggregator, strategy, run, reward,
-                   propose, train, held_out, {t.id: t for t in train},
-                   [t.id for t in train], artifact_id, blast_radius,
-                   executor=executor, meter=meter, scratch_repo=scratch,
-                   checkpoint_payload=_cp_payload, checkpointing=checkpointing,
-                   checkpoint_round_base=_cp_round_base)
+    eng = _Engine(ledger, runtime, verifier, aggregator, strategy, run, reward,
+                  propose, train, held_out, {t.id: t for t in train},
+                  [t.id for t in train], artifact_id, blast_radius,
+                  extra_artifact_ids=tuple(
+                      aid for aid in (extra_artifacts or {}) if aid != artifact_id),
+                  artifact_strategies=artifact_strategies,
+                  contract_dependents=contract_dependents,
+                  executor=executor, meter=meter, scratch_repo=scratch,
+                  checkpoint_payload=_cp_payload, checkpointing=checkpointing,
+                  checkpoint_round_base=_cp_round_base)
+    # A contract-breaking commit lands atomically (commit_atomic); this is the
+    # consumer side -- re-measure the artifacts that depended on the changed
+    # contract. Wired here, after the engine exists, so the callback has
+    # somewhere to read the ledger from. The reverse dependency graph is also
+    # handed to the aggregator so it can refuse a breaking commit that has
+    # declared dependents but no adapted states to land with it.
+    try:
+        aggregator.on_contract_change = eng.invalidate_dependents
+        aggregator.contract_dependents = contract_dependents
+    except AttributeError:      # a custom aggregator without the slot
+        pass
+    return eng
 
 
 def evolve(
@@ -2418,6 +2731,41 @@ def evolve(
     #: default) is the old behaviour exactly -- optional spend degrades against
     #: the global floors, every candidate treated alike.
     allocator: Optional[Any] = None,
+    #: Persist every rollout and gate evaluation as a
+    #: :class:`~agentdescent.trajectory.Trajectory` under
+    #: ``<repo_path>/trajectories/`` -- what the run provider saw, what it
+    #: returned, what that earned, against which artifact version and
+    #: environment. Off by default: a throwaway repo's records die with it, so
+    #: the write cost is pure overhead there, and recording is a deliberate
+    #: choice about keeping a run's evidence. On by passing
+    #: ``trajectory_store=`` with a store you built (the explicit store wins
+    #: over the boolean). The store is the durable base every learning-type
+    #: increment reads -- process-supervised reflection, offline re-weighting,
+    #: audit replay -- and it is what an ``EvidenceCard.trace_ids`` entry
+    #: points at.
+    record_trajectories: bool = False,
+    #: An explicit :class:`~agentdescent.trajectory.TrajectoryStore` to record
+    #: into. Pass one to control where records land (a shared store, a custom
+    #: root, a custom privacy configuration) without going through the
+    #: ``<repo_path>/trajectories/`` default. ``None`` + ``record_trajectories``
+    #: builds the default store.
+    trajectory_store: Optional["TrajectoryStore"] = None,
+    #: The artifact's contract -- the externally-visible interface, and where
+    #: governance invariants are declared. Pass
+    #: ``Contract(invariants=(Invariant("mutable_keys", ("a", "b")),))`` and the
+    #: aggregator enforces each rule **before** a candidate is measured (see
+    #: :mod:`agentdescent.invariants`); a diff that breaks one reports a
+    #: ``violates-invariant`` outcome and never buys a held-out sweep. ``None``
+    #: (the default) is the reference skill contract, which declares nothing and
+    #: enforces nothing -- the untouched path exactly.
+    contract: Optional[Contract] = None,
+    #: Additional artifacts to register alongside the primary. Each value is an
+    #: :class:`EvolvingArtifact` with its own ``id``, ``blast_radius`` and
+    #: ``strategy``. The primary (``artifact_id``) is the one the worker loop
+    #: runs and proposes on; these are registered so ``propose`` can return a
+    #: diff whose ``target`` names one of them, and the aggregator merges it.
+    #: Empty (the default) is the old single-artifact behaviour exactly.
+    extra_artifacts: Optional[Dict[str, "EvolvingArtifact"]] = None,
 ) -> EvolutionResult:
     """Evolve an artifact. Provide either ``agent`` (with ``solve``/``propose``)
     or the ``run`` / ``propose`` callables directly.
@@ -2754,6 +3102,46 @@ def evolve(
         spent; ``max_tokens`` is what exists to spend). Counterfactual
         exploration re-measures candidates the model judged unworthy, so a
         biased value model is corrected rather than reinforced.
+    record_trajectories:
+        Persist every rollout and gate evaluation as a
+        :class:`~agentdescent.trajectory.Trajectory` under
+        ``<repo_path>/trajectories/`` -- what the run provider saw, what it
+        returned, what that earned, against which artifact version and
+        environment. Off by default: a throwaway repo's records die with it, so
+        the write cost is pure overhead there, and recording is a deliberate
+        choice about keeping a run's evidence. The store is the durable base
+        every learning-type increment reads -- process-supervised reflection,
+        offline re-weighting, audit replay -- and it is what an
+        ``EvidenceCard.trace_ids`` entry points at. Pass ``trajectory_store=``
+        with a store you built to control where records land instead.
+    trajectory_store:
+        An explicit :class:`~agentdescent.trajectory.TrajectoryStore` to record
+        into. Pass one to control where records land (a shared store, a custom
+        root, a custom privacy configuration) without going through the
+        ``<repo_path>/trajectories/`` default. The explicit store wins over
+        ``record_trajectories``; ``None`` + ``record_trajectories`` builds the
+        default store.
+    contract:
+        The artifact's contract -- the externally-visible interface, and where
+        governance invariants are declared. Pass
+        ``Contract(invariants=(Invariant("mutable_keys", ("a", "b")),))`` and
+        the aggregator enforces each rule **before** a candidate is measured
+        (see :mod:`agentdescent.invariants`); a diff that breaks one reports a
+        ``violates-invariant`` outcome and never buys a held-out sweep.
+        ``None`` (the default) is the reference skill contract, which declares
+        nothing and enforces nothing -- the untouched path exactly.
+    extra_artifacts:
+        Additional artifacts to register alongside the primary
+        (``artifact_id``), as ``{aid: EvolvingArtifact}``. The primary is the
+        one the worker loop rolls out and proposes on; each extra is registered
+        in the ledger and the worker proposes against it too, so a proposal can
+        name one of them as a diff target and the aggregator merges it there
+        (the evidence buffer already buckets by ``diff.target``). ``depends_on``
+        on an extra's ``Contract`` declares which artifacts it relies on: a
+        contract-breaking change to one re-measures its dependents (their cached
+        scores were taken under the superseded contract) and lands atomically via
+        ``Ledger.commit_atomic``. Empty (the default) is the old single-artifact
+        behaviour exactly.
 
     Returns
     -------
@@ -2838,7 +3226,10 @@ def evolve(
             policies=policies, checkpointing=checkpointing,
             stop_on_diminishing_returns=stop_on_diminishing_returns,
             efficiency_floor=efficiency_floor,
-            call_budget=call_budget, allocator=allocator)
+            call_budget=call_budget, allocator=allocator,
+            record_trajectories=record_trajectories,
+            trajectory_store=trajectory_store, contract=contract,
+            extra_artifacts=extra_artifacts)
 
     if pipelined_gate:
         # The mirror of the block above, and the same reasoning: a knob accepted
@@ -2879,7 +3270,7 @@ def evolve(
     # rollout: an incompatible pairing used to be discovered one diff at a time, by
     # silently discarding it.
     section_map = _resolve_sections(parallel, strategy)
-    _reject_pipeline_parallel(parallel)
+    _reject_pipeline_parallel(parallel, extra_artifacts, artifact_id)
     # Resolved once: the round body is the hot path, and a strategy either has
     # the hook for the whole run or does not.
     observe_plan = getattr(parallel, "observe", None)
@@ -2898,7 +3289,9 @@ def evolve(
             shuffle=shuffle, seed=seed,
         usage=usage, verifier=_pol.verifier, ledger_impl=_pol.ledger,
         policies_bundle=_pol, checkpointing=checkpointing,
-        allocator=allocator)
+        allocator=allocator, record_trajectories=record_trajectories,
+        trajectory_store=trajectory_store, contract=contract,
+        extra_artifacts=extra_artifacts)
     # Start the clock after the wiring, before the first unit of work: setup
     # is not what a time-to-quality number is asking about.
     eng.meter.start()
@@ -3122,21 +3515,55 @@ def evolve(
                     print(f"round {r:>3}  worker {unit.worker} failed: "
                           f"{type(e).__name__}: {str(e)[:100]}")
 
-        def _run_unit_inner(unit) -> None:
-            if not unit.keys:
+        def _artifact_targets(unit) -> List[str]:
+            """The artifacts this worker proposes for in one unit.
+
+            Under PP each worker owns one stage, and a stage *is* an artifact id
+            (``PipelineParallel(stages=["skill-a", "skill-b"])`` -- the reason
+            PP was refused while ``evolve()`` could register only one artifact).
+            Otherwise the worker rolls out the primary and also proposes for every
+            registered extra, so one rollout's lesson reaches the whole library.
+            """
+            if getattr(parallel, "name", "") == "PP" or type(parallel).__name__ == "PipelineParallel":
+                stages = getattr(parallel, "stages", None)
+                if stages:
+                    return [stages[unit.stage % len(stages)]]
+                return [artifact_id]
+            return [artifact_id] + list(eng.extra_artifact_ids)
+
+        def _propose_one(unit, task, aid: str) -> None:
+            """Roll out artifact ``aid``, propose against it, file its card."""
+            if aid == artifact_id:
+                mine, mine_v, mine_branch = _snapshot_for(unit.worker)
+            else:
+                # Extras are read from the round snapshot; they have no per-worker
+                # staleness mechanism of their own yet (Phase 1), so a worker sees
+                # the head it was given this round, on `dev`.
+                mine = snap.get(aid)
+                mine_v = snap.version.get(aid, 0)
+                mine_branch = Ledger.DEV
+            if mine is None:
                 return
-            # This worker's own view of the artifact. Identical to the round's
-            # under the default `refresh_interval=1`; older, by design, above it.
-            mine, mine_v, mine_branch = _snapshot_for(unit.worker)
-            task = by_id[sampler.pick(unit.keys, r)]     # a task from this worker's shard
             # The rollout is the part that can move elsewhere. Everything around
             # it -- which task, what the output implies, who is told about it --
             # reads or writes state that has to stay in this process.
-            outcome = eng.executor.rollout(_spec_for(eng, mine, task))
+            rendered = mine.render()
+            outcome = eng.executor.rollout(_spec_for(eng, mine, task, rendered))
             if not outcome.ok:
                 raise _rollout_failure(outcome)
             output = outcome.output
             score = _checked_reward(outcome.reward, task)
+            # Record the rollout before anything else can decide it does not
+            # matter: the trajectory is the run's evidence, and a rollout that
+            # turns out to be solved, stale or rejected is exactly the one a
+            # learning consumer wants to re-read. Returns None when recording
+            # is off (or the write deduped/failed) -- that empty is what the
+            # card's trace_ids below will carry.
+            trace = eng._record_rollout(
+                artifact_id=aid, rendered=rendered, task=task,
+                base_version={aid: mine_v}, purpose="rollout",
+                output=output, reward=score, wallclock=outcome.seconds,
+                worker_id=f"w{unit.worker}", lease_id=outcome.lease_id)
             sampler.record(task.id, score)               # learn which tasks carry signal
             # Observed here, before the solved-task early return: a *group* is
             # every rollout against this base and cluster, and one that only saw
@@ -3146,7 +3573,7 @@ def evolve(
             # `None`, which is worse than not having it.
             adv = advantage.observe(
                 advantage.key(mine_v, str(task.meta.get("cluster", ""))), score)
-            if observe_plan is not None:
+            if aid == artifact_id and observe_plan is not None:
                 # ...and let the parallel strategy learn too, if it wants to.
                 # `plan` alone is a pure function of its arguments, which is
                 # enough to shard and not enough to schedule: UCB over task
@@ -3170,15 +3597,17 @@ def evolve(
                 propose(mine.render(), task, output, score), task)
             if not proposal:
                 return
-            diff = strategy.to_diff(mine.state, proposal, f"w{unit.worker}", mine_v, artifact_id)
+            strat = eng.artifact_strategies.get(aid, strategy)
+            diff = strat.to_diff(mine.state, proposal, f"w{unit.worker}", mine_v, aid)
             if diff is None:
                 return
             # Tensor parallelism means each worker owns a disjoint *section* of the
             # artifact, which is what makes the merge a conflict-free union. The
             # plan assigns the section; enforce it here, or the guarantee is only a
             # comment: without this every worker could edit the same hot key and TP
-            # degenerated into differently-sharded DP.
-            if unit.section is not None:
+            # degenerated into differently-sharded DP. Extras are whole-artifact
+            # proposals, so the check applies to the primary only.
+            if unit.section is not None and aid == artifact_id:
                 outside = [k for k in diff.ops
                            if section_map.get(k) != unit.section]
                 if outside:
@@ -3204,21 +3633,50 @@ def evolve(
             # :mod:`agentdescent.allocator`).
             if self_verify and governor.candidate_worth(_allocator_context(
                     diff, adv, score, getattr(mine, "blast_radius", 0.2))):
-                after = _checked_reward(
-                    reward(task, run(mine.apply(diff).render(), task)), task)
+                t_self = time.time()
+                # The candidate's render is computed once and used for both the
+                # rollout and the record, so the trajectory and the measurement
+                # agree by construction.
+                rendered_after = mine.apply(diff).render()
+                after_output = run(rendered_after, task)
+                after = _checked_reward(reward(task, after_output), task)
                 delta = after - score
+                # The self-verify re-run is itself evidence: it is the first
+                # measurement of the *candidate*, against the same task, and a
+                # learning consumer reads it exactly because it predates the
+                # gate's own (cheaper) view. The boundary record carries the
+                # provider's output, not just the score -- the same contract as
+                # the rollout path.
+                self_trace = eng._record_rollout(
+                    artifact_id=aid, rendered=rendered_after, task=task,
+                    base_version={aid: mine_v}, purpose="self_verify",
+                    output=after_output, reward=after, wallclock=time.time() - t_self,
+                    worker_id=f"w{unit.worker}")
             else:
                 delta = 0.0
+                self_trace = None
             aggregator.ingest(EvidenceCard(
-                diff=diff, base_version={artifact_id: mine_v}, touched=[artifact_id],
+                diff=diff, base_version={aid: mine_v}, touched=[aid],
                 before_after_delta=delta, trajectory_refs=[task],
                 branch=mine_branch,
+                # The records that justify this card, when recording is on: the
+                # rollout that produced the diff and the self-verify re-run.
+                # Each entry is None-safe -- None means "recording off / dedupe /
+                # write failed", and a consumer reads the empty tuple that way.
+                trace_ids=tuple(t for t in (trace, self_trace) if t is not None),
                 # Recorded always, acted on by nobody unless a policy from
                 # `agentdescent.advantage` is installed. It is arithmetic over
                 # two numbers the round already has, and a signal that is only
                 # computed when something consumes it can never be looked at to
                 # decide whether anything should.
                 advantage=adv))
+
+        def _run_unit_inner(unit) -> None:
+            if not unit.keys:
+                return
+            task = by_id[sampler.pick(unit.keys, r)]     # a task from this worker's shard
+            for aid in _artifact_targets(unit):
+                _propose_one(unit, task, aid)
 
         try:
             # the parallel strategy assigns this round's tasks to workers; they run
@@ -3390,8 +3848,8 @@ def evolve(
             f"one successfully read: {type(e).__name__}: {str(e)[:160]}")
     if final is None:                 # nothing was ever read: hand back the seed
         final = EvolvingArtifact(artifact_id, dict(initial_state or strategy.initial()),
-                                 blast_radius=blast_radius, runtime=eng.runtime,
-                                 strategy=strategy)
+                                     blast_radius=blast_radius, runtime=eng.runtime,
+                                     strategy=strategy)
     # Scoring runs the agent, so a dead backend must not raise out of the driver
     # and discard everything already committed.
     try:
@@ -3414,6 +3872,8 @@ def evolve(
                              stop_reason="error" if run_error else stop_reason,
                              fusion_trials=_fusion_trials(aggregator),
                              budget=governor.summary() if governor.active else None,
+                             trajectories_path=getattr(
+                                 eng.runtime.trajectory_store, "root", None),
                              **_cost_fields(eng.meter))
     eng.cleanup()
     result.replay = _replay_stats(sampler)

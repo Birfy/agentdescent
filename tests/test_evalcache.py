@@ -11,6 +11,8 @@ concurrency are worth pinning:
 """
 
 import json
+import os
+from pathlib import Path
 import threading
 import time
 
@@ -161,6 +163,36 @@ def test_a_file_cache_separates_environments_too(tmp_path):
     assert cache.get_or_eval(cache_key("r", "t", "image-b"), lambda: 0.0) == 0.0
 
 
+def test_file_cache_invalidate_deletes_the_targeted_entries(tmp_path):
+    """`FileCache.invalidate` must remove the on-disk entries it names, so a
+    fresh process re-evaluates rather than reading the stale score back. The
+    keys are (rendered, task_id, fingerprint); with a non-empty fingerprint the
+    old prefix comparison compared the *task id* to the fingerprint and deleted
+    nothing (review)."""
+    cache = FileCache(str(tmp_path))
+    cache.get_or_eval(cache_key("R", "t1", "fp"), lambda: 0.3)
+    cache.get_or_eval(cache_key("R", "t2", "fp"), lambda: 0.4)
+    cache.invalidate("R", "fp")
+    assert len(os.listdir(str(tmp_path))) == 0, (
+        "both fingerprint-matched files must be deleted")
+    # a fresh reader re-evaluates instead of reading the stale score back
+    fresh = FileCache(str(tmp_path))
+    assert fresh.get_or_eval(cache_key("R", "t1", "fp"), lambda: 0.9) == 0.9
+
+
+def test_file_cache_invalidate_without_fingerprint_drops_all_tasks_on_render(tmp_path):
+    """No fingerprint -> every task measured on this render is invalidated,
+    matching MemoryCache's coarse semantics."""
+    import os
+    cache = FileCache(str(tmp_path))
+    cache.get_or_eval(cache_key("R", "t1", "fp"), lambda: 0.3)
+    cache.get_or_eval(cache_key("R", "t2", "fp"), lambda: 0.4)
+    cache.get_or_eval(cache_key("other", "t1", "fp"), lambda: 0.5)
+    cache.invalidate("R")
+    assert len(os.listdir(str(tmp_path))) == 1, (
+        "only the other-render entry survives")
+
+
 def test_an_unwritable_cache_does_not_fail_the_run(tmp_path):
     """The answer has already been paid for. Losing the chance to reuse it is a
     smaller problem than losing the run."""
@@ -203,3 +235,83 @@ def test_a_run_can_be_given_a_shared_cache(tmp_path):
     assert first.final_reward == second.final_reward
     # the second run found the first one's evaluations already on disk
     assert second.cache_hits > 0
+
+
+def test_a_failed_replace_does_not_leave_an_orphan_tmp(tmp_path, monkeypatch):
+    """OSError on rename used to swallow the error but leave path.{pid}.tmp (#263)."""
+    import os
+    cache = FileCache(str(tmp_path))
+    key = cache_key("r", "t", "")
+    real_replace = os.replace
+
+    def boom(src, dst):
+        raise OSError("cross-device")
+
+    monkeypatch.setattr(os, "replace", boom)
+    assert cache.get_or_eval(key, lambda: 1.25) == 1.25
+    monkeypatch.setattr(os, "replace", real_replace)
+    leftovers = [p.name for p in tmp_path.iterdir() if ".tmp" in p.name]
+    assert leftovers == [], leftovers
+    # And the paid answer is still returned even though nothing landed on disk.
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_non_finite_score_is_returned_but_not_written(tmp_path):
+    """NaN/inf must not poison the on-disk cache as non-JSON tokens (#263)."""
+    cache = FileCache(str(tmp_path))
+    key = cache_key("r", "nan", "")
+    out = cache.get_or_eval(key, lambda: float("nan"))
+    assert out != out  # NaN
+    assert list(tmp_path.iterdir()) == []
+    # A later finite measurement for the same key still computes (no stale NaN hit).
+    calls = {"n": 0}
+
+    def finite():
+        calls["n"] += 1
+        return 0.5
+
+    # Same process MemoryCache already holds NaN for this key — use a fresh
+    # FileCache so we only exercise the disk path.
+    fresh = FileCache(str(tmp_path))
+    assert fresh.get_or_eval(key, finite) == 0.5
+    assert calls["n"] == 1
+    raw = (tmp_path / Path(fresh._path(key)).name).read_text(encoding="utf-8")
+    assert "NaN" not in raw and json.loads(raw)["value"] == 0.5
+
+
+def test_a_write_encode_failure_does_not_fail_the_run(tmp_path, monkeypatch):
+    """TypeError/ValueError from json.dump must be dropped like OSError (#263)."""
+    import agentdescent.evalcache as ec
+    cache = FileCache(str(tmp_path))
+    key = cache_key("r", "t", "")
+    real_dump = json.dump
+
+    def boom(*args, **kwargs):
+        raise TypeError("unencodable")
+
+    monkeypatch.setattr(ec.json, "dump", boom)
+    assert cache.get_or_eval(key, lambda: 0.875) == 0.875
+    monkeypatch.setattr(ec.json, "dump", real_dump)
+    assert [p.name for p in tmp_path.iterdir() if ".tmp" in p.name] == []
+
+
+@pytest.mark.parametrize("key", [
+    ("run", Path("task"), "env"),
+    __import__("uuid").UUID(int=123),
+])
+def test_a_non_json_native_key_still_persists_across_instances(tmp_path, key):
+    """``_path()`` hashes keys with ``default=str``; the write must too, or a
+    Path/UUID key is silently never cached and every fresh FileCache re-pays
+    the evaluation (review on #264)."""
+    calls = {"n": 0}
+
+    def fn():
+        calls["n"] += 1
+        return 0.25
+
+    assert FileCache(str(tmp_path)).get_or_eval(key, fn) == 0.25
+    assert FileCache(str(tmp_path)).get_or_eval(key, fn) == 0.25
+    assert calls["n"] == 1
+    files = [p for p in tmp_path.iterdir() if p.suffix == ".json"]
+    assert len(files) == 1
+    assert json.loads(files[0].read_text(encoding="utf-8"))["value"] == 0.25

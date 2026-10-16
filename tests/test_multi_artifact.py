@@ -1,0 +1,603 @@
+"""Multi-artifact evolution: ``extra_artifacts=``, PP stages, and atomic contracts.
+
+The library's single-artifact heritage is the constraint these tests pin down.
+Before this feature three things were impossible at once -- ``evolve()``
+registered exactly one artifact, ``PipelineParallel`` was refused (it needs one
+artifact per stage and a single-artifact run has nowhere for the stages to live),
+and a contract-breaking change could not land through the engine at all (the
+ledger's ``_assert_contract`` refuses it, and nothing routed through
+``commit_atomic``). The tests here assert all three seams are now real:
+registration, cross-artifact diff production by the worker loop, and the atomic
+adaptation transaction.
+"""
+
+import warnings
+
+import pytest
+
+from agentdescent.evolution import (
+    AppendRules,
+    EvolvingArtifact,
+    Task,
+    evolve,
+)
+from agentdescent.evolvable import Contract, Diff
+from agentdescent.ledger import Ledger
+from agentdescent.parallel import PipelineParallel
+
+
+def _reward(task, output):
+    return 1.0 if output == "correct" else 0.0
+
+
+def _ledger(tmp_path, extra_ids=()):
+    """A scratch ledger with an 'artifact' plus the given extra artifact ids."""
+    def serialize(a):
+        return {"state": a.state, "blast_radius": a.blast_radius}
+
+    def deserialize(aid, version, state):
+        return EvolvingArtifact(aid, state.get("state", {}), version,
+                                state.get("blast_radius", 0.2))
+
+    lg = Ledger(str(tmp_path / "repo"), serialize, deserialize)
+    lg.register(EvolvingArtifact("artifact", {"k": "v0"}, blast_radius=0.2))
+    for aid in extra_ids:
+        if aid != "artifact":
+            lg.register(EvolvingArtifact(aid, {}, blast_radius=0.2))
+    return lg
+
+
+def _tasks(n=12):
+    return [Task(id=f"t{i}", prompt=f"p{i}") for i in range(n)]
+
+
+class _Reflector:
+    """Fails t0 until a clue is in the artifact, then proposes that clue."""
+
+    def solve(self, rendered, task):
+        return "correct" if "clue" in rendered or task.id != "t0" else "wrong"
+
+    def propose(self, rendered, task, output, reward):
+        return "t0 clue" if task.id == "t0" else None
+
+
+def _run(*, extra_artifacts, parallel=None, rounds=4, n_workers=2,
+         agent=None, **kw):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return evolve(_tasks(), _reward, agent=agent or _Reflector(), rounds=rounds,
+                      n_workers=n_workers, max_concurrency=n_workers,
+                      strategy=AppendRules(), extra_artifacts=extra_artifacts,
+                      parallel=parallel, **kw)
+
+
+class _BreakingRules(AppendRules):
+    """AppendRules, but every proposal is a semver-major (contract-breaking) diff.
+
+    Shipped strategies never mark a diff ``contract_breaking`` -- the flag is
+    the caller's declaration that a change is a deliberate interface break, and
+    only a custom strategy knows when to make it. This is that declaration, so
+    the tests can reach the atomic adaptation transaction end to end."""
+
+    def to_diff(self, state, proposal, author, base_version, target):
+        d = super().to_diff(state, proposal, author, base_version, target)
+        if d is not None:
+            d = Diff(d.diff_id, d.target, dict(d.ops), contract_breaking=True,
+                     author=d.author)
+        return d
+
+
+# -- registration -------------------------------------------------------------
+
+
+def test_extra_artifacts_are_registered_in_the_ledger():
+    extra = {"skill-b": EvolvingArtifact("skill-b", {}, blast_radius=0.2)}
+    res = _run(extra_artifacts=extra)
+    commits = [line for line in res.ledger_log if "register skill-b" in line]
+    assert commits, "the extra artifact must be registered into the ledger"
+
+
+def test_single_artifact_default_behaviour_is_unchanged():
+    res = _run(extra_artifacts=None)
+    assert res.state, "the primary artifact should still evolve"
+    assert res.final_reward == 1.0
+
+
+# -- cross-artifact diffs -----------------------------------------------------
+
+
+def test_worker_loop_proposes_against_extra_artifacts():
+    extra = {"skill-b": EvolvingArtifact("skill-b", {}, blast_radius=0.2)}
+    res = _run(extra_artifacts=extra)
+    merged = [line for line in res.ledger_log if "-> skill-b" in line]
+    assert merged, "a proposal must target the extra artifact and be merged"
+    assert any("-> artifact" in line for line in res.ledger_log), (
+        "the primary must still receive proposals in a multi-artifact run")
+
+
+def test_extra_artifacts_carry_their_own_strategy():
+    from agentdescent.strategies import SingleSlot
+
+    class _SlotReflector(_Reflector):
+        def propose(self, rendered, task, output, reward):
+            return "the one true clue" if task.id == "t0" else None
+
+    extra = {"slot-b": EvolvingArtifact(
+        "slot-b", {}, blast_radius=0.2, strategy=SingleSlot())}
+    res = _run(extra_artifacts=extra, agent=_SlotReflector())
+    merged = [line for line in res.ledger_log if "-> slot-b" in line]
+    assert merged
+
+
+# -- PipelineParallel with extra_artifacts ------------------------------------
+
+
+def test_pipeline_parallel_is_allowed_with_extra_artifacts():
+    extra = {"stage-b": EvolvingArtifact("stage-b", {}, blast_radius=0.2)}
+    res = _run(extra_artifacts=extra,
+               parallel=PipelineParallel(stages=["artifact", "stage-b"]))
+    assert any("-> stage-b" in line for line in res.ledger_log), (
+        "PP's second stage must have an artifact to propose against")
+
+
+def test_pipeline_parallel_without_extra_artifacts_is_still_refused():
+    with pytest.raises(ValueError) as excinfo:
+        _run(extra_artifacts=None,
+             parallel=PipelineParallel(stages=["artifact"]))
+    assert "PipelineParallel" in str(excinfo.value)
+
+
+def test_pipeline_parallel_stages_must_name_registered_artifacts():
+    extra = {"stage-b": EvolvingArtifact("stage-b", {}, blast_radius=0.2)}
+    with pytest.raises(ValueError) as excinfo:
+        _run(extra_artifacts=extra,
+             parallel=PipelineParallel(stages=["artifact", "ghost-stage"]))
+    assert "ghost-stage" in str(excinfo.value)
+
+
+# -- the atomic adaptation transaction ----------------------------------------
+
+
+def test_contract_breaking_diff_lands_atomically():
+    """A contract-breaking diff with no declared dependents lands atomically
+    through `commit_atomic` -- the sanctioned route for a deliberate contract
+    change, bypassing `_assert_contract`'s refusal."""
+    # No `depends_on`: this breaking change has nothing it must land with.
+    extra = {"b": EvolvingArtifact("b", {}, blast_radius=0.2,
+                                   contract=Contract(
+                                       input_schema="text", output_schema="text",
+                                       major=1))}
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res = evolve(_tasks(), _reward, agent=_Reflector(), rounds=3,
+                     n_workers=2, max_concurrency=2, strategy=_BreakingRules(),
+                     extra_artifacts=extra)
+    log = res.ledger_log
+    assert any("-> artifact" in line and "contract" in line for line in log), (
+        "a contract-breaking diff must be committed atomically, with a message "
+        "that says so")
+
+
+def test_contract_breaking_with_dependents_but_no_adapters_is_refused(tmp_path):
+    """A contract-breaking change to an artifact with declared dependents must
+    land *with* its adapted dependents in the same atomic commit. If none are
+    supplied, the merge is refused (`missing-adapters`) rather than half-applied
+    -- committing just the breaking artifact would leave the dependents
+    registered against a superseded contract."""
+    from agentdescent.aggregator import Aggregator, AggregatorConfig, _Candidate
+    from agentdescent.scheduler import AuditScheduler
+    from agentdescent.verifier import ThreeLayerVerifier, VerifierBudget
+
+    lg = _ledger(tmp_path, extra_ids=("artifact", "b"))
+    agg = Aggregator(lg, ThreeLayerVerifier(
+        eval_fn=lambda a, t: 0.5, held_out=[1, 2, 3],
+        budget=VerifierBudget()), AuditScheduler(),
+        AggregatorConfig(batch_trigger=1))
+    # The engine wires the reverse dependency graph: "artifact" depends on "b".
+    agg.contract_dependents = {"artifact": ["b"]}
+    snap = lg.snapshot(Ledger.DEV)
+    base = snap.get("artifact")
+    cand = base.apply(Diff(
+        diff_id="d", target="artifact", ops={"k": "v"},
+        author="w", contract_breaking=True))
+    c = _Candidate(
+        artifact_id="artifact", artifact=base, candidate=cand,
+        diff=Diff(diff_id="d", target="artifact", ops={"k": "v"},
+                  author="w", contract_breaking=True),
+        cards=[], survivor_cards=[], head=snap.version,
+        fused=False, considered=1, survived=1, discarded=0, conflicts=0,
+        base_counts=(2.0, 0.0), cand_counts=(3.0, 0.0),
+        base_cheap=1.0, cand_cheap=1.0)
+    report = agg._decide(c)
+    assert report.category == "missing-adapters", (
+        f"breaking change with dependents but no adapters must be refused, "
+        f"got {report.category}")
+    assert report.committed_version is None, "nothing may commit"
+    assert lg.head_version(Ledger.DEV).get("artifact") == 1, (
+        "the breaking change must not land without its adapters")
+
+
+def test_contract_breaking_with_adapters_commits_both_atomically(tmp_path):
+    """Supplying the adapted dependents makes the atomic adaptation transaction
+    go through: candidate + adapters land in one `commit_atomic`, dependents
+    are re-registered against the new contract."""
+    from agentdescent.aggregator import Aggregator, AggregatorConfig, _Candidate
+    from agentdescent.scheduler import AuditScheduler
+    from agentdescent.verifier import ThreeLayerVerifier, VerifierBudget
+    lg = _ledger(tmp_path, extra_ids=("artifact", "b"))
+    agg = Aggregator(lg, ThreeLayerVerifier(
+        eval_fn=lambda a, t: 0.5, held_out=[1, 2, 3],
+        budget=VerifierBudget()), AuditScheduler(),
+        AggregatorConfig(batch_trigger=1))
+    agg.contract_dependents = {"artifact": ["b"]}
+    invalidated = []
+    agg.on_contract_change = lambda aid, branch: invalidated.append(
+        (aid, branch))
+    snap = lg.snapshot(Ledger.DEV)
+    base = snap.get("artifact")
+    b_old = snap.get("b")
+    cand = base.apply(Diff(
+        diff_id="d", target="artifact", ops={"k": "v"},
+        author="w", contract_breaking=True))
+    b_adapted = b_old.apply(Diff(
+        diff_id="adapter", target="b", ops={"k2": "v2"}, author="w"))
+    c = _Candidate(
+        artifact_id="artifact", artifact=base, candidate=cand,
+        diff=Diff(diff_id="d", target="artifact", ops={"k": "v"},
+                  author="w", contract_breaking=True),
+        cards=[], survivor_cards=[], head=snap.version,
+        fused=False, considered=1, survived=1, discarded=0, conflicts=0,
+        adapters=[b_adapted],
+        base_counts=(2.0, 0.0), cand_counts=(3.0, 0.0),
+        base_cheap=1.0, cand_cheap=1.0)
+    report = agg._decide(c)
+    assert report.committed_version is not None, "with adapters, it commits"
+    after = lg.snapshot(Ledger.DEV)
+    assert after.version["artifact"] == 2 and after.version["b"] == 2, (
+        "candidate and adapter must land in the same atomic commit")
+    assert invalidated == [("artifact", "dev")], (
+        "dependents must be re-measured after the breaking change, on the "
+        f"branch that changed (got {invalidated})")
+
+
+def _agg_with_dependents(tmp_path, extra_ids=("artifact", "b"), dependents=None):
+    from agentdescent.aggregator import Aggregator, AggregatorConfig, _Candidate
+    from agentdescent.scheduler import AuditScheduler
+    from agentdescent.verifier import ThreeLayerVerifier, VerifierBudget
+    lg = _ledger(tmp_path, extra_ids=extra_ids)
+    agg = Aggregator(lg, ThreeLayerVerifier(
+        eval_fn=lambda a, t: 0.5, held_out=[1, 2, 3],
+        budget=VerifierBudget()), AuditScheduler(),
+        AggregatorConfig(batch_trigger=1))
+    agg.contract_dependents = dependents or {}
+    return lg, agg
+
+
+def test_contract_breaking_with_partial_adapters_is_refused(tmp_path):
+    """The adapters must cover *every* declared dependent: with dependents
+    ['b', 'c'], an adapter for only 'b' is still `missing-adapters` -- 'c'
+    would stay registered against the superseded contract."""
+    from agentdescent.aggregator import _Candidate
+    lg, agg = _agg_with_dependents(tmp_path, extra_ids=("artifact", "b", "c"),
+                                   dependents={"artifact": ["b", "c"]})
+    snap = lg.snapshot(Ledger.DEV)
+    base = snap.get("artifact")
+    cand = base.apply(Diff(diff_id="d", target="artifact", ops={"k": "v"},
+                           author="w", contract_breaking=True))
+    b_adapted = snap.get("b").apply(Diff(diff_id="adapter", target="b",
+                                         ops={"k2": "v2"}, author="w"))
+    c = _Candidate(
+        artifact_id="artifact", artifact=base, candidate=cand,
+        diff=Diff(diff_id="d", target="artifact", ops={"k": "v"},
+                  author="w", contract_breaking=True),
+        cards=[], survivor_cards=[], head=snap.version,
+        fused=False, considered=1, survived=1, discarded=0, conflicts=0,
+        adapters=[b_adapted],
+        base_counts=(2.0, 0.0), cand_counts=(3.0, 0.0),
+        base_cheap=1.0, cand_cheap=1.0)
+    report = agg._decide(c)
+    assert report.category == "missing-adapters", (
+        f"a partial adapter set must be refused, got {report.category}")
+    assert report.committed_version is None
+    assert "missing ['c']" in report.reason, report.reason
+
+
+def test_contract_breaking_with_unrelated_adapter_is_refused(tmp_path):
+    """An adapter for an artifact that is not a declared dependent must be
+    refused too: the real dependent would stay against the superseded contract
+    while the transaction pretends to be complete."""
+    from agentdescent.aggregator import _Candidate
+    lg, agg = _agg_with_dependents(tmp_path, extra_ids=("artifact", "b", "x"),
+                                   dependents={"artifact": ["b"]})
+    snap = lg.snapshot(Ledger.DEV)
+    base = snap.get("artifact")
+    cand = base.apply(Diff(diff_id="d", target="artifact", ops={"k": "v"},
+                           author="w", contract_breaking=True))
+    x_adapted = snap.get("x").apply(Diff(diff_id="adapter", target="x",
+                                         ops={"k3": "v3"}, author="w"))
+    c = _Candidate(
+        artifact_id="artifact", artifact=base, candidate=cand,
+        diff=Diff(diff_id="d", target="artifact", ops={"k": "v"},
+                  author="w", contract_breaking=True),
+        cards=[], survivor_cards=[], head=snap.version,
+        fused=False, considered=1, survived=1, discarded=0, conflicts=0,
+        adapters=[x_adapted],
+        base_counts=(2.0, 0.0), cand_counts=(3.0, 0.0),
+        base_cheap=1.0, cand_cheap=1.0)
+    report = agg._decide(c)
+    assert report.category == "missing-adapters", (
+        f"an adapter for an unrelated artifact must be refused, "
+        f"got {report.category}")
+    assert report.committed_version is None
+    assert "extra ['x']" in report.reason, report.reason
+
+
+def test_contract_breaking_with_adapters_but_no_dependents_is_refused(tmp_path):
+    """An artifact with *no* declared dependents must not carry adapters in a
+    breaking commit either: the exact-set guard is the invariant, and an empty
+    required set with a nonempty adapter set is as exact a violation as a
+    partial one. Committing the stray adapter would change an artifact no gate
+    asked this diff to touch (PR #197 review: the guard only ran when the
+    required set was nonempty)."""
+    from agentdescent.aggregator import _Candidate
+    lg, agg = _agg_with_dependents(tmp_path, extra_ids=("artifact", "x"),
+                                   dependents={})
+    snap = lg.snapshot(Ledger.DEV)
+    base = snap.get("artifact")
+    cand = base.apply(Diff(diff_id="d", target="artifact", ops={"k": "v"},
+                           author="w", contract_breaking=True))
+    x_adapted = snap.get("x").apply(Diff(diff_id="adapter", target="x",
+                                         ops={"unexpected": "committed"},
+                                         author="w"))
+    c = _Candidate(
+        artifact_id="artifact", artifact=base, candidate=cand,
+        diff=Diff(diff_id="d", target="artifact", ops={"k": "v"},
+                  author="w", contract_breaking=True),
+        cards=[], survivor_cards=[], head=snap.version,
+        fused=False, considered=1, survived=1, discarded=0, conflicts=0,
+        adapters=[x_adapted],
+        base_counts=(2.0, 0.0), cand_counts=(3.0, 0.0),
+        base_cheap=1.0, cand_cheap=1.0)
+    report = agg._decide(c)
+    assert report.category == "missing-adapters", (
+        f"adapters with no declared dependents must be refused, "
+        f"got {report.category}")
+    assert report.committed_version is None
+    assert "extra ['x']" in report.reason, report.reason
+    assert lg.head_version(Ledger.DEV).get("x") == 1, (
+        "the unrelated adapter must not land")
+
+
+def test_contract_breaking_with_duplicate_adapters_is_refused(tmp_path):
+    """Duplicating one dependent's adapter while another stays missing must be
+    refused, not treated as coverage."""
+    from agentdescent.aggregator import _Candidate
+    lg, agg = _agg_with_dependents(tmp_path, extra_ids=("artifact", "b", "c"),
+                                   dependents={"artifact": ["b", "c"]})
+    snap = lg.snapshot(Ledger.DEV)
+    base = snap.get("artifact")
+    cand = base.apply(Diff(diff_id="d", target="artifact", ops={"k": "v"},
+                           author="w", contract_breaking=True))
+    b_adapted = snap.get("b").apply(Diff(diff_id="adapter", target="b",
+                                         ops={"k2": "v2"}, author="w"))
+    c = _Candidate(
+        artifact_id="artifact", artifact=base, candidate=cand,
+        diff=Diff(diff_id="d", target="artifact", ops={"k": "v"},
+                  author="w", contract_breaking=True),
+        cards=[], survivor_cards=[], head=snap.version,
+        fused=False, considered=1, survived=1, discarded=0, conflicts=0,
+        adapters=[b_adapted, b_adapted],
+        base_counts=(2.0, 0.0), cand_counts=(3.0, 0.0),
+        base_cheap=1.0, cand_cheap=1.0)
+    report = agg._decide(c)
+    assert report.category == "missing-adapters", (
+        f"duplicated adapters must be refused, got {report.category}")
+    assert report.committed_version is None
+    assert "duplicated=True" in report.reason, report.reason
+
+
+def test_commit_atomic_retry_rejects_a_stale_adapter(tmp_path):
+    """A CAS conflict that advanced one of the adapter artifacts must not retry
+    the *old* adapter state over it: the adapter is a final state, not a diff,
+    so it cannot be rebased, and the retry rejects the stale transaction."""
+    from agentdescent.aggregator import _Candidate
+    lg, agg = _agg_with_dependents(tmp_path, extra_ids=("artifact", "b"),
+                                   dependents={"artifact": ["b"]})
+    snap = lg.snapshot(Ledger.DEV)
+    base = snap.get("artifact")
+    cand = base.apply(Diff(diff_id="d", target="artifact", ops={"k": "v"},
+                           author="w", contract_breaking=True))
+    b_old = snap.get("b")
+    b_adapted = b_old.apply(Diff(diff_id="adapter", target="b",
+                                 ops={"k2": "v2"}, author="w"))
+
+    # A concurrent writer commits to 'b' after the candidate was prepared but
+    # before our atomic commit lands -- the CAS on 'b' then fails, and the
+    # retry must refuse to commit the adapter written against the old head.
+    lg.commit(b_old.apply(Diff(diff_id="concurrent", target="b",
+                               ops={"concurrent": "field"})),
+              {"b": b_old.version}, branch=Ledger.DEV)
+
+    new_version = agg._commit_with_retry(
+        "artifact", cand,
+        Diff(diff_id="d", target="artifact", ops={"k": "v"},
+             author="w", contract_breaking=True),
+        snap.version, adapters=[b_adapted])
+    assert new_version is None, (
+        "a stale adapter must be rejected, not committed over the fresh head")
+    after = lg.snapshot(Ledger.DEV)
+    assert after.version.get("b") == 2, (
+        "the concurrent b commit must survive (no lost update)")
+    assert after.get("b").state.get("concurrent") == "field", (
+        "the concurrent adapter field must not be deleted by the retry")
+
+
+def test_contract_breaking_fork_candidate_commits_to_its_own_fork(tmp_path):
+    """A contract-breaking candidate prepared against a fork must land on that
+    fork, not on `dev` -- the same branch routing the non-breaking path got in
+    the multi-head fix. `_commit_with_retry` hard-coded `branch=Ledger.DEV` on
+    the `commit_atomic` call, so a breaking fork candidate overwrote `dev`
+    (deleting its independent state) while the fork stayed behind (review)."""
+    from agentdescent.aggregator import _Candidate
+    lg, agg = _agg_with_dependents(tmp_path, extra_ids=("artifact", "b"),
+                                   dependents={"artifact": ["b"]})
+    # Give dev and the fork divergent states at the same artifact version: the
+    # wrong-branch CAS would otherwise be the one that *succeeds*.
+    lg.fork("head/0")
+    dev_art = lg.snapshot(Ledger.DEV).get("artifact")
+    lg.commit(dev_art.apply(Diff(diff_id="dev_only", target="artifact",
+                                 ops={"dev_only": "preserve"}, author="w")),
+              {"artifact": dev_art.version}, branch=Ledger.DEV)
+    fork_art = lg.snapshot("head/0").get("artifact")
+    lg.commit(fork_art.apply(Diff(diff_id="fork_only", target="artifact",
+                                  ops={"fork_only": "preserve"}, author="w")),
+              {"artifact": fork_art.version}, branch="head/0")
+
+    snap = lg.snapshot("head/0")
+    base = snap.get("artifact")
+    cand = base.apply(Diff(diff_id="break", target="artifact", ops={"k": "v"},
+                           author="w", contract_breaking=True))
+    b_old = snap.get("b")
+    b_adapted = b_old.apply(Diff(diff_id="adapter", target="b",
+                                 ops={"k2": "v2"}, author="w"))
+    c = _Candidate(
+        artifact_id="artifact", artifact=base, candidate=cand,
+        diff=Diff(diff_id="break", target="artifact", ops={"k": "v"},
+                  author="w", contract_breaking=True),
+        cards=[], survivor_cards=[], head=snap.version,
+        fused=False, considered=1, survived=1, discarded=0, conflicts=0,
+        branch="head/0", adapters=[b_adapted],
+        base_counts=(2.0, 0.0), cand_counts=(3.0, 0.0),
+        base_cheap=1.0, cand_cheap=1.0)
+    report = agg._decide(c)
+    assert report.committed_version is not None, "with adapters, it commits"
+
+    after_fork = lg.snapshot("head/0")
+    assert after_fork.get("artifact").state.get("fork_only") == "preserve", (
+        "the fork's own independent state must survive")
+    assert after_fork.get("artifact").state.get("k") == "v", (
+        "the breaking diff must land on the fork")
+    after_dev = lg.snapshot(Ledger.DEV)
+    assert after_dev.get("artifact").state.get("dev_only") == "preserve", (
+        "dev must be untouched by a fork candidate")
+    assert after_dev.version.get("artifact") == 2, (
+        "dev's version must not advance from a fork candidate "
+        f"(got {after_dev.version.get('artifact')})")
+
+
+def test_contract_dependents_are_re_measured_after_a_breaking_change(tmp_path):
+    """After a breaking commit on the primary, dependent 'b' loses its cached
+    scores (they were measured under the superseded contract). The engine's
+    `invalidate_dependents` (wired as `aggregator.on_contract_change`) evicts
+    them by the dependent's render."""
+    from agentdescent.evalcache import MemoryCache
+    from agentdescent.evolution import _Engine
+
+    cache = MemoryCache()
+    lg = _ledger(tmp_path, extra_ids=("artifact", "b"))
+    b_art = lg.snapshot(Ledger.DEV).get("b")
+    key = (b_art.render(), "t0", "")
+    cache.get_or_eval(key, lambda: 0.7)
+
+    runtime = type("Runtime", (), {})()   # a stand-in _Runtime with a cache
+    runtime.cache = cache
+    eng = _Engine.__new__(_Engine)
+    eng.ledger = lg
+    eng.runtime = runtime
+    eng.contract_dependents = {"artifact": ["b"]}
+    eng.invalidate_dependents("artifact")
+
+    assert key not in cache._values, (
+        "the dependent artifact's cached evaluation must be evicted after a "
+        "contract-breaking commit on what it depends on")
+
+
+def test_commit_atomic_is_all_or_nothing(tmp_path):
+    def serialize(a): return {"state": a.state, "blast_radius": a.blast_radius}
+
+    def deserialize(aid, version, state):
+        return EvolvingArtifact(aid, state.get("state", {}), version,
+                                state.get("blast_radius", 0.2))
+
+    led = Ledger(str(tmp_path / "repo"), serialize, deserialize)
+    a = EvolvingArtifact("a", {"v": "1"}, blast_radius=0.2)
+    b = EvolvingArtifact("b", {"v": "2"}, blast_radius=0.2,
+                         contract=Contract(depends_on=("a",)))
+    led.register(a)
+    led.register(b)
+    base = led.head_version(Ledger.DEV)
+    a_new = EvolvingArtifact("a", {"v": "1", "extra": "x"}, blast_radius=0.2,
+                             contract=Contract(major=2))
+    b_new = EvolvingArtifact("b", {"v": "2"}, blast_radius=0.2,
+                             contract=Contract(depends_on=("a",)))
+    _, vv = led.commit_atomic([a_new, b_new], base)
+    assert vv["a"] == 2 and vv["b"] == 2
+
+
+def _run_trajectory_probe(tmp_path, *, asynchronous=False):
+    """Run evolve/async_evolve with an extra artifact and a trajectory store,
+    returning the store. skill-b carries a distinctive state marker so its
+    records can be told apart from the primary's by render."""
+    from agentdescent.trajectory import TrajectoryStore
+
+    extra = {"skill-b": EvolvingArtifact(
+        "skill-b", {"seed": "SKILLB-MARKER"}, blast_radius=0.2)}
+    store = TrajectoryStore(str(tmp_path / "traj"))
+    kw = dict(extra_artifacts=extra, trajectory_store=store,
+              repo_path=str(tmp_path / "repo"))
+    if asynchronous:
+        from agentdescent.async_evolve import async_evolve
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            async_evolve(_tasks(), _reward, agent=_Reflector(),
+                         n_workers=2, max_iters=8, max_seconds=2.0,
+                         held_out_frac=0.5, **kw)
+    else:
+        _run(extra_artifacts=extra, trajectory_store=store,
+             repo_path=str(tmp_path / "repo"))
+    return store
+
+
+def _extra_records(store):
+    """Rollout/self-verify records whose rendered text is the extra's."""
+    from agentdescent.trajectory import (PURPOSE_ROLLOUT,
+                                         PURPOSE_SELF_VERIFY)
+    out = []
+    for r in store.iter_records():
+        if r.purpose in (PURPOSE_ROLLOUT, PURPOSE_SELF_VERIFY) \
+                and "SKILLB-MARKER" in r.rendered:
+            out.append(r)
+    return out
+
+
+def test_sync_rollout_records_attribute_extras_to_the_extra(tmp_path):
+    """The sync worker loop records an extra's rollout under the *extra's* id,
+    not the primary's: `_record_rollout` is called once per target `aid`, so
+    an extra's records must carry `artifact_id=aid` and a version vector keyed
+    by it, matching the async path (review: both calls hard-coded the primary
+    id, so skill-b's evidence was attributed to 'artifact')."""
+    store = _run_trajectory_probe(tmp_path)
+    extra_recs = _extra_records(store)
+    assert extra_recs, "premise: skill-b must be rolled out and recorded"
+    assert all(r.artifact_id == "skill-b" for r in extra_recs), (
+        "every record whose render is the extra's must carry the extra's id, "
+        f"got {sorted({r.artifact_id for r in extra_recs})}")
+    # the primary's records stay on the primary
+    from agentdescent.trajectory import PURPOSE_ROLLOUT
+    primary_recs = [r for r in store.iter_records(purpose=PURPOSE_ROLLOUT)
+                    if "SKILLB-MARKER" not in r.rendered]
+    assert primary_recs and all(r.artifact_id == "artifact"
+                                for r in primary_recs), (
+        "the primary's rollout records must stay attributed to the primary")
+
+
+def test_async_rollout_records_attribute_extras_to_the_extra(tmp_path):
+    """Async twin: the barrier-free worker already attributes extras correctly;
+    pin it so the two engines cannot drift again (review)."""
+    store = _run_trajectory_probe(tmp_path, asynchronous=True)
+    extra_recs = _extra_records(store)
+    assert extra_recs, "premise: skill-b must be rolled out and recorded"
+    assert all(r.artifact_id == "skill-b" for r in extra_recs), (
+        "every record whose render is the extra's must carry the extra's id, "
+        f"got {sorted({r.artifact_id for r in extra_recs})}")

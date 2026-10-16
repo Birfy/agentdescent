@@ -22,8 +22,9 @@ template, a harness module, or a learned verifier.  What evolves is decided by
 from __future__ import annotations
 
 import hashlib
+import unicodedata
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Tuple, runtime_checkable
+from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Sequence, Tuple, runtime_checkable
 
 
 class ContractError(Exception):
@@ -79,12 +80,30 @@ class Contract:
     ``breaking`` marks a semver-major style change; the Ledger refuses diffs
     that declare a dependency on a superseded major (design doc, section 6,
     "contract mechanism").
+
+    ``invariants`` are declarative governance rules every diff to this
+    artifact must satisfy (see :mod:`agentdescent.invariants`). They are
+    enforced by the aggregator **before** a candidate is measured, so a
+    policy-violating diff is rejected without buying a held-out sweep. Empty
+    (the default) is the untouched path exactly -- no rule, no check, no
+    overhead. Because the check is part of the merge pipeline, a contract that
+    declares a rule can never silently stop enforcing it.
+
+    ``depends_on`` names the artifact ids whose **contracts** this artifact
+    relies on. It is what turns a single-artifact commit into an atomic
+    adaptation transaction: when one of those artifacts commits a contract-
+    breaking change, this artifact must land (re-registered) in the *same* git
+    commit, via :meth:`~agentdescent.ledger.Ledger.commit_atomic`. Empty means
+    the artifact depends on nothing and a breaking change elsewhere never
+    touches it.
     """
 
     input_schema: str = "any"
     output_schema: str = "any"
     side_effects: Tuple[str, ...] = ()
     major: int = 1
+    invariants: Tuple[Any, ...] = ()
+    depends_on: Tuple[str, ...] = ()
 
     def is_compatible_with(self, other: "Contract") -> bool:
         return self.major == other.major
@@ -98,6 +117,12 @@ class Diff:
     domain (:mod:`agentdescent.domains.router`) it is a mapping of key -> value
     edits, but the aggregator never inspects it directly -- it always goes
     through the owning :class:`Evolvable`.
+
+    ``rationale`` is a short human-readable reason for the change (from a
+    FileTree reflector, or concatenated when diffs are fused). It is
+    metadata only: it must **not** enter ``diff_id`` / content fingerprints,
+    so dedup and the eval cache stay unchanged. Empty for strategies that
+    never produce one.
     """
 
     diff_id: str
@@ -105,11 +130,48 @@ class Diff:
     ops: Dict[str, Any] = field(default_factory=dict)
     contract_breaking: bool = False
     author: str = "unknown"  # which worker produced it
+    rationale: str = ""
 
     def size(self) -> int:
         """A crude "number of edited lines" proxy used by the trust-region
         cap (design doc, section 4.4)."""
         return len(self.ops)
+
+
+_RATIONALE_CAP = 500
+
+
+def rationale_paragraph(text: Any, *, cap: int = _RATIONALE_CAP) -> str:
+    """Collapse a rationale to a single paragraph, capped for commit messages.
+
+    Non-strings and blanks become ``""``. Whitespace (including newlines) is
+    folded so a ledger commit subject/body stays one paragraph. Control
+    characters (NUL included) become spaces and lone surrogates are dropped:
+    a reflector can legally emit ``"\\u0000"`` or ``"\\ud800"`` in JSON, and
+    either would crash ``git commit -m`` (``embedded null byte`` /
+    ``UnicodeEncodeError``) for an otherwise valid merge.
+    """
+    if not isinstance(text, str):
+        return ""
+    text = "".join(
+        " " if unicodedata.category(ch) == "Cc"
+        else "" if unicodedata.category(ch) == "Cs"
+        else ch
+        for ch in text)
+    one = " ".join(text.split())
+    if len(one) > cap:
+        one = one[:cap].rstrip()
+    return one
+
+
+def combined_rationale(diffs: Sequence["Diff"], *, cap: int = _RATIONALE_CAP) -> str:
+    """Deduped concatenation of parent rationales for a fused / synth Diff."""
+    parts: List[str] = []
+    for d in diffs:
+        r = rationale_paragraph(getattr(d, "rationale", "") or "", cap=cap)
+        if r and r not in parts:
+            parts.append(r)
+    return rationale_paragraph("; ".join(parts), cap=cap)
 
 
 @dataclass
@@ -138,6 +200,17 @@ class EvidenceCard:
     #: the cheap re-verification silently becomes a no-op, and a diff that makes
     #: the artifact worse survives it.
     trajectory_refs: List[Any] = field(default_factory=list)
+    #: The ``trace_id``s of the rollout trajectories that justify this diff,
+    #: when a :class:`~agentdescent.trajectory.TrajectoryStore` was attached to
+    #: the run. Each is ``"<artifact_id>:<sha256(identity)>"``, stable across
+    #: processes, and resolvable through the store. Unlike ``trajectory_refs``,
+    #: which carries the *Task objects* the artifact's ``evidence_eval`` can
+    #: score, these point at the persisted *records* of those rollouts -- the
+    #: inputs, outputs and rewards, durable after the run. The producers
+    #: (``evolve``'s and ``async_evolve``'s worker loops) populate this only
+    #: when recording is on; a run without a store carries an empty tuple, so a
+    #: consumer can tell "recording was off" from "no rollouts were kept".
+    trace_ids: Tuple[str, ...] = field(default_factory=tuple)
     # `version_annotations: List[VersionVector]` used to sit here, described as
     # "per-turn version annotations, used when the ledger hot-updates
     # mid-rollout". Nothing ever wrote one and nothing ever read one -- not a

@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-340 public names across 56 modules.
+343 public names across 56 modules.
 
 ---
 
@@ -57,8 +57,17 @@ EvolutionResult(
     redispatched: int = 0,
     duplicates_dropped: int = 0,
     cas_conflicts: int = 0,
+    critic_checked: int = 0,
+    critic_rejected: int = 0,
     cache_hits: int = 0,
     cache_misses: int = 0,
+    trajectories_recorded: int = 0,
+    trajectories_dedup: int = 0,
+    trajectory_write_seconds: float = 0.0,
+    trajectory_write_failures: int = 0,
+    trajectories_path: Optional[str] = None,
+    invariant_checked: int = 0,
+    invariant_rejections: int = 0,
     sandbox_wait_s: float = 0.0,
     sandbox_setup_s: float = 0.0,
     sandboxes_created: int = 0,
@@ -95,7 +104,8 @@ EvolvingArtifact(
     version: int = 1,
     blast_radius: float = 0.2,
     runtime: Optional['_Runtime'] = None,
-    strategy: Optional[Strategy] = None
+    strategy: Optional[Strategy] = None,
+    contract: Optional[Contract] = None
 ) -> None
 ```
 
@@ -247,7 +257,11 @@ evolve(
     verbose: bool = False,
     usage: Optional[Usage] = None,
     policies: Optional['Policies'] = None,
-    allocator: Optional[Any] = None
+    allocator: Optional[Any] = None,
+    record_trajectories: bool = False,
+    trajectory_store: Optional['TrajectoryStore'] = None,
+    contract: Optional[Contract] = None,
+    extra_artifacts: Optional[Dict[str, 'EvolvingArtifact']] = None
 ) -> EvolutionResult
 ```
 
@@ -304,6 +318,10 @@ evolve(
 | `usage` | `Optional[Usage]` | `None` | Share one `Usage` with your model adapters (`claude(usage=u)`, `openai_compatible(usage=u)`) and the result's token counts become real. Without it the run still reports calls, seconds and failures -- `run` is `(rendered, task) -> str`, so an opaque actor has no way to surface tokens, and inventing a number would be worse than reporting zero. |
 | `policies` | `Optional['Policies']` | `None` | Bundle of replaceable pieces (`Policies`). Every field defaults to `None` meaning "current behaviour", so `Policies()` and passing nothing are the same run. The individual keyword arguments -- `task_sampler`, `staleness_policy`, `aggregator_factory` -- are shortcuts onto its fields and keep working; an explicit argument wins over a bundle default rather than being silently ignored. Fields whose implementations have not landed yet raise rather than being accepted and ignored: a caller who passes a custom acceptance rule and sees a finished run would reasonably conclude it ran. New capabilities go here rather than adding another parameter to a function that already has thirty-five. |
 | `allocator` | `Optional[Any]` | `None` | Value-directed budget allocation (see `allocator`). `None` (the default) is the old behaviour exactly: optional spend (fusion tournaments, the self-verify rollout) degrades against the global `soft_floor` / `hard_floor` thresholds as the token budget runs out, every candidate treated alike. Pass a `ValueBudgetAllocator` (or any object with `decide(ctx) -> AllocateDecision` and `observe(ctx, committed)`) and, once the budget is tight, the self-verify rollout is spent only on candidates the allocator's value model expects to commit; the merge path reports every outcome back so the model learns. Requires `max_tokens` to be set (the allocator decides how the budget is spent; `max_tokens` is what exists to spend). Counterfactual exploration re-measures candidates the model judged unworthy, so a biased value model is corrected rather than reinforced. |
+| `record_trajectories` | `bool` | `False` | Persist every rollout and gate evaluation as a `Trajectory` under `<repo_path>/trajectories/` -- what the run provider saw, what it returned, what that earned, against which artifact version and environment. Off by default: a throwaway repo's records die with it, so the write cost is pure overhead there, and recording is a deliberate choice about keeping a run's evidence. The store is the durable base every learning-type increment reads -- process-supervised reflection, offline re-weighting, audit replay -- and it is what an `EvidenceCard.trace_ids` entry points at. Pass `trajectory_store=` with a store you built to control where records land instead. |
+| `trajectory_store` | `Optional['TrajectoryStore']` | `None` | An explicit `TrajectoryStore` to record into. Pass one to control where records land (a shared store, a custom root, a custom privacy configuration) without going through the `<repo_path>/trajectories/` default. The explicit store wins over `record_trajectories`; `None` + `record_trajectories` builds the default store. |
+| `contract` | `Optional[Contract]` | `None` | The artifact's contract -- the externally-visible interface, and where governance invariants are declared. Pass `Contract(invariants=(Invariant("mutable_keys", ("a", "b")),))` and the aggregator enforces each rule **before** a candidate is measured (see `invariants`); a diff that breaks one reports a `violates-invariant` outcome and never buys a held-out sweep. `None` (the default) is the reference skill contract, which declares nothing and enforces nothing -- the untouched path exactly. |
+| `extra_artifacts` | `Optional[Dict[str, 'EvolvingArtifact']]` | `None` | Additional artifacts to register alongside the primary (`artifact_id`), as `{aid: EvolvingArtifact}`. The primary is the one the worker loop rolls out and proposes on; each extra is registered in the ledger and the worker proposes against it too, so a proposal can name one of them as a diff target and the aggregator merges it there (the evidence buffer already buckets by `diff.target`). `depends_on` on an extra's `Contract` declares which artifacts it relies on: a contract-breaking change to one re-measures its dependents (their cached scores were taken under the superseded contract) and lands atomically via `Ledger.commit_atomic`. Empty (the default) is the old single-artifact behaviour exactly. |
 
 ### `reflector(...)`
 
@@ -819,12 +837,14 @@ FileTree(
     frozen: Sequence[str] = (),
     max_files_per_diff: int = 2,
     max_file_bytes: int = 28000,
-    planned_paths: Sequence[str] = ()
+    planned_paths: Sequence[str] = (),
+    validators: Sequence[Callable[[Mapping[str, str]], Optional[str]]] = ()
 ) -> None
 ```
 
 | method | what it does |
 |---|---|
+| `check_candidate(state: Mapping[str, str], ops: Mapping[str, Optional[str]]) -> Optional[str]` | Run `validators` on `state` with `ops` applied. |
 | `frozen_files(source: Mapping[str, str]) -> Dict[str, str]` | The pristine content of every frozen path, for the runner's overlay. |
 | `keys() -> Sequence[str]` | The declared key space, for `TensorParallel`. |
 | `writable(path: str) -> bool` | May the loop write this path? `frozen` beats `editable`. |
@@ -832,6 +852,10 @@ FileTree(
 ### `parse_edits(proposal: str) -> Dict[str, Optional[str]]`
 
 Parse a reflector reply into `{path: new_content}` (`None` = delete).
+
+### `parse_proposal(proposal: str) -> Tuple[Dict[str, Optional[str]], str]`
+
+Parse a reflector reply into `(edits, rationale)`.
 
 ### `tree_reflector(...)`
 
@@ -948,7 +972,9 @@ Contract(
     input_schema: str = 'any',
     output_schema: str = 'any',
     side_effects: Tuple[str, ...] = (),
-    major: int = 1
+    major: int = 1,
+    invariants: Tuple[Any, ...] = (),
+    depends_on: Tuple[str, ...] = ()
 ) -> None
 ```
 
@@ -966,7 +992,8 @@ Diff(
     target: str,
     ops: Dict[str, Any] = <factory>,
     contract_breaking: bool = False,
-    author: str = 'unknown'
+    author: str = 'unknown',
+    rationale: str = ''
 ) -> None
 ```
 
@@ -985,6 +1012,7 @@ EvidenceCard(
     touched: List[str],
     before_after_delta: float = 0.0,
     trajectory_refs: List[Any] = <factory>,
+    trace_ids: Tuple[str, ...] = <factory>,
     advantage: Optional[float] = None,
     cost_tokens: int = 0,
     cost_wallclock: float = 0.0,
@@ -1033,7 +1061,8 @@ Aggregator(
     conflict: Optional['ConflictPolicy'] = None,
     fusion: Optional['FusionPolicy'] = None,
     acceptance: Optional['AcceptancePolicy'] = None,
-    promotion: Optional['PromotionPolicy'] = None
+    promotion: Optional['PromotionPolicy'] = None,
+    screen: Optional['ScreenPolicy'] = None
 ) -> None
 ```
 
@@ -1106,6 +1135,11 @@ The vocabulary of `category`.
 | `ORACLE_REJECTED` | `'oracle-rejected'` |
 | `CAS_CONFLICT` | `'cas-conflict'` |
 | `UNKNOWN_ARTIFACT` | `'unknown-artifact'` |
+| `VIOLATES_INVARIANT` | `'violates-invariant'` |
+| `MISSING_ADAPTERS` | `'missing-adapters'` |
+| `CRITIC_REJECTED` | `'critic-rejected'` |
+| `NOISE_FLOOR` | `'noise-floor'` |
+| `COST_RULE` | `'cost-rule'` |
 
 ### `MergeReport(...)`
 
@@ -1264,6 +1298,7 @@ AuditedReward(
 |---|---|
 | `calibration_set() -> list` | Resolved CALIBRATION records for *this* verifier version. |
 | `pending() -> list` | Audited units still waiting on truth. |
+| `refresh_verifier_version() -> str` | Re-derive `verifier_version` from a live `version_extra`. |
 
 ### `RenderTap(run: Callable[[str, Any], str]) -> None`
 
@@ -1286,7 +1321,8 @@ Audit(
     acceptance: RectifiedAcceptance,
     store: AuditStore,
     calibrator: Calibrator,
-    watch: VerifierWatch
+    watch: VerifierWatch,
+    boost: Optional['VerifierBoost'] = None
 ) -> None
 ```
 
@@ -1320,7 +1356,8 @@ attach(
     verifier_version: Optional[str] = None,
     version_extra: Any = None,
     watch_ids: Iterable[str] = (),
-    watch_globs: Sequence[str] = ()
+    watch_globs: Sequence[str] = (),
+    boost: Optional['VerifierBoost'] = None
 ) -> Audit
 ```
 
@@ -1343,6 +1380,7 @@ attach(
 | `version_extra` | `Any` | `None` |  |
 | `watch_ids` | `Iterable[str]` | `()` | Artifact ids and diff-key globs that mean the verifier changed. Nothing is watched by default, which is right for a fixed function and exactly wrong for a run that evolves its own judge -- see `VerifierWatch`. |
 | `watch_globs` | `Sequence[str]` | `()` | As `watch_ids`. |
+| `boost` | `Optional['VerifierBoost']` | `None` |  |
 
 ---
 
@@ -2709,6 +2747,23 @@ Archive(
 
 Keep the `k` best-scoring candidates and spread the workers over them.
 
+### `CladeThompson(...)`
+
+HGM's expansion policy: Thompson sampling on clade metaproductivity.
+
+```python
+CladeThompson(
+    cool_down_beta: float = 0.0,
+    max_tau: float = 1000.0,
+    seed: int = 0,
+    rng: Optional['random.Random'] = None
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `tau(budget_remaining: float) -> float` | `budget_remaining ** (-cool_down_beta)`, clamped to `[1, max_tau]`. |
+
 ### `CostEfficient(...)`
 
 FlatPuct that pays for exploration out of a budget. **Test-time scaling.**
@@ -2797,7 +2852,8 @@ PopulationAggregator(
     conflict = None,
     fusion = None,
     acceptance = None,
-    promotion = None
+    promotion = None,
+    screen = None
 )
 ```
 
@@ -2822,7 +2878,8 @@ population_factory(
     conflict = None,
     fusion = None,
     acceptance = None,
-    promotion = None
+    promotion = None,
+    screen = None
 )
 ```
 
@@ -2835,6 +2892,31 @@ Combine competing values for the same key, when a dict update cannot. &nbsp;·&n
 ### `KeepContradictions()`
 
 A conflict policy that leaves contradicting diffs for fusion to resolve.
+
+### `LearnableFusionPolicy(...)`
+
+A fusion policy that learns when merging wins -- and stops paying for the ranking it cannot change.
+
+```python
+LearnableFusionPolicy(
+    inner: Optional[Any] = None,
+    *,
+    tournament: bool = True,
+    seed: int = 0,
+    min_trials: int = 20,
+    uncertainty_threshold: float = 0.15,
+    epsilon: float = 0.1,
+    max_wrong_skips: int = 1,
+    lr: float = 0.2,
+    reg: float = 0.05,
+    max_logit: float = 3.0
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `bind(verifier: Any) -> None` | Forward the verifier to the inner tournament and the union path. |
+| `select(artifact: Evolvable, diffs: List[Diff]) -> Tuple[Diff, Evolvable, bool]` | Learn or predict: skip the ranking sweep when the union is confidently predicted to win (a learned logistic, not a proof). |
 
 ### `ReflectiveFusion(...)`
 
@@ -3053,6 +3135,7 @@ EvolveSpec(
     editable: Sequence[str] = ('**',),
     frozen: Sequence[str] = (),
     max_files_per_diff: int = 2,
+    validate_skill: bool = True,
     entrypoint: Sequence[str] = (),
     setup_cmd: Sequence[str] = (),
     test_cmd: Sequence[str] = ('python', '-m', 'pytest', '-q'),
@@ -3063,6 +3146,7 @@ EvolveSpec(
     policies: Dict[str, Any] = <factory>,
     agg_config: Dict[str, Any] = <factory>,
     evolve: Dict[str, Any] = <factory>,
+    extra_artifacts: Dict[str, Any] = <factory>,
     allow: Sequence[str] = (),
     version: int = 1
 ) -> None
@@ -3163,7 +3247,11 @@ async_evolve(
     verbose: bool = False,
     usage: Optional[Usage] = None,
     policies: Optional['Policies'] = None,
-    allocator: Optional[Any] = None
+    allocator: Optional[Any] = None,
+    record_trajectories: bool = False,
+    trajectory_store: Optional[Any] = None,
+    contract: Optional[Contract] = None,
+    extra_artifacts: Optional[Dict[str, 'EvolvingArtifact']] = None
 ) -> EvolutionResult
 ```
 
@@ -3219,6 +3307,10 @@ async_evolve(
 | `usage` | `Optional[Usage]` | `None` | Share one `Usage` with your model adapters (`claude(usage=u)`, `openai_compatible(usage=u)`) and the result's token counts become real. Without it the run still reports calls, seconds and failures -- `run` is `(rendered, task) -> str`, so an opaque actor has no way to surface tokens, and inventing a number would be worse than reporting zero. |
 | `policies` | `Optional['Policies']` | `None` | Bundle of replaceable pieces (`Policies`). Every field defaults to `None` meaning "current behaviour", so `Policies()` and passing nothing are the same run. The individual keyword arguments -- `task_sampler`, `staleness_policy`, `aggregator_factory` -- are shortcuts onto its fields and keep working; an explicit argument wins over a bundle default rather than being silently ignored. Fields whose implementations have not landed yet raise rather than being accepted and ignored: a caller who passes a custom acceptance rule and sees a finished run would reasonably conclude it ran. New capabilities go here rather than adding another parameter to a function that already has thirty-five. |
 | `allocator` | `Optional[Any]` | `None` | Exactly as in `evolve`: value-directed budget allocation (see `allocator`). `None` (the default) is the old behaviour exactly. Pass a value allocator and, once the token budget is tight, the self-verify rollout is spent only on candidates the allocator expects to commit; the merger reports every outcome back so it learns. Requires `max_tokens`. Counterfactual exploration corrects a biased value model rather than reinforcing it. |
+| `record_trajectories` | `bool` | `False` | Exactly as in `evolve`: persist every rollout and gate evaluation as a `Trajectory` under `<repo_path>/trajectories/`. Off by default; pass `trajectory_store=` to control where records land. |
+| `trajectory_store` | `Optional[Any]` | `None` | An explicit `TrajectoryStore` to record into. `None` + `record_trajectories` builds the default store at `<repo_path>/trajectories`. |
+| `contract` | `Optional[Contract]` | `None` | Exactly as in `evolve`: the artifact's contract, where governance invariants are declared. `None` (the default) is the reference skill contract, which declares nothing and enforces nothing. |
+| `extra_artifacts` | `Optional[Dict[str, 'EvolvingArtifact']]` | `None` | Exactly as in `evolve`: additional artifacts to register alongside the primary, as `{aid: EvolvingArtifact}`. The barrier-free worker proposes against each of them too (no parallel strategy, so it is the primary plus every extra), and the aggregator merges their diffs by target. Empty (the default) is the old single-artifact behaviour exactly. |
 
 ---
 
@@ -3714,7 +3806,7 @@ The exception tuple a caller catches to treat any ledger problem as recoverable.
 
 ### `LedgerProtocol`
 
-Seven methods: four the aggregator calls, three more the engine calls.
+Eight methods: four the aggregator calls, four more the engine calls.
 
 ### `LocalWorkspaceSandbox`
 

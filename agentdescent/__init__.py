@@ -31,6 +31,7 @@ from .audit import (
     AuditedReward, AuditRecord, AuditStore, DeferredOracle, GoldAnswer,
     NullOracle, Purpose, RenderTap, resolve_from_mapping, verifier_fingerprint,
     residual_bias,
+    BoostState, VerifierBoost, isotonic_fit,
 )
 from . import backends, dataloader          # submodules: agentdescent.dataloader.hf_rows(...)
 from .dataloader import Dataset, split_dataset
@@ -44,13 +45,20 @@ from .advantage import (
     state_distance,
 )
 from .defaults import DefaultConflict, DefaultFusion
-from .fusion import KeepContradictions, ReflectiveFusion, reflective_merge
+from .invariants import (
+    BUILTIN_INVARIANTS,
+    Invariant,
+    check_dependency_graph,
+    check_invariants,
+)
+from .fusion import KeepContradictions, ReflectiveFusion, LearnableFusionPolicy, reflective_merge
 from .sampling import DifficultyWeighted, ReplaySampler, RoundRobin, TaskSampler
 from .replay import ReplayAwareProposal
 from .selection import (
     Archive,
     Beam,
     Candidate,
+    CladeThompson,
     CostEfficient,
     MCTS,
     MultiHeadUnsupported,
@@ -111,9 +119,22 @@ from .policies import (
     Sandbox,
     SandboxProvider,
     SandboxSpec,
+    ScreenPolicy,
     VerifierProtocol,
 )
 from .evalcache import CacheProtocol, FileCache, MemoryCache
+from .trajectory import (
+    PURPOSE_EVAL,
+    PURPOSE_PROBE,
+    PURPOSE_ROLLOUT,
+    PURPOSE_SELF_VERIFY,
+    PURPOSES,
+    RECORD_TEXT_ENV,
+    Trajectory,
+    TrajectoryEvent,
+    TrajectoryStore,
+    trajectory_key,
+)
 from .checkpoint import (
     save_checkpoint,
     load_checkpoint,
@@ -151,7 +172,7 @@ from .filetree import (
     parse_tree,
     tree_summary,
 )
-from .treestrategy import EDIT_PROTOCOL, FileTree, parse_edits, tree_reflector
+from .treestrategy import EDIT_PROTOCOL, FileTree, parse_edits, parse_proposal, tree_reflector
 from .runners import (
     LAYOUTS, PLUGIN_FROZEN, PLUGIN_HOSTS, TEST_FAILURE_MARKER, PluginHost, code_runner,
     gated_reward, plugin_runner, tree_runner,
@@ -217,7 +238,7 @@ from .parallel import (
     shard_round_robin,
 )
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"
 
 __all__ = [
     "Contract",
@@ -248,6 +269,7 @@ __all__ = [
     "TaskSampler",
     "ReflectiveFusion",
     "KeepContradictions",
+    "LearnableFusionPolicy",
     "DefaultConflict",
     "DefaultFusion",
     "reflective_merge",
@@ -265,6 +287,7 @@ __all__ = [
     "Beam",
     "ParetoFrontier",
     "Archive",
+    "CladeThompson",
     "CostEfficient",
     "MCTS",
     "MultiHeadUnsupported",
@@ -424,6 +447,7 @@ __all__ = [
     "EDIT_PROTOCOL",
     "FileTree",
     "parse_edits",
+    "parse_proposal",
     "tree_reflector",
     "LAYOUTS",
     "TEST_FAILURE_MARKER",

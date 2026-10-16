@@ -144,6 +144,21 @@ def _git(repo: str, *args: str) -> str:
 _LOCK_NAME = ".agentdescent-repo.lock"
 
 
+def _replace_file(path: str, data: bytes) -> None:
+    """Atomically put ``data`` at ``path``; never leave the temp sibling behind."""
+    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+    try:
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)
+    finally:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except OSError:
+            pass
+
+
 def _acquire_file_lock(path: str, timeout: float = 120.0):
     """Block until this process owns the repository."""
     try:
@@ -234,7 +249,7 @@ class Ledger:
         A driver that owns a throwaway repo removes it when it returns, but a
         round abandoned on ``round_timeout`` leaves worker threads running that
         Python cannot cancel -- and one of those, finishing later, would commit
-        into the deleted directory and *recreate* it (``_dump_artifact`` calls
+        into the deleted directory and *recreate* it (``_write_all`` calls
         ``makedirs(exist_ok=True)``). Closing first turns that late write into an
         ordinary error inside the straggler's own thread, where the driver already
         absorbs it."""
@@ -266,15 +281,21 @@ class Ledger:
         self._exclude_non_ledger_files()
 
     def _exclude_non_ledger_files(self) -> None:
-        """Keep `checkpoints/` out of the index, on every repo we open.
+        """Keep `checkpoints/` and `trajectories/` out of the index.
 
-        Checkpoints are per-process diagnostics, not ledger state: they live in
-        the working tree, and `_commit` runs `git add -A`. Committed, they break
-        the ledger in two ways. A branch switch *deletes* them -- a dev-only file
-        does not exist on stable -- so a resume finds nothing. Worse, the next
-        round rewrites the now-tracked file, and `checkout` refuses to clobber a
-        modified tracked file: every `snapshot(STABLE)` and `promote_to_stable`
-        after that dies with "local changes would be overwritten".
+        Both are per-process *derived* data, not ledger state: they live in the
+        working tree, and `_commit` runs `git add -A`. Committed, they break
+        the ledger in two ways. A branch switch *deletes* them -- a dev-only
+        file does not exist on stable -- so a resume finds nothing. Worse, the
+        next round rewrites the now-tracked file, and `checkout` refuses to
+        clobber a modified tracked file: every `snapshot(STABLE)` and
+        `promote_to_stable` after that dies with "local changes would be
+        overwritten".
+
+        ``trajectories/`` is the :mod:`~agentdescent.trajectory` store's home
+        when the engine records rollouts. Rollouts are derived data too, and
+        the same argument applies verbatim: a branch switch must not delete the
+        run's evidence, and a rewrite must not break a checkout.
 
         The exclusion goes in `.git/info/exclude`, not a working-tree
         `.gitignore`, for the reason the repo lock lives in `.git/` too: that
@@ -287,26 +308,30 @@ class Ledger:
         Written on **every** `__init__`, not just at genesis: a ledger created
         by an earlier version already has its `.git/`, so an init-only write
         would skip precisely the long-lived repos a resume exists for.
-        (The name mirrors `checkpoint.CHECKPOINT_DIR`; spelled out here to keep
-        the ledger free of that import.)
+        (The names mirror `checkpoint.CHECKPOINT_DIR` and the trajectory
+        store's home; spelled out here to keep the ledger free of those
+        imports.)
         """
-        rule = "checkpoints/"
         path = os.path.join(self.repo_path, ".git", "info", "exclude")
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             try:
                 with open(path) as f:
-                    lines = f.read().splitlines()
+                    existing = set(f.read().splitlines())
             except FileNotFoundError:
-                lines = []
-            if rule in lines:
+                existing = set()
+            missing = [rule for rule in ("checkpoints/", "trajectories/")
+                       if rule not in existing]
+            if not missing:
                 return
             with open(path, "a") as f:
-                f.write(f"{rule}\n")
+                for rule in missing:
+                    f.write(f"{rule}\n")
         except OSError:
             # A read-only or otherwise hostile `.git/` is not a reason to
-            # refuse the ledger: nothing writes checkpoints unless the caller
-            # turned them on, and that path degrades on its own.
+            # refuse the ledger: nothing writes checkpoints or trajectories
+            # unless the caller turned them on, and those paths degrade on
+            # their own.
             pass
 
     # -- low-level version bookkeeping ---------------------------------------
@@ -368,11 +393,55 @@ class Ledger:
         process -- or the same one after a crash -- can see an empty or partial
         file where the version vector should be. Renaming over the target is
         atomic on POSIX, so a reader sees the old vector or the new one."""
-        path = self._versions_path()
-        tmp = f"{path}.{os.getpid()}.tmp"
-        with open(tmp, "w") as f:
-            json.dump(vv, f, indent=2, sort_keys=True)
-        os.replace(tmp, path)
+        self._write_all([self._stage_versions(vv)])
+
+    def _stage_versions(self, vv: VersionVector) -> Tuple[str, str]:
+        return self._versions_path(), json.dumps(vv, indent=2, sort_keys=True)
+
+    def _stage_artifact(self, artifact: Evolvable, version: int) -> Tuple[str, str]:
+        """Encode an artifact's payload without touching the working tree.
+
+        Encoding first is what keeps a serializer refusal (a ``set``, a ``Path``,
+        any non-JSON value) from leaving a torn ``artifacts/<id>.json`` behind:
+        streaming ``json.dump`` into a truncated file used to stop half-way, and
+        the next unrelated commit's ``git add -A`` swept the torn file in, so
+        every later ``snapshot()`` raised (#265)."""
+        payload = {"version": version, "state": self._serialize(artifact)}
+        return (self._artifact_path(artifact.id),
+                json.dumps(payload, indent=2, sort_keys=True))
+
+    def _write_all(self, files: List[Tuple[str, str]]) -> None:
+        """Write every ``(path, text)`` atomically, or leave all as they were.
+
+        Each file goes through a sibling temp and ``os.replace``. If any write
+        fails, the files this call already replaced get their previous bytes
+        back (or are removed if they were new), so a failed operation leaves the
+        working tree exactly as it found it -- nothing half-written for a later
+        ``git add -A`` to commit. That is what makes ``commit_atomic`` all or
+        nothing on disk, not only in its CAS check (#265)."""
+        # switching branches can drop an empty (untracked) artifacts/ dir.
+        os.makedirs(os.path.join(self.repo_path, "artifacts"), exist_ok=True)
+        prior: List[Tuple[str, Optional[bytes]]] = []
+        try:
+            for path, text in files:
+                try:
+                    with open(path, "rb") as f:
+                        old: Optional[bytes] = f.read()
+                except FileNotFoundError:
+                    old = None
+                prior.append((path, old))
+                _replace_file(path, text.encode("utf-8"))
+        except BaseException:
+            for path, old in reversed(prior):
+                try:
+                    if old is None:
+                        if os.path.exists(path):
+                            os.remove(path)
+                    else:
+                        _replace_file(path, old)
+                except OSError:
+                    pass
+            raise
 
     def _artifact_path(self, artifact_id: str) -> str:
         return os.path.join(self.repo_path, "artifacts", f"{artifact_id}.json")
@@ -414,17 +483,13 @@ class Ledger:
                 self._checkout(br)
                 vv = self._read_versions()
                 if artifact.id not in vv:
-                    self._dump_artifact(artifact, version=1)
+                    staged = self._stage_artifact(artifact, version=1)
                     vv[artifact.id] = 1
-                    self._write_versions(vv)
+                    self._write_all([staged, self._stage_versions(vv)])
                     self._commit(f"register {artifact.id}")
 
     def _dump_artifact(self, artifact: Evolvable, version: int) -> None:
-        payload = {"version": version, "state": self._serialize(artifact)}
-        # switching branches can drop an empty (untracked) artifacts/ dir.
-        os.makedirs(os.path.join(self.repo_path, "artifacts"), exist_ok=True)
-        with open(self._artifact_path(artifact.id), "w") as f:
-            json.dump(payload, f, indent=2, sort_keys=True)
+        self._write_all([self._stage_artifact(artifact, version)])
 
     def _commit(self, message: str) -> str:
         _git(self.repo_path, "add", "-A")
@@ -487,20 +552,31 @@ class Ledger:
                 )
             self._assert_contract(new_state)
             new_version = head + 1
-            self._dump_artifact(new_state, new_version)
+            staged = self._stage_artifact(new_state, new_version)
             vv[aid] = new_version
-            self._write_versions(vv)
+            self._write_all([staged, self._stage_versions(vv)])
             commit_hash = self._commit(message or f"update {aid} -> v{new_version}")
             return commit_hash, new_version
 
     def _assert_contract(self, new_state: Evolvable) -> None:
-        """Refuse a commit that would change the registered contract major.
+        """Refuse a commit that would change the registered contract.
 
         The check the design calls for and the codebase never made: `Contract`,
         `Contract.is_compatible_with` and `ContractRejected` all existed, nothing
         called any of them, and the docstrings described an enforcement that was
         not there. Comparing against the contract recorded at
-        :meth:`register` needs no change to any serializer."""
+        :meth:`register` needs no change to any serializer.
+
+        The **invariants** are compared too, as defence in depth: the gate reads
+        rules off the base artifact, which the loop writes to the ledger payload
+        -- so a bug that dropped them on the apply/serialize round-trip would
+        silently disable the rule while the run kept counting `invariant_checked`.
+        Refusing a commit whose candidate's invariants differ from the registered
+        (operator-supplied) contract turns that silent evaporation into a loud
+        `ContractRejected`, independent of where the candidate's contract came
+        from. The comparison is by value (``Invariant`` is a frozen dataclass),
+        so a re-registration that moves the major is the sanctioned way to change
+        rules, exactly as before."""
         known = self._contracts.get(new_state.id)
         incoming = getattr(new_state, "contract", None)
         if known is None or incoming is None:
@@ -510,6 +586,13 @@ class Ledger:
                 f"{new_state.id}: contract major {incoming.major} is incompatible "
                 f"with the registered major {known.major}. A breaking contract "
                 "change must be re-registered deliberately, not merged.")
+        if known.invariants != incoming.invariants:
+            raise ContractRejected(
+                f"{new_state.id}: commit would change the registered contract's "
+                f"governance invariants from {list(known.invariants)} to "
+                f"{list(incoming.invariants)}. Invariants are operator-supplied "
+                "and must be changed by re-registering the artifact, not by a "
+                "merged diff.")
 
     def commit_atomic(
         self,
@@ -544,12 +627,13 @@ class Ledger:
                     raise CASConflict(
                         f"{st.id}: head={head} but diff based on {expected}"
                     )
-            # phase 2: write all, then one commit
+            # phase 2: encode all, write all (or none), then one commit
+            staged = []
             for st in new_states:
                 nv = vv.get(st.id, 0) + 1
-                self._dump_artifact(st, nv)
+                staged.append(self._stage_artifact(st, nv))
                 vv[st.id] = nv
-            self._write_versions(vv)
+            self._write_all(staged + [self._stage_versions(vv)])
             ids = ",".join(s.id for s in new_states)
             commit_hash = self._commit(message or f"atomic update {ids}")
             return commit_hash, dict(vv)
@@ -576,9 +660,9 @@ class Ledger:
             self._checkout(self.STABLE)
             svv = self._read_versions()
             nv = svv.get(artifact_id, 0) + 1
-            self._dump_artifact(dev_state, nv)
+            staged = self._stage_artifact(dev_state, nv)
             svv[artifact_id] = nv
-            self._write_versions(svv)
+            self._write_all([staged, self._stage_versions(svv)])
             self._commit(f"promote {artifact_id} to stable v{nv}")
             return nv
 

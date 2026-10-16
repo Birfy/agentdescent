@@ -66,6 +66,7 @@ __all__ = [
     "Archive",
     "Beam",
     "Candidate",
+    "CladeThompson",
     "FlatPuct",
     "MCTS",
     "MultiHeadUnsupported",
@@ -73,6 +74,7 @@ __all__ = [
     "SelectionContext",
     "SelectionPolicy",
     "SingleHead",
+    "clade_counts",
     "pareto_front",
     "pareto_win_frequency",
     "sigmoid_novelty_weights",
@@ -195,6 +197,43 @@ class SingleHead:
         return [ctx.head] * n
 
 
+
+def _finite_float(name: str, value: object) -> float:
+    """Parse ``value`` as a finite float, or raise ``ValueError``.
+
+    A string is refused even when it parses: ``"1.4"`` is a config typo, not a
+    knob, matching :class:`Archive`'s temperature check (#284). ``bool`` is
+    refused too -- ``True`` is an ``int`` subclass and would silently become
+    ``1.0``.
+    """
+    if isinstance(value, bool) or isinstance(value, (str, bytes)):
+        raise ValueError(f"{name} must be a finite number, got {value!r}")
+    try:
+        parsed = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a finite number, got {value!r}") from None
+    if not math.isfinite(parsed):
+        raise ValueError(f"{name} must be a finite number, got {value!r}")
+    return parsed
+
+
+def _safe_pow(base: float, exp: float) -> float:
+    """``base ** exp`` that returns ``+inf`` instead of raising ``OverflowError``.
+
+    Used by :meth:`CostEfficient.cost_factors` and :meth:`FlatPuct._priors` so a
+    steep exponent on a wide cost/prior ratio cannot crash ``select()`` (#293).
+    """
+    if exp == 0.0:
+        return 1.0
+    try:
+        out = base ** exp
+    except OverflowError:
+        return math.inf
+    if not math.isfinite(out):
+        return math.inf if out > 0 else 0.0
+    return out
+
+
 class Beam(SingleHead):
     """Keep the ``k`` best-scoring candidates and spread the workers over them.
 
@@ -217,8 +256,10 @@ class Beam(SingleHead):
     """
 
     def __init__(self, k: int = 1) -> None:
-        if k < 1:
-            raise ValueError(f"beam width must be at least 1, got {k}")
+        # bool is an int subclass; True would pass `k < 1` and then slice as 1.
+        # A float (incl. NaN) used to construct and then TypeError in select (#293).
+        if isinstance(k, bool) or not isinstance(k, int) or k < 1:
+            raise ValueError(f"beam width must be an integer >= 1, got {k!r}")
         self.k = k
 
     def select(self, ctx: SelectionContext, n: int) -> Sequence[Candidate]:
@@ -293,10 +334,42 @@ def sigmoid_novelty_weights(scores: Sequence[float],
     `examples/adas` each carried a byte-identical copy, one selecting a parent
     and one choosing what to show the meta-agent. Two copies of a published
     formula is how the two quietly stop being the same formula.
+
+    Scores far below zero used to raise ``OverflowError`` inside ``math.exp``
+    (#286). The formula is unchanged for every finite score that fits in a
+    float exponential -- including the whole ``[0, 1]`` band DGM publishes --
+    so port-equivalence stays bit-identical; only an overflowing evaluation
+    falls back to sigmoid 0 (the same limit ``-inf`` already reached). A
+    non-finite score contributes weight 0 -- the same convention this mode
+    already uses for an unscored candidate -- so a ``NaN`` in the archive
+    cannot poison ``random.choices`` with a non-finite weight total.
     """
-    raw = [(1.0 / (1.0 + math.exp(-10.0 * (s - 0.5)))) * (1.0 / (1.0 + c))
-           for s, c in zip(scores, children)]
-    total = sum(raw) or 1.0
+    raw: List[float] = []
+    for s, c in zip(scores, children):
+        try:
+            score = float(s)
+        except (TypeError, ValueError):
+            score = float("nan")
+        if not math.isfinite(score):
+            # Unscored / corrupted: zero weight, matching Archive(sigmoid_novelty)
+            # treating score=None as 0.0 before calling this helper.
+            raw.append(0.0)
+            continue
+        try:
+            # Exact DGM formula. Overflow only for finite scores << 0 (about
+            # s <= -70); the [0, 1] band never takes this branch.
+            sig = 1.0 / (1.0 + math.exp(-10.0 * (score - 0.5)))
+        except OverflowError:
+            sig = 0.0
+        raw.append(sig * (1.0 / (1.0 + c)))
+    total = sum(raw)
+    if not raw:
+        return []
+    # All zeros (every score non-finite or overflowing-negative) still has to
+    # be a selectable distribution: dividing by 1.0 would hand random.choices
+    # an all-zero vector and raise. Uniform matches Archive('uniform').
+    if not total or not math.isfinite(total):
+        return [1.0 / len(raw)] * len(raw)
     return [r / total for r in raw]
 
 
@@ -455,21 +528,70 @@ class Archive(SingleHead):
                  seed: int = 0, rng: Optional["random.Random"] = None) -> None:
         if sampling not in self.MODES:
             raise ValueError(f"sampling must be one of {self.MODES}, not {sampling!r}")
-        if temperature <= 0:
-            raise ValueError("temperature must be positive")
+        # `not (t > 0)` rather than `t <= 0`: NaN compares false both ways, and
+        # an archive built with it only failed at the first `select()`, with a
+        # message about weight totals that named nothing the caller had set.
+        # A string is refused even when it parses: `"0.5"` is a config typo,
+        # not a temperature, and accepting it would only move the failure to
+        # the first `score / temperature`. The value kept is the validated
+        # float, which for any int, float or numpy scalar divides exactly as
+        # the caller's own value did.
+        try:
+            t = (math.nan if isinstance(temperature, (str, bytes))
+                 else float(temperature))
+        except (TypeError, ValueError):
+            t = math.nan
+        if not (math.isfinite(t) and t > 0):
+            raise ValueError(
+                f"temperature must be a positive finite number, got {temperature!r}")
         self.sampling = sampling
-        self.temperature = temperature
+        self.temperature = t
         self.seed = seed
         self.rng = rng
 
-    def _weight(self, c: Candidate) -> float:
-        if self.sampling == "uniform":
-            return 1.0
+    @staticmethod
+    def _score(c: Candidate) -> float:
         # An unscored candidate is given the mean, not zero: the archive's job is
         # to keep trying things that have not been tried.
-        score = 0.5 if c.score is None else c.score
-        weight = math.exp(score / self.temperature)
-        return weight / (1 + c.selected) if self.sampling == "novelty" else weight
+        return 0.5 if c.score is None else c.score
+
+    def _weights(self, pool: Sequence[Candidate]) -> List[float]:
+        """Softmax weights for ``'performance'`` / ``'novelty'`` / ``'uniform'``.
+
+        The raw ``exp(score / T)`` (divided by ``1 + selected`` for novelty) is
+        returned **unchanged whenever it is representable**, so every seeded
+        draw at an ordinary temperature is the one it always was. Below about
+        ``T = 1/709`` a score of 1 is past the float range: ``math.exp`` raised
+        ``OverflowError`` mid-``select()``, and just above that a few hundred
+        near-top candidates summed to ``inf`` and ``random.choices`` refused the
+        total. Only then -- raw weights overflowing, or a total that is not a
+        positive finite number -- are the max-shifted ``exp((s - s_max) / T)``
+        used instead: the same distribution, with the largest weight exactly 1.
+        The shift is taken on the *scores*, before dividing: at a subnormal
+        ``T`` the logit ``s / T`` is already ``inf``, and shifting logits would
+        compute ``inf - inf``.
+        """
+        if self.sampling == "uniform":
+            return [1.0] * len(pool)
+        scores = [self._score(c) for c in pool]
+        divisors = ([1 + c.selected for c in pool] if self.sampling == "novelty"
+                    else [1] * len(pool))
+        try:
+            weights = [math.exp(s / self.temperature) / d
+                       for s, d in zip(scores, divisors)]
+        except OverflowError:
+            weights = None
+        if weights is not None:
+            # Summed left to right, as `random.choices` accumulates them: the
+            # builtin `sum` may compensate and stay finite where it would not.
+            total = 0.0
+            for w in weights:
+                total += w
+            if 0.0 < total < math.inf:
+                return weights
+        top = max(scores)
+        return [math.exp((s - top) / self.temperature) / d
+                for s, d in zip(scores, divisors)]
 
     def select(self, ctx: SelectionContext, n: int) -> Sequence[Candidate]:
         import random
@@ -491,7 +613,7 @@ class Archive(SingleHead):
                 [0.0 if c.score is None else c.score for c in pool],
                 [c.selected for c in pool])
         else:
-            weights = [self._weight(c) for c in pool]
+            weights = self._weights(pool)
         # An int, not a tuple: tuple seeding is deprecated from 3.9 and would
         # eventually start raising in the middle of a long run.
         rng = self.rng or random.Random(self.seed * 1_000_003 + ctx.round)
@@ -538,12 +660,14 @@ class FlatPuct(SingleHead):
     """
 
     def __init__(self, c_puct: float = 1.0, prior_exponent: float = 0.0) -> None:
-        self.c_puct = c_puct
+        # Non-finite c_puct used to make every PUCT compare False (always pick
+        # index 0); a None/str crashed mid-select with TypeError (#293).
+        self.c_puct = _finite_float("c_puct", c_puct)
         #: How sharply :attr:`Candidate.prior` bends the exploration term.
         #: ``0.0`` ignores priors entirely and is upstream's uniform ``1/N``;
         #: ``2.0`` weights by the square, which is what separates a promising
         #: candidate from a dead-end one rather than merely ordering them.
-        self.prior_exponent = prior_exponent
+        self.prior_exponent = _finite_float("prior_exponent", prior_exponent)
 
     def _priors(self, rows: Sequence[Candidate]) -> List[float]:
         """``P(s,a)``, normalised to sum to 1 so ``c_puct`` keeps its meaning.
@@ -570,11 +694,18 @@ class FlatPuct(SingleHead):
         if self.prior_exponent <= 0.0 or not rated:
             return [1.0 / len(rows)] * len(rows)
         fallback = sum(rated) / len(rated)
-        raw = [
-            (c.prior if c.prior is not None and math.isfinite(c.prior) and c.prior > 0
-             else fallback) ** self.prior_exponent
+        # Divide by the max before the power so a steep exponent cannot
+        # overflow to +inf and then fall through to a uniform distribution
+        # (which would erase the stronger prior — Codex P2 on #294). The
+        # max factor cancels in the normalisation, so finite in-range
+        # results stay bit-identical to ``base ** exp``.
+        bases = [
+            (c.prior if c.prior is not None and math.isfinite(c.prior)
+             and c.prior > 0 else fallback)
             for c in rows
         ]
+        peak = max(bases) or 1.0
+        raw = [_safe_pow(base / peak, self.prior_exponent) for base in bases]
         total = sum(raw)
         if not total or not math.isfinite(total):
             return [1.0 / len(rows)] * len(rows)
@@ -625,15 +756,19 @@ class FlatPuct(SingleHead):
 class MCTS(SingleHead):
     """UCT over the candidate tree: one evolve step is one rollout.
 
-    ``value`` is the candidate's held-out reward, ``visits`` is
-    ``Candidate.selected``, and the backup runs up ``Candidate.parent``. An
-    unvisited candidate has infinite UCT score and so is always tried first,
-    which is the standard rule and the one that keeps a shallow tree from being
-    ignored.
+    ``value`` is the candidate's held-out reward and ``visits`` is
+    ``Candidate.selected``. Under ``evolve()``, ``PopulationAggregator``
+    backpropagates each selection up ``Candidate.parent`` so those visits are
+    subtree counts (#275); this policy itself only *reads* ``selected`` — it
+    does not walk the parent chain. An unvisited candidate has infinite UCT
+    score and so is always tried first, which is the standard rule and the one
+    that keeps a shallow tree from being ignored.
     """
 
     def __init__(self, exploration: float = 1.4) -> None:
-        self.exploration = exploration
+        # Non-finite exploration made every UCT score non-finite so the ranked
+        # order was accidental (#293).
+        self.exploration = _finite_float("exploration", exploration)
 
     def _uct(self, c: Candidate, total: int) -> float:
         if c.selected == 0:
@@ -697,7 +832,11 @@ class CostEfficient(FlatPuct):
     def __init__(self, c_puct: float = 1.0, cost_exponent: float = 1.0,
                  prior_exponent: float = 0.0, anneal: bool = True) -> None:
         super().__init__(c_puct=c_puct, prior_exponent=prior_exponent)
-        self.cost_exponent = max(0.0, float(cost_exponent))
+        # Non-finite used to store as 0.0 (NaN) or inf and then OverflowError /
+        # poison factors mid-select (#293). A negative still means "ignore cost"
+        # (clamped to 0), matching the previous max(0, ...) behaviour.
+        alpha = _finite_float("cost_exponent", cost_exponent)
+        self.cost_exponent = max(0.0, alpha)
         self.anneal = anneal
 
     def cost_factors(self, rows: Sequence[Candidate]) -> List[float]:
@@ -716,7 +855,10 @@ class CostEfficient(FlatPuct):
         known = [x for x in raw if x is not None]
         mean = (sum(known) / len(known)) if known else 1.0
         effective = [x if x is not None else mean for x in raw]
-        factors = [max(1e-9, (x / mean)) ** self.cost_exponent for x in effective]
+        factors = [
+            max(1e-9, _safe_pow(x / mean, self.cost_exponent))
+            for x in effective
+        ]
         return factors
 
     def select(self, ctx: SelectionContext, n: int) -> Sequence[Candidate]:
@@ -753,4 +895,156 @@ class CostEfficient(FlatPuct):
                 visits[node] += 1
                 parent = rows[node].parent
                 node = by_version.get(parent) if parent is not None else None
+        return picked
+
+
+def clade_counts(candidates: Sequence[Candidate]) -> List[Tuple[float, float]]:
+    """HGM's clade evidence ``(n^C_success, n^C_failure)`` for each candidate.
+
+    A node's *own* evidence is ``(sum s_i, n - sum s_i)`` over its ``per_task``
+    scores (each clipped to ``[0, 1]``, non-finite ones dropped) when it has
+    any, else ``(score, 1 - score)`` as one pseudo-observation, else nothing.
+    Its *clade* evidence is its own plus every descendant's, found by walking
+    ``Candidate.parent`` up from each node -- guarded against a chain that loops
+    or names a version outside the pool, exactly like :class:`FlatPuct`.
+
+    Pure: the result is recomputed from ``candidates`` on every call and never
+    stored on them. That is a deliberate deviation from upstream ``main``, whose
+    ``tree.py::Node.get_decendant_evals`` extends a node's own measure list in
+    place once it has fewer than ``num_pseudo`` evals, so evidence grows each
+    time ``expand()`` runs; the paper's formula has no such accumulation.
+    """
+    rows = list(candidates)
+    own: List[Tuple[float, float]] = []
+    for c in rows:
+        vals = [min(1.0, max(0.0, float(v))) for v in c.per_task.values()
+                if v is not None and math.isfinite(float(v))]
+        if vals:
+            s = sum(vals)
+            own.append((s, len(vals) - s))
+        elif c.score is not None and math.isfinite(float(c.score)):
+            s = min(1.0, max(0.0, float(c.score)))
+            own.append((s, 1.0 - s))
+        else:
+            own.append((0.0, 0.0))
+    by_version: Dict[int, int] = {}
+    for i, c in enumerate(rows):
+        by_version.setdefault(c.version, i)
+    totals = [[0.0, 0.0] for _ in rows]
+    for i, (s, f) in enumerate(own):
+        seen: Set[int] = set()
+        node: Optional[int] = i
+        while node is not None and node not in seen:
+            seen.add(node)
+            totals[node][0] += s
+            totals[node][1] += f
+            parent = rows[node].parent
+            node = by_version.get(parent) if parent is not None else None
+    return [(s, f) for s, f in totals]
+
+
+class CladeThompson(SingleHead):
+    """HGM's expansion policy: Thompson sampling on clade metaproductivity.
+
+    The Huxley-Gödel Machine (Wang et al., ICLR 2026,
+    https://arxiv.org/abs/2510.21614; code https://github.com/metauto-ai/HGM)
+    observes that the highest-*scoring* node -- what DGM's and SICA's archive
+    rules expand (here ``Archive('sigmoid_novelty')`` / ``Archive('best')``) --
+    is a weak predictor of which node has good *descendants*. It scores a node
+    by its clade instead (see :func:`clade_counts`) and draws
+    ``theta_a ~ Beta(tau * (1 + S_a), tau * (1 + F_a))``, expanding the argmax.
+
+    **Eligibility** mirrors upstream ``hgm.py::expand``: only nodes whose *own*
+    mean score is finite and ``> 0``. With none eligible, or a pool of one, the
+    answer is ``ctx.head``.
+
+    **tau.** ``1`` by default (upstream ``cool_down: false``). With
+    ``cool_down_beta > 0`` upstream's multiplier
+    ``max_evals**beta / (max_evals - used)**beta`` is read off
+    ``ctx.budget_remaining`` as ``tau = budget_remaining**(-beta)``, capped at
+    ``max_tau``: the Beta draws tighten around each clade's mean as the budget
+    runs out, so exploration narrows onto the most metaproductive node.
+
+    **n > 1** makes ``n`` independent draws, *with* replacement: two workers on
+    the same node is the protocol's way to say "this one deserves both".
+
+    **Deterministic** given ``seed``, or pass ``rng`` to own the stream, exactly
+    like :class:`Archive`.
+
+    **Fidelity.** This ports HGM's *expansion* policy only. Its separate
+    evaluation policy and the expand-vs-evaluate scheduler (``n_task_evals **
+    alpha``) need an engine seam agentdescent does not have. Upstream's
+    replacement of a well-evaluated node's own evals by ``num_pseudo`` copies of
+    its mean is not ported, nor is its in-place accumulation of descendant
+    evidence (see :func:`clade_counts`). Under ``evolve()`` the tree is only as
+    real as ``Candidate.parent``, which the population archive records once
+    #275 lands.
+    """
+
+    def __init__(self, cool_down_beta: float = 0.0, max_tau: float = 1e3,
+                 seed: int = 0, rng: Optional["random.Random"] = None) -> None:
+        # `not (x >= 0)` also rejects NaN, which slips past a plain `x < 0`.
+        if not (math.isfinite(float(cool_down_beta)) and cool_down_beta >= 0):
+            raise ValueError("cool_down_beta must be finite and >= 0")
+        # A non-finite cap would let an exhausted budget hand
+        # `random.betavariate` an infinite tau.
+        if not (math.isfinite(float(max_tau)) and max_tau >= 1):
+            raise ValueError("max_tau must be finite and >= 1")
+        self.cool_down_beta = cool_down_beta
+        self.max_tau = max_tau
+        self.seed = seed
+        self.rng = rng
+
+    def tau(self, budget_remaining: float) -> float:
+        """``budget_remaining ** (-cool_down_beta)``, clamped to ``[1, max_tau]``.
+
+        ``budget_remaining`` is read the way :class:`CostEfficient` reads it:
+        NaN and ``+inf`` (no ceiling) mean a full budget, so ``tau = 1``; only
+        ``<= 0`` means exhausted, so ``tau = max_tau`` (#280). The power is
+        taken in log space and capped before exponentiating, because a small
+        but legal fraction with a steep ``cool_down_beta`` overflows a float
+        ``**`` (which raises rather than returning ``inf``).
+        """
+        if self.cool_down_beta == 0:
+            return 1.0
+        b = float(budget_remaining)
+        if math.isnan(b) or b >= 1.0:
+            return 1.0
+        if b <= 0:
+            return self.max_tau
+        log_tau = -self.cool_down_beta * math.log(b)
+        if log_tau >= math.log(self.max_tau):
+            return self.max_tau
+        return min(self.max_tau, max(1.0, math.exp(log_tau)))
+
+    @staticmethod
+    def _eligible(c: Candidate) -> bool:
+        vals = [float(v) for v in c.per_task.values()
+                if v is not None and math.isfinite(float(v))]
+        if vals:
+            return sum(vals) / len(vals) > 0
+        return (c.score is not None and math.isfinite(float(c.score))
+                and float(c.score) > 0)
+
+    def select(self, ctx: SelectionContext, n: int) -> Sequence[Candidate]:
+        import random
+
+        rows = list(ctx.candidates)
+        if len(rows) <= 1:
+            return super().select(ctx, n)
+        counts = clade_counts(rows)
+        pool = [i for i, c in enumerate(rows) if self._eligible(c)]
+        if not pool:
+            return super().select(ctx, n)
+        tau = self.tau(ctx.budget_remaining)
+        rng = self.rng or random.Random(self.seed * 1_000_003 + ctx.round)
+        picked: List[Candidate] = []
+        for _ in range(n):
+            best, best_theta = pool[0], -math.inf
+            for i in pool:
+                s, f = counts[i]
+                theta = rng.betavariate(tau * (1.0 + s), tau * (1.0 + f))
+                if theta > best_theta:
+                    best, best_theta = i, theta
+            picked.append(rows[best])
         return picked

@@ -1205,22 +1205,53 @@ def cached_completion(complete: Callable[[str], str], directory: str, *,
         if os.path.exists(path):
             try:
                 with open(path, encoding="utf-8") as handle:
-                    with lock:
-                        stats["hits"] += 1
-                    return json.load(handle)["response"]
-            except (OSError, ValueError, KeyError):
-                pass          # a half-written entry is a miss, not a failure
+                    entry = json.load(handle)
+            except (OSError, ValueError):
+                entry = None      # a half-written entry is a miss, not a failure
+            cached = entry.get("response") if isinstance(entry, dict) else None
+            # Only a well-formed entry is a hit -- counted after it parsed, so a
+            # corrupt entry is a miss and only a miss, and the contract stays
+            # ``prompt -> str`` even if someone hand-edited the file.
+            if isinstance(cached, str):
+                with lock:
+                    stats["hits"] += 1
+                return cached
         response = complete(prompt)
         with lock:
             stats["misses"] += 1
-        # Written whole then renamed: a concurrent reader never sees a partial
-        # entry, which is the failure the `except` above would otherwise absorb
-        # silently on every call.
-        fd, tmp = tempfile.mkstemp(dir=directory, suffix=".partial")
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump({"response": response}, handle)
-        os.replace(tmp, path)
+        _store(path, response)
         return response
+
+    def _store(path: str, response: Any) -> None:
+        """Best effort: a cache that cannot write must never cost the caller
+        the response it already paid for.
+
+        Encoded before the disk is touched (an unencodable response leaves no
+        temp file), written whole then renamed (a concurrent reader never sees
+        a partial entry), and the temp sibling is removed on every failure path
+        so a flaky disk does not accumulate ``*.partial`` files.
+        """
+        if not isinstance(response, str):
+            return
+        try:
+            blob = json.dumps({"response": response})
+        except (TypeError, ValueError):
+            return
+        tmp = None
+        try:
+            fd, tmp = tempfile.mkstemp(dir=directory, suffix=".partial")
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(blob)
+            os.replace(tmp, path)
+            tmp = None
+        except OSError:
+            pass
+        finally:
+            if tmp is not None:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
 
     complete_cached.stats = stats          # type: ignore[attr-defined]
     return complete_cached

@@ -59,6 +59,7 @@ from .governance import HARNESS_BLAST_RADIUS, SKILL_BLAST_RADIUS
 from .policies import Policies
 from .rewards import command_scorer, scorer
 from .runners import code_runner, gated_reward, tree_runner
+from .skillspec import SKILL_FILE, SkillTreeValidator, parse_skill_frontmatter, validate_skill_tree
 from .staleness import get_policy
 from .treestrategy import FileTree, tree_reflector
 from .workspec import DEFAULT_ALLOWED_PREFIXES, Ref, RefError
@@ -197,6 +198,12 @@ class EvolveSpec:
     editable: Sequence[str] = ("**",)
     frozen: Sequence[str] = ()
     max_files_per_diff: int = 2
+    #: ``skill_dir`` only: reject, before any rollout, a candidate that deletes
+    #: ``SKILL.md`` or breaks its Agent Skills frontmatter (``name`` /
+    #: ``description`` rules, ``name`` kept stable). Skipped with a note when the
+    #: initial tree does not pass itself. ``false`` for a host that accepts a
+    #: looser format. See :mod:`agentdescent.skillspec`.
+    validate_skill: bool = True
     #: ``agent_code`` only.
     entrypoint: Sequence[str] = ()
     setup_cmd: Sequence[str] = ()
@@ -219,6 +226,12 @@ class EvolveSpec:
     agg_config: Dict[str, Any] = field(default_factory=dict)
     #: Passed straight to ``evolve()``.
     evolve: Dict[str, Any] = field(default_factory=dict)
+    #: Additional artifacts to evolve alongside the primary, as
+    #: ``{aid: EvolvingArtifact}``. Composed by :func:`compose` into
+    #: ``extra_artifacts=`` for ``evolve()`` -- the worker loop proposes against
+    #: each, and the aggregator merges their diffs by target. Empty (default) is
+    #: a single-artifact run.
+    extra_artifacts: Dict[str, Any] = field(default_factory=dict)
     #: Extra import prefixes a ``module:attribute`` ref may resolve into. The
     #: package's own modules are always allowed; widening this is the moment to
     #: think about who can write the spec.
@@ -877,9 +890,35 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
                 raise SpecError(f"kind='plugin' needs host in {sorted(PLUGIN_FROZEN)}, "
                                 f"got {spec.host!r}")
             frozen = list(PLUGIN_FROZEN[spec.host]) + frozen
+        validators: List[Any] = []
+        if spec.kind == "skill_dir" and spec.validate_skill:
+            initial_errors = validate_skill_tree(tree)
+            if initial_errors:
+                notes.append(
+                    "kind='skill_dir': the initial tree is not a valid Agent Skill "
+                    f"({', '.join(initial_errors)}), so the SKILL.md structural gate "
+                    "is off for this run; fix the frontmatter to enable it, or set "
+                    "validate_skill: false to silence this.")
+            else:
+                # The *initial* name, not artifact_id(): the spec requires it to
+                # equal the installed directory name, and artifact_id() is only
+                # the staging name (it allows uppercase, `_` and `.`).
+                root_name = (parse_skill_frontmatter(tree[SKILL_FILE]) or {}).get("name")
+                validators.append(SkillTreeValidator(root_name))
+                # A note, not a gate: the staging directory is often named
+                # differently from where the skill is installed. But a host
+                # that keys skills by directory will not load it under this one.
+                dirname = os.path.basename(os.path.normpath(str(spec.target)))
+                if root_name and dirname and dirname != root_name:
+                    notes.append(
+                        f"kind='skill_dir': SKILL.md name {root_name!r} differs from "
+                        f"the target directory {dirname!r}; the Agent Skills spec "
+                        f"requires them to match, so install the result as "
+                        f"{root_name}/ (the gate keeps the name stable).")
         strategy = FileTree(tree, editable=list(spec.editable), frozen=frozen,
                             max_files_per_diff=spec.max_files_per_diff,
-                            max_file_bytes=tspec.max_file_bytes)
+                            max_file_bytes=tspec.max_file_bytes,
+                            validators=validators)
         overlay = strategy.frozen_files(tree)
         runner_common = dict(name=aid, overlay=overlay, workspace_root=workspace_root,
                              sandbox_pool=sandbox_pool)
@@ -930,6 +969,15 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
 
     # -- knobs: kind defaults < spec.evolve < caller overrides ------------------
     knobs: Dict[str, Any] = {**defaults, **spec.evolve, **overrides}
+    # The dedicated field and the pass-through agree; an explicit `spec.evolve`
+    # entry wins, exactly as it would for any other knob.
+    if spec.extra_artifacts:
+        if "extra_artifacts" in knobs:
+            merged = dict(knobs["extra_artifacts"])
+            merged.update(spec.extra_artifacts)
+            knobs["extra_artifacts"] = merged
+        else:
+            knobs["extra_artifacts"] = dict(spec.extra_artifacts)
     held_out = float(knobs.get("held_out_frac", 0.3))
     train = _train_count(len(tasks), held_out)
     knobs.setdefault("n_workers", max(1, min(default_workers, train)))

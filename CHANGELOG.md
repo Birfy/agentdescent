@@ -6,14 +6,240 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-16
+
 ### Added
+
+- **`Ledger.fork` / `live_heads` / `discard_head` — multiple live heads (#75).**
+  The ledger held one `dev` branch; `PopulationAggregator` serialised candidates
+  by rewriting it, so no two workers could expand different candidates at once.
+  `fork("head/0")` creates an independent branch with its own version vector;
+  `live_heads()` lists `dev` plus all `head/` forks; `discard_head` cleans up.
+  `Candidate.branch` and `EvidenceCard.branch` carry the fork name.
+  `PopulationAggregator.step(n_workers)` forks a `head/<slot>` per selected
+  candidate and `head_for_worker(wid)` distributes workers across them.
+  `_commit_with_retry` commits to `EvidenceCard.branch`; the sync and async
+  worker loops snapshot from `head_for_worker` instead of hardcoded `dev`.
+  `_decide` passes the candidate's own branch through to the commit (and the
+  CAS-rebase path rebases against that branch, not `dev`), so a fork candidate
+  updates only its fork. `finalize` discards all forks and commits the best
+  candidate to `dev`.
+  Default: `SingleHead` + no forks = old behaviour exactly. 12 tests.
+
+- **Value-directed budget allocation — `evolve(allocator=...)` / `async_evolve(allocator=...)`.** `BudgetGovernor` degrades optional spend (fusion tournaments, the self-verify rollout) against global floors: once `spent / max_tokens` crosses a threshold, *every* candidate stops getting the expensive part. The EvoAlloc line of work measures the cost of that fixed allocation when evaluation is the scarce resource — this replaces it with a **per-candidate** decision learned from the run's own merge history.
+
+  **`ValueBudgetAllocator`** (`agentdescent/allocator.py`) is a learner with two halves. **Value-directed allocation**: once the token budget is tight, the self-verify rollout is spent only on candidates the value model expects to commit — a `LearningValueModel`, a tiny online logistic fit over the **pre-spend features the worker actually decides on** (the rollout's group-relative advantage, the diff's size, the artifact's blast radius), with a logit clip and L2 so one outlier cannot blow the weights. The model is trained on exactly that vector — post-outcome signals (delta, P(improve), stable distance) are kept for the audit trail but never enter `AllocatorContext.features` — so it cannot fit the labels with signals the decision never sees. **Counterfactual exploration**: a candidate the model judged unworthy is skipped — except with epsilon probability, when it is evaluated anyway; the outcome is then ground truth the model was wrong about, and it learns from it. Without this term a value-based allocator only ever sees the candidates it already believed in, and a biased prior is never corrected — the selection-bias collapse this term exists to prevent.
+
+  Wired end to end: the worker asks the governor `candidate_worth(ctx)` before the self-verify rollout; the aggregator reports **every** measured decision exactly once (`observe(ctx, committed)`), with oracle rejection and acceptance rejection as negative labels — a model fit on commits alone never leaves warm-up. **Every commit is attributed to a worker's actual pre-spend vector**: a fused candidate keeps its first contributor's context, and a tournament-selected single proposal is matched to its own winning card — never a losing first entrant, never a fused union size. The feature vector is **scale-normalised**: the raw-op diff size (1..100+) would swamp the advantage (a z-score) and blast radius in a raw logistic fit, so `size` is mapped through `log1p` to `[0, 1]` — verified by a regression where a high-advantage, large-diff candidate still predicts commit. `allocator=None` (the default) is the old behaviour byte for byte — the clock thresholds remain the *ceiling* the allocator may never exceed. 25 tests in `tests/test_allocator.py` (incl. negative-outcome, sync/async feature-parity, end-to-end fused + single-winner regressions, the A/B arm wiring, and the size-scale regression). **`bench/ab_allocator.py`** is the equal-budget A/B (off vs on, real datasets HotpotQA/finer, per-seed quality + measured tokens + a fired check that distinguishes "the allocator helped" from "it never ran"); exported from the package root; `docs/api.md` regenerated.
+
+- **`async_evolve(resume_queue=...)` — the L-traj resume half, the straggler
+  re-run.** Detection is **after-return**: `run(rendered, task) -> output` is
+  opaque, so a rollout that overruns its predicted cost is noticed once it has
+  finished (it is not cancelled mid-flight) and counted
+  (`result.stragglers`). With a shared
+  :class:`~agentdescent.scheduler.ResumeQueue` passed in, it now *records* the
+  detected task and the version it measured instead of dropping it; the next
+  idle worker whose shard owns that task re-runs it against the **current**
+  head. A straggler measured version N, its re-run measures version N+k, so the
+  pair is a free cross-version A/B signal — the design's L-traj note made
+  behaviour.
+
+  `ResumeQueue.pop_for(task_ids)` hands a queued resume only to a worker whose
+  shard owns the task, so no two workers re-run the same one. `result.resumed`
+  reports the re-runs. `resume_queue=None` (the default) is the old behaviour
+  exactly: stragglers are counted and dropped.
+
+  **Re-queue is bounded** (`ResumeQueue(max_attempts=...)`, default 1): the
+  queue counts how many times each task has been resumed, and `push` refuses a
+  task past the cap — so a chronically slow task gets exactly `max_attempts`
+  re-runs instead of an infinite resume loop starving the worker's fresh tasks.
+
+- `CladeThompson` selection policy (#276): HGM's expansion rule, Thompson
+  sampling on clade metaproductivity (node plus descendants via
+  `Candidate.parent`), with an opt-in budget-driven cool-down and
+  seeded draws; `clade_counts()` exposes the `(S, F)` evidence. Ports the
+  paper's formula without upstream's in-place evidence accumulation.
+- Add the RRSI component vocabulary (`examples/rrsi/components.py`) and per-edit
+  history `L_t` (`examples/rrsi/history.py`: yield, prune set, stall
+  exploration) adapted from the pinned Google release, with defensive handling
+  of non-finite measurements and torn JSONL lines, including tails cut
+  inside a multibyte UTF-8 character (#252). Still not an
+  `evolve()` integration; see `docs/algo-rrsi.md`.
+- `kind="skill_dir"` now gates candidates structurally before any rollout
+  (#246): a diff that deletes `SKILL.md`, drops its frontmatter, or breaks the
+  Agent Skills `name` / `description` / `compatibility` rules (or renames the
+  skill) is rejected and counted in `FileTree.structural_rejections` by reason.
+  New `agentdescent.skillspec` (`validate_skill_tree`, `SkillTreeValidator`,
+  dependency-free) and a general `FileTree(validators=...)` hook. Skipped with
+  a note when the initial skill does not pass; opt out with
+  `validate_skill: false`. The gate also covers model-written merges:
+  `ReflectiveFusion` asks the strategy's new `FileTree.check_candidate` before
+  returning a synthesised union, and a refused one falls back to ranking. Header
+  values a YAML loader would refuse or read as non-text (unterminated quotes,
+  invalid `\` escapes, text after a closing quote, `[...]` / `{...}`, unquoted
+  `: `, reserved first characters, and plain `null` / `true` / number / date
+  values) are `frontmatter-malformed`; a BOM and inline `# comments` (even ones
+  containing a colon) are tolerated.
+- `Diff.rationale` carries the FileTree reflector's reason into the ledger
+  commit message and the ReplayAwareProposal rejected-evidence note (#247).
+  `parse_proposal` returns edits plus rationale; `parse_edits` stays a thin
+  wrapper. Fused/synth diffs concatenate parent rationales (deduped, capped).
+  Rationales never enter `diff_id`. Control characters (NUL included) and
+  lone surrogates are stripped from rationales so `git commit` cannot crash on
+  them, and `parse_proposal` is exported from the package root.
+
+- Add the RRSI cosine-annealed L0 edit-budget schedule (`examples/rrsi/schedule.py`)
+  adapted from the pinned Google release, with endpoint / float-guard / bound
+  regressions (#238). Still not an `evolve()` integration; see `docs/algo-rrsi.md`.
 
 - Add an offline RRSI round-selection mechanism fixture adapted from Google's
   pinned release, with decision regressions and explicit validation boundaries.
   This is not yet an `evolve()` integration or full RRSI port; see
   `docs/algo-rrsi.md`.
 
+- **Rollout trajectory ledger.** `evolve(record_trajectories=True)` (and
+  `async_evolve`, and any spec through the `evolve` dict) now persists every
+  rollout, self-verify re-run and gate evaluation as a versioned `Trajectory`
+  under `<repo_path>/trajectories/` -- the exact rendered artifact text the run
+  provider saw, the task, the output, the reward, and the artifact version and
+  environment it all happened against. Records are content-addressed on the
+  same identity the evaluation cache keys on (`rendered`, `task`, environment),
+  so re-runs dedupe instead of piling up; the exists-check + write pair is
+  locked, so a single process's racing writers count exactly one record and
+  the rest as deduped. The boundary record (rendered, output, reward) is always
+  written when recording is on; event *detail* text is metadata unless
+  `AGENTDESCENT_RECORD_TEXT=1` or a store built with `record_text=True`. A
+  failed write is counted in the meter and never fails a rollout.
+  The store is the durable base the learning-type increments (process
+  supervision, offline re-weighting, audit replay) read; worker-produced
+  `EvidenceCard`s now carry the `trace_id`s of the records that justify them.
+  New counters: `trajectories_recorded`, `trajectories_dedup`,
+  `trajectory_write_seconds`, `trajectory_write_failures`; new
+  `EvolutionResult.trajectories_path`. Off by default -- a run without a store
+  reports zeros and behaves exactly as before.
+- **Governance invariants.** `evolve(contract=Contract(invariants=(...)))` (and
+  `async_evolve`) declares machine-checkable rules every diff to the artifact
+  must satisfy -- ``mutable_keys``, per-commit op/char caps, a non-decreasing
+  ``blast_radius`` (an artifact may not relax its own governance layer), a
+  no-self-dependency rule, or a custom predicate resolved as a ``workspec.Ref``.
+  The aggregator enforces them **before** a candidate is measured, so a
+  policy-violating diff is rejected with a ``violates-invariant`` outcome
+  instead of buying a held-out sweep; a rule that cannot run (an unknown kind,
+  a broken predicate) is a violation, never a silent skip. The contract rides
+  in the ledger payload so invariants survive the round-trip (an artifact whose
+  rules evaporate in storage is a governance rule that silently stopped
+  running); registration-time dependency-graph checks refuse self/cyclic
+  ``depends_on`` (duck-typed, so they light up with multi-artifact deps). New
+  meter counters ``invariant_checked`` / ``invariant_rejections`` and a
+  ``violates-invariant`` outcome; an artifact that declares nothing reports
+  zeros and is the untouched path exactly.
+
+- Changelog fragments (#295): a PR now adds one file `changelog.d/<number>-<slug>.md`
+  instead of editing `CHANGELOG.md`, so open PRs stop conflicting on the same
+  lines. `python -m tools.changelog_fragments check` validates them (and runs in
+  `pytest -q`); `release [--version X.Y.Z --date YYYY-MM-DD]` folds them into
+  `[Unreleased]` by category and optionally cuts the release section. See
+  `changelog.d/README.md`.
+
 ### Fixed
+
+- `audit.AuditStore` keeps its crash-safety contract (#274). A torn tail left
+  by a killed process gets a newline before the next append, so the record
+  written after the crash is no longer glued onto the fragment and lost; the
+  file is read as bytes and decoded per line, so a tear inside a multi-byte
+  character, a line that parses to a non-object, or a side-record missing its
+  keys costs that one line (counted in `corrupt`) instead of making the store
+  unopenable. Lines are encoded with `allow_nan=False` before the file is
+  touched and memory is updated only after the write returns, so a failed
+  `append` / `resolve` / `reopen` / `remember_*` leaves the index agreeing with
+  a fresh reload. `observe_unlabelled` and `resolve` refuse non-finite scores
+  with `ValueError`, and `load` counts a line holding a non-finite number (the
+  `NaN` / `Infinity` tokens older builds wrote, or an overflowing literal) as
+  corrupt instead of loading it. `resolve_from_mapping` refuses a batch with a
+  non-numeric or non-finite answer before anything lands, naming the offending
+  ids, instead of reporting it as already resolved. An unknown
+  `schema_version` still raises.
+- `FlatPuct` / `CostEfficient` / `MCTS` / `Beam` no longer crash or silently
+  poison `select()` on bad knobs (#293). `CostEfficient.cost_factors` and
+  `FlatPuct._priors` used to raise `OverflowError` on a steep
+  `cost_exponent` / `prior_exponent` against a wide ratio; both now use a
+  safe power that returns `+inf` instead of raising, so an expensive
+  candidate loses exploration rather than aborting the round. Non-finite
+  `c_puct` / `prior_exponent` / `exploration` / `cost_exponent` are refused
+  with `ValueError` at construction (a negative `cost_exponent` still clamps
+  to 0 = ignore cost). `Beam(k=...)` now requires an integer `>= 1`, so
+  `nan` / `1.5` / `True` no longer construct and then `TypeError` on the
+  first slice.
+
+- `sigmoid_novelty_weights` / `Archive(sampling='sigmoid_novelty')` no longer
+  raise `OverflowError` on large negative scores, and a non-finite score no
+  longer poisons the weight total (#286). The sigmoid is evaluated in a
+  numerically stable form (large negatives contribute ~0, matching `-inf`);
+  non-finite scores contribute weight 0, matching this mode's unscored
+  convention. Scores in the normal `[0, 1]` band stay bit-identical to the
+  previous formula so DGM port equivalence is unchanged.
+
+- `runstore` rounds/status no longer break on a non-finite reward or a torn
+  `rounds.jsonl` line (#271). `append_round` encodes with `allow_nan=False` and
+  writes non-finite floats as `null`; `rounds()` skips malformed lines instead
+  of raising; `on_round` tracks only finite rewards for `best_reward` /
+  `last_reward` so `max(best)` cannot become order-dependent on `NaN`; the
+  loopback panel dumps with the same sanitize + `allow_nan=False` contract.
+  `append_round` writes a newline first when the file ends in a torn fragment,
+  so the round written after a crash is not glued onto it; `rounds()` decodes
+  per line so a tear inside a multi-byte character costs one line; text
+  `status <run_id>` / `watch` print a `null` reward as `n/a` instead of raising.
+
+- HuggingFace row-cache filenames sanitize split names and bound their
+  components (#261), keeping slash-containing and traversal-style splits in
+  one portable cache entry. Lossy conversions include a digest to distinguish
+  split names (a bounded config is digested from the raw config, so configs
+  that slug identically stay distinct), and a versioned suffix prevents old raw-split cache entries
+  from aliasing the new names. Existing normal filenames and datasets-server
+  requests are unchanged.
+
+- `TrajectoryStore.record()` no longer raises when a record cannot be encoded
+  (a NaN inside a structured output, non-string dict keys, a circular value, a
+  `__str__` that raises, a non-string event detail) (#259). It is counted in
+  `trajectory_write_failures` like a full disk and nothing is written, so
+  `eval_one` no longer mistakes it for a backend transient and re-runs the
+  already-paid rollout `ATTEMPTS` times before failing the gate.
+
+- `FileCache` write failures no longer leave orphan `*.tmp` siblings, and
+  encode errors (`TypeError`/`ValueError`) are swallowed like `OSError` so a
+  paid evaluation is never failed by the cache; non-finite scores are returned
+  but not written (`allow_nan=False`). Non-JSON-native keys (`Path`, `UUID`)
+  still persist via `default=str`, matching how `_path()` hashes them (#263).
+- A failed `Ledger` write no longer corrupts the ledger (#265). Payloads are
+  encoded before any file is touched, each file is replaced via a temp
+  sibling, and an operation that fails part-way restores the files it already
+  wrote, so a serializer refusal or a full disk can no longer leave a torn
+  `artifacts/<id>.json` (or half of a `commit_atomic`) for the next commit's
+  `git add -A` to sweep in and break every later `snapshot()`.
+- `runstore._write_json` encodes before creating a sibling tmp and always
+  removes that sibling in `finally`, so a serializer refusal or a failed
+  replace can no longer leave an orphan `status.json.<uuid>.tmp` /
+  `spec.json.<uuid>.tmp` in a run directory (#267).
+
+- `meta.cached_completion` is best effort and never costs the caller a paid call: a cache-write failure (`OSError`, unencodable or non-`str` response) returns the response uncached and leaves no `*.partial` sibling, the entry is encoded before the disk is touched, and a corrupt or non-`str` entry (including a JSON list, which used to raise `TypeError`) is counted once, as a miss, instead of as both a hit and a miss (#269).
+
+- `TrajectoryStore.get` / `path_for` round-trip `trace_id`s whose `artifact_id` contains a colon by parsing with `rsplit(":", 1)` (#257). The key is always a hex digest; a leading split treated a namespaced id as part of the key and returned ``None`` for a record that was on disk.
+
+- `dataloader` cache entries are written atomically (temp file + `os.replace`),
+  read back as bytes instead of locale-decoded text, and refetched when they do
+  not parse; a fresh non-JSON response is parsed before caching so it can no
+  longer poison `hf_rows` / `hf_rows_modelscope` (#255).
+
+- Container sandbox allowlisted env vars are forwarded as `--env NAME` so
+  credential values no longer appear on the `docker`/`podman` argv (`ps`)
+  (#244). Non-allowlisted names and `--env-file` remain forbidden. Allowlist
+  entries ending in `*` are rejected before forwarding: Podman expands bare
+  `--env PREFIX*` to every matching host variable, which would leak
+  non-allowlisted credentials.
+
+- `CallBudget` default floor is capped at `base`, so a configured ceiling below
+  256 can no longer be silently raised above what the caller agreed to (#234).
+  Explicit `floor > base` and non-positive `base`/`floor` raise `ValueError`.
 
 - `hf_rows_modelscope(cache=False)` now bypasses an existing on-disk cache and
   does not write the fresh response back (#229). `fetch_bytes` / `fetch_text`
@@ -36,6 +262,60 @@ All notable changes to AgentDescent are documented here. The format follows
 - The `OVERSIZED` merge report now quotes the trust region that actually
   rejected the diff (the adaptive policy's current region) instead of the
   config constants (#224).
+
+- `BudgetGovernor`'s diminishing-returns stop skips a non-finite (`NaN`/`inf`)
+  round reward like `None` instead of letting it poison the peak efficiency, and
+  no longer misfires or crashes when `min_efficiency_samples < 2` (#242).
+
+- `PopulationAggregator` records `Candidate.parent` and backpropagates
+  subtree `selected` counts under `evolve()` (#275). Selecting a candidate
+  remembers its version as the branch tip; the next new state admitted from
+  that branch is filed as its child, and `selected` increments on the node
+  and every ancestor (cycle-guarded), so `FlatPuct` / `CostEfficient` /
+  `MCTS` see a real tree instead of a flat bag. Lineage survives
+  checkpoint/restore; pre-change checkpoints restore as roots. Archive ids
+  are unique even when two forks commit different states at the same
+  ledger version, so one fork's selection never bumps or parents the other;
+  restoring an older checkpoint that already holds such a collision gives
+  the later row a fresh id (saved parent references keep the first).
+
+- `CladeThompson.tau()` reads `budget_remaining` like `CostEfficient` (#280):
+  `+inf` (no ceiling) and NaN mean a full budget (`tau = 1`) instead of an
+  exhausted one (`max_tau`); the power is taken in log space and capped, so a
+  small fraction with a steep `cool_down_beta` no longer raises
+  `OverflowError` mid-`select()`. Non-finite `cool_down_beta` / `max_tau` are
+  rejected with `ValueError`.
+
+- `AdaptiveTrustRegion` moves each cap by at least one unit per widen or
+  tighten (#282). With plain `round(cap * factor)`, the default `widen=1.25`
+  mapped an op cap of 2 to `round(2.5) == 2` (and 1 to 1), so two reversals
+  from the default 6 left the op cap stuck for the rest of the run while
+  `chars` and `history` kept moving. A tighten no longer clamps a cap that sits
+  below `minimum` *up* to it, so a rollback can never loosen the region.
+  `maximum` stays a hard ceiling. `window < 1` (which raised
+  `ZeroDivisionError` on the first `observe`), `widen < 1`, `tighten` outside
+  `(0, 1]`, non-finite factors, `accept_rate_to_widen` outside `[0, 1]`, and
+  non-positive bounds are rejected with `ValueError` at construction.
+
+- `selection.Archive` no longer crashes at small temperatures (#284).
+  `performance` / `novelty` computed `exp(score / temperature)` raw, so below
+  about `temperature = 1/709` `select()` raised `OverflowError`. Just above
+  that, a few hundred near-top candidates summed to `inf` and
+  `random.choices` refused the total. The raw weights are still used,
+  bit-for-bit, whenever they are representable, so seeded draws do not move.
+  When they overflow, or their total is not a positive finite number, the
+  max-shifted softmax (the same distribution) is used instead. A `NaN`,
+  infinite or non-numeric `temperature` is now rejected with `ValueError` at
+  construction rather than failing at the first `select()`.
+
+- `rewards` reads numbers as they are written (#288). `last_number`,
+  `numeric_close` and `command_scorer` used to take `1.5e-3` as `-3`,
+  `6.02e23` as `23`, `.5` as `5`, `pages 3-4` as `-4` and `1,2,3` as `123`;
+  the parser now understands exponents and leading decimal points, groups
+  commas only in threes, and treats a minus glued to a preceding digit or
+  letter as subtraction. An overflowing figure (`1e999`) is no longer read as
+  `inf`, so `command_scorer` raises `GraderError` instead of clamping it to
+  `1.0`.
 
 ## [0.5.1] — 2026-10-10
 
@@ -108,34 +388,6 @@ value-directed evaluation or Genesis blind-mode proposals.
   candidate)` pair, and updates trust from the oracle's verdict. The scheduler's
   `collect` flag is forced on when `audit_drain_per_step > 0`. `EvolutionResult.
   audit_drained` reports how many ran. Default `0` = the old behaviour exactly.
-
-- **Value-directed budget allocation — `evolve(allocator=...)` / `async_evolve(allocator=...)`.** `BudgetGovernor` degrades optional spend (fusion tournaments, the self-verify rollout) against global floors: once `spent / max_tokens` crosses a threshold, *every* candidate stops getting the expensive part. The EvoAlloc line of work measures the cost of that fixed allocation when evaluation is the scarce resource — this replaces it with a **per-candidate** decision learned from the run's own merge history.
-
-  **`ValueBudgetAllocator`** (`agentdescent/allocator.py`) is a learner with two halves. **Value-directed allocation**: once the token budget is tight, the self-verify rollout is spent only on candidates the value model expects to commit — a `LearningValueModel`, a tiny online logistic fit over the **pre-spend features the worker actually decides on** (the rollout's group-relative advantage, the diff's size, the artifact's blast radius), with a logit clip and L2 so one outlier cannot blow the weights. The model is trained on exactly that vector — post-outcome signals (delta, P(improve), stable distance) are kept for the audit trail but never enter `AllocatorContext.features` — so it cannot fit the labels with signals the decision never sees. **Counterfactual exploration**: a candidate the model judged unworthy is skipped — except with epsilon probability, when it is evaluated anyway; the outcome is then ground truth the model was wrong about, and it learns from it. Without this term a value-based allocator only ever sees the candidates it already believed in, and a biased prior is never corrected — the selection-bias collapse this term exists to prevent.
-
-  Wired end to end: the worker asks the governor `candidate_worth(ctx)` before the self-verify rollout; the aggregator reports **every** measured decision exactly once (`observe(ctx, committed)`), with oracle rejection and acceptance rejection as negative labels — a model fit on commits alone never leaves warm-up. **Every commit is attributed to a worker's actual pre-spend vector**: a fused candidate keeps its first contributor's context, and a tournament-selected single proposal is matched to its own winning card — never a losing first entrant, never a fused union size. The feature vector is **scale-normalised**: the raw-op diff size (1..100+) would swamp the advantage (a z-score) and blast radius in a raw logistic fit, so `size` is mapped through `log1p` to `[0, 1]` — verified by a regression where a high-advantage, large-diff candidate still predicts commit. `allocator=None` (the default) is the old behaviour byte for byte — the clock thresholds remain the *ceiling* the allocator may never exceed. 25 tests in `tests/test_allocator.py` (incl. negative-outcome, sync/async feature-parity, end-to-end fused + single-winner regressions, the A/B arm wiring, and the size-scale regression). **`bench/ab_allocator.py`** is the equal-budget A/B (off vs on, real datasets HotpotQA/finer, per-seed quality + measured tokens + a fired check that distinguishes "the allocator helped" from "it never ran"); exported from the package root; `docs/api.md` regenerated.
-
-- **`async_evolve(resume_queue=...)` — the L-traj resume half, the straggler
-  re-run.** Detection is **after-return**: `run(rendered, task) -> output` is
-  opaque, so a rollout that overruns its predicted cost is noticed once it has
-  finished (it is not cancelled mid-flight) and counted
-  (`result.stragglers`). With a shared
-  :class:`~agentdescent.scheduler.ResumeQueue` passed in, it now *records* the
-  detected task and the version it measured instead of dropping it; the next
-  idle worker whose shard owns that task re-runs it against the **current**
-  head. A straggler measured version N, its re-run measures version N+k, so the
-  pair is a free cross-version A/B signal — the design's L-traj note made
-  behaviour.
-
-  `ResumeQueue.pop_for(task_ids)` hands a queued resume only to a worker whose
-  shard owns the task, so no two workers re-run the same one. `result.resumed`
-  reports the re-runs. `resume_queue=None` (the default) is the old behaviour
-  exactly: stragglers are counted and dropped.
-
-  **Re-queue is bounded** (`ResumeQueue(max_attempts=...)`, default 1): the
-  queue counts how many times each task has been resumed, and `push` refuses a
-  task past the cap — so a chronically slow task gets exactly `max_attempts`
-  re-runs instead of an infinite resume loop starving the worker's fresh tasks.
 
 - **`ReplaySampler` + `ProposalContext.rejected` — make the settled-evidence pool a consumer.** The aggregator's settled pool (stale / oversized / CAS-conflict evidence cards) was diagnostic-only: nothing read it back. Two consumers now close that loop.
 
@@ -2371,7 +2623,6 @@ value-directed evaluation or Genesis blind-mode proposals.
   `NameError` twenty minutes into a paid sweep -- which is exactly how one
   shipped.
 
-
 ### Added
 
 - **`--budget-rollouts` on every algorithm port**, forwarded as
@@ -2394,7 +2645,6 @@ value-directed evaluation or Genesis blind-mode proposals.
   one in the matrix that was equal-budget before this existed — which is itself a
   "semantics changed" entry, since one row of a table meaning something different
   from the other six is the failure the column is there to prevent.
-
 
 ### Changed
 
@@ -4431,7 +4681,8 @@ First public release on PyPI as **`agentdescent`**.
   discrete-space `Aggregator`, staleness policies, DP/TP/PP parallelism, layered
   governance, and the provider-agnostic `agentdescent.agents` completion layer.
 
-[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/Birfy/agentdescent/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/Birfy/agentdescent/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Birfy/agentdescent/compare/v0.4.6...v0.5.0
 [0.4.6]: https://github.com/Birfy/agentdescent/compare/v0.4.5...v0.4.6
@@ -4442,19 +4693,3 @@ First public release on PyPI as **`agentdescent`**.
 [0.3.0]: https://github.com/Birfy/agentdescent/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Birfy/agentdescent/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Birfy/agentdescent/releases/tag/v0.1.0
-
-- **`Ledger.fork` / `live_heads` / `discard_head` — multiple live heads (#75).**
-  The ledger held one `dev` branch; `PopulationAggregator` serialised candidates
-  by rewriting it, so no two workers could expand different candidates at once.
-  `fork("head/0")` creates an independent branch with its own version vector;
-  `live_heads()` lists `dev` plus all `head/` forks; `discard_head` cleans up.
-  `Candidate.branch` and `EvidenceCard.branch` carry the fork name.
-  `PopulationAggregator.step(n_workers)` forks a `head/<slot>` per selected
-  candidate and `head_for_worker(wid)` distributes workers across them.
-  `_commit_with_retry` commits to `EvidenceCard.branch`; the sync and async
-  worker loops snapshot from `head_for_worker` instead of hardcoded `dev`.
-  `_decide` passes the candidate's own branch through to the commit (and the
-  CAS-rebase path rebases against that branch, not `dev`), so a fork candidate
-  updates only its fork. `finalize` discards all forks and commits the best
-  candidate to `dev`.
-  Default: `SingleHead` + no forks = old behaviour exactly. 12 tests.

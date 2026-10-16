@@ -279,6 +279,25 @@ class ProposalPolicy(Protocol):
 
 
 @runtime_checkable
+class ScreenPolicy(Protocol):
+    """A pre-evaluation gate on evidence cards.
+
+    Called by the aggregator **before** the expensive measurement, so a card
+    the screen rejects is settled and reported without ever buying a held-out
+    sweep. ``screen(card)`` returns ``None`` for a card that may proceed, or a
+    reason string for one that must not. The reason becomes the merge report's
+    detail and the outcome is ``critic-rejected``.
+
+    The seam exists for the RRSI pre-evaluation critic (leakage and edit-budget
+    screening, see ``examples/rrsi/``), and it is deliberately a *card* gate:
+    screening after a candidate is built is too late, and screening the whole
+    batch loses which card failed and why.
+    """
+
+    def screen(self, card: "EvidenceCard") -> Optional[str]: ...
+
+
+@runtime_checkable
 class ConflictPolicy(Protocol):
     """Which of a batch of mutually contradictory changes survive.
 
@@ -350,12 +369,14 @@ class VerifierProtocol(Protocol):
 
 @runtime_checkable
 class LedgerProtocol(Protocol):
-    """Seven methods: four the aggregator calls, three more the engine calls.
+    """Eight methods: four the aggregator calls, four more the engine calls.
 
     Deriving this from the aggregator alone -- ``snapshot``, ``head_version``,
     ``commit``, ``promote_to_stable`` -- yields a contract that type-checks and
     then dies in ``_build_engine``, which calls ``register`` before any merge
     happens, in ``_safe_log`` at the end of every run, and in ``_Engine.cleanup``.
+    ``commit_atomic`` is the aggregator's path for a contract-breaking diff, which
+    must land as a single git commit with its adapters.
 
     ``repo_path`` is an attribute, not a method: the checkpoint module reads it
     to know where to write ``checkpoints/``. Every :class:`~agentdescent.ledger.Ledger`
@@ -375,6 +396,9 @@ class LedgerProtocol(Protocol):
     def head_version(self, branch: str = ...) -> Dict[str, int]: ...
     def commit(self, new_state: "Evolvable", base_version: Dict[str, int],
                branch: str = ..., message: str = ...) -> Tuple[str, int]: ...
+    def commit_atomic(self, new_states: List["Evolvable"],
+                      base_version: Dict[str, int],
+                      branch: str = ..., message: str = ...) -> Tuple[str, Dict[str, int]]: ...
     def promote_to_stable(self, artifact_id: str) -> Optional[int]: ...
     def log(self, branch: str = ..., limit: int = ...) -> List[str]: ...
     def close(self) -> None: ...
@@ -390,7 +414,8 @@ class SandboxSpec:
     """What environment one rollout needs. Must survive JSON: it crosses processes.
 
     Note what is *not* here: any secret. ``env_allowlist`` carries variable
-    **names**, and the values are read inside the sandbox. A spec gets pickled,
+    **names** only; the container provider forwards each set name as
+    ``--env NAME`` so values never land on the argv. A spec gets pickled,
     logged, cached and written to a journal, so a spec that carried an API key
     would leak it into all four.
     """
@@ -481,6 +506,12 @@ class Policies:
     #: worker, which is what the engine has always done.
     selection: Optional["SelectionPolicy"] = None
     proposal: Optional[ProposalPolicy] = None
+    #: A pre-evaluation gate on evidence cards (see
+    #: :class:`ScreenPolicy`). ``None`` keeps the old behaviour exactly --
+    #: every card that passes the trust region and staleness filter is merged.
+    #: Wired by the aggregator's ``_prepare``, so it runs before any
+    #: measurement.
+    screen: Optional[ScreenPolicy] = None
     conflict: Optional[ConflictPolicy] = None
     fusion: Optional[FusionPolicy] = None
     acceptance: Optional[AcceptancePolicy] = None

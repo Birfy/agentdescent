@@ -38,12 +38,14 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import (Any, Callable, Deque, Dict, List, Optional, Protocol, Tuple,
-                    Union, runtime_checkable)
+from typing import (Any, Callable, Deque, Dict, List, Optional, Protocol, Sequence,
+                    Tuple, Union, runtime_checkable)
 
 from .evolvable import (
-    ContractError, Diff, EvidenceCard, Evolvable, VersionVector, vv_staleness,
+    ContractError, Diff, EvidenceCard, Evolvable, VersionVector,
+    combined_rationale, rationale_paragraph, vv_staleness,
 )
+from .invariants import check_invariants
 from .defaults import (
     DefaultAcceptance, DefaultConflict, DefaultFusion, DefaultPromotion,
 )
@@ -52,7 +54,7 @@ from .ledger import CASConflict, Ledger
 from .metrics import Meter
 from .policies import (
     AcceptancePolicy, ConflictPolicy, FusionPolicy, MergeContext,
-    PromotionPolicy,
+    PromotionPolicy, ScreenPolicy,
 )
 from .scheduler import AuditScheduler
 from .staleness import StaleAction, StalenessPolicy, get_policy
@@ -222,6 +224,30 @@ class MergeOutcome(str, Enum):
     CAS_CONFLICT = "cas-conflict"
     #: The bucket named an artifact the ledger does not have.
     UNKNOWN_ARTIFACT = "unknown-artifact"
+    #: The diff broke one of the artifact's declared governance invariants
+    #: (see :mod:`agentdescent.invariants`). Rejected **before** measurement,
+    #: so a policy-violating proposal never buys a held-out sweep. The
+    #: reflector (or the contract) is the thing to look at.
+    VIOLATES_INVARIANT = "violates-invariant"
+    #: A contract-breaking diff landed on an artifact with declared dependents
+    #: (``Contract.depends_on``), but the worker supplied no adapted dependent
+    #: states to land in the same ``commit_atomic``. The atomic adaptation
+    #: transaction would otherwise silently commit only the breaking artifact,
+    #: leaving dependents registered against a superseded contract. Explicitly
+    #: rejected rather than half-applied.
+    MISSING_ADAPTERS = "missing-adapters"
+    #: A pre-evaluation screen (see
+    #: :class:`~agentdescent.policies.ScreenPolicy`) rejected the card before
+    #: it was measured -- leakage, an over-budget edit bundle, inert machinery.
+    #: The reason is on the report; the card was settled without a held-out
+    #: sweep, so no invented measurement ever justified it.
+    CRITIC_REJECTED = "critic-rejected"
+    #: An RRSI-style selector refused the candidate at its historical-best
+    #: noise floor (``score < S* - delta``).
+    NOISE_FLOOR = "noise-floor"
+    #: An RRSI-style selector refused the candidate on its cost rule (either
+    #: branch): the improvement costs more policy tokens than it is worth.
+    COST_RULE = "cost-rule"
 
     def __str__(self) -> str:            # so f-strings render the value, not the name
         return self.value
@@ -339,6 +365,11 @@ class _Candidate:
     oversized: int = 0
     #: The ledger branch this candidate was proposed against.
     branch: Optional[str] = None
+    #: Adapted states of the dependents that must land in the *same* atomic
+    #: commit as a contract-breaking change (the design's atomic adaptation
+    #: transaction). ``None``/empty when the diff is not contract-breaking, or
+    #: when the artifact has no declared dependents.
+    adapters: Optional[Sequence[Evolvable]] = None
 
     #: Filled by `Aggregator._measure`. `None` until then, which is what makes a
     #: candidate that skipped the phase fail loudly rather than commit on zeros.
@@ -607,7 +638,23 @@ def fuse_diffs(diffs: List[Diff]) -> Diff:
     ids = "+".join(sorted(d.diff_id for d in diffs))
     breaking = any(d.contract_breaking for d in diffs)
     return Diff(diff_id=f"fused({ids})", target=diffs[0].target, ops=ops,
-                contract_breaking=breaking, author="aggregator")
+                contract_breaking=breaking, author="aggregator",
+                rationale=combined_rationale(diffs))
+
+
+def merge_commit_message(diff: Diff, artifact_id: str) -> str:
+    """Ledger commit subject (+ optional rationale body) for an accepted Diff.
+
+    Without a rationale this is exactly ``merge {diff_id} -> {artifact_id}`` —
+    the historical message every non-FileTree strategy still produces. With one,
+    the rationale is appended as a single-paragraph body so ``git log`` on the
+    ledger carries *why* the change landed.
+    """
+    subject = f"merge {diff.diff_id} -> {artifact_id}"
+    body = rationale_paragraph(getattr(diff, "rationale", "") or "")
+    if not body:
+        return subject
+    return f"{subject}\n\n{body}"
 
 
 def install_policy(policy: Any, verifier: Any, config: "AggregatorConfig") -> None:
@@ -642,6 +689,7 @@ class Aggregator:
         fusion: Optional["FusionPolicy"] = None,
         acceptance: Optional["AcceptancePolicy"] = None,
         promotion: Optional["PromotionPolicy"] = None,
+        screen: Optional["ScreenPolicy"] = None,
     ) -> None:
         self.ledger = ledger
         self.verifier = verifier
@@ -666,6 +714,11 @@ class Aggregator:
             verifier, tournament=cfg.fusion_tournament)
         self.acceptance_policy = acceptance or DefaultAcceptance.from_config(cfg)
         self.promotion_policy = promotion or DefaultPromotion.from_config(cfg)
+        #: Pre-evaluation screen on evidence cards (see
+        #: :class:`~agentdescent.policies.ScreenPolicy`). ``None`` keeps the
+        #: old behaviour exactly -- every card that survives the trust region
+        #: and staleness filter proceeds to the gate.
+        self.screen_policy = screen
         # Two things a policy may need are built in here and nowhere a caller
         # can reach: the verifier (for anything that ranks) and the config (for
         # anything that reads a threshold). So every installed policy is offered
@@ -678,12 +731,26 @@ class Aggregator:
                        self.acceptance_policy, self.promotion_policy):
             install_policy(policy, verifier, cfg)
         self.buffer = EvidenceBuffer()
-        #: Optional value allocator (see :mod:`agentdescent.allocator`), wired
-        #: by the engine so the merge path can feed commit outcomes back into
-        #: it. ``None`` keeps the old behaviour; the aggregator never consults
-        #: the allocator for a decision (the worker does, through the budget
-        #: governor), it only reports what happened.
+        #: Optional value allocator (see :mod:`agentdescent/allocator.py`),
+        #: wired by the engine so the merge path can feed commit outcomes back
+        #: into it. ``None`` keeps the old behaviour; the aggregator never
+        #: consults the allocator for a decision (the worker does, through the
+        #: budget governor), it only reports what happened.
         self.allocator: Optional[Any] = None
+        #: Called after a **contract-breaking** commit lands, with the changed
+        #: artifact id and the branch it committed on. The engine wires it to
+        #: re-measure artifacts whose ``Contract.depends_on`` names the changed
+        #: artifact (their cached evaluations were taken under the superseded
+        #: contract). Optional -- ``None`` keeps the old behaviour of not
+        #: noticing.
+        self.on_contract_change: Optional[Callable[[str, str], None]] = None
+        #: Reverse contract-dependency graph: ``changed_artifact_id ->
+        #: [dependents]``, wired by the engine from the registered artifacts'
+        #: ``Contract.depends_on``. Used to refuse a contract-breaking commit
+        #: that would land without adapted dependents (see
+        #: :data:`MergeOutcome.MISSING_ADAPTERS`). Empty (single-artifact runs)
+        #: keeps the old behaviour.
+        self.contract_dependents: Dict[str, List[str]] = {}
         self._posteriors: Dict[str, BetaPosterior] = defaultdict(BetaPosterior)
         #: How many queued audits the L-value consumer drained and ran against
         #: the oracle. Zero when ``audit_drain_per_step`` is 0 (the default).
@@ -1033,10 +1100,21 @@ class Aggregator:
             }
         except AttributeError:
             return None
+        # An acceptance policy that keeps its own state (an RRSI-style selector
+        # holds the historical-best floor, the per-edit ledger and the annealed
+        # round counter) opts into checkpointing through an optional hook. A
+        # policy without one is simply absent from the payload -- the same way
+        # the posterior is absent from an aggregator that never had one.
+        state = None
+        hook = getattr(getattr(self, "acceptance_policy", None),
+                       "checkpoint_state", None)
+        if callable(hook):
+            state = hook()
         return {
             "posteriors": posteriors,
             "promoted_at": dict(self._promoted_at),
             "seen": sorted(self._seen),
+            "acceptance_state": state,
         }
 
     def restore(self, state: dict) -> None:
@@ -1069,6 +1147,15 @@ class Aggregator:
         seen = state.get("seen")
         if isinstance(seen, list):
             self._seen = set(seen)
+        acc = state.get("acceptance_state")
+        if acc is not None:
+            hook = getattr(getattr(self, "acceptance_policy", None),
+                           "restore_state", None)
+            if callable(hook):
+                try:
+                    hook(acc)
+                except Exception:  # noqa: BLE001 - a bad payload must not hide the artifact
+                    pass
 
     @property
     def _survival(self) -> Dict[str, int]:
@@ -1223,7 +1310,7 @@ class Aggregator:
         return False
 
     def _commit_with_retry(self, artifact_id, candidate, diff, head,
-                           branch: str = Ledger.DEV):
+                           branch: str = Ledger.DEV, adapters=None):
         """CAS, rebasing onto whatever landed first. ``None`` when it kept losing.
 
         With one writer a conflict cannot happen: every commit goes through a
@@ -1244,14 +1331,38 @@ class Aggregator:
         measurement is what the retry is trying to preserve. A diff whose value
         depends on which of two commits landed first is a diff the staleness
         policy should have caught.
+
+        A **contract-breaking** diff is committed atomically: ``commit`` refuses
+        a contract change via ``_assert_contract`` (it has to be re-registered
+        deliberately, not merged), while ``commit_atomic`` skips that guard --
+        which is the point of the atomic path (design doc section 6, the "atomic
+        adaptation transaction"). So the sanctioned route for a breaking change
+        is exactly the one the ledger offers but no engine path used. ``adapters``
+        are the dependent artifacts that must land in the same git commit (their
+        states already adapted to the new contract); ``None`` is a single-artifact
+        breaking change, which is still atomic by being one commit.
         """
         attempts = max(1, self.config.cas_attempts)
         for attempt in range(attempts):
-            base_vv = {artifact_id: head.get(artifact_id, 0)}
+            if diff.contract_breaking:
+                # `commit_atomic` CAS-checks *every* state it writes, so the
+                # base vector must name each one (candidate + adapters) with the
+                # version it was measured against. `head` is the merge's full
+                # version vector (from the branch snapshot), so every id is
+                # there; a missing entry means "new artifact, base 0".
+                new_states = [candidate] + list(adapters or ())
+                base_vv = {s.id: head.get(s.id, 0) for s in new_states}
+            else:
+                base_vv = {artifact_id: head.get(artifact_id, 0)}
             try:
+                if diff.contract_breaking:
+                    _, vv = self.ledger.commit_atomic(
+                        new_states, base_vv, branch=branch,
+                        message=f"merge {diff.diff_id} -> {artifact_id} (contract)")
+                    return vv[artifact_id]
                 _, new_version = self.ledger.commit(
                     candidate, base_vv, branch=branch,
-                    message=f"merge {diff.diff_id} -> {artifact_id}")
+                    message=merge_commit_message(diff, artifact_id))
                 return new_version
             except CASConflict:
                 if self.meter is not None:
@@ -1273,6 +1384,16 @@ class Aggregator:
                     # and reporting a conflict would be truer than reporting a
                     # commit that did not happen.
                     return None
+                # The primary rebases via `fresh.apply(diff)`, but an adapter is
+                # a *final state*, not a diff -- it cannot be rebased here, only
+                # re-validated. If a concurrent commit advanced one of the
+                # artifacts an adapter writes, committing the old adapter state
+                # as its next version would delete whatever that commit added.
+                # Reject the stale transaction; it re-files and is re-prepared
+                # by the worker.
+                for ad in (adapters or ()):
+                    if snap.version.get(ad.id, 0) != ad.version - 1:
+                        return None
         return None
 
     def _known_artifacts(self):
@@ -1336,6 +1457,47 @@ class Aggregator:
         region = self._trust_region()
         cards, oversized = self._apply_trust_region(cards, region)
 
+        # Pre-evaluation screen (RRSI critic and friends): runs here, before
+        # staleness and certainly before the expensive measurement, so a card
+        # the screen rejects is settled without buying a held-out sweep and
+        # without an invented measurement. The screen is a *card* gate -- it
+        # names which card failed and why -- and a batch that is only rejected
+        # cards reports ``critic-rejected`` with the reasons.
+        if self.screen_policy is not None:
+            kept: List[EvidenceCard] = []
+            rejected_screen: List[Tuple[EvidenceCard, str]] = []
+            for card in cards:
+                if self.meter is not None:
+                    self.meter.add("critic_checked")
+                reason = self.screen_policy.screen(card)
+                if reason is None:
+                    kept.append(card)
+                else:
+                    rejected_screen.append((card, reason))
+            if rejected_screen:
+                if self.meter is not None:
+                    self.meter.add("critic_rejected", len(rejected_screen))
+                self.buffer.settle([c for c, _ in rejected_screen])
+                if not kept:
+                    # A screen rejection is still a merge decision: an annealed
+                    # budget and a stall detector must advance on it, or a search
+                    # that only ever produced screen-rejected bundles would stay
+                    # pinned at b_max and never enter structured exploration
+                    # (RRSI review). The acceptance policy opts in through the
+                    # same per-merge accounting it uses on an accept/reject.
+                    on_reject = getattr(self.acceptance_policy,
+                                        "on_screen_reject", None)
+                    if callable(on_reject):
+                        on_reject()
+                    detail = "; ".join(
+                        f"{reason} (task {card.trajectory_refs[0].id if card.trajectory_refs else '?'})"
+                        for card, reason in rejected_screen)
+                    return MergeReport(artifact_id, None, False, n_considered, 0,
+                                       len(rejected_screen), 0, 0.0, None,
+                                       detail, MergeOutcome.CRITIC_REJECTED,
+                                       oversized=len(oversized))
+            cards = kept
+
         head = snap.version
         survivors, discarded = self._staleness_filter(artifact, head, cards)
         self.buffer.settle(discarded)
@@ -1361,6 +1523,38 @@ class Aggregator:
         kept_cards, conflicts = self._resolve_conflicts(artifact, survivors)
         kept_diffs = [c.diff for c in kept_cards]
         best_diff, best_state, fused = self._tournament(artifact, kept_diffs)
+        # Governance invariants (design doc, section 6): a declared contract
+        # is enforced here, **before** the expensive measurement -- a diff that
+        # breaks one must not buy a held-out sweep. The check reads the base
+        # artifact's contract, which is the registered one; a contract with no
+        # invariants returns no violations and costs a getattr. A violation
+        # settles the survivor cards (so the replay path learns not to propose
+        # it again) and reports ``violates-invariant`` with the reasons.
+        # ``invariant_checked`` counts every candidate whose contract declared
+        # a rule and passed through the gate (violated or not); a run that
+        # declared nothing reports zero, which is the honest reading "no rules
+        # to enforce", not "the gate is broken".
+        _declared = getattr(getattr(artifact, "contract", None), "invariants", ())
+        if _declared and self.meter is not None:
+            self.meter.add("invariant_checked")
+        violations = check_invariants(artifact, best_diff, best_state)
+        if violations:
+            if self.meter is not None:
+                self.meter.add("invariant_rejections", len(violations))
+            self.buffer.settle(survivors)
+            # Same per-merge accounting as the all-screen-rejected path: an
+            # annealed budget / stall detector must advance on a governance
+            # refusal too, or a streak of violates-invariant decisions freezes
+            # the RRSI schedule at b_max (review #254 P2).
+            on_reject = getattr(self.acceptance_policy,
+                                "on_screen_reject", None)
+            if callable(on_reject):
+                on_reject()
+            return MergeReport(artifact_id, None, False, n_considered,
+                               len(survivors), len(discarded), conflicts, 0.0,
+                               None, "; ".join(violations),
+                               MergeOutcome.VIOLATES_INVARIANT,
+                               oversized=len(oversized))
         return _Candidate(
             artifact_id=artifact_id, artifact=artifact, candidate=best_state,
             diff=best_diff, cards=kept_cards, survivor_cards=survivors,
@@ -1489,11 +1683,44 @@ class Aggregator:
         # -- commit (section 4.1): CAS on dev --------------------------------
         # The candidate was prepared against its branch's own head (`c.head`),
         # so it must commit to *that* branch -- a fork candidate going to `dev`
-        # would overwrite the confirmed branch and leave the fork unchanged
-        # (PR #196 review). Empty branch means `dev`, the single-head default.
+        # would overwrite the confirmed branch and leave the fork unchanged.
+        # Empty branch means `dev`, the single-head default.
+        # A contract-breaking change must land **with** its adapted dependents
+        # in the same atomic commit -- the design's "atomic adaptation
+        # transaction". The worker produces the breaking diff; the adapted
+        # dependent states are what make it safe. The adapters must cover
+        # *exactly* the declared dependents: every dependent that relies on
+        # this artifact's contract has to land adapted in the same commit, and
+        # a stray adapter for an unrelated artifact would leave a real
+        # dependent registered against the superseded contract while pretending
+        # the transaction is complete. The guard runs whenever *either* side is
+        # nonempty: an artifact with no declared dependents must not carry
+        # adapters either -- a breaking change to it has nothing to land with,
+        # and committing an unrelated adapter would silently change an artifact
+        # no gate asked it to touch.
+        required = set(self.contract_dependents.get(c.artifact_id, ()))
+        if c.diff.contract_breaking:
+            adapters = list(getattr(c, "adapters", None) or ())
+            adapter_ids = [a.id for a in adapters]
+            missing = sorted(required - set(adapter_ids))
+            extra = sorted(set(adapter_ids) - required)
+            duplicated = len(adapter_ids) != len(set(adapter_ids))
+            if missing or extra or duplicated:
+                _observe_outcome(False)
+                return report(None, None,
+                              f"contract-breaking change to {c.artifact_id} has "
+                              f"declared dependents {sorted(required)}; its "
+                              f"adapters (ids {sorted(set(adapter_ids))}) must "
+                              f"cover exactly those, but they are missing "
+                              f"{missing}, extra {extra} and "
+                              f"duplicated={duplicated}. Refusing rather than "
+                              f"half-apply: every dependent must land adapted "
+                              f"in the same atomic commit.",
+                              MergeOutcome.MISSING_ADAPTERS)
         new_version = self._commit_with_retry(
             c.artifact_id, c.candidate, c.diff, c.head,
-            branch=c.branch or Ledger.DEV)
+            branch=c.branch or Ledger.DEV,
+            adapters=getattr(c, "adapters", None))
         committed = new_version is not None
         _observe_outcome(committed)
         if not committed:
@@ -1501,5 +1728,8 @@ class Aggregator:
             return report(None, None, "CAS conflict", MergeOutcome.CAS_CONFLICT)
 
         prior.update(True, weight=2.0)  # a committed improvement is strong evidence.
+
+        if c.diff.contract_breaking and self.on_contract_change is not None:
+            self.on_contract_change(c.artifact_id, c.branch or Ledger.DEV)
 
         return report(c.diff, new_version, "committed", MergeOutcome.COMMITTED)

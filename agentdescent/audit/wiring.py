@@ -71,6 +71,12 @@ class Audit:
     #: :meth:`~agentdescent.audit.gate.VerifierWatch.check` between rounds, or
     #: :meth:`~agentdescent.audit.gate.VerifierWatch.on_merge` from a hook.
     watch: VerifierWatch
+    #: Optional verifier bootstrap flywheel (see
+    #: :class:`~agentdescent.audit.boost.VerifierBoost`). ``None`` keeps the
+    #: old behaviour exactly. When set, :meth:`recompute` retrains it after
+    #: re-estimating the rectification, so the loop's calibration and the
+    #: verifier's own improvement move together.
+    boost: Optional["VerifierBoost"] = None
 
     @property
     def verifier_version(self) -> str:
@@ -85,7 +91,23 @@ class Audit:
         return self.calibrator.current(self.verifier_version)
 
     def recompute(self) -> Rectification:
-        """Re-read the store and re-estimate. Call after a batch resolves."""
+        """Re-read the store and re-estimate. Call after a batch resolves.
+
+        When a :class:`~agentdescent.audit.boost.VerifierBoost` is attached,
+        it is retrained here too -- a batch of resolved labels is exactly the
+        moment the flywheel should learn from. After a retrain that changes
+        ``version_tag``, the reward's fingerprint is refreshed and
+        :meth:`~agentdescent.audit.gate.VerifierWatch.check` runs so the old
+        calibration is withdrawn before the new version is estimated.
+        """
+        if self.boost is not None:
+            # Train against labels scored under the version currently in force
+            # (before activation changes the tag).
+            self.boost.retrain(verifier_version=self.verifier_version)
+            prev = self.verifier_version
+            self.reward.refresh_verifier_version()
+            if self.reward.verifier_version != prev:
+                self.watch.check()
         return self.calibrator.recompute(self.verifier_version)
 
     def rebalance(self, unseen: float, **kw: Any) -> float:
@@ -173,7 +195,8 @@ def attach(verifier: Callable[[Any, str], float], *,
            verifier_version: Optional[str] = None,
            version_extra: Any = None,
            watch_ids: Iterable[str] = (),
-           watch_globs: Sequence[str] = ()) -> Audit:
+           watch_globs: Sequence[str] = (),
+           boost: Optional["VerifierBoost"] = None) -> Audit:
     """Assemble the audit around ``verifier`` and return what ``evolve()`` needs.
 
     Parameters
@@ -228,11 +251,18 @@ def attach(verifier: Callable[[Any, str], float], *,
         if not policy.enabled:
             enabled = False
 
+    if boost is not None and version_extra is None and verifier_version is None:
+        # Live tag so activation changes the audit fingerprint (review #273).
+        version_extra = boost.version_tag
+
     reward = AuditedReward(
         verifier, oracle=oracle, store=store, draw_by=draw_by,
         sample_rate=default_rate, stratify=stratify, rates=rates,
         calibration_fraction=calibration_fraction, seed=seed,
         verifier_version=verifier_version, version_extra=version_extra)
+
+    if boost is not None and boost._version_for_training is None:
+        boost._version_for_training = lambda: reward.verifier_version
 
     calibrator = Calibrator(store, alpha=policy.alpha if policy else 0.05,
                             seed=seed)
@@ -251,4 +281,4 @@ def attach(verifier: Callable[[Any, str], float], *,
     watch.check()
     return Audit(reward=reward, run=RenderTap(run) if run is not None else None,
                  acceptance=acceptance, store=store, calibrator=calibrator,
-                 watch=watch)
+                 watch=watch, boost=boost)
