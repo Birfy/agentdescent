@@ -35,13 +35,14 @@ __all__ = ["exact_match", "contains", "last_number", "numeric_close",
 #: thousands groups of exactly three digits (``1,234.5``, so ``1,2,3`` is three
 #: numbers, not ``123``). A ``-``/``+`` is a sign only when it is not glued to
 #: a preceding digit, letter or closing bracket, so ``pages 3-4`` reads ``4``,
-#: not ``-4``; and a match never starts inside another number (#288).
+#: not ``-4``; a match never starts inside another number, yet a figure
+#: glued to an ellipsis (``Total...42``) is still read (#288).
 _NUMBER = re.compile(
-    r"(?<![\d.])"                          # not in the middle of another number
+    r"(?<!\d)(?<!\d\.)"                    # not in the middle of another number
     r"(?:(?<![0-9A-Za-z)\]}])[-+])?"       # a sign, unless it is a binary minus
     r"(?:\d{1,3}(?:,\d{3})+(?:\.\d*)?"     # thousands-grouped
     r"|\d+(?:\.\d*)?"                      # plain; ``1.`` / ``1.e-3`` too
-    r"|\.\d+)"                              # leading decimal point
+    r"|(?<![.\d])\.\d+)"                   # leading decimal point, not out of "..."
     r"(?:[eE][-+]?\d+)?"                    # exponent
     r"(?!\d)"
 )
@@ -113,8 +114,9 @@ def last_number(gold_key: str = "gold", *, tolerance: float = 0.0) -> Callable:
         if want is None:
             raise ValueError(
                 f"task {getattr(task, 'id', '?')!r}: meta[{gold_key!r}] contains no "
-                f"number, so last_number() can never match it. Use exact_match() or "
-                f"contains(), or point gold_key= at the right column.")
+                f"number (none that is finite), so last_number() can never match "
+                f"it. Use exact_match() or contains(), or point gold_key= at the "
+                f"right column.")
         found = _NUMBER.findall(output or "")
         got = _to_float(found[-1]) if found else None
         if got is None:

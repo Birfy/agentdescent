@@ -43,6 +43,11 @@ from agentdescent.rewards import (GraderError, _last_number_in, command_scorer,
     ("答案是-3", -3.0),
     ("first 10 then 20", 20.0),
     ("3em", 3.0),
+    # a figure glued to an ellipsis is still a figure; a version is not three
+    ("Total...42", 42.0),
+    ("Answer:...42", 42.0),
+    ("so...7.5", 7.5),
+    ("v1.2.3", 1.2),
 ])
 def test_last_number_in_reads_the_written_figure(text, want):
     assert _last_number_in(text) == pytest.approx(want)
@@ -96,3 +101,12 @@ def test_command_scorer_refuses_an_overflowing_score():
     # a trailing decimal point before the exponent must not split it into 999
     with pytest.raises(GraderError):
         _grader("print('1.e999')")(_task("x"), "out")
+
+
+def test_command_scorer_reads_a_score_after_an_ellipsis():
+    assert _grader("print('score...0.8')")(_task("x"), "out") == pytest.approx(0.8)
+
+
+def test_last_number_overflowing_gold_is_a_loud_error():
+    with pytest.raises(ValueError, match="contains no number.*finite"):
+        last_number()(_task("1e999"), "1e999")
