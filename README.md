@@ -69,10 +69,10 @@ cannot drift from what the paper shows.
 
 ## Install and run the offline demo
 
-These instructions target **0.5.1**. Once that version is published:
+These instructions target **0.6.0**. Once that version is published:
 
 ```bash
-pip install "agentdescent>=0.5.1"
+pip install "agentdescent>=0.6.0"
 agentdescent demo
 ```
 

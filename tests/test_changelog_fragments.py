@@ -6,6 +6,7 @@ conflicting on the same lines. These tests pin the contract of
 ``changelog.d`` of this checkout so a malformed fragment fails ``pytest -q``.
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -297,3 +298,153 @@ def test_history_below_unreleased_is_untouched(tmp_path):
     out = (root / "CHANGELOG.md").read_text(encoding="utf-8")
     tail = CHANGELOG[CHANGELOG.index("## [1.0.0]"): CHANGELOG.index("[Unreleased]:")]
     assert tail in out
+
+
+# -- atomic write / fault injection (#297) ------------------------------------
+#
+# ``run_release`` used to open CHANGELOG.md with mode "w", which truncates the
+# file before the replacement bytes are on disk. A crash (or an injected
+# OSError) after that truncate would leave an empty or partial history. The
+# fix stages the full replacement in a sibling temp file, fsyncs+closes it,
+# then ``os.replace``s; fragments are removed only after replace succeeds.
+
+
+def test_release_writes_via_atomic_replace(tmp_path, monkeypatch):
+    """Happy path still folds and deletes, and the durable write goes through
+    ``os.replace`` rather than truncating CHANGELOG.md in place."""
+    import os as _os
+
+    root = make_repo(tmp_path, a_1="Fixed\nOne.\n")
+    original = (root / "CHANGELOG.md").read_bytes()
+    replaces = []
+    real_replace = _os.replace
+
+    def tracking_replace(src, dst):
+        replaces.append((str(src), str(dst)))
+        # The destination must still hold the original bytes at replace time:
+        # a truncate-then-write path would already have emptied it.
+        assert Path(dst).read_bytes() == original
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(cf.os, "replace", tracking_replace)
+
+    assert release(root) == 0
+    assert replaces, "release must call os.replace for the CHANGELOG write"
+    assert any(Path(dst).name == "CHANGELOG.md" for _src, dst in replaces)
+    text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "- One." in text
+    assert fragment_files(root) == ["README.md"]
+
+
+def test_release_survives_a_write_failure(tmp_path, monkeypatch):
+    """If staging the replacement raises mid-write, CHANGELOG.md and every
+    fragment must be left untouched and the failure surfaced."""
+    import io
+
+    root = make_repo(tmp_path, a_1="Fixed\nOne.\n", b_2="Added\nTwo.\n")
+    before_changelog = (root / "CHANGELOG.md").read_bytes()
+    before_fragments = fragment_files(root)
+
+    class BoomFile:
+        def write(self, data):
+            raise OSError("injected write failure")
+
+        def flush(self):
+            pass
+
+        def fileno(self):
+            return -1
+
+        def close(self):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def boom_fdopen(fd, *a, **k):
+        # Close the real fd so we do not leak the mkstemp handle; then return
+        # a stub that fails on write.
+        try:
+            cf.os.close(fd)
+        except OSError:
+            pass
+        return BoomFile()
+
+    monkeypatch.setattr(cf.os, "fdopen", boom_fdopen)
+
+    err = io.StringIO()
+    rc = cf.run_release(root, out=io.StringIO(), err=err)
+    assert rc == 1
+    assert "failed to write CHANGELOG.md" in err.getvalue()
+    assert (root / "CHANGELOG.md").read_bytes() == before_changelog
+    assert fragment_files(root) == before_fragments
+    leftovers = [p.name for p in root.iterdir() if p.name.startswith(".CHANGELOG")]
+    assert leftovers == []
+
+
+def test_release_survives_a_flush_failure(tmp_path, monkeypatch):
+    """Failure while flushing/closing the staged file also preserves history."""
+    import io
+
+    root = make_repo(tmp_path, a_1="Fixed\nOne.\n")
+    before_changelog = (root / "CHANGELOG.md").read_bytes()
+    before_fragments = fragment_files(root)
+
+    real_fdopen = cf.os.fdopen
+
+    def flaky_fdopen(fd, *a, **k):
+        handle = real_fdopen(fd, *a, **k)
+        real_flush = handle.flush
+
+        def boom_flush():
+            real_flush()
+            raise OSError("injected flush failure")
+
+        handle.flush = boom_flush
+        return handle
+
+    monkeypatch.setattr(cf.os, "fdopen", flaky_fdopen)
+
+    err = io.StringIO()
+    rc = cf.run_release(root, out=io.StringIO(), err=err)
+    assert rc == 1
+    assert "failed to write CHANGELOG.md" in err.getvalue()
+    assert (root / "CHANGELOG.md").read_bytes() == before_changelog
+    assert fragment_files(root) == before_fragments
+
+
+def test_release_survives_a_replace_failure(tmp_path, monkeypatch):
+    """If the final os.replace fails, the original CHANGELOG.md stays and
+    fragments remain available for a retry."""
+    import io
+
+    root = make_repo(tmp_path, a_1="Fixed\nOne.\n")
+    before_changelog = (root / "CHANGELOG.md").read_bytes()
+    before_fragments = fragment_files(root)
+
+    def boom_replace(src, dst):
+        raise OSError("injected replace failure")
+
+    monkeypatch.setattr(cf.os, "replace", boom_replace)
+
+    err = io.StringIO()
+    rc = cf.run_release(root, out=io.StringIO(), err=err)
+    assert rc == 1
+    assert "failed to write CHANGELOG.md" in err.getvalue()
+    assert (root / "CHANGELOG.md").read_bytes() == before_changelog
+    assert fragment_files(root) == before_fragments
+
+
+def test_release_success_still_folds_and_is_idempotent(tmp_path, capsys):
+    """Successful atomic path: folded text, fragments gone, re-run is a no-op."""
+    root = make_repo(tmp_path, a_1="Fixed\nOne.\n")
+    assert release(root) == 0
+    after = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "- One." in after
+    assert fragment_files(root) == ["README.md"]
+    assert release(root) == 0
+    assert (root / "CHANGELOG.md").read_text(encoding="utf-8") == after
+    assert "no fragments to fold" in capsys.readouterr().out
