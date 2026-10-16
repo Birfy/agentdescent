@@ -1,18 +1,18 @@
 ---
-description: Twenty-one published self-evolution algorithms ported as runnable plug-ins on one runtime, each with a declared fidelity class and a measured before-and-after result.
+description: Twenty-two published self-evolution algorithms ported as runnable plug-ins on one runtime, each with a declared fidelity class and a measured before-and-after result.
 ---
 
-# Self-evolution algorithms — twenty-one ports
+# Self-evolution algorithms — twenty-two ports
 
 AgentDescent is a *general* engine for parallel, merge-based evolution. To show
-it is faithful to the field — not a toy — twenty-one published **skill**,
+it is faithful to the field — not a toy — twenty-two published **skill**,
 **program** and **harness** self-evolution algorithms run on it, each as one
 runnable example with a dedicated page. Eight reproduce their paper's own
-benchmark; thirteen preserve the mechanism on a compact domain and say so. What
+benchmark; fourteen preserve the mechanism on a compact domain and say so. What
 each one follows and where it departs is recorded per port in
 [port fidelity](port-fidelity.md).
 
-**All twenty-one run through the AgentDescent evolution engines.** No example
+**All twenty-two run through the AgentDescent evolution engines.** No example
 bypasses the engine, and they reach it three ways:
 
 * the **eight benchmark-faithful ports** are each a custom `strategy=` and/or a
@@ -24,15 +24,15 @@ bypasses the engine, and they reach it three ways:
   mechanisms plug in as `Policies(...)` fields, their artifacts as shared
   [strategies](strategies.md), and the [runtime matrix](matrix-overview.md)
   measures them under all three schedulers;
-* **Dynamic Cheatsheet** is a twelfth `MethodPolicy` definition, listed
-  [on its own](#added-since-dynamic-cheatsheet-the-ace-precursor) so the eleven
-  above keep describing what they were measured with;
+* **Dynamic Cheatsheet** is one more `MethodPolicy` definition, listed
+  [on its own](#added-since-dynamic-cheatsheet-the-ace-precursor) so the table
+  above keeps describing what it was measured with;
 * **Genesis** is neither: a custom `strategy=` like the first group, a
   `mechanism_microport` fidelity class like the second, and its whole algorithm
   installed through `Policies(proposal=, acceptance=, conflict=)` — the case that
   shows the seams are enough on their own.
 
-**All twenty-one are parallel — and can run async.** In synchronous mode their workers
+**All twenty-two are parallel — and can run async.** In synchronous mode their workers
 run **concurrently** (overlapping LLM rollouts) with the aggregator merge as the
 barrier (*synchronous data-parallelism*). Add **`--async`** and the same example
 runs **barrier-free** through
@@ -79,6 +79,7 @@ so they share a runner, a budget contract and a command line. Port author:
 | **Absolute Zero** | `inference_analogue` | self-play carts | frozen self-play evaluation; learnability signal | [→](algo-absolute-zero.md) |
 | **R-Zero** | `inference_analogue` | self-play carts | `AdvantageAcceptance` (GRPO shape), `DifficultyWeighted` | [→](algo-r-zero.md) |
 | **Agent0** | `inference_analogue` | self-play carts | `DifficultyWeighted`; calculator stop-and-go | [→](algo-agent0.md) |
+| **gskill** (port author `chendanyang`) | `mechanism_microport` | vendored bug-fix repo (not SWE-smith) | `FileTree` skill dir + `skill_dir` validator; strict held-out acceptance | [→](algo-gskill.md) |
 
 ### Added since: Dynamic Cheatsheet, the ACE precursor
 
@@ -237,7 +238,7 @@ cannot be decorative. `run_port` also records all three in `framework`, and
 
 ---
 
-## Measured results — all twenty-one
+## Measured results — all twenty-two
 
 Every port below has been run and every number is linked to the run that
 produced it, **except Dynamic Cheatsheet, which has only a deterministic
@@ -335,7 +336,7 @@ port:
 |---|---|---|
 | Evolution / program search | [OpenEvolve](algo-openevolve.md) | [PromptBreeder](algo-promptbreeder.md), [AFlow](algo-aflow.md) |
 | Reflection / refinement | [GEPA](algo-gepa.md) (reflective) | [Reflexion](algo-reflexion.md), [Self-Refine](algo-self-refine.md) |
-| Skills / lifelong learning | [EvoSkill](algo-evoskill.md), [SkillOpt](algo-skillopt.md), [ACE](algo-ace.md) | [Voyager](algo-voyager.md), [SkillWeaver](algo-skillweaver.md), [Dynamic Cheatsheet](algo-dynamic-cheatsheet.md) (DC-Cu, the ACE precursor microport) |
+| Skills / lifelong learning | [EvoSkill](algo-evoskill.md), [SkillOpt](algo-skillopt.md), [ACE](algo-ace.md) | [Voyager](algo-voyager.md), [SkillWeaver](algo-skillweaver.md), [gskill](algo-gskill.md), [Dynamic Cheatsheet](algo-dynamic-cheatsheet.md) (DC-Cu, the ACE precursor microport) |
 | Self-play / unlabeled data | — | [Absolute Zero](algo-absolute-zero.md), [R-Zero](algo-r-zero.md), [Agent0](algo-agent0.md) |
 | Self-modifying code / harness | [DGM](algo-dgm.md), [ADAS](algo-adas.md) | [SICA](algo-sica.md), [Gödel Agent](algo-godel-agent.md) |
 

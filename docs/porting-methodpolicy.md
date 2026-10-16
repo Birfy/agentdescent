@@ -34,5 +34,5 @@ Use this for mechanism microports and analogues — declarative
 - [ ] Add its row to
   [the eleven](self-evolution-examples.md#the-eleven-microports-and-analogues)
   and, once measured, to
-  [all twenty-one](self-evolution-examples.md#measured-results-all-twenty-one).
+  [all twenty-two](self-evolution-examples.md#measured-results-all-twenty-two).
 - [ ] Record the port author and the upstream trace, exactly as Path A does.

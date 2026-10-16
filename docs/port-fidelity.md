@@ -1,6 +1,6 @@
 # Port fidelity — what each port follows, and where it departs
 
-Twenty-one published self-evolution algorithms run on this engine — eight as benchmark-faithful ports, thirteen as declared microports and analogues. Every one of them
+Twenty-two published self-evolution algorithms run on this engine — eight as benchmark-faithful ports, fourteen as declared microports and analogues. Every one of them
 was published as a **serial** loop, and every one of them here runs in parallel
 with a merge step the original does not have. That is only an interesting claim
 if the algorithm is otherwise untouched — a "parallelised GEPA" that quietly
@@ -20,9 +20,9 @@ the axis the differences actually fall on, and because the answer is not always
     contradicts reproduces something nobody ran.
 
 !!! note "Fidelity is a per-port property, not a tier"
-    All twenty-one ports sit side by side in
+    All twenty-two ports sit side by side in
     [Self-evolution algorithms](self-evolution-examples.md); what differs is
-    each port's recorded fidelity class. Thirteen of them run compact domains or
+    each port's recorded fidelity class. Fourteen of them run compact domains or
     substituted environments and say so on their pages -- a mechanism
     microport or an environment, inference, or self-edit analogue is not a
     faithful benchmark port, and the [runtime matrix](matrix-overview.md)
@@ -520,7 +520,7 @@ section naming exactly what its compact or substituted domain gives up, and a
 port is. Start from the
 [table of all eleven](self-evolution-examples.md#the-eleven-microports-and-analogues);
 their measured results are
-[in one place](self-evolution-examples.md#measured-results-all-twenty-one), and the
+[in one place](self-evolution-examples.md#measured-results-all-twenty-two), and the
 scheduler comparison they exist for is the [runtime matrix](matrix-overview.md).
 
 What they share is the thing the fidelity class encodes: **a `mechanism_microport`

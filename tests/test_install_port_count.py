@@ -30,6 +30,6 @@ def test_install_guide_names_the_current_number_of_dry_run_ports():
         sections.append(catalogue[start:end])
 
     total = sum(_algorithm_rows(section) for section in sections)
-    assert total == 21
+    assert total == 22
     assert f"All {total} algorithm ports print" in install
     assert "All nineteen" not in install
