@@ -31,6 +31,7 @@ from .audit import (
     AuditedReward, AuditRecord, AuditStore, DeferredOracle, GoldAnswer,
     NullOracle, Purpose, RenderTap, resolve_from_mapping, verifier_fingerprint,
     residual_bias,
+    BoostState, VerifierBoost, isotonic_fit,
 )
 from . import backends, dataloader          # submodules: agentdescent.dataloader.hf_rows(...)
 from .dataloader import Dataset, split_dataset

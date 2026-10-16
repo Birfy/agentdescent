@@ -1294,6 +1294,7 @@ AuditedReward(
 |---|---|
 | `calibration_set() -> list` | Resolved CALIBRATION records for *this* verifier version. |
 | `pending() -> list` | Audited units still waiting on truth. |
+| `refresh_verifier_version() -> str` | Re-derive `verifier_version` from a live `version_extra`. |
 
 ### `RenderTap(run: Callable[[str, Any], str]) -> None`
 
@@ -1316,7 +1317,8 @@ Audit(
     acceptance: RectifiedAcceptance,
     store: AuditStore,
     calibrator: Calibrator,
-    watch: VerifierWatch
+    watch: VerifierWatch,
+    boost: Optional['VerifierBoost'] = None
 ) -> None
 ```
 
@@ -1350,7 +1352,8 @@ attach(
     verifier_version: Optional[str] = None,
     version_extra: Any = None,
     watch_ids: Iterable[str] = (),
-    watch_globs: Sequence[str] = ()
+    watch_globs: Sequence[str] = (),
+    boost: Optional['VerifierBoost'] = None
 ) -> Audit
 ```
 
@@ -1373,6 +1376,7 @@ attach(
 | `version_extra` | `Any` | `None` |  |
 | `watch_ids` | `Iterable[str]` | `()` | Artifact ids and diff-key globs that mean the verifier changed. Nothing is watched by default, which is right for a fixed function and exactly wrong for a run that evolves its own judge -- see `VerifierWatch`. |
 | `watch_globs` | `Sequence[str]` | `()` | As `watch_ids`. |
+| `boost` | `Optional['VerifierBoost']` | `None` |  |
 
 ---
 

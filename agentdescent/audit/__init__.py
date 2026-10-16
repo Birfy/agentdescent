@@ -67,6 +67,7 @@ the information of nineteen judged by exact match.
 """
 
 from .wiring import Audit, attach
+from .boost import BoostState, VerifierBoost, isotonic_fit
 from .calibrator import (STALE_INFLATION, Calibrator, Rectification,
                          population_resid_sd)
 from .coverage import (CALIBRATION_CEILING, CALIBRATION_FLOOR, MIN_UNSEEN,
