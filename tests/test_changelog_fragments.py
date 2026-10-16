@@ -448,3 +448,126 @@ def test_release_success_still_folds_and_is_idempotent(tmp_path, capsys):
     assert release(root) == 0
     assert (root / "CHANGELOG.md").read_text(encoding="utf-8") == after
     assert "no fragments to fold" in capsys.readouterr().out
+
+
+# -- rename durability and POSIX mode (#301) -----------------------------------
+#
+# #300 made the replacement atomic but (1) never synced the parent directory, so
+# after a system crash the rename could be lost while fragment unlinks survived,
+# and (2) published the private 0600 ``mkstemp`` inode, silently changing a 0644
+# CHANGELOG.md. Ordinary exception injection cannot prove power-loss durability;
+# these tests pin the *ordering* and failure contract the fix relies on.
+
+posix_only = pytest.mark.skipif(os.name != "posix", reason="POSIX-only semantics")
+
+
+def _record_operations(monkeypatch, root):
+    """Record the order of fsync (file vs directory), replace and fragment unlink."""
+    import stat as _stat
+
+    ops = []
+    real_fsync, real_replace = cf.os.fsync, cf.os.replace
+    real_unlink = Path.unlink
+
+    def fsync(fd):
+        kind = "dir" if _stat.S_ISDIR(cf.os.fstat(fd).st_mode) else "file"
+        ops.append(f"fsync-{kind}")
+        return real_fsync(fd)
+
+    def replace(src, dst):
+        ops.append("replace")
+        return real_replace(src, dst)
+
+    def unlink(self, *a, **k):
+        if self.parent.name == "changelog.d":
+            ops.append("unlink-fragment")
+        return real_unlink(self, *a, **k)
+
+    monkeypatch.setattr(cf.os, "fsync", fsync)
+    monkeypatch.setattr(cf.os, "replace", replace)
+    monkeypatch.setattr(Path, "unlink", unlink)
+    return ops
+
+
+@posix_only
+def test_parent_directory_is_synced_after_replace_and_before_fragment_unlink(
+        tmp_path, monkeypatch):
+    root = make_repo(tmp_path, a_1="Fixed\nOne.\n", b_2="Added\nTwo.\n")
+    ops = _record_operations(monkeypatch, root)
+    assert release(root) == 0
+    assert ops == ["fsync-file", "replace", "fsync-dir",
+                   "unlink-fragment", "unlink-fragment"]
+
+
+@posix_only
+def test_directory_sync_failure_keeps_every_fragment_and_is_honest(
+        tmp_path, monkeypatch):
+    import io
+
+    root = make_repo(tmp_path, a_1="Fixed\nOne.\n", b_2="Added\nTwo.\n")
+    before_fragments = fragment_files(root)
+    real_fsync = cf.os.fsync
+
+    def fsync(fd):
+        import stat as _stat
+        if _stat.S_ISDIR(cf.os.fstat(fd).st_mode):
+            raise OSError(5, "injected directory fsync failure")
+        return real_fsync(fd)
+
+    monkeypatch.setattr(cf.os, "fsync", fsync)
+    out, err = io.StringIO(), io.StringIO()
+    rc = cf.run_release(root, out=out, err=err)
+    assert rc == 1
+    assert fragment_files(root) == before_fragments       # nothing deleted
+    message = err.getvalue()
+    assert "injected directory fsync failure" in message
+    assert "may already have been replaced" in message
+    assert "no changes made" not in message               # that would be false
+    assert "folded" not in out.getvalue()
+    # The replace did happen, and no staging file is left behind.
+    assert "- One." in (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert [p.name for p in root.iterdir() if p.name.startswith(".CHANGELOG")] == []
+
+
+def test_non_posix_platforms_skip_the_directory_sync_and_mode_copy(
+        tmp_path, monkeypatch):
+    """Unsupported platforms are explicit: no directory descriptor is opened and
+    no POSIX mode is assumed; the atomic replace still works."""
+    root = make_repo(tmp_path, a_1="Fixed\nOne.\n")
+    monkeypatch.setattr(cf, "_POSIX", False)
+
+    def forbidden(*a, **k):
+        raise AssertionError("directory sync attempted on a non-POSIX platform")
+
+    monkeypatch.setattr(cf, "_fsync_directory", forbidden)
+    assert release(root) == 0
+    assert "- One." in (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert fragment_files(root) == ["README.md"]
+
+
+@posix_only
+@pytest.mark.parametrize("mode", [0o644, 0o640, 0o664, 0o600, 0o2755])
+def test_release_preserves_the_existing_file_mode(tmp_path, mode):
+    root = make_repo(tmp_path, a_1="Fixed\nOne.\n")
+    changelog = root / "CHANGELOG.md"
+    os.chmod(changelog, mode)
+    assert release(root) == 0
+    assert "- One." in changelog.read_text(encoding="utf-8")
+    assert (os.stat(changelog).st_mode & 0o7777) == mode
+
+
+@posix_only
+def test_mode_is_applied_before_the_replacement_is_published(
+        tmp_path, monkeypatch):
+    root = make_repo(tmp_path, a_1="Fixed\nOne.\n")
+    os.chmod(root / "CHANGELOG.md", 0o644)
+    real_replace = cf.os.replace
+    seen = []
+
+    def replace(src, dst):
+        seen.append(os.stat(src).st_mode & 0o7777)
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(cf.os, "replace", replace)
+    assert release(root) == 0
+    assert seen == [0o644]
