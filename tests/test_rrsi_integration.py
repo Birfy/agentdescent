@@ -226,6 +226,45 @@ def test_a_streak_of_rejections_anneals_the_budget_and_trips_stall():
         "a flat progress must trip the stall note while the search is stuck")
 
 
+def test_an_improvement_after_a_rejection_streak_is_not_a_stall():
+    """The accept must append the *post-decision* S*, so an improvement that
+    breaks a rejection streak is not reported as a stall. Before the fix,
+    `record_merge()` ran before `best_score` was updated, so an accepted jump
+    left progress flat (`[0.5, 0.5, 0.5]`) and `stalled()` True even though S*
+    just moved (review)."""
+    st = RRsiState(RRsiConfig(stall_window=3), base_score=0.5)
+    acc = RRsiAcceptance(st)
+    # two rejections (base 0.5 -> cand 0.3): progress stays at 0.5
+    assert acc.accept(_context(st, base=(5, 5), cand=(3, 7))).accept is False
+    assert acc.accept(_context(st, base=(5, 5), cand=(3, 7))).accept is False
+    # one acceptance (base 0.5 -> cand 0.8): S* moves to 0.8
+    assert acc.accept(_context(st, base=(5, 5), cand=(8, 2))).accept is True
+    assert st.best_score == pytest.approx(0.8)
+    assert st.progress == [0.5, 0.5, 0.8], (
+        "the accept must append the post-decision S*, not the pre-decision one; "
+        f"got {st.progress}")
+    assert st.stalled() is False, (
+        "an improvement that broke the streak must not read as a stall")
+    assert st.round == 3
+
+
+def test_an_improvement_after_a_rejection_streak_survives_checkpoint():
+    """The corrected progress must round-trip through the acceptance state's
+    checkpoint: a resumed run must not inherit a stale flat history that reads
+    as a stall when S* actually moved."""
+    st = RRsiState(RRsiConfig(stall_window=3), base_score=0.5)
+    acc = RRsiAcceptance(st)
+    acc.accept(_context(st, base=(5, 5), cand=(3, 7)))     # reject
+    acc.accept(_context(st, base=(5, 5), cand=(3, 7)))     # reject
+    acc.accept(_context(st, base=(5, 5), cand=(8, 2)))     # accept -> 0.8
+    fresh = RRsiState(RRsiConfig(stall_window=3), base_score=0.5)
+    fresh.restore(st.checkpoint())
+    assert fresh.best_score == pytest.approx(0.8)
+    assert fresh.progress == [0.5, 0.5, 0.8]
+    assert fresh.stalled() is False, (
+        "restored history must not report a stall for an S* that moved")
+
+
 def test_screen_rejections_advance_the_schedule():
     """The aggregator's screen-rejected path (critic) must advance the anneal
     too -- it is a merge decision, and the RRSI acceptance policy opts in via

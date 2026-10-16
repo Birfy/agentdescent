@@ -542,10 +542,12 @@ class RRsiAcceptance:
 
         # The schedule advances on *every* decision this policy makes -- a
         # rejection is a round the search spent stuck, not a free one (see
-        # RRsiState.record_merge). best_score is advanced only on an accept.
-        self.state.record_merge()
-
+        # RRsiState.record_merge). best_score is advanced only on an accept,
+        # and the accept records the **post-decision** S*: appending before the
+        # update would make an improve-after-rejection-streak look stalled even
+        # though S* just moved (review).
         if not decision.admissible:
+            self.state.record_merge()
             self.state.record_measurement(ctx.diff, delta_score=observed,
                                           delta_cost=decision.delta_cost or 0.0,
                                           accepted=False)
@@ -557,6 +559,7 @@ class RRsiAcceptance:
 
         self.state.best_score = update_best_score(self.state.best_score, candidate)
         self.state.incumbent_cost = cand_cost
+        self.state.record_merge()
         self.state.record_measurement(ctx.diff, delta_score=observed,
                                       delta_cost=decision.delta_cost or 0.0,
                                       accepted=True)
