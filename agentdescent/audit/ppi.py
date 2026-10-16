@@ -26,7 +26,9 @@ below name each where it bites:
 
 1. Estimating ``lam`` on the same labelled units it is then applied to
    under-reports the standard error. Fixed by K-fold cross-fitting.
-2. A `z` quantile is too narrow at audit sample sizes. Fixed with `t`.
+2. A `z` quantile is too narrow at audit sample sizes. Fixed with `t`, and `t`
+   itself must be exact at the small degrees of freedom cluster-robust
+   intervals produce (``groups - 1``, not ``n - 1``): see :func:`t_ppf`.
 3. Coverage is about 0.92, not 0.95, when the dominant stratum has fewer than
    :data:`MIN_N_DOMINANT` labels. Not a bug -- the skew of a binary outcome --
    but it must be *said*, so it is a warning and a locked test.
@@ -80,34 +82,144 @@ class PPIError(ValueError):
     """
 
 
+#: Below this many degrees of freedom the Cornish-Fisher expansion in
+#: :func:`t_ppf` is no longer trusted and the quantile is obtained from the exact
+#: CDF instead. The expansion is within 1.4e-5 at df = 9 (about 6e-6 relative)
+#: but within 3e-8 by df = 30, which is where it meets the 1e-6 relative
+#: accuracy the exact branch delivers everywhere else.
+_T_PPF_SERIES_MIN_DF = 30.0
+
+
+def _betacf(a: float, b: float, x: float) -> float:
+    """Continued fraction for the incomplete beta (modified Lentz)."""
+    tiny = 1e-300
+    qab, qap, qam = a + b, a + 1.0, a - 1.0
+    c = 1.0
+    d = 1.0 - qab * x / qap
+    d = 1.0 / (tiny if abs(d) < tiny else d)
+    h = d
+    for m in range(1, 500):
+        m2 = 2 * m
+        aa = m * (b - m) * x / ((qam + m2) * (a + m2))
+        d = 1.0 + aa * d
+        d = 1.0 / (tiny if abs(d) < tiny else d)
+        c = 1.0 + aa / c
+        c = tiny if abs(c) < tiny else c
+        h *= d * c
+        aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))
+        d = 1.0 + aa * d
+        d = 1.0 / (tiny if abs(d) < tiny else d)
+        c = 1.0 + aa / c
+        c = tiny if abs(c) < tiny else c
+        de = d * c
+        h *= de
+        if abs(de - 1.0) < 3e-16:
+            break
+    return h
+
+
+def _t_sf(t: float, df: float) -> float:
+    """Upper tail ``P(T > t)`` of Student's t for ``t >= 0``.
+
+    Computed directly from the regularized incomplete beta
+    ``I_x(df/2, 1/2)`` with ``x = df / (df + t**2)``, so a small tail
+    probability keeps full relative precision instead of being ``1 - cdf``.
+    """
+    if t <= 0.0:
+        return 0.5
+    a, b = df / 2.0, 0.5
+    x = df / (df + t * t)
+    if x <= 0.0:
+        return 0.0
+    lbeta = math.lgamma(a) + math.lgamma(b) - math.lgamma(a + b)
+    front = math.exp(a * math.log(x) + b * math.log1p(-x) - lbeta) if x < 1.0 else 0.0
+    if x < (a + 1.0) / (a + b + 2.0):
+        ib = front * _betacf(a, b, x) / a
+    else:
+        ib = 1.0 - front * _betacf(b, a, 1.0 - x) / b
+    return 0.5 * ib
+
+
+def _t_pdf(t: float, df: float) -> float:
+    lc = (math.lgamma((df + 1.0) / 2.0) - math.lgamma(df / 2.0)
+          - 0.5 * math.log(df * math.pi))
+    return math.exp(lc - (df + 1.0) / 2.0 * math.log1p(t * t / df))
+
+
+def _t_upper_quantile_exact(q: float, df: float) -> float:
+    """The ``t > 0`` with ``P(T > t) = q``, for ``0 < q < 0.5``.
+
+    Safeguarded Newton on the exact tail inside a bracket whose upper end grows
+    until it encloses the root (a fixed ceiling would saturate for df < 1, where
+    the quantile is in the hundreds or more).
+    """
+    lo, hi = 0.0, 1.0
+    while _t_sf(hi, df) > q:
+        lo, hi = hi, hi * 2.0
+        if hi > 1e150:                  # q is below double-precision resolution
+            return math.inf
+    t = 0.5 * (lo + hi)
+    for _ in range(200):
+        err = _t_sf(t, df) - q
+        if err > 0.0:
+            lo = t
+        else:
+            hi = t
+        pdf = _t_pdf(t, df)
+        nxt = t + err / pdf if pdf > 0.0 else -1.0       # d sf / dt = -pdf
+        if not lo < nxt < hi:
+            nxt = 0.5 * (lo + hi)
+        if abs(nxt - t) <= 1e-15 * abs(nxt):
+            return nxt
+        t = nxt
+    return t
+
+
 def t_ppf(p: float, df: float) -> float:
-    """Quantile of Student's t, via the Cornish-Fisher expansion in ``1/df``.
+    """Quantile of Student's t, accurate for every ``df > 0``.
 
     A `t` and not a `z`, which is pitfall 2. Strata in a real audit carry 40-100
     labels; the normal quantile is 2-3% too small there, and an interval that is
     2% too narrow is an interval that covers 93% of the time while claiming 95%.
 
-    Accuracy, measured against the quantile obtained by bisecting the exact CDF
-    (regularized incomplete beta): **worst absolute error 1.4e-5 for df >= 9**,
-    falling to 3e-8 by df = 30. Below df = 9 the expansion degrades quickly --
-    3.8e-3 at df = 3 -- which does not matter here because
-    :data:`MIN_N_DOMINANT` keeps the dominant stratum far above that and
-    :func:`ppi_mean_stratified` refuses fewer than two labels outright.
+    Three regimes:
 
-    The four correction terms are the standard expansion; truncating to two
-    costs a factor of ~30 in accuracy at df = 10, which is cheap to avoid.
+    * ``df >= 30``: the four-term Cornish-Fisher expansion in ``1/df`` -- worst
+      absolute error 3e-8 there (1.4e-5 at df = 9), no iteration.
+    * ``df == 1`` and ``df == 2``: the closed forms ``tan(pi (p - 1/2))`` and
+      ``(2p - 1) / sqrt(2 p (1 - p))``.
+    * every other ``df < 30``, including fractional Welch-Satterthwaite values
+      below 1: the exact CDF (regularized incomplete beta) is inverted by
+      safeguarded Newton, to about 1e-12 relative.
+
+    The small-df branches are not a corner case. A cluster-robust interval has
+    ``groups - 1`` degrees of freedom (``Stratum.clusters_lab``; the calibrator
+    clusters by ``task_id``), so an audit whose first labels come from two to
+    four tasks lands at df of roughly 1-3, where the expansion alone is 1-36% too
+    narrow. ``MIN_N_DOMINANT`` bounds the *label* count, not the cluster count.
     """
-    if df <= 0:
+    if df != df or df <= 0:
         raise PPIError(f"degrees of freedom must be positive, got {df!r}")
-    z = NormalDist().inv_cdf(p)
-    z2 = z * z
-    z3, z5, z7, z9 = z2 * z, z2 * z2 * z, z2 * z2 * z2 * z, z2 * z2 * z2 * z2 * z
-    return (z
-            + (z3 + z) / (4.0 * df)
-            + (5.0 * z5 + 16.0 * z3 + 3.0 * z) / (96.0 * df ** 2)
-            + (3.0 * z7 + 19.0 * z5 + 17.0 * z3 - 15.0 * z) / (384.0 * df ** 3)
-            + (79.0 * z9 + 776.0 * z7 + 1482.0 * z5 - 1920.0 * z3 - 945.0 * z)
-            / (92160.0 * df ** 4))
+    z = NormalDist().inv_cdf(p)             # also rejects p outside (0, 1)
+    if df >= _T_PPF_SERIES_MIN_DF:
+        z2 = z * z
+        z3, z5, z7, z9 = z2 * z, z2 * z2 * z, z2 * z2 * z2 * z, z2 * z2 * z2 * z2 * z
+        return (z
+                + (z3 + z) / (4.0 * df)
+                + (5.0 * z5 + 16.0 * z3 + 3.0 * z) / (96.0 * df ** 2)
+                + (3.0 * z7 + 19.0 * z5 + 17.0 * z3 - 15.0 * z) / (384.0 * df ** 3)
+                + (79.0 * z9 + 776.0 * z7 + 1482.0 * z5 - 1920.0 * z3 - 945.0 * z)
+                / (92160.0 * df ** 4))
+    if p == 0.5:
+        return 0.0
+    q = min(p, 1.0 - p)                     # work in the upper tail, mirror after
+    if df == 1.0:
+        t = 1.0 / math.tan(math.pi * q)     # = tan(pi (1/2 - q))
+    elif df == 2.0:
+        t = (1.0 - 2.0 * q) / math.sqrt(2.0 * q * (1.0 - q))
+    else:
+        t = _t_upper_quantile_exact(q, df)
+    return t if p > 0.5 else -t
 
 
 @dataclass(frozen=True)
