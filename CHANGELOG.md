@@ -100,6 +100,22 @@ All notable changes to AgentDescent are documented here. The format follows
   max-shifted softmax (the same distribution) is used instead. A `NaN`,
   infinite or non-numeric `temperature` is now rejected with `ValueError` at
   construction rather than failing at the first `select()`.
+- `audit.AuditStore` keeps its crash-safety contract (#274). A torn tail left
+  by a killed process gets a newline before the next append, so the record
+  written after the crash is no longer glued onto the fragment and lost; the
+  file is read as bytes and decoded per line, so a tear inside a multi-byte
+  character, a line that parses to a non-object, or a side-record missing its
+  keys costs that one line (counted in `corrupt`) instead of making the store
+  unopenable. Lines are encoded with `allow_nan=False` before the file is
+  touched and memory is updated only after the write returns, so a failed
+  `append` / `resolve` / `reopen` / `remember_*` leaves the index agreeing with
+  a fresh reload. `observe_unlabelled` and `resolve` refuse non-finite scores
+  with `ValueError`, and `load` counts a line holding a non-finite number (the
+  `NaN` / `Infinity` tokens older builds wrote, or an overflowing literal) as
+  corrupt instead of loading it. `resolve_from_mapping` refuses a batch with a
+  non-numeric or non-finite answer before anything lands, naming the offending
+  ids, instead of reporting it as already resolved. An unknown
+  `schema_version` still raises.
 - `FlatPuct` / `CostEfficient` / `MCTS` / `Beam` no longer crash or silently
   poison `select()` on bad knobs (#293). `CostEfficient.cost_factors` and
   `FlatPuct._priors` used to raise `OverflowError` on a steep
