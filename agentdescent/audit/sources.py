@@ -27,6 +27,7 @@ by having a merge thread hang for four hours is not.
 
 from __future__ import annotations
 
+import math
 import threading
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Protocol, runtime_checkable
@@ -188,12 +189,41 @@ def resolve_from_mapping(store, answers: Dict[str, float], *, at: Optional[float
     ``already`` on the returned report says how many were skipped, because a
     replay that lands nothing and a replay that lands everything both look like
     success from a bare count.
+
+    **An unusable answer refuses the whole batch, before anything lands.** A
+    score that is not a number, or is ``nan`` / ``inf``, is a bad file rather
+    than a replay: counting it as "already resolved" -- which is what catching
+    every ``ValueError`` from `AuditStore.resolve` used to do -- reported a
+    corrupt answer as a harmless duplicate and the record stayed pending with
+    nobody told. So every score is checked first and a ``ValueError`` names
+    each offending record id, with the store untouched; fix the file and replay.
     """
-    landed = already = 0
+    scores: Dict[str, float] = {}
+    bad: List[str] = []
     for record_id, score in answers.items():
         try:
-            if store.resolve(record_id, float(score), at=at):
+            x = float(score)
+        except (TypeError, ValueError):
+            x = math.nan
+        if not math.isfinite(x):
+            bad.append(f"{record_id}={score!r}")
+            continue
+        scores[record_id] = x
+    if bad:
+        raise ValueError(
+            "refusing the batch, nothing was resolved: oracle scores must be "
+            "finite numbers, got " + ", ".join(bad))
+    landed = already = 0
+    for record_id, score in scores.items():
+        rec = store.get(record_id)
+        if rec is not None and rec.resolved:
+            already += 1
+            continue
+        try:
+            if store.resolve(record_id, score, at=at):
                 landed += 1
         except ValueError:
+            # Resolved by someone else since the check above. The score is
+            # already known finite, so this is the overwrite refusal only.
             already += 1
     return BatchResult(landed=landed, already_resolved=already)
