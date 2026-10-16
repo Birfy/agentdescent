@@ -197,6 +197,43 @@ class SingleHead:
         return [ctx.head] * n
 
 
+
+def _finite_float(name: str, value: object) -> float:
+    """Parse ``value`` as a finite float, or raise ``ValueError``.
+
+    A string is refused even when it parses: ``"1.4"`` is a config typo, not a
+    knob, matching :class:`Archive`'s temperature check (#284). ``bool`` is
+    refused too -- ``True`` is an ``int`` subclass and would silently become
+    ``1.0``.
+    """
+    if isinstance(value, bool) or isinstance(value, (str, bytes)):
+        raise ValueError(f"{name} must be a finite number, got {value!r}")
+    try:
+        parsed = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a finite number, got {value!r}") from None
+    if not math.isfinite(parsed):
+        raise ValueError(f"{name} must be a finite number, got {value!r}")
+    return parsed
+
+
+def _safe_pow(base: float, exp: float) -> float:
+    """``base ** exp`` that returns ``+inf`` instead of raising ``OverflowError``.
+
+    Used by :meth:`CostEfficient.cost_factors` and :meth:`FlatPuct._priors` so a
+    steep exponent on a wide cost/prior ratio cannot crash ``select()`` (#293).
+    """
+    if exp == 0.0:
+        return 1.0
+    try:
+        out = base ** exp
+    except OverflowError:
+        return math.inf
+    if not math.isfinite(out):
+        return math.inf if out > 0 else 0.0
+    return out
+
+
 class Beam(SingleHead):
     """Keep the ``k`` best-scoring candidates and spread the workers over them.
 
@@ -219,8 +256,10 @@ class Beam(SingleHead):
     """
 
     def __init__(self, k: int = 1) -> None:
-        if k < 1:
-            raise ValueError(f"beam width must be at least 1, got {k}")
+        # bool is an int subclass; True would pass `k < 1` and then slice as 1.
+        # A float (incl. NaN) used to construct and then TypeError in select (#293).
+        if isinstance(k, bool) or not isinstance(k, int) or k < 1:
+            raise ValueError(f"beam width must be an integer >= 1, got {k!r}")
         self.k = k
 
     def select(self, ctx: SelectionContext, n: int) -> Sequence[Candidate]:
@@ -572,12 +611,14 @@ class FlatPuct(SingleHead):
     """
 
     def __init__(self, c_puct: float = 1.0, prior_exponent: float = 0.0) -> None:
-        self.c_puct = c_puct
+        # Non-finite c_puct used to make every PUCT compare False (always pick
+        # index 0); a None/str crashed mid-select with TypeError (#293).
+        self.c_puct = _finite_float("c_puct", c_puct)
         #: How sharply :attr:`Candidate.prior` bends the exploration term.
         #: ``0.0`` ignores priors entirely and is upstream's uniform ``1/N``;
         #: ``2.0`` weights by the square, which is what separates a promising
         #: candidate from a dead-end one rather than merely ordering them.
-        self.prior_exponent = prior_exponent
+        self.prior_exponent = _finite_float("prior_exponent", prior_exponent)
 
     def _priors(self, rows: Sequence[Candidate]) -> List[float]:
         """``P(s,a)``, normalised to sum to 1 so ``c_puct`` keeps its meaning.
@@ -605,8 +646,10 @@ class FlatPuct(SingleHead):
             return [1.0 / len(rows)] * len(rows)
         fallback = sum(rated) / len(rated)
         raw = [
-            (c.prior if c.prior is not None and math.isfinite(c.prior) and c.prior > 0
-             else fallback) ** self.prior_exponent
+            _safe_pow(
+                (c.prior if c.prior is not None and math.isfinite(c.prior)
+                 and c.prior > 0 else fallback),
+                self.prior_exponent)
             for c in rows
         ]
         total = sum(raw)
@@ -667,7 +710,9 @@ class MCTS(SingleHead):
     """
 
     def __init__(self, exploration: float = 1.4) -> None:
-        self.exploration = exploration
+        # Non-finite exploration made every UCT score non-finite so the ranked
+        # order was accidental (#293).
+        self.exploration = _finite_float("exploration", exploration)
 
     def _uct(self, c: Candidate, total: int) -> float:
         if c.selected == 0:
@@ -731,7 +776,11 @@ class CostEfficient(FlatPuct):
     def __init__(self, c_puct: float = 1.0, cost_exponent: float = 1.0,
                  prior_exponent: float = 0.0, anneal: bool = True) -> None:
         super().__init__(c_puct=c_puct, prior_exponent=prior_exponent)
-        self.cost_exponent = max(0.0, float(cost_exponent))
+        # Non-finite used to store as 0.0 (NaN) or inf and then OverflowError /
+        # poison factors mid-select (#293). A negative still means "ignore cost"
+        # (clamped to 0), matching the previous max(0, ...) behaviour.
+        alpha = _finite_float("cost_exponent", cost_exponent)
+        self.cost_exponent = max(0.0, alpha)
         self.anneal = anneal
 
     def cost_factors(self, rows: Sequence[Candidate]) -> List[float]:
@@ -750,7 +799,10 @@ class CostEfficient(FlatPuct):
         known = [x for x in raw if x is not None]
         mean = (sum(known) / len(known)) if known else 1.0
         effective = [x if x is not None else mean for x in raw]
-        factors = [max(1e-9, (x / mean)) ** self.cost_exponent for x in effective]
+        factors = [
+            max(1e-9, _safe_pow(x / mean, self.cost_exponent))
+            for x in effective
+        ]
         return factors
 
     def select(self, ctx: SelectionContext, n: int) -> Sequence[Candidate]:
