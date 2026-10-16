@@ -54,7 +54,7 @@ from .ledger import CASConflict, Ledger
 from .metrics import Meter
 from .policies import (
     AcceptancePolicy, ConflictPolicy, FusionPolicy, MergeContext,
-    PromotionPolicy,
+    PromotionPolicy, ScreenPolicy,
 )
 from .scheduler import AuditScheduler
 from .staleness import StaleAction, StalenessPolicy, get_policy
@@ -229,6 +229,18 @@ class MergeOutcome(str, Enum):
     #: so a policy-violating proposal never buys a held-out sweep. The
     #: reflector (or the contract) is the thing to look at.
     VIOLATES_INVARIANT = "violates-invariant"
+    #: A pre-evaluation screen (see
+    #: :class:`~agentdescent.policies.ScreenPolicy`) rejected the card before
+    #: it was measured -- leakage, an over-budget edit bundle, inert machinery.
+    #: The reason is on the report; the card was settled without a held-out
+    #: sweep, so no invented measurement ever justified it.
+    CRITIC_REJECTED = "critic-rejected"
+    #: An RRSI-style selector refused the candidate at its historical-best
+    #: noise floor (``score < S* - delta``).
+    NOISE_FLOOR = "noise-floor"
+    #: An RRSI-style selector refused the candidate on its cost rule (either
+    #: branch): the improvement costs more policy tokens than it is worth.
+    COST_RULE = "cost-rule"
 
     def __str__(self) -> str:            # so f-strings render the value, not the name
         return self.value
@@ -665,6 +677,7 @@ class Aggregator:
         fusion: Optional["FusionPolicy"] = None,
         acceptance: Optional["AcceptancePolicy"] = None,
         promotion: Optional["PromotionPolicy"] = None,
+        screen: Optional["ScreenPolicy"] = None,
     ) -> None:
         self.ledger = ledger
         self.verifier = verifier
@@ -689,6 +702,11 @@ class Aggregator:
             verifier, tournament=cfg.fusion_tournament)
         self.acceptance_policy = acceptance or DefaultAcceptance.from_config(cfg)
         self.promotion_policy = promotion or DefaultPromotion.from_config(cfg)
+        #: Pre-evaluation screen on evidence cards (see
+        #: :class:`~agentdescent.policies.ScreenPolicy`). ``None`` keeps the
+        #: old behaviour exactly -- every card that survives the trust region
+        #: and staleness filter proceeds to the gate.
+        self.screen_policy = screen
         # Two things a policy may need are built in here and nowhere a caller
         # can reach: the verifier (for anything that ranks) and the config (for
         # anything that reads a threshold). So every installed policy is offered
@@ -1056,10 +1074,20 @@ class Aggregator:
             }
         except AttributeError:
             return None
+        # An acceptance policy that keeps its own state (an RRSI-style selector
+        # holds the historical-best floor, the per-edit ledger and the annealed
+        # round counter) opts into checkpointing through an optional hook. A
+        # policy without one is simply absent from the payload -- the same way
+        # the posterior is absent from an aggregator that never had one.
+        state = None
+        hook = getattr(self.acceptance_policy, "checkpoint_state", None)
+        if callable(hook):
+            state = hook()
         return {
             "posteriors": posteriors,
             "promoted_at": dict(self._promoted_at),
             "seen": sorted(self._seen),
+            "acceptance_state": state,
         }
 
     def restore(self, state: dict) -> None:
@@ -1092,6 +1120,14 @@ class Aggregator:
         seen = state.get("seen")
         if isinstance(seen, list):
             self._seen = set(seen)
+        acc = state.get("acceptance_state")
+        if acc is not None:
+            hook = getattr(self.acceptance_policy, "restore_state", None)
+            if callable(hook):
+                try:
+                    hook(acc)
+                except Exception:  # noqa: BLE001 - a bad payload must not hide the artifact
+                    pass
 
     @property
     def _survival(self) -> Dict[str, int]:
@@ -1358,6 +1394,37 @@ class Aggregator:
         n_considered = len(cards)
         region = self._trust_region()
         cards, oversized = self._apply_trust_region(cards, region)
+
+        # Pre-evaluation screen (RRSI critic and friends): runs here, before
+        # staleness and certainly before the expensive measurement, so a card
+        # the screen rejects is settled without buying a held-out sweep and
+        # without an invented measurement. The screen is a *card* gate -- it
+        # names which card failed and why -- and a batch that is only rejected
+        # cards reports ``critic-rejected`` with the reasons.
+        if self.screen_policy is not None:
+            kept: List[EvidenceCard] = []
+            rejected_screen: List[Tuple[EvidenceCard, str]] = []
+            for card in cards:
+                if self.meter is not None:
+                    self.meter.add("critic_checked")
+                reason = self.screen_policy.screen(card)
+                if reason is None:
+                    kept.append(card)
+                else:
+                    rejected_screen.append((card, reason))
+            if rejected_screen:
+                if self.meter is not None:
+                    self.meter.add("critic_rejected", len(rejected_screen))
+                self.buffer.settle([c for c, _ in rejected_screen])
+                if not kept:
+                    detail = "; ".join(
+                        f"{reason} (task {card.trajectory_refs[0].id if card.trajectory_refs else '?'})"
+                        for card, reason in rejected_screen)
+                    return MergeReport(artifact_id, None, False, n_considered, 0,
+                                       len(rejected_screen), 0, 0.0, None,
+                                       detail, MergeOutcome.CRITIC_REJECTED,
+                                       oversized=len(oversized))
+            cards = kept
 
         head = snap.version
         survivors, discarded = self._staleness_filter(artifact, head, cards)

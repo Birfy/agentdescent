@@ -833,7 +833,7 @@ def _publish_stable(aggregator) -> None:
 _WIRED_POLICIES = ("task_sampler", "selection", "proposal", "conflict", "fusion",
                    "acceptance", "promotion", "staleness", "verifier", "ledger",
                    "aggregator_factory", "eval_cache", "sandbox_spec", "evaluator",
-                   "executor")
+                   "executor", "screen")
 
 #: The same bundle, minus the one field the barrier-free loop does not read.
 #: `async_evolve`'s worker calls `eng.run` directly; there is no executor seam in
@@ -1110,6 +1110,8 @@ def _cost_fields(meter: Meter) -> Dict[str, Any]:
         "cas_conflicts": m.cas_conflicts,
         "invariant_checked": m.invariant_checked,
         "invariant_rejections": m.invariant_rejections,
+        "critic_checked": m.critic_checked,
+        "critic_rejected": m.critic_rejected,
         "cache_hits": m.cache_hits,
         "cache_misses": m.cache_misses,
         "trajectories_recorded": m.trajectories_recorded,
@@ -1467,6 +1469,11 @@ class EvolutionResult:
     #: Commits that lost a compare-and-swap race and rebased. Zero with one
     #: writer by construction.
     cas_conflicts: int = 0
+    #: Pre-evaluation screens: cards passed through a screen policy, and cards
+    #: it rejected (settled without a held-out sweep). A run with no screen
+    #: reports zeros -- the honest reading "no screen installed".
+    critic_checked: int = 0
+    critic_rejected: int = 0
     #: Evaluation cache. ``misses`` is the number of evaluations actually
     #: performed; the ratio is the duplicate-computation figure a multi-process
     #: run has to report.
@@ -2060,8 +2067,12 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     if agent is not None:
         run = run or agent.solve
         propose = propose or agent.propose
-    if run is None or propose is None:
-        raise ValueError("provide agent=, or both run= and propose=")
+    if run is None or (propose is None and
+                       (policies_bundle is None or policies_bundle.proposal is None)):
+        raise ValueError(
+            "provide agent=, or both run= and propose=, or a proposal policy "
+            "through Policies(proposal=...): the engine needs a way to turn a "
+            "rollout into a candidate change.")
     if policies_bundle is not None and policies_bundle.proposal is not None:
         # A mutable cell filled after the aggregator is built below, so the
         # propose adapter can read the settled-evidence pool for the task it is
@@ -2365,7 +2376,8 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     # behaviour. The task/proposal/eval-cache halves of `Policies` are read above
     # and are unaffected, so only the merge side is named.
     if aggregator_factory is not None:
-        dropped = [name for name in ("conflict", "fusion", "acceptance", "promotion")
+        dropped = [name for name in ("conflict", "fusion", "acceptance", "promotion",
+                                     "screen")
                    if getattr(pol, name, None) is not None]
         if dropped:
             warnings.warn(
@@ -2378,7 +2390,8 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     def _default_aggregator(ledger, verifier, audit, config, policy):
         return Aggregator(ledger, verifier, audit, config, staleness_policy=policy,
                           meter=meter, conflict=pol.conflict, fusion=pol.fusion,
-                          acceptance=pol.acceptance, promotion=pol.promotion)
+                          acceptance=pol.acceptance, promotion=pol.promotion,
+                          screen=pol.screen)
 
     # A declared selection policy is what asks for a population layer -- the rule
     # the port runner already used, moved here so it is the engine's rule rather
@@ -2388,7 +2401,8 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
         from .population import population_factory
         aggregator_factory = population_factory(
             selection, artifact_id, meter=meter, conflict=pol.conflict,
-            fusion=pol.fusion, acceptance=pol.acceptance, promotion=pol.promotion)
+            fusion=pol.fusion, acceptance=pol.acceptance, promotion=pol.promotion,
+            screen=pol.screen)
 
     # `None` defers to whatever the config already says, so `agg_config=` keeps
     # working and the two cannot silently disagree; an explicit True or False

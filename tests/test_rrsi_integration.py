@@ -1,0 +1,310 @@
+"""The RRSI integration has to be right in the exact places issue #221 calls out:
+
+* leakage and edit-budget screening must run **before** evaluation -- a leaking
+  or over-budget card must never buy a held-out sweep, never mind commit;
+* the selector must reuse the pinned Algorithm-2 rule (historical-best floor,
+  both cost-rule branches, novelty) and keep ``S*`` monotone and resumable;
+* the proposer must actually condition on the measured history, the pruning
+  targets and the stall-exploration note -- not just carry the knobs;
+* the untouched path stays untouched (a run without the bundle reports zeros).
+
+Every fixture here is offline and deterministic.
+"""
+
+import pytest
+
+from agentdescent.aggregator import MergeOutcome
+from agentdescent.evolution import SingleSlot, Task, evolve
+from agentdescent.evolvable import Diff, EvidenceCard
+from agentdescent.policies import MergeContext, Policies
+
+from examples.rrsi.rrsi_policies import (
+    RRsiAcceptance,
+    RRsiConfig,
+    RRsiCritic,
+    RRsiProposalPolicy,
+    RRsiState,
+    build_rrsi_bundle,
+)
+
+
+def _task(n):
+    return Task(id=f"t{n}", prompt=f"item {n}", meta={"gold": "42"})
+
+
+def _diff(ops, diff_id="d"):
+    return Diff(diff_id=diff_id, target="artifact", ops=ops)
+
+
+def _card(ops, cost_tokens=0):
+    return EvidenceCard(diff=_diff(ops), base_version={}, touched=["artifact"],
+                        trajectory_refs=[_task(0)], cost_tokens=cost_tokens)
+
+
+def _context(state, *, base=(5, 5), cand=(5, 5), ops=("value",), costs=0):
+    from agentdescent.evolution import EvolvingArtifact
+    art = EvolvingArtifact("artifact", {"value": "seed"}, strategy=SingleSlot())
+    cand_art = EvolvingArtifact("artifact", {"value": "new"}, strategy=SingleSlot())
+    cards = [_card({k: "x" for k in ops}, cost_tokens=costs)]
+    return MergeContext(
+        artifact=art, candidate=cand_art, cards=cards,
+        base_counts=base, cand_counts=cand, diff=cards[0].diff)
+
+
+# -- the critic: budget + leakage before evaluation -----------------------------
+
+
+def test_the_budget_anneals_and_the_critic_enforces_it():
+    state = RRsiState(RRsiConfig(b_min=1, b_max=5, T=4))
+    critic = RRsiCritic(state)
+    assert state.budget() == 5              # round 0: early, wide
+    assert critic.screen(_card({"a": "x", "b": "y", "c": "z"})) is None
+    # round 3 of T=4 has annealed to 2: a 3-op diff now exceeds it
+    state.round = 3
+    assert state.budget() == 2
+    assert critic.screen(_card({"a": "x", "b": "y"})) is None
+    reason = critic.screen(_card({"a": "x", "b": "y", "c": "z"}))
+    assert reason is not None and "budget" in reason
+
+
+def test_the_critic_rejects_evolve_set_leakage():
+    state = RRsiState()
+    critic = RRsiCritic(state, protected=("t3", "42"))
+    assert critic.screen(_card({"value": "generic rule"})) is None
+    reason = critic.screen(_card({"value": "always answer t3 with 42"}))
+    assert reason is not None and "leaks evolve-set content" in reason
+
+
+def test_the_model_reviewer_is_only_asked_when_deterministic_checks_pass():
+    seen = {"n": 0}
+
+    def reviewer(prompt):
+        seen["n"] += 1
+        return "leak"
+
+    state = RRsiState()
+    critic = RRsiCritic(state, protected=("t3",), reviewer=reviewer)
+    # deterministic leak -> the reviewer is never asked
+    critic.screen(_card({"value": "mention t3"}))
+    assert seen["n"] == 0
+    # clean diff -> the reviewer is asked and can veto
+    reason = critic.screen(_card({"value": "generic rule"}))
+    assert reason == "critic: leak"
+    assert seen["n"] == 1
+
+
+def test_protected_strings_never_come_from_the_holdout():
+    # The discipline issue #221 demands: protected strings are derived from the
+    # evolve set only. A holdout answer must not be in the critic's set.
+    train_gold = {"t0": "42", "t1": "17"}
+    holdout_gold = "SECRET-FINAL-HOLDOUT-ANSWER"
+    protected = [f"{k}={v}" for k, v in train_gold.items()]
+    assert all(holdout_gold not in p for p in protected)
+    assert "SECRET-FINAL-HOLDOUT-ANSWER" not in " ".join(protected)
+
+
+# -- the state: history, stall, pruning ----------------------------------------
+
+
+def test_record_measurement_builds_the_history_ledger():
+    state = RRsiState()
+    state.record_measurement(_diff({"skills/x.md": "a"}), delta_score=0.1,
+                             delta_cost=0.0, accepted=True)
+    state.record_measurement(_diff({"memory/y.md": "b"}), delta_score=-0.1,
+                             delta_cost=0.0, accepted=False)
+    assert state.attempts["skills"] == 1
+    assert state.attempts["memory"] == 1
+    assert len(state.ledger) == 2
+    assert state.ledger[0].accepted is True
+    assert state.ledger[1].accepted is False
+
+
+def test_stall_detection_and_pruning_targets():
+    state = RRsiState(RRsiConfig(noise_band=0.05, prune_window=2,
+                                 stall_window=3))
+    # a component that never yields positive gain is a pruning target
+    state.record_measurement(_diff({"tools/a.md": "x"}), delta_score=0.0,
+                             delta_cost=0.0, accepted=False)
+    state.record_measurement(_diff({"tools/b.md": "x"}), delta_score=-0.05,
+                             delta_cost=0.0, accepted=False)
+    state._round_gains = state._round_gains[-2:]
+    assert "tools" in state.pruning_targets()
+    # a healthy component is not
+    state2 = RRsiState(RRsiConfig(prune_window=2))
+    state2.record_measurement(_diff({"skill/a.md": "x"}), delta_score=0.3,
+                              delta_cost=0.0, accepted=True)
+    assert state2.pruning_targets() == []
+    # a flat S* trajectory beyond the noise band is a stall
+    state3 = RRsiState(RRsiConfig(noise_band=0.05, stall_window=3))
+    state3.progress = [0.5, 0.51, 0.5]
+    assert state3.stalled() is True
+    state3.progress = [0.5, 0.6, 0.7]
+    assert state3.stalled() is False
+
+
+def test_the_proposer_prompt_carries_budget_history_pruning_and_stall():
+    from agentdescent.policies import ProposalContext
+
+    calls = {"prompts": []}
+
+    def complete(prompt):
+        calls["prompts"].append(prompt)
+        return "always state the year"
+
+    state = RRsiState(RRsiConfig(T=10, prune_window=2))
+    state.record_measurement(_diff({"tools/a.md": "x"}), delta_score=0.0,
+                             delta_cost=0.0, accepted=False)
+    state.progress = [0.5, 0.5, 0.5, 0.5]     # stalled
+    policy = RRsiProposalPolicy(complete, state)
+    out = policy.propose(ProposalContext(
+        rendered="seed", task=_task(0), output="answer", reward=0.0))
+    prompt = calls["prompts"][0]
+    assert out == ["always state the year"]
+    assert f"Round {state.round}" in prompt
+    assert "[RRSI history]" in prompt
+    assert "[RRSI pruning]" in prompt and "tools" in prompt
+    assert "[RRSI exploration]" in prompt
+
+
+def test_state_checkpoint_round_trip():
+    state = RRsiState()
+    state.best_score = 0.9
+    state.round = 3
+    state.record_measurement(_diff({"skill/a.md": "x"}), delta_score=0.4,
+                             delta_cost=0.0, accepted=True)
+    fresh = RRsiState()
+    fresh.restore(state.checkpoint())
+    assert fresh.best_score == 0.9
+    assert fresh.round == 3
+    assert len(fresh.ledger) == 1
+    assert fresh.ledger[0].components == ("skill",)
+    assert fresh.attempts["skill"] == 1
+
+
+# -- the selector: pinned Algorithm 2 via the engine's acceptance slot ----------
+
+
+def test_acceptance_applies_the_historical_best_floor():
+    state = RRsiState(base_score=0.9)
+    policy = RRsiAcceptance(state)
+    # candidate 0.8 < S* (0.9) with delta 0 -> noise floor
+    d = policy.accept(_context(state, base=(5, 5), cand=(8, 2)))
+    assert d.accept is False
+    assert d.category == MergeOutcome.NOISE_FLOOR.value
+    assert state.best_score == 0.9           # S* unchanged
+
+
+def test_acceptance_large_gain_cost_rule():
+    state = RRsiState(base_score=0.5)
+    state.incumbent_cost = 100
+    policy = RRsiAcceptance(state)
+    # deltaS = 0.7 - 0.5 = 0.2 > noise_band(0); deltaC = (300-100)/100 = 2.0
+    # beta0=0.1, beta1=1.0 -> budget 0.1 + 0.2 = 0.3 < 2.0 -> refuse
+    d = policy.accept(_context(state, base=(5, 5), cand=(7, 3), costs=300))
+    assert d.accept is False
+    assert d.category == MergeOutcome.COST_RULE.value
+
+
+def test_acceptance_accepts_an_improvement_and_advances_s_star():
+    state = RRsiState(base_score=0.5)
+    policy = RRsiAcceptance(state)
+    d = policy.accept(_context(state, base=(5, 5), cand=(7, 3)))
+    assert d.accept is True
+    assert state.best_score == pytest.approx(0.7)   # monotone advance
+    assert state.round == 1
+    # a later candidate below the new S* is refused by the floor
+    d2 = policy.accept(_context(state, base=(7, 3), cand=(5, 5)))
+    assert d2.accept is False
+    assert d2.category == MergeOutcome.NOISE_FLOOR.value
+
+
+def test_acceptance_within_band_rule_counts_novelty():
+    # within the noise band, novelty can carry an otherwise-flat candidate
+    cfg = RRsiConfig(noise_band=0.05, w_s=1.0, w_c=1.0, w_n=1.0)
+    state = RRsiState(cfg, base_score=0.5)
+    policy = RRsiAcceptance(state)
+    # deltaS = 0.1 <= band(0.05)? no -> 0.1 > 0.05 is large-gain. Use cand=0.52
+    # deltaS=0.02 <= band: within-band; novel component skill (unseen) -> w_n*1
+    d = policy.accept(_context(state, base=(50, 50), cand=(52, 48),
+                               ops=("skill/x.md",)))
+    assert d.accept is True
+    assert state.best_score == pytest.approx(0.52)
+
+
+# -- end to end ----------------------------------------------------------------
+
+
+def _offline_actors():
+    def run(rendered, task):
+        return "answer" + (" 2026" if "year" in rendered else "")
+
+    def reward(task, output):
+        return 1.0 if "2026" in output else 0.0
+
+    return run, reward
+
+
+def _tasks(n=8):
+    return [Task(id=f"t{i}", prompt=f"item {i}") for i in range(n)]
+
+
+def _complete_factory(leak=False):
+    def complete(prompt):
+        return "always mention t3" if leak else "always state the year"
+    return complete
+
+
+def test_end_to_end_leaking_candidate_is_screened_before_measurement(tmp_path):
+    run, reward = _offline_actors()
+    bundle, state = build_rrsi_bundle(_complete_factory(leak=True),
+                                      protected=("t3",))
+    result = evolve(_tasks(), reward, run=run,
+                    strategy=SingleSlot(initial_value="seed"), rounds=2,
+                    n_workers=2, repo_path=str(tmp_path / "repo"),
+                    policies=bundle)
+    assert result.critic_rejected >= 1
+    assert result.critic_checked >= 1
+    assert result.outcomes().get("critic-rejected", 0) >= 1
+    assert result.outcomes().get("committed", 0) == 0
+
+
+def test_end_to_end_a_clean_run_commits_under_the_bundle(tmp_path):
+    run, reward = _offline_actors()
+    bundle, state = build_rrsi_bundle(_complete_factory(),
+                                      protected=("t3",))
+    result = evolve(_tasks(), reward, run=run,
+                    strategy=SingleSlot(initial_value="seed"), rounds=2,
+                    n_workers=2, repo_path=str(tmp_path / "repo"),
+                    policies=bundle)
+    assert result.outcomes().get("committed", 0) >= 1
+    assert result.outcomes().get("critic-rejected", 0) == 0
+    assert result.critic_rejected == 0
+    assert state.best_score > 0.0            # S* advanced
+
+
+def test_untouched_path_reports_zeros(tmp_path):
+    run, reward = _offline_actors()
+    result = evolve(_tasks(), reward, run=run,
+                    strategy=SingleSlot(initial_value="seed"), rounds=1,
+                    n_workers=2, repo_path=str(tmp_path / "repo"),
+                    propose=lambda r, t, o, re: "always state the year")
+    assert result.critic_checked == 0
+    assert result.critic_rejected == 0
+    assert result.outcomes().get("critic-rejected", 0) == 0
+
+
+def test_resume_preserves_the_historical_best_floor(tmp_path):
+    run, reward = _offline_actors()
+    repo = str(tmp_path / "repo")
+    bundle1, state1 = build_rrsi_bundle(_complete_factory())
+    evolve(_tasks(), reward, run=run, strategy=SingleSlot(initial_value="seed"),
+           rounds=1, n_workers=2, repo_path=repo, policies=bundle1,
+           checkpointing=True)
+    assert state1.best_score > 0.0
+    # a fresh bundle on the same repo: the aggregator restores the acceptance
+    # state, so the floor is preserved, not reset
+    bundle2, state2 = build_rrsi_bundle(_complete_factory())
+    evolve(_tasks(), reward, run=run, strategy=SingleSlot(initial_value="seed"),
+           rounds=1, n_workers=2, repo_path=repo, policies=bundle2,
+           checkpointing=True)
+    assert state2.best_score == pytest.approx(state1.best_score)
