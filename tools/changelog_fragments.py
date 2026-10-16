@@ -269,19 +269,23 @@ def _atomic_write(path, data):
             suffix=".tmp",
             dir=str(path.parent),
         )
+        mode = None
         if _POSIX:
             try:
                 mode = stat.S_IMODE(os.stat(path).st_mode)
             except FileNotFoundError:
-                mode = None  # new file: keep mkstemp's private default
-            if mode is not None:
-                # Before publication, so the file never appears at the
-                # destination name with the wrong mode.
-                os.chmod(tmp_name, mode)
+                pass  # new file: keep mkstemp's private default
         with os.fdopen(fd, "wb") as handle:
             fd = None  # ownership transferred to the file object
             handle.write(payload)
             handle.flush()
+            if mode is not None:
+                # After the write: Linux clears setuid/setgid when an
+                # unprivileged process writes to a file, so applying the mode
+                # earlier would lose those bits. Still before the fsync and,
+                # above all, before publication, so the file never appears at
+                # the destination name with the wrong mode.
+                os.fchmod(handle.fileno(), mode)
             os.fsync(handle.fileno())
         os.replace(tmp_name, path)
         tmp_name = None

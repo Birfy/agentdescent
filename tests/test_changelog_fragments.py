@@ -546,7 +546,7 @@ def test_non_posix_platforms_skip_the_directory_sync_and_mode_copy(
 
 
 @posix_only
-@pytest.mark.parametrize("mode", [0o644, 0o640, 0o664, 0o600])
+@pytest.mark.parametrize("mode", [0o644, 0o640, 0o664, 0o600, 0o2755])
 def test_release_preserves_the_existing_file_mode(tmp_path, mode):
     root = make_repo(tmp_path, a_1="Fixed\nOne.\n")
     changelog = root / "CHANGELOG.md"
