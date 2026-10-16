@@ -85,6 +85,8 @@ class MeterSnapshot:
     trajectory_write_failures: int = 0
     invariant_checked: int = 0
     invariant_rejections: int = 0
+    critic_checked: int = 0
+    critic_rejected: int = 0
     sandbox_wait_s: float = 0.0
     sandbox_setup_s: float = 0.0
     sandboxes_created: int = 0
@@ -107,6 +109,7 @@ _COUNTERS = frozenset({
     "trajectories_recorded", "trajectories_dedup",
     "trajectory_write_seconds", "trajectory_write_failures",
     "invariant_checked", "invariant_rejections",
+    "critic_checked", "critic_rejected",
     "sandbox_wait_s", "sandbox_setup_s", "sandboxes_created",
     "sandboxes_reused", "sandbox_failures", "env_mismatch",
 })
@@ -232,6 +235,11 @@ class Meter:
     #: reading "no rules to enforce", not "the gate is broken".
     invariant_checked: int = 0
     invariant_rejections: int = 0
+    #: Pre-evaluation screens: cards passed through the screen policy, and
+    #: cards it rejected (settled without a held-out sweep). A run with no
+    #: screen reports zeros, which is the honest reading "no screen installed".
+    critic_checked: int = 0
+    critic_rejected: int = 0
 
     #: Sandbox accounting. Zero on the default single-workspace path; filled once
     #: the sandbox pool exists. Kept here from the start so the result schema
@@ -327,6 +335,8 @@ class Meter:
                 trajectory_write_failures=self.trajectory_write_failures,
                 invariant_checked=self.invariant_checked,
                 invariant_rejections=self.invariant_rejections,
+                critic_checked=self.critic_checked,
+                critic_rejected=self.critic_rejected,
                 sandbox_wait_s=self.sandbox_wait_s,
                 sandbox_setup_s=self.sandbox_setup_s,
                 sandboxes_created=self.sandboxes_created,

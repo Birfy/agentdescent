@@ -1,9 +1,9 @@
-# RRSI — regularized harness mechanisms (microport increments)
+# RRSI — regularized harness self-improvement (microport + evolve() wiring)
 
-This is an **offline mechanism microport** of selected pieces from Google
-Research's *Regularized Recursive Self-Improvement of Agent Harnesses* (RRSI).
-It is not a full port and does not claim to reproduce the paper's benchmark
-results.
+This is a **mechanism microport** of Google Research's *Regularized Recursive
+Self-Improvement of Agent Harnesses* (RRSI), wired into `evolve()` through the
+engine's existing `Policies` seams. It does not claim to reproduce the paper's
+benchmark results; the reported numbers are upstream's, not measured here.
 
 ## Sources and pin
 
@@ -93,18 +93,57 @@ out of the tried set \(T_t\) and the yield \(g_t\). From it:
 | numpy scalar measurements (`np.float32`) | Written as-is | Accepted as any `numbers.Real` except `bool` |
 | Text-only diff (string literals / comments) declared structural, prose mentions a signal word | Declared tag kept | Recorded as `prompt` |
 
-None of these mechanisms is wired into `evolve()`, `aggregator_factory`, a
-proposal policy, or a resumable run record yet. There is no RRSI CLI,
-harness-directory domain, leakage critic, proposer, trial aggregation, pruning
-loop (the history computes \(B_t\) but nothing removes machinery), or
-evaluation/accounting adapter. AgentDescent's default evolution behavior is
-unchanged. Real-model and benchmark measurements are **unmeasured** here;
-upstream reported values are not AgentDescent results.
+
+## Wired into `evolve()` (`examples/rrsi/rrsi_policies.py`)
+
+`build_rrsi_bundle(complete, protected=..., reviewer=..., config=...,
+base_score=...)` assembles the three slots into one `Policies` bundle and
+returns `(bundle, state)`. The three share one :class:`RRsiState` — `S*`, the
+measured per-edit ledger, the component bookkeeping and the annealed round
+counter — which is what makes them one algorithm rather than three knobs.
+
+| Slot | Policy | What it regularizes |
+|---|---|---|
+| `Policies(screen=...)` | `RRsiCritic` | Pre-evaluation screen: annealed edit-budget gate (`len(ops) > b_t` rejected) and deterministic leakage screening against the evolve set (`protected` strings), plus an optional model `reviewer`. Runs **before measurement** (issue #221: "screening before evaluation is important"), so a leaking or over-budget card is settled and reported as `critic-rejected` without a held-out sweep. |
+| `Policies(proposal=...)` | `RRsiProposalPolicy` | The regularized proposer: injects the annealed budget, the measured per-edit history, pruning targets and the stall-exploration note into the reflection prompt. |
+| `Policies(acceptance=...)` | `RRsiAcceptance` | The pinned `selection.judge` decision — historical-best floor, both cost-rule branches, novelty — with `S*` advanced through the pinned `update_best_score`. `S*`, the ledger and the round counter checkpoint/restore through the aggregator's optional acceptance hook, so a resumed run does not lose the floor. |
+
+### Declared deviations (recorded, not silent)
+
+* **One candidate per round.** The engine merges to one candidate per round,
+  so the multi-candidate `select_round` "choose highest admissible argmax"
+  step is not exercised; each merge's candidate is judged against the
+  incumbent and `S*`. This is the "one winner per round" semantics issue #221
+  asks to establish first.
+* **The round counter advances once per merge.** On the synchronous path that
+  is the round barrier; on the barrier-free path there is no round barrier, so
+  the annealed schedule anneals per merge instead of per RRSI round. Callers
+  who need the paper's round semantics run the synchronous path.
+* **`noise_band` is a configured parameter** (default `0.0`, the conservative
+  floor `score >= S*`). The paper estimates it by repeatedly evaluating the
+  unchanged base harness; set `RRsiConfig.noise_band` from that measurement.
+* **Cost is `EvidenceCard.cost_tokens`, averaged per rollout** (the proposing
+  rollout's usage, when the caller shares a `Usage` with its adapters), **not a
+  batch sum** -- summing across a merge's cards would make the cost rule depend
+  on how many cards happened to land in the bucket. This is still a proxy:
+  Algorithm 2's `dC` is the *candidate* harness's cost relative to the
+  incumbent's on the same evaluation, and the proposing rollout runs the
+  incumbent, so the cost rule is approximate until candidate-side held-out
+  telemetry exists. Missing or zero telemetry yields `dC = 0`, matching the
+  pinned upstream behaviour.
+* **Protected strings come from the evolve set only** — never the final
+  holdout. The integration tests enforce that discipline by construction.
+
+What is still not wired: a full harness-directory domain adapter, multi-round
+`select_round` trial aggregation, and a RRSI CLI. AgentDescent's default
+evolution behavior is unchanged — a run without the bundle reports zero
+`critic_checked` / `critic_rejected` and no `critic-rejected` /
+`noise-floor` / `cost-rule` outcomes.
 
 ## Local verification
 
 ```bash
-pytest -q tests/test_rrsi_selection.py tests/test_rrsi_schedule.py tests/test_rrsi_history.py
+pytest -q tests/test_rrsi_selection.py tests/test_rrsi_schedule.py tests/test_rrsi_history.py tests/test_rrsi_integration.py
 ```
 
 Selection goldens cover the historical floor, both cost branches, domain veto,
@@ -113,7 +152,9 @@ numeric inputs. Schedule fixtures cover endpoints, monotonic anneal, the float
 guard, clamping, degenerate horizons and invalid bounds. History fixtures
 cover bundle fan-out, unmeasured records, the prune window and \(B_t\),
 `render`'s cap, torn-line recovery, atomic rewrites, stall and exploration, and
-`normalize`'s evidence check. Completing the full
-RRSI integration (issue #221) still needs pre-evaluation leakage screening,
-the proposer and pruning loop that consume this history, and the
-`evolve()`/CLI fixture.
+`normalize`'s evidence check. Integration fixtures
+cover the budget/leakage screen before evaluation, the model reviewer being
+asked only when deterministic checks pass, history attribution, stall
+exploration, pruning targets, `S*` monotonicity and checkpoint/restore, and
+offline end-to-end runs (leak → `critic-rejected`, clean → commit, untouched →
+zeros).

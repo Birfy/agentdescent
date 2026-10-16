@@ -279,6 +279,25 @@ class ProposalPolicy(Protocol):
 
 
 @runtime_checkable
+class ScreenPolicy(Protocol):
+    """A pre-evaluation gate on evidence cards.
+
+    Called by the aggregator **before** the expensive measurement, so a card
+    the screen rejects is settled and reported without ever buying a held-out
+    sweep. ``screen(card)`` returns ``None`` for a card that may proceed, or a
+    reason string for one that must not. The reason becomes the merge report's
+    detail and the outcome is ``critic-rejected``.
+
+    The seam exists for the RRSI pre-evaluation critic (leakage and edit-budget
+    screening, see ``examples/rrsi/``), and it is deliberately a *card* gate:
+    screening after a candidate is built is too late, and screening the whole
+    batch loses which card failed and why.
+    """
+
+    def screen(self, card: "EvidenceCard") -> Optional[str]: ...
+
+
+@runtime_checkable
 class ConflictPolicy(Protocol):
     """Which of a batch of mutually contradictory changes survive.
 
@@ -487,6 +506,12 @@ class Policies:
     #: worker, which is what the engine has always done.
     selection: Optional["SelectionPolicy"] = None
     proposal: Optional[ProposalPolicy] = None
+    #: A pre-evaluation gate on evidence cards (see
+    #: :class:`ScreenPolicy`). ``None`` keeps the old behaviour exactly --
+    #: every card that passes the trust region and staleness filter is merged.
+    #: Wired by the aggregator's ``_prepare``, so it runs before any
+    #: measurement.
+    screen: Optional[ScreenPolicy] = None
     conflict: Optional[ConflictPolicy] = None
     fusion: Optional[FusionPolicy] = None
     acceptance: Optional[AcceptancePolicy] = None
