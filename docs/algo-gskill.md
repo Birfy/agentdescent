@@ -103,7 +103,7 @@ learned on some instances of a repository and judged on others, as in gskill.
 scheduler with a scripted model that applies a convention only when the skill
 states it; that checks the loop (propose → validate → gate → export), not the
 quality of any model, so no number from it belongs in
-[the results table](self-evolution-examples.md#measured-results-all-twenty). The
+[the results table](self-evolution-examples.md#measured-results-all-twenty-two). The
 row will be added when a live run exists.
 
 ## Run it
