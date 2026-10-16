@@ -224,8 +224,11 @@ def _validate(policy: AuditPolicy, weights: Dict[str, float],
     _num("target_halfwidth", policy.target_halfwidth)
     for name in ("max_labels", "min_per_stratum", "min_dominant"):
         value = getattr(policy, name)
-        v = _num(name, value)
-        if not math.isfinite(v) or v < 0 or v != int(v):
+        # Integral, not merely integral-valued: a float floor such as ``20.0``
+        # is copied straight into ``target`` and would leave ``target_n`` and
+        # ``total_n`` as floats.
+        if (not isinstance(value, numbers.Integral) or isinstance(value, bool)
+                or value < 0):
             raise ValueError(f"AuditPolicy.{name} must be a non-negative "
                              f"integer, got {value!r}")
     if (not _real(expected_units) or not math.isfinite(float(expected_units))

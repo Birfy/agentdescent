@@ -393,6 +393,9 @@ _SD = {"a": 0.3, "b": 0.2}
     (dict(calibration_fraction=float("nan")), "calibration_fraction"),
     (dict(max_labels=-5), "max_labels"),
     (dict(max_labels=10.5), "max_labels"),
+    (dict(max_labels=400.0), "max_labels"),
+    (dict(min_per_stratum=20.0), "min_per_stratum"),
+    (dict(min_dominant=True), "min_dominant"),
     (dict(min_per_stratum=-1), "min_per_stratum"),
     (dict(min_dominant=float("inf")), "min_dominant"),
 ])
@@ -437,6 +440,16 @@ def test_boundary_values_that_already_meant_something_still_plan(kw):
     p = plan(AuditPolicy(enabled=True, **kw), weights=_W,
              expected_units=1000, resid_sd=_SD)
     assert all(0.0 <= r <= 1.0 for r in p.rates.values())
+
+
+def test_numpy_integer_label_counts_are_accepted_and_counts_stay_ints():
+    np = pytest.importorskip("numpy")
+    p = plan(AuditPolicy(enabled=True, max_labels=np.int64(400),
+                         min_per_stratum=np.int32(20)),
+             weights=_W, expected_units=1000, resid_sd=_SD)
+    assert all(isinstance(n, int) or isinstance(n, np.integer)
+               for n in p.target_n.values())
+    assert float(p.total_n).is_integer()
 
 
 def test_a_zero_weight_stratum_is_still_allowed():
