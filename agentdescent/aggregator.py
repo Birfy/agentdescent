@@ -720,11 +720,12 @@ class Aggregator:
         #: budget governor), it only reports what happened.
         self.allocator: Optional[Any] = None
         #: Called after a **contract-breaking** commit lands, with the changed
-        #: artifact id. The engine wires it to re-measure artifacts whose
-        #: ``Contract.depends_on`` names the changed artifact (their cached
-        #: evaluations were taken under the superseded contract). Optional --
-        #: ``None`` keeps the old behaviour of not noticing.
-        self.on_contract_change: Optional[Callable[[str], None]] = None
+        #: artifact id and the branch it committed on. The engine wires it to
+        #: re-measure artifacts whose ``Contract.depends_on`` names the changed
+        #: artifact (their cached evaluations were taken under the superseded
+        #: contract). Optional -- ``None`` keeps the old behaviour of not
+        #: noticing.
+        self.on_contract_change: Optional[Callable[[str, str], None]] = None
         #: Reverse contract-dependency graph: ``changed_artifact_id ->
         #: [dependents]``, wired by the engine from the registered artifacts'
         #: ``Contract.depends_on``. Used to refuse a contract-breaking commit
@@ -1642,6 +1643,6 @@ class Aggregator:
         prior.update(True, weight=2.0)  # a committed improvement is strong evidence.
 
         if c.diff.contract_breaking and self.on_contract_change is not None:
-            self.on_contract_change(c.artifact_id)
+            self.on_contract_change(c.artifact_id, c.branch or Ledger.DEV)
 
         return report(c.diff, new_version, "committed", MergeOutcome.COMMITTED)

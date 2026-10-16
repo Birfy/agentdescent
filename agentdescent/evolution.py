@@ -1886,10 +1886,13 @@ class _Engine:
     #: the old contract, so the engine re-measures them.
     contract_dependents: Dict[str, List[str]] = field(default_factory=dict)
 
-    def invalidate_dependents(self, changed_artifact_id: str) -> None:
+    def invalidate_dependents(self, changed_artifact_id: str,
+                              branch: str = Ledger.DEV) -> None:
         """Drop cached evaluations of artifacts that depend on ``changed``.
 
-        Called when a contract-breaking diff commits on ``changed_artifact_id``:
+        Called when a contract-breaking diff commits on ``changed_artifact_id``
+        (on ``branch`` -- a fork's dependents are measured against the fork's
+        head, so evicting the *fork's* renders is what forces their re-measure):
         every artifact whose ``Contract.depends_on`` names it was measured under
         the superseded contract, so its cached scores no longer mean what they
         said. Re-measuring is forced by evicting those cache entries -- the
@@ -1902,7 +1905,7 @@ class _Engine:
         dependents = self.contract_dependents.get(changed_artifact_id) or ()
         if not dependents:
             return
-        snap = self.ledger.snapshot(Ledger.DEV)
+        snap = self.ledger.snapshot(branch)
         invalidate = getattr(self.runtime.cache, "invalidate", None)
         if not callable(invalidate):
             return

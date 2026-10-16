@@ -232,7 +232,8 @@ def test_contract_breaking_with_adapters_commits_both_atomically(tmp_path):
         AggregatorConfig(batch_trigger=1))
     agg.contract_dependents = {"artifact": ["b"]}
     invalidated = []
-    agg.on_contract_change = lambda aid: invalidated.append(aid)
+    agg.on_contract_change = lambda aid, branch: invalidated.append(
+        (aid, branch))
     snap = lg.snapshot(Ledger.DEV)
     base = snap.get("artifact")
     b_old = snap.get("b")
@@ -255,8 +256,9 @@ def test_contract_breaking_with_adapters_commits_both_atomically(tmp_path):
     after = lg.snapshot(Ledger.DEV)
     assert after.version["artifact"] == 2 and after.version["b"] == 2, (
         "candidate and adapter must land in the same atomic commit")
-    assert invalidated == ["artifact"], (
-        "dependents must be re-measured after the breaking change")
+    assert invalidated == [("artifact", "dev")], (
+        "dependents must be re-measured after the breaking change, on the "
+        f"branch that changed (got {invalidated})")
 
 
 def _agg_with_dependents(tmp_path, extra_ids=("artifact", "b"), dependents=None):

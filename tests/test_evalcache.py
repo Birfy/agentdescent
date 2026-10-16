@@ -11,6 +11,7 @@ concurrency are worth pinning:
 """
 
 import json
+import os
 from pathlib import Path
 import threading
 import time
@@ -160,6 +161,36 @@ def test_a_file_cache_separates_environments_too(tmp_path):
     cache = FileCache(str(tmp_path))
     cache.get_or_eval(cache_key("r", "t", "image-a"), lambda: 1.0)
     assert cache.get_or_eval(cache_key("r", "t", "image-b"), lambda: 0.0) == 0.0
+
+
+def test_file_cache_invalidate_deletes_the_targeted_entries(tmp_path):
+    """`FileCache.invalidate` must remove the on-disk entries it names, so a
+    fresh process re-evaluates rather than reading the stale score back. The
+    keys are (rendered, task_id, fingerprint); with a non-empty fingerprint the
+    old prefix comparison compared the *task id* to the fingerprint and deleted
+    nothing (review)."""
+    cache = FileCache(str(tmp_path))
+    cache.get_or_eval(cache_key("R", "t1", "fp"), lambda: 0.3)
+    cache.get_or_eval(cache_key("R", "t2", "fp"), lambda: 0.4)
+    cache.invalidate("R", "fp")
+    assert len(os.listdir(str(tmp_path))) == 0, (
+        "both fingerprint-matched files must be deleted")
+    # a fresh reader re-evaluates instead of reading the stale score back
+    fresh = FileCache(str(tmp_path))
+    assert fresh.get_or_eval(cache_key("R", "t1", "fp"), lambda: 0.9) == 0.9
+
+
+def test_file_cache_invalidate_without_fingerprint_drops_all_tasks_on_render(tmp_path):
+    """No fingerprint -> every task measured on this render is invalidated,
+    matching MemoryCache's coarse semantics."""
+    import os
+    cache = FileCache(str(tmp_path))
+    cache.get_or_eval(cache_key("R", "t1", "fp"), lambda: 0.3)
+    cache.get_or_eval(cache_key("R", "t2", "fp"), lambda: 0.4)
+    cache.get_or_eval(cache_key("other", "t1", "fp"), lambda: 0.5)
+    cache.invalidate("R")
+    assert len(os.listdir(str(tmp_path))) == 1, (
+        "only the other-render entry survives")
 
 
 def test_an_unwritable_cache_does_not_fail_the_run(tmp_path):
