@@ -71,23 +71,61 @@ is where the port diverges from `evolve()`'s usual strict gate:
 
 | | `acceptance` | A rewrite that drops useful content |
 |---|---|---|
-| default (**online**, upstream) | `CommitEveryUpdate` | kept |
+| default (**online**, upstream) | `CommitEveryUpdate` | kept (see the warning below for the two vetoes that had to be closed) |
 | `--gated` (offline, ACE-like) | the framework default | rejected: held-out reward falls |
 
 The default is the faithful one. `--gated` is the ACE-like offline reading: the
 cheatsheet is trained on one split and only kept if it helps the held-out one.
 
-!!! warning "Why the cheatsheet declares `blast_radius=0.2`"
-    Above `governance.FAST_MAX` (0.3) the runtime **audits every commit** against
-    the full held-out set and vetoes any that did not improve it — a blocking
-    gate that runs *in front of* the acceptance policy. The shared runner's
-    default of 0.6 is therefore a gate whatever `AcceptancePolicy` is installed:
-    at 0.6 the accept-everything rule still returned `oracle-rejected` for a
-    rewrite that dropped the tip. `MethodPolicy` gained a `blast_radius` field
-    (default 0.6, so every other port is unchanged) and the cheatsheet — skill
-    layer context, as ACE's playbook — declares 0.2.
+!!! warning "Why online mode needs three runner fields, not one"
+    Online DC-Cu is only online if nothing between the curator and the ledger
+    can veto a rewrite. The runtime has two vetoes that sit **in front of** the
+    acceptance policy, and an accept-everything `AcceptancePolicy` reaches
+    neither:
+
+    1. **L1 commit audit by blast radius.** Above `governance.FAST_MAX` (0.3)
+       every commit is audited against the full held-out set and returns
+       `oracle-rejected` unless it improved. The shared runner's default of 0.6
+       is therefore a gate whatever policy is installed. `MethodPolicy` gained a
+       `blast_radius` field (default 0.6, so every other port is unchanged) and
+       the cheatsheet — skill-layer context, as ACE's playbook — declares 0.2.
+    2. **Low-trust audit.** The audit also opens at *any* blast radius once its
+       trust in the cheap ranking layer drops below 0.75, and trust halves
+       (1.0 → 0.5) the first time the cheap sample and the full held-out set
+       disagree about a candidate's direction. A rewrite that helps the
+       engine's 8-puzzle cheap sample and hurts the 12-puzzle split is then
+       `oracle-rejected` before `CommitEveryUpdate` is consulted.
+       `MethodPolicy.cheap_eval_tasks` (default `None`, the engine's own 8)
+       closes it: online mode sets it to the whole held-out split, the two
+       layers become one measurement (the evaluation cache returns identical
+       numbers), they cannot disagree, and the audit never opens.
+       `test_engine_default_cheap_layer_vetoes_an_online_rewrite_on_disagreement`
+       pins the engine behaviour this works around, and
+       `test_full_held_out_cheap_layer_keeps_the_rewrite_online` the fix.
+    3. **The test split is frozen by default.** The shared runner scores the
+       test split with a fixed artifact, so no test answer would be curated and
+       task *i+1* would not see what task *i* taught — a frozen memory trained
+       on another split, not the Gen → Cur protocol. `MethodPolicy` gained an
+       opt-in `test_time_learning` (default `False`); online mode sets it, and
+       the runner then scores the test split as an ordered stream: solve,
+       score, `propose`, apply the diff to an in-memory copy, next task.
+
     `test_the_shared_runner_really_is_ungated_online_and_gated_with_the_flag`
-    pins both modes in all three schedulers.
+    pins both acceptance modes in all three schedulers.
+
+!!! note "What the test stream does and does not measure"
+    The reported **test quality for online mode is the streamed one**; the
+    frozen score of the same evolved cheatsheet is recorded beside it
+    (`framework.test_stream.frozen_quality`), so the gain from continued
+    learning is a difference, not a claim. The stream starts from the cheatsheet
+    the engine evolved on the train / held-out splits, **not** from `(empty)` as
+    upstream's single test stream does: it is transfer followed by online
+    learning. It is strictly sequential whatever `--workers` says, uses its own
+    `stream:` phases (the proposal budget check is unchanged), never writes to
+    the ledger, and counts its refused or unchanged updates separately from
+    `invalid` candidates. `--gated` is the offline reading and scores a frozen
+    artifact. Only strategies whose diffs are key → value replacements can
+    stream.
 
 ## Boundaries
 
@@ -103,6 +141,8 @@ cheatsheet is trained on one split and only kept if it helps the held-out one.
   the *old* cheatsheet; the [porting policy](porting-methodpolicy.md) forbids
   fallback substitution, so the proposal costs its candidate and is counted
   `invalid`.
+- **The test stream starts from the evolved cheatsheet, not `(empty)`**, and the
+  engine's train / held-out phase runs first; see the note above.
 - **Parallel curators are merged.** Upstream is one sequential stream. Under
   `evolve()` several workers rewrite one base at once; contradictions go
   through the shared reflective merge (one model call, tag-free shape check).
@@ -119,11 +159,13 @@ curator that writes it. It shows the plumbing, not a model's behaviour.
 
 | mode | acceptance | test, before → after | validation | accepted | invalid | calls |
 |---|---|---:|---:|---:|---:|---:|
-| serial / sync / async | online (`CommitEveryUpdate`) | 0.000 → **1.000** | 0.000 → 1.000 | 1/2 | 0 | 64 |
-| serial / sync / async | `--gated` | 0.000 → **1.000** | 0.000 → 1.000 | 1/2 | 0 | 64 |
+| serial / sync / async | online (`CommitEveryUpdate`), streamed test | 0.000 → **1.000** | 0.000 → 1.000 | 1/2 | 0 | 88 |
+| serial / sync / async | `--gated`, frozen test | 0.000 → **1.000** | 0.000 → 1.000 | 1/2 | 0 | 64 |
 
 The two rows agree because the stub curator never writes a harmful rewrite; the
-tests that separate the modes feed it one that is
+online row's 24 extra calls are the test stream (12 solves, 12 curations — the
+stub rewrites the cheatsheet to the text it already holds, so all 12 updates are
+"unchanged"). The tests that separate the modes feed it one that is
 (`test_online_mode_keeps_every_rewrite_and_it_round_trips_the_ledger`,
 `test_gated_mode_rejects_a_rewrite_that_empties_useful_content`).
 

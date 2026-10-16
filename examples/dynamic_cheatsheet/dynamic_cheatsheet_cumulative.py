@@ -40,6 +40,17 @@ Deliberate substitutions, stated as such:
   where the runtime audits every commit and vetoes any that did not raise
   held-out reward *in front of* the acceptance policy -- which would make
   "keep every rewrite" gated anyway.
+* **The cheap ranking layer is the whole held-out split (online only).** The
+  commit audit lowers its trust in the cheap layer each time cheap and full
+  held-out disagree about a rewrite, and below 0.75 trust it opens at *any*
+  blast radius, vetoing a non-improving rewrite the accept-everything policy
+  meant to keep. ``MethodPolicy.cheap_eval_tasks`` makes the two layers one
+  measurement, so they cannot disagree.
+* **The test split is a stream (online only).** ``MethodPolicy.test_time_learning``
+  makes the runner solve, score and curate the test tasks in order, each seeing
+  the memory the previous one produced -- the Gen -> Cur loop itself. The
+  reported test quality is the streamed one (the frozen score is recorded beside
+  it); the ledger's artifact is not touched. ``--gated`` scores a frozen artifact.
 * **Parallel curators.** Upstream is one sequential stream. Under
   ``evolve()`` several workers rewrite the same cheatsheet from the same base;
   those contradictions are merged by the shared reflective merge (one model
@@ -323,6 +334,8 @@ def build(seed: int, *, gated: bool = False) -> MethodPolicy:
             "A curator reply without a <cheatsheet> block is refused and counted invalid; upstream's extract_cheatsheet returns the old cheatsheet instead, which is a fallback substitution.",
             "No code execution: upstream's generator can run its own Python via EXECUTE CODE!; snippets here are text in the cheatsheet only.",
             "The cheatsheet is skill-layer context (blast_radius=0.2, as ACE): at the runner's L1 default of 0.6 the runtime's commit audit vetoes any non-improving rewrite regardless of the acceptance policy, so online mode would not be online.",
+            "Online mode makes the cheap ranking layer the whole held-out split (MethodPolicy.cheap_eval_tasks): otherwise a cheap/full disagreement lowers the audit's trust below 0.75, it opens at any blast radius, and a non-improving rewrite is oracle-rejected before the accept-everything policy runs.",
+            "Online mode scores the test split as a sequential Gen -> Cur stream (MethodPolicy.test_time_learning), so the reported final quality is test-time learning rather than a frozen memory trained on another split; --gated scores a frozen artifact.",
             "Concurrent curator rewrites of one base are merged by the shared reflective merge; upstream is one sequential stream.",
             "Vendored 36-puzzle Game-of-24 slice replaces upstream's full Game-of-24 set; DC-RS / CumulativeRetrieval (embeddings) and AIME/GPQA are out of scope.",
         ),
@@ -342,6 +355,16 @@ def build(seed: int, *, gated: bool = False) -> MethodPolicy:
         # every commit and vetoes any that did not raise held-out reward, which
         # would make the accept-everything online mode gated by the back door.
         blast_radius=0.2,
+        # Online mode only. The audit lowers its trust in the cheap ranking layer
+        # each time cheap and full held-out disagree about a rewrite, and below
+        # 0.75 trust it opens at any blast radius -- vetoing a non-improving
+        # rewrite the accept-everything policy was meant to keep. Making the
+        # cheap layer the whole held-out split removes the disagreement.
+        cheap_eval_tasks=None if gated else len(held_out),
+        # Online mode only: the test split is a Gen -> Cur stream the cheatsheet
+        # keeps learning from. Gated mode is the offline reading: a frozen
+        # artifact, as the held-out gate vetted it.
+        test_time_learning=not gated,
     )
 
 

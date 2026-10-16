@@ -10,8 +10,8 @@ so you can reproduce it.
 
 ## The algorithm ports
 
-All nineteen port results live in one place — **[measured results, all
-twenty](self-evolution-examples.md#measured-results-all-twenty)** — with each
+The measured port results live in one place — **[measured results, all
+twenty-one](self-evolution-examples.md#measured-results-all-twenty-one)** — with each
 row linked to the page that carries its full setup, its caveats and the run file
 it came from. They are not repeated here: a second copy of a number is a copy
 that goes stale, and this page's copy did.

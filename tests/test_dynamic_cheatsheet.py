@@ -271,12 +271,17 @@ def _fake(curator_sheet):
     return reply
 
 
-def _run(gated, curator_sheet, initial_sheet):
+def _run(gated, curator_sheet, initial_sheet, *, completion=None,
+         cheap=...):
     """One real `evolve()` round with the port's own pieces. Returns the result
     and the strategy so the ledger's state can be inspected."""
     policy = dc.build(0, gated=gated)
     usage = Usage()
-    recorder = Recorder(metered(_fake(curator_sheet), usage), usage)
+    recorder = Recorder(
+        metered(completion or _fake(curator_sheet), usage), usage)
+    # `...` means "whatever the policy declares", `None` is the engine default.
+    cheap_kw = {"cheap_eval_tasks": policy.cheap_eval_tasks if cheap is ...
+                else cheap}
     run_llm = PhasedLLM(recorder, "run:dynamic_cheatsheet")
     prop_llm = PhasedLLM(recorder, "proposal:dynamic_cheatsheet")
     result = evolve(
@@ -291,6 +296,7 @@ def _run(gated, curator_sheet, initial_sheet):
         held_out_frac=policy.held_out_frac, solved_threshold=1.1,
         agg_config=AggregatorConfig(batch_trigger=2, max_wait_rounds=1),
         shuffle=False, seed=0, verbose=False, policies=policy.engine,
+        **cheap_kw,
     )
     return result, policy
 
@@ -406,3 +412,185 @@ def test_no_embedding_or_retrieval_dependency_is_imported():
     for name in banned:
         assert f"import {name}" not in source
         assert f"from {name}" not in source
+
+
+# ---------------------------------------------------------------------------
+# The audit's low-trust veto, and the opt-out that closes it.
+# ---------------------------------------------------------------------------
+
+def _split_fake():
+    """Sheet A solves two held-out puzzles that sit in the engine's default
+    cheap sample (indices 0 and 2 of Random(0).sample(range(12), 8)); sheet B
+    solves four that sit outside it. Rewriting B -> A therefore *raises* the
+    cheap score (0 -> 2/8) while *lowering* the full one (4/12 -> 2/12): the
+    two layers disagree about the direction."""
+    held = game24.game24_splits(0)[1]
+    solves = {"SHEET-A": {held[0].prompt, held[2].prompt},
+              "SHEET-B": {held[i].prompt for i in (1, 5, 8, 9)}}
+    reference = game24.reference_answers()
+
+    def reply(prompt):
+        if "cheatsheet reference curator" in prompt.lower():
+            return "<cheatsheet>SHEET-A</cheatsheet>"
+        numbers = re.findall(r"Input: ([\d ]+)", prompt)[-1].strip()
+        sheet = prompt.split("CHEATSHEET:", 1)[1].split("Now it is time", 1)[0]
+        solved = any(tag in sheet and numbers in puzzles
+                     for tag, puzzles in solves.items())
+        expression = reference[numbers] if solved else "1 + 1"
+        return f"<answer>{expression}</answer>"
+    return reply
+
+
+def test_the_declared_cheap_layer_is_the_whole_held_out_split_online_only():
+    online, gated = dc.build(0), dc.build(0, gated=True)
+    assert online.cheap_eval_tasks == len(online.held_out_tasks) == 12
+    assert gated.cheap_eval_tasks is None
+
+
+def test_engine_default_cheap_layer_vetoes_an_online_rewrite_on_disagreement():
+    """The limit the opt-out exists for, pinned so it cannot silently change:
+    at the engine's default cheap sample, the disagreement halves trust, the
+    audit opens at blast_radius 0.2, and the non-improving rewrite is refused
+    before `CommitEveryUpdate` is consulted."""
+    result, _ = _run(False, "", "SHEET-B", completion=_split_fake(),
+                     cheap=None)
+    assert result.state["cheatsheet"] == "SHEET-B"
+    assert result.outcomes() == {"oracle-rejected": 1}
+
+
+def test_full_held_out_cheap_layer_keeps_the_rewrite_online():
+    result, _ = _run(False, "", "SHEET-B", completion=_split_fake())
+    assert result.state["cheatsheet"] == "SHEET-A"
+    assert result.outcomes() == {"committed": 1}
+
+
+def test_gated_mode_still_refuses_that_same_rewrite():
+    result, _ = _run(True, "", "SHEET-B", completion=_split_fake())
+    assert result.state["cheatsheet"] == "SHEET-B"
+    assert result.outcomes().get("committed", 0) == 0
+
+
+def test_cheap_eval_tasks_reaches_the_engine_and_defaults_to_none(monkeypatch):
+    import examples._method_runner as runner
+
+    seen = []
+    real = runner.evolve
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs["cheap_eval_tasks"])
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(runner, "evolve", spy)
+    _through_the_shared_runner(False)
+    _through_the_shared_runner(True)
+    assert seen == [12, None]
+
+
+# ---------------------------------------------------------------------------
+# Test-time learning: the test split is a Gen -> Cur stream, opt-in.
+# ---------------------------------------------------------------------------
+
+def test_the_stream_feeds_each_update_into_the_next_task():
+    """Task i+1's generator prompt carries what the curator wrote after task i,
+    and the curator's prompt carries the model's own answer."""
+    from examples._method_runner import _stream_test
+
+    policy = dc.build(0)
+    tasks = policy.test_tasks[:4]
+    generated, curated = [], []
+    counter = iter(range(100))
+
+    def completion(prompt):
+        if "cheatsheet reference curator" in prompt.lower():
+            curated.append(prompt)
+            return f"<cheatsheet>UPDATE-{next(counter)}</cheatsheet>"
+        generated.append(prompt)
+        return "<answer>1 + 1</answer>"
+
+    initial = {"cheatsheet": "START"}
+    stream = _stream_test(
+        policy, _llm(_Recording(completion)), _llm(_Recording(completion)),
+        initial, tasks)
+    assert [("START" in p, "UPDATE-0" in p, "UPDATE-1" in p, "UPDATE-2" in p)
+            for p in generated] == [
+        (True, False, False, False), (False, True, False, False),
+        (False, False, True, False), (False, False, False, True)]
+    assert all("<answer>1 + 1</answer>" in p for p in curated)
+    assert stream["curated"] == 4 and stream["refused"] == 0
+    assert stream["rendered"] == "UPDATE-3"
+    assert initial == {"cheatsheet": "START"}  # the ledger's state is not touched
+
+
+def test_a_refused_stream_update_leaves_memory_as_it_was():
+    from examples._method_runner import _stream_test
+
+    policy = dc.build(0)
+    recording = _Recording(lambda prompt: (
+        "no block here" if "cheatsheet reference curator" in prompt.lower()
+        else "<answer>1 + 1</answer>"))
+    stream = _stream_test(policy, _llm(recording), _llm(recording),
+                          {"cheatsheet": "KEEP"}, policy.test_tasks[:3])
+    assert stream["curated"] == 0 and stream["refused"] == 3
+    assert stream["rendered"] == "KEEP"
+
+
+def test_a_rewrite_equal_to_the_current_memory_is_unchanged_not_refused():
+    from examples._method_runner import _stream_test
+
+    policy = dc.build(0)
+    recording = _Recording(lambda prompt: (
+        "<cheatsheet>SAME</cheatsheet>"
+        if "cheatsheet reference curator" in prompt.lower()
+        else "<answer>1 + 1</answer>"))
+    stream = _stream_test(policy, _llm(recording), _llm(recording),
+                          {"cheatsheet": "SAME"}, policy.test_tasks[:3])
+    assert (stream["curated"], stream["refused"], stream["unchanged"]) == (0, 0, 3)
+
+
+def test_online_run_streams_the_test_split_and_reports_it():
+    online = _through_the_shared_runner(False)
+    block = online.framework["test_stream"]
+    assert block["tasks"] == 12
+    # USELESS is what the engine already committed, so every stream rewrite of it
+    # is unchanged; the curated path is covered by the stream tests above.
+    assert block["curated"] + block["unchanged"] + block["refused"] == 12
+    assert "frozen_quality" in block and "rendered" not in block
+    phases = set(online.phase_summary)
+    assert any(p.startswith("stream:dynamic_cheatsheet:solve") for p in phases)
+    assert any(p.startswith("stream:dynamic_cheatsheet:curate") for p in phases)
+    # The stream is not part of the proposal budget.
+    assert online.budget["matched"] is True
+    assert online.budget["observed_proposal_calls"] <= 2
+
+
+def test_gated_run_scores_a_frozen_artifact_with_no_stream():
+    gated = _through_the_shared_runner(True)
+    assert "test_stream" not in gated.framework
+    assert not any(p.startswith("stream:") for p in gated.phase_summary)
+
+
+def test_refused_stream_updates_are_not_counted_as_invalid_candidates():
+    from examples._method_runner import run_port
+
+    policy = dc.build(0)
+    usage = Usage()
+    broken = _Recording(lambda prompt: (
+        "no block" if "cheatsheet reference curator" in prompt.lower()
+        else "<answer>1 + 1</answer>"))
+    recorder = Recorder(metered(broken, usage), usage)
+    result = run_port(policy, recorder, mode="sync_parallel", seed=0,
+                      workers=2, candidate_budget=2, max_seconds=30.0,
+                      shutdown_grace=5.0)
+    assert result.invalid_candidates == 2          # the two engine proposals
+    assert result.framework["test_stream"]["refused"] == 12
+
+
+def test_no_other_port_opts_in_to_the_stream_or_a_cheap_layer():
+    from bench.candidate_methods import ALGORITHMS
+
+    for name, (_, builder) in ALGORITHMS.items():
+        policy = builder(0)
+        if name == "dynamic_cheatsheet":
+            continue
+        assert policy.test_time_learning is False, name
+        assert policy.cheap_eval_tasks is None, name

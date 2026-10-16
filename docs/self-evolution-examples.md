@@ -1,18 +1,18 @@
 ---
-description: Twenty published self-evolution algorithms ported as runnable plug-ins on one runtime, each with a declared fidelity class and a measured before-and-after result.
+description: Twenty-one published self-evolution algorithms ported as runnable plug-ins on one runtime, each with a declared fidelity class and a measured before-and-after result.
 ---
 
-# Self-evolution algorithms — twenty ports
+# Self-evolution algorithms — twenty-one ports
 
 AgentDescent is a *general* engine for parallel, merge-based evolution. To show
-it is faithful to the field — not a toy — twenty published **skill**,
+it is faithful to the field — not a toy — twenty-one published **skill**,
 **program** and **harness** self-evolution algorithms run on it, each as one
 runnable example with a dedicated page. Eight reproduce their paper's own
-benchmark; twelve preserve the mechanism on a compact domain and say so. What
+benchmark; thirteen preserve the mechanism on a compact domain and say so. What
 each one follows and where it departs is recorded per port in
 [port fidelity](port-fidelity.md).
 
-**All twenty run through the AgentDescent evolution engines.** No example
+**All twenty-one run through the AgentDescent evolution engines.** No example
 bypasses the engine, and they reach it three ways:
 
 * the **eight benchmark-faithful ports** are each a custom `strategy=` and/or a
@@ -24,12 +24,15 @@ bypasses the engine, and they reach it three ways:
   mechanisms plug in as `Policies(...)` fields, their artifacts as shared
   [strategies](strategies.md), and the [runtime matrix](matrix-overview.md)
   measures them under all three schedulers;
+* **Dynamic Cheatsheet** is a twelfth `MethodPolicy` definition, listed
+  [on its own](#added-since-dynamic-cheatsheet-the-ace-precursor) so the eleven
+  above keep describing what they were measured with;
 * **Genesis** is neither: a custom `strategy=` like the first group, a
   `mechanism_microport` fidelity class like the second, and its whole algorithm
   installed through `Policies(proposal=, acceptance=, conflict=)` — the case that
   shows the seams are enough on their own.
 
-**All twenty are parallel — and can run async.** In synchronous mode their workers
+**All twenty-one are parallel — and can run async.** In synchronous mode their workers
 run **concurrently** (overlapping LLM rollouts) with the aggregator merge as the
 barrier (*synchronous data-parallelism*). Add **`--async`** and the same example
 runs **barrier-free** through
@@ -88,7 +91,7 @@ same runner and command line.
 |---|---|---|---|---|
 | **Dynamic Cheatsheet** (DC-Cu) | `mechanism_microport` | Game of 24 (36 vendored puzzles, offline) | whole-value `CheatsheetSlot`; label-free curator; online `CommitEveryUpdate` acceptance or `--gated`; `blast_radius=0.2` | [→](algo-dynamic-cheatsheet.md) |
 
-### The twentieth: Genesis, at the standard seams
+### The twenty-first: Genesis, at the standard seams
 
 One port is a mechanism microport that is **not** a `MethodPolicy`: its algorithm
 is a recursion, so it installs as a proposal policy rather than as a declaration
@@ -234,10 +237,11 @@ cannot be decorative. `run_port` also records all three in `framework`, and
 
 ---
 
-## Measured results — all twenty
+## Measured results — all twenty-one
 
-Every port has been run and every number below is linked to the run that
-produced it. **The two halves of this page are not comparable with each other**,
+Every port below has been run and every number is linked to the run that
+produced it, **except Dynamic Cheatsheet, which has only a deterministic
+offline run and no row here yet** (see [its page](algo-dynamic-cheatsheet.md#measured-results-game-of-24)). **The two halves of this page are not comparable with each other**,
 and within each half only rows on the same domain are: a gain is bounded by the
 headroom its baseline leaves, and the ports sit on benchmarks whose baselines
 run from 0.000 to 0.641.
@@ -296,7 +300,7 @@ that establish the port works end to end, not a comparison.
 | [OpenEvolve](algo-openevolve.md#measured-results-function-minimization) | function minimization | combined score 0.9638 → **1.4995** against a 1.5 ceiling, held-out seeds | async N=4, 24 rollouts |
 | [ERA](algo-era.md#measured-results-playground-s3e1) | Kaggle Playground S3E1 | test RMSE 0.7297 → **0.5913** (−19.0%) on 2,476 unseen rows; 7-node tree, all valid | async N=3, 6 expansions |
 
-### The twentieth, on two formation runs
+### The twenty-first, on two formation runs
 
 The repository starts with no implementation in it, so "before" is 0.000 by
 construction rather than by a weak baseline. Model rows are three seeds at
