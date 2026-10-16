@@ -374,6 +374,30 @@ def test_t_ppf_does_not_saturate_for_tiny_df():
     assert _t_cdf(q, 0.1) == pytest.approx(0.975, abs=1e-9)
 
 
+def test_t_ppf_is_finite_for_tiny_df_where_the_quantile_exceeds_1e150():
+    """`t**2` overflows near 1e154, but the quantile at df = 0.01 is ~4e168 and
+    is a perfectly good double. It used to come back as `inf`."""
+    q = t_ppf(0.99, 0.01)
+    assert math.isfinite(q) and 1e168 < q < 1e169
+    # P(T > t) ~ C * t**-df for huge t: halving the tail multiplies t by 2**(1/df)
+    ratio = t_ppf(0.995, 0.01) / q
+    assert ratio == pytest.approx(2.0 ** (1.0 / 0.01), rel=1e-3)
+    assert t_ppf(0.01, 0.01) == pytest.approx(-q, rel=1e-9)
+
+
+@pytest.mark.parametrize("df", [0.5, 1, 2, 3, 7.5, 20])
+@pytest.mark.parametrize("eps", [1e-12, 1e-9, 1e-6])
+def test_t_ppf_resolves_probabilities_next_to_the_median(df, eps):
+    """`0.5 - tail` rounds to the same double over a whole interval of `t`, so
+    the quantile of `0.5 + eps` came back as noise. To first order it is
+    `eps / pdf(0)`, with a relative correction of order `eps**2`."""
+    p = 0.5 + eps
+    pdf0 = math.exp(math.lgamma((df + 1) / 2) - math.lgamma(df / 2)) / math.sqrt(df * math.pi)
+    expected = (p - 0.5) / pdf0
+    assert t_ppf(p, df) == pytest.approx(expected, rel=1e-6)
+    assert t_ppf(1.0 - p, df) == pytest.approx(-(0.5 - (1.0 - p)) / pdf0, rel=1e-6)
+
+
 def test_t_ppf_is_continuous_across_the_series_threshold():
     below, above = t_ppf(0.975, 29.999999), t_ppf(0.975, 30.0)
     assert abs(below - above) < 1e-7
