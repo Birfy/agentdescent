@@ -441,3 +441,91 @@ def test_a_z_quantile_would_have_been_too_narrow_at_audit_sizes():
     z = NormalDist().inv_cdf(0.975)
     for df, floor in ((40, 0.01), (80, 0.005)):
         assert (t_ppf(0.975, df) - z) / z > floor
+
+
+# ---------------------------------------------------------------------------
+# input validation: nothing non-finite becomes a result (#314)
+# ---------------------------------------------------------------------------
+
+def _good(n=12, n_unlab=50, seed=0):
+    rng = np.random.default_rng(seed)
+    f = rng.random(n)
+    y = f + rng.normal(0, 0.1, n)
+    return f, y, rng.random(n_unlab)
+
+
+NAN, INF = float("nan"), float("inf")
+
+
+@pytest.mark.parametrize("weight", [NAN, INF, -INF, -0.5])
+def test_a_non_finite_or_negative_weight_is_refused(weight):
+    """`abs(nan - 1) > 1e-6` is False, so a NaN weight used to skip the check."""
+    f, y, fu = _good()
+    with pytest.raises(PPIError):
+        Stratum("a", weight, f, y, f_unlab=fu)
+
+
+@pytest.mark.parametrize("bad", [NAN, INF, -INF])
+@pytest.mark.parametrize("which", ["f_lab", "y_lab", "f_unlab"])
+def test_non_finite_scores_are_refused(which, bad):
+    f, y, fu = _good()
+    arrs = {"f_lab": f.copy(), "y_lab": y.copy(), "f_unlab": fu.copy()}
+    arrs[which][0] = bad
+    with pytest.raises(PPIError):
+        Stratum("a", 1.0, arrs["f_lab"], arrs["y_lab"], f_unlab=arrs["f_unlab"])
+
+
+@pytest.mark.parametrize("kwargs", [
+    dict(mean_unlab=NAN, var_unlab=0.05),
+    dict(mean_unlab=INF, var_unlab=0.05),
+    dict(mean_unlab=0.5, var_unlab=NAN),
+    dict(mean_unlab=0.5, var_unlab=INF),
+    dict(mean_unlab=0.5, var_unlab=0.05, n_unlab=NAN),
+    dict(mean_unlab=0.5, var_unlab=0.05, n_unlab=INF),
+    dict(mean_unlab=0.5, var_unlab=0.05, n_unlab=2.5),
+    dict(mean_unlab=0.5, var_unlab=0.05, n_unlab=-1),
+])
+def test_non_finite_moments_and_bad_counts_are_refused(kwargs):
+    f, y, _ = _good()
+    kwargs = {"n_unlab": 50, **kwargs}
+    with pytest.raises(PPIError):
+        Stratum.from_moments("a", 1.0, f, y, **kwargs)
+
+
+def test_an_integral_float_count_is_still_accepted_and_normalised():
+    f, y, _ = _good()
+    s = Stratum.from_moments("a", 1.0, f, y, n_unlab=50.0,
+                             mean_unlab=0.5, var_unlab=0.05)
+    assert s.n_unlab == 50 and isinstance(s.n_unlab, int)
+
+
+@pytest.mark.parametrize("alpha", [0.0, -0.1, 1.0, 1.5, NAN, INF, -INF, "0.05", None])
+def test_alpha_outside_the_open_unit_interval_is_a_ppi_error(alpha):
+    """Used to be StatisticsError (<= 0), a zero-width interval (1.0) or NaN."""
+    f, y, fu = _good()
+    with pytest.raises(PPIError):
+        ppi_mean_stratified([Stratum("a", 1.0, f, y, f_unlab=fu)], alpha=alpha)
+
+
+@pytest.mark.parametrize("k", [1, 0, -3, 2.5, None])
+def test_k_folds_below_two_is_a_ppi_error(k):
+    f, y, fu = _good()
+    with pytest.raises(PPIError):
+        ppi_mean_stratified([Stratum("a", 1.0, f, y, f_unlab=fu)], k_folds=k)
+
+
+def test_a_nan_weight_that_bypasses_the_constructor_still_fails_the_sum_check():
+    """The check itself is written so NaN fails it, not only the constructor."""
+    f, y, fu = _good()
+    ok = Stratum("a", 0.5, f, y, f_unlab=fu)
+    bad = Stratum("b", 0.5, f, y, f_unlab=fu)
+    object.__setattr__(bad, "weight", NAN)
+    with pytest.raises(PPIError, match="sum"):
+        ppi_mean_stratified([ok, bad])
+
+
+def test_valid_inputs_are_unchanged_by_the_validation():
+    f, y, fu = _good()
+    r = ppi_mean_stratified([Stratum("a", 1.0, f, y, f_unlab=fu)], alpha=0.1)
+    assert np.isfinite(r.theta) and r.ci[0] < r.theta < r.ci[1]
+    assert r.alpha == 0.1

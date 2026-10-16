@@ -2127,7 +2127,7 @@ Calibrator(
 | parameter | type | default | what it is |
 |---|---|---|---|
 | `store` | `AuditStore` | *required* | Where the audited pairs and the unlabelled moments live. |
-| `alpha` | `float` | `0.05` |  |
+| `alpha` | `float` | `0.05` | `1 - alpha` is the nominal coverage of the interval. Must satisfy `0 < alpha < 1`; anything else raises `ValueError` here, at construction, rather than on the first merge. |
 | `seed` | `int` | `0` |  |
 | `min_labels` | `int` | `30` | Below this many resolved calibration labels the result is stale rather than wide. A very wide interval and "we do not know yet" are different claims, and only the second one stops a caller reading a number off it. |
 | `min_per_stratum` | `int` | `5` | A stratum with fewer than this many labels is **merged into the largest one** rather than dropped. Dropping it would silently change the population the estimate describes; merging keeps every unit represented and costs only resolution. |
