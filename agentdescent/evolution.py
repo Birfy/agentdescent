@@ -38,7 +38,7 @@ import time
 import warnings
 from dataclasses import asdict, dataclass, field, replace as _replace
 from typing import (
-    Any, Callable, Dict, List, Optional, Protocol, Sequence, Tuple,
+    Any, Callable, Dict, List, Mapping, Optional, Protocol, Sequence, Tuple,
     runtime_checkable,
 )
 
@@ -2102,6 +2102,30 @@ def _check_callable(fn: Callable, n_args: int, sig_hint: str) -> None:
             f"{getattr(fn, '__name__', fn)!r} does not match {sig_hint}: {e}") from None
 
 
+def _contract_dependents(primary_id: str, primary_contract: Any,
+                         extra_artifacts: Optional[Mapping[str, Any]]
+                         ) -> Dict[str, List[str]]:
+    """Reverse contract-dependency graph over *every* registered artifact.
+
+    Maps ``changed_artifact_id -> [dependents]`` where a dependent is any
+    artifact -- the primary included -- whose effective ``Contract.depends_on``
+    names the changed one. One graph feeds both consumers: the aggregator's
+    exact adapter-coverage check and the engine's dependent cache invalidation,
+    so they cannot disagree about who a breaking change must adapt. Order is
+    primary first, then extras in registration order; an artifact is listed once
+    per dependency even if ``depends_on`` repeats a name."""
+    nodes: List[Tuple[str, Any]] = [(primary_id, primary_contract)]
+    for aid, art in (extra_artifacts or {}).items():
+        if aid == primary_id:
+            continue                    # the primary, already a node
+        nodes.append((aid, getattr(art, "contract", None)))
+    out: Dict[str, List[str]] = {}
+    for aid, c in nodes:
+        for dep in dict.fromkeys(getattr(c, "depends_on", ()) or ()):
+            out.setdefault(dep, []).append(aid)
+    return out
+
+
 def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state,
                   blast_radius, artifact_id, held_out_frac, repo_path, agg_config,
                   staleness_policy, aggregator_factory, oracle_budget,
@@ -2390,16 +2414,21 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     # contract), so the engine re-measures them. This is the seam the design
     # calls the atomic adaptation transaction's consumer side: the breaking diff
     # itself already lands atomically via ``commit_atomic``.
-    contract_dependents: Dict[str, List[str]] = {}
-    for aid, art in (extra_artifacts or {}).items():
-        if aid == artifact_id:
-            continue
-        deps = tuple(getattr(getattr(art, "contract", None), "depends_on", ()) or ())
-        for dep in deps:
-            if dep in contract_dependents:
-                contract_dependents[dep].append(aid)
-            else:
-                contract_dependents[dep] = [aid]
+    #
+    # Every registered artifact is a node, the primary included: a primary whose
+    # own contract ``depends_on`` an extra is a dependent of that extra, so a
+    # contract-breaking change to the extra must land with the primary's adapter
+    # and evict the primary's cached evaluations like any other dependent's
+    # (the first cut skipped the primary here and silently dropped it from both).
+    # The primary's contract is the operator-supplied ``contract=`` (the same one
+    # the merge gate enforces); absent that, the registered artifact's own (a
+    # resumed ledger's stored contract, or the empty default).
+    primary_contract = contract
+    if primary_contract is None:
+        primary_contract = getattr(
+            ledger.snapshot(Ledger.DEV).get(artifact_id), "contract", None)
+    contract_dependents = _contract_dependents(
+        artifact_id, primary_contract, extra_artifacts)
 
     # The cheap layer must actually be cheap. It used to be pinned to the full
     # held-out set (`rule_subset=len(held_out)`) with zero noise, on the reasoning

@@ -62,12 +62,12 @@ class _Reflector:
 
 
 def _run(*, extra_artifacts, parallel=None, rounds=4, n_workers=2,
-         agent=None, **kw):
+         agent=None, strategy_cls=AppendRules, **kw):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         return evolve(_tasks(), _reward, agent=agent or _Reflector(), rounds=rounds,
                       n_workers=n_workers, max_concurrency=n_workers,
-                      strategy=AppendRules(), extra_artifacts=extra_artifacts,
+                      strategy=strategy_cls(), extra_artifacts=extra_artifacts,
                       parallel=parallel, **kw)
 
 
@@ -601,3 +601,155 @@ def test_async_rollout_records_attribute_extras_to_the_extra(tmp_path):
     assert all(r.artifact_id == "skill-b" for r in extra_recs), (
         "every record whose render is the extra's must carry the extra's id, "
         f"got {sorted({r.artifact_id for r in extra_recs})}")
+
+
+# -- the primary is a node of the contract-dependency graph (#303) ------------
+
+
+def test_contract_dependents_graph_includes_the_primary():
+    """The reverse graph is built over every registered artifact. The primary's
+    separately supplied contract used to be skipped, so a primary that
+    `depends_on` an extra was invisible to the adapter and cache guards."""
+    from agentdescent.evolution import _contract_dependents
+    extras = {
+        "e": EvolvingArtifact("e", {}, contract=Contract(depends_on=("f",))),
+        "f": EvolvingArtifact("f", {}),
+        # the primary listed among extras is not double counted or re-read
+        "artifact": EvolvingArtifact("artifact", {}, contract=Contract(
+            depends_on=("ignored",))),
+    }
+    graph = _contract_dependents(
+        "artifact", Contract(depends_on=("e", "f", "e")), extras)
+    assert graph == {"e": ["artifact"], "f": ["artifact", "e"]}
+    # no dependencies anywhere (the default): nothing is required of anyone
+    assert _contract_dependents("artifact", None, None) == {}
+    assert _contract_dependents(
+        "artifact", Contract(), {"e": EvolvingArtifact("e", {})}) == {}
+
+
+def _break_extra_candidate(lg, adapters=(), branch=Ledger.DEV):
+    """A contract-breaking candidate for extra 'e', prepared against `branch`."""
+    from agentdescent.aggregator import _Candidate
+    snap = lg.snapshot(branch)
+    base = snap.get("e")
+    cand = base.apply(Diff(diff_id="d", target="e", ops={"k": "v"},
+                           author="w", contract_breaking=True))
+    return _Candidate(
+        artifact_id="e", artifact=base, candidate=cand,
+        diff=Diff(diff_id="d", target="e", ops={"k": "v"}, author="w",
+                  contract_breaking=True),
+        cards=[], survivor_cards=[], head=snap.version,
+        fused=False, considered=1, survived=1, discarded=0, conflicts=0,
+        branch=branch, adapters=list(adapters),
+        base_counts=(2.0, 0.0), cand_counts=(3.0, 0.0),
+        base_cheap=1.0, cand_cheap=1.0)
+
+
+def _primary_depends_on_extra(tmp_path):
+    """Ledger + aggregator wired exactly as the engine wires them for a primary
+    whose contract depends_on the extra 'e'."""
+    from agentdescent.evolution import _contract_dependents
+    lg, agg = _agg_with_dependents(tmp_path, extra_ids=("artifact", "e"))
+    agg.contract_dependents = _contract_dependents(
+        "artifact", Contract(depends_on=("e",)),
+        {"e": EvolvingArtifact("e", {})})
+    return lg, agg
+
+
+def test_breaking_an_extra_the_primary_depends_on_needs_the_primary_adapter(
+        tmp_path):
+    lg, agg = _primary_depends_on_extra(tmp_path)
+    report = agg._decide(_break_extra_candidate(lg))
+    assert report.category == "missing-adapters", report.category
+    assert report.committed_version is None
+    assert "missing ['artifact']" in report.reason, report.reason
+    assert lg.head_version(Ledger.DEV).get("e") == 1, (
+        "the extra's breaking change must not land without the primary's adapter")
+    assert lg.head_version(Ledger.DEV).get("artifact") == 1
+
+
+def test_primary_adapter_commits_atomically_and_invalidates_its_cache(tmp_path):
+    from agentdescent.evalcache import MemoryCache
+    from agentdescent.evolution import _Engine
+    lg, agg = _primary_depends_on_extra(tmp_path)
+    cache = MemoryCache()
+    eng = _Engine.__new__(_Engine)
+    eng.ledger, eng.runtime = lg, type("Runtime", (), {"cache": cache})()
+    eng.contract_dependents = agg.contract_dependents
+    agg.on_contract_change = eng.invalidate_dependents
+
+    snap = lg.snapshot(Ledger.DEV)
+    adapted = snap.get("artifact").apply(Diff(
+        diff_id="adapter", target="artifact", ops={"adapted": "yes"}, author="w"))
+    # the engine evicts the dependent's render as of the post-commit snapshot
+    key = (adapted.render(), "t0", "")
+    cache.get_or_eval(key, lambda: 0.7)
+    report = agg._decide(_break_extra_candidate(lg, adapters=[adapted]))
+    assert report.committed_version is not None
+    after = lg.snapshot(Ledger.DEV)
+    assert after.version["e"] == 2 and after.version["artifact"] == 2, (
+        "extra and primary adapter land in one atomic commit")
+    assert key not in cache._values, (
+        "the primary's cached evaluation (measured under the superseded "
+        "contract) must be evicted")
+
+
+def test_primary_adapter_checks_keep_refusing_duplicates_and_strays(tmp_path):
+    lg, agg = _primary_depends_on_extra(tmp_path)
+    snap = lg.snapshot(Ledger.DEV)
+    adapted = snap.get("artifact").apply(Diff(
+        diff_id="adapter", target="artifact", ops={"a": "1"}, author="w"))
+    dup = agg._decide(_break_extra_candidate(lg, adapters=[adapted, adapted]))
+    assert dup.category == "missing-adapters" and "duplicated=True" in dup.reason
+    stray = lg.snapshot(Ledger.DEV).get("e").apply(Diff(
+        diff_id="adapter", target="e", ops={"a": "1"}, author="w"))
+    extra = agg._decide(_break_extra_candidate(lg, adapters=[adapted, stray]))
+    assert extra.category == "missing-adapters" and "extra ['e']" in extra.reason
+    assert lg.head_version(Ledger.DEV).get("e") == 1
+
+
+def test_primary_adapter_lands_on_the_forks_branch_only(tmp_path):
+    lg, agg = _primary_depends_on_extra(tmp_path)
+    lg.fork("head/0")
+    snap = lg.snapshot("head/0")
+    adapted = snap.get("artifact").apply(Diff(
+        diff_id="adapter", target="artifact", ops={"a": "1"}, author="w"))
+    refused = agg._decide(_break_extra_candidate(lg, branch="head/0"))
+    assert refused.category == "missing-adapters"
+    report = agg._decide(_break_extra_candidate(
+        lg, adapters=[adapted], branch="head/0"))
+    assert report.committed_version is not None
+    assert lg.snapshot("head/0").version["e"] == 2
+    assert lg.snapshot("head/0").get("artifact").state.get("a") == "1"
+    assert lg.snapshot(Ledger.DEV).version["e"] == 1, "dev must be untouched"
+    assert lg.snapshot(Ledger.DEV).get("artifact").state.get("a") is None
+
+
+def test_sync_evolve_refuses_breaking_an_extra_the_primary_depends_on(tmp_path):
+    """End to end: with the primary's contract depending on extra 'b', the
+    worker loop's breaking proposals to 'b' carry no adapter for the primary,
+    so none of them may commit."""
+    extra = {"b": EvolvingArtifact("b", {}, blast_radius=0.2,
+                                   strategy=_BreakingRules())}
+    res = _run(extra_artifacts=extra, strategy_cls=_BreakingRules,
+               contract=Contract(depends_on=("b",)),
+               repo_path=str(tmp_path / "repo"))
+    assert not [line for line in res.ledger_log if "-> b" in line], (
+        "a breaking change to 'b' landed without the primary's adapter")
+    assert any("-> artifact" in line for line in res.ledger_log), (
+        "premise: the primary (no dependents) still evolves")
+
+
+def test_async_evolve_refuses_breaking_an_extra_the_primary_depends_on(tmp_path):
+    from agentdescent.async_evolve import async_evolve
+    extra = {"b": EvolvingArtifact("b", {}, blast_radius=0.2,
+                                   strategy=_BreakingRules())}
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res = async_evolve(_tasks(), _reward, agent=_Reflector(), n_workers=2,
+                           max_iters=8, max_seconds=2.0, held_out_frac=0.5,
+                           strategy=_BreakingRules(), extra_artifacts=extra,
+                           contract=Contract(depends_on=("b",)),
+                           repo_path=str(tmp_path / "repo"))
+    assert not [line for line in res.ledger_log if "-> b" in line], (
+        "a breaking change to 'b' landed without the primary's adapter")
