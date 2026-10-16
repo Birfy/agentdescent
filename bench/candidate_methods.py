@@ -32,6 +32,7 @@ from examples._method_runner import MethodRunResult, run_port
 from examples.absolute_zero import absolute_zero_selfplay
 from examples.aflow import aflow_workflow_search
 from examples.agent0 import agent0_tool_curriculum
+from examples.dynamic_cheatsheet import dynamic_cheatsheet_cumulative
 from examples.godel_agent import godel_agent_self_modify
 from examples.gskill import gskill_repo_skill
 from examples.promptbreeder import promptbreeder_genetic_prompts
@@ -57,6 +58,7 @@ _MODULES = (
     agent0_tool_curriculum,
     sica_self_edit,
     godel_agent_self_modify,
+    dynamic_cheatsheet_cumulative,
     gskill_repo_skill,
 )
 
