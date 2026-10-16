@@ -431,6 +431,59 @@ def test_commit_atomic_retry_rejects_a_stale_adapter(tmp_path):
         "the concurrent adapter field must not be deleted by the retry")
 
 
+def test_contract_breaking_fork_candidate_commits_to_its_own_fork(tmp_path):
+    """A contract-breaking candidate prepared against a fork must land on that
+    fork, not on `dev` -- the same branch routing the non-breaking path got in
+    the multi-head fix. `_commit_with_retry` hard-coded `branch=Ledger.DEV` on
+    the `commit_atomic` call, so a breaking fork candidate overwrote `dev`
+    (deleting its independent state) while the fork stayed behind (review)."""
+    from agentdescent.aggregator import _Candidate
+    lg, agg = _agg_with_dependents(tmp_path, extra_ids=("artifact", "b"),
+                                   dependents={"artifact": ["b"]})
+    # Give dev and the fork divergent states at the same artifact version: the
+    # wrong-branch CAS would otherwise be the one that *succeeds*.
+    lg.fork("head/0")
+    dev_art = lg.snapshot(Ledger.DEV).get("artifact")
+    lg.commit(dev_art.apply(Diff(diff_id="dev_only", target="artifact",
+                                 ops={"dev_only": "preserve"}, author="w")),
+              {"artifact": dev_art.version}, branch=Ledger.DEV)
+    fork_art = lg.snapshot("head/0").get("artifact")
+    lg.commit(fork_art.apply(Diff(diff_id="fork_only", target="artifact",
+                                  ops={"fork_only": "preserve"}, author="w")),
+              {"artifact": fork_art.version}, branch="head/0")
+
+    snap = lg.snapshot("head/0")
+    base = snap.get("artifact")
+    cand = base.apply(Diff(diff_id="break", target="artifact", ops={"k": "v"},
+                           author="w", contract_breaking=True))
+    b_old = snap.get("b")
+    b_adapted = b_old.apply(Diff(diff_id="adapter", target="b",
+                                 ops={"k2": "v2"}, author="w"))
+    c = _Candidate(
+        artifact_id="artifact", artifact=base, candidate=cand,
+        diff=Diff(diff_id="break", target="artifact", ops={"k": "v"},
+                  author="w", contract_breaking=True),
+        cards=[], survivor_cards=[], head=snap.version,
+        fused=False, considered=1, survived=1, discarded=0, conflicts=0,
+        branch="head/0", adapters=[b_adapted],
+        base_counts=(2.0, 0.0), cand_counts=(3.0, 0.0),
+        base_cheap=1.0, cand_cheap=1.0)
+    report = agg._decide(c)
+    assert report.committed_version is not None, "with adapters, it commits"
+
+    after_fork = lg.snapshot("head/0")
+    assert after_fork.get("artifact").state.get("fork_only") == "preserve", (
+        "the fork's own independent state must survive")
+    assert after_fork.get("artifact").state.get("k") == "v", (
+        "the breaking diff must land on the fork")
+    after_dev = lg.snapshot(Ledger.DEV)
+    assert after_dev.get("artifact").state.get("dev_only") == "preserve", (
+        "dev must be untouched by a fork candidate")
+    assert after_dev.version.get("artifact") == 2, (
+        "dev's version must not advance from a fork candidate "
+        f"(got {after_dev.version.get('artifact')})")
+
+
 def test_contract_dependents_are_re_measured_after_a_breaking_change(tmp_path):
     """After a breaking commit on the primary, dependent 'b' loses its cached
     scores (they were measured under the superseded contract). The engine's

@@ -1318,7 +1318,7 @@ class Aggregator:
             try:
                 if diff.contract_breaking:
                     _, vv = self.ledger.commit_atomic(
-                        new_states, base_vv, branch=Ledger.DEV,
+                        new_states, base_vv, branch=branch,
                         message=f"merge {diff.diff_id} -> {artifact_id} (contract)")
                     return vv[artifact_id]
                 _, new_version = self.ledger.commit(
