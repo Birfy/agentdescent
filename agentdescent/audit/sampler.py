@@ -39,6 +39,7 @@ it. At the sizes an audit uses that is a few units either way.
 from __future__ import annotations
 
 import math
+import numbers
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
@@ -191,6 +192,55 @@ def resid_sd_from(previous: Any) -> Dict[str, float]:
             for name, cell in per.items() if "resid_sd" in cell}
 
 
+def _validate(policy: AuditPolicy, weights: Dict[str, float],
+              expected_units: int) -> None:
+    """Refuse an enabled policy or weight set that cannot produce a real plan.
+
+    Every check here is one a bad value used to slip past: ``alpha`` outside
+    ``(0, 1)`` either crashed inside ``NormalDist.inv_cdf`` or quietly planned
+    at ``z <= 0``; a NaN anywhere reached ``math.ceil`` or came back as a NaN
+    inclusion probability; and a ``calibration_fraction`` above 1 halved every
+    rate without a word (#325). Same reasoning as ``audit.ppi`` (#314): NaN
+    compares false against every range check, so it has to be named.
+    """
+    def _real(value: Any) -> bool:
+        # A numeric string would pass ``float()`` and then fail later inside
+        # the arithmetic, so only real numbers count; ``bool`` is not one here.
+        return isinstance(value, numbers.Real) and not isinstance(value, bool)
+
+    def _num(name: str, value: Any) -> float:
+        if not _real(value) or math.isnan(float(value)):
+            raise ValueError(f"AuditPolicy.{name} must be a number, got "
+                             f"{value!r}")
+        return float(value)
+
+    alpha = _num("alpha", policy.alpha)
+    if not (0.0 < alpha < 1.0):
+        raise ValueError(f"AuditPolicy.alpha must be in (0, 1), got {alpha!r}")
+    split = _num("calibration_fraction", policy.calibration_fraction)
+    if not (0.0 <= split <= 1.0):
+        raise ValueError("AuditPolicy.calibration_fraction must be in [0, 1], "
+                         f"got {split!r}")
+    _num("target_halfwidth", policy.target_halfwidth)
+    for name in ("max_labels", "min_per_stratum", "min_dominant"):
+        value = getattr(policy, name)
+        # Integral, not merely integral-valued: a float floor such as ``20.0``
+        # is copied straight into ``target`` and would leave ``target_n`` and
+        # ``total_n`` as floats.
+        if (not isinstance(value, numbers.Integral) or isinstance(value, bool)
+                or value < 0):
+            raise ValueError(f"AuditPolicy.{name} must be a non-negative "
+                             f"integer, got {value!r}")
+    if (not _real(expected_units) or not math.isfinite(float(expected_units))
+            or expected_units < 0):
+        raise ValueError("expected_units must be a finite non-negative "
+                         f"number, got {expected_units!r}")
+    for k, v in weights.items():
+        if not _real(v) or not math.isfinite(float(v)) or v < 0:
+            raise ValueError(f"weight for stratum {k!r} must be finite and "
+                             f">= 0, got {v!r}")
+
+
 def plan(policy: AuditPolicy, *, weights: Dict[str, float],
          expected_units: int,
          resid_sd: Optional[Dict[str, float]] = None) -> SamplePlan:
@@ -214,6 +264,15 @@ def plan(policy: AuditPolicy, *, weights: Dict[str, float],
         allocation already assumes -- so the first run, with no history, plans
         proportionally and is right to.
 
+    Raises
+    ------
+    ValueError
+        For an enabled policy whose ``alpha`` is outside ``(0, 1)``, whose
+        ``calibration_fraction`` is outside ``[0, 1]``, whose
+        ``target_halfwidth`` is NaN, whose label counts are not non-negative
+        integers, or for a negative / non-finite weight or ``expected_units``
+        (#325). A disabled policy is never checked: it plans nothing either way.
+
     Notes
     -----
     The total is the Neyman-optimal sample size for the requested half-width:
@@ -231,6 +290,7 @@ def plan(policy: AuditPolicy, *, weights: Dict[str, float],
         return SamplePlan(rates={}, target_n={}, weights={}, resid_sd={},
                           default_rate=0.0, expected_units=expected_units,
                           warnings=["audit disabled; nothing will be sampled"])
+    _validate(policy, weights, expected_units)
     if not weights:
         return SamplePlan(rates={}, target_n={}, weights={}, resid_sd={},
                           default_rate=0.0, expected_units=expected_units,

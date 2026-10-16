@@ -1,0 +1,2 @@
+Fixed
+`audit.plan_audit` (`audit.sampler.plan`) now refuses an enabled `AuditPolicy` with `alpha` outside (0, 1), `calibration_fraction` outside [0, 1], a NaN `target_halfwidth`, negative or fractional label counts, and negative or non-finite stratum weights or `expected_units`, raising a `ValueError` that names the field. Previously these crashed with unrelated errors, returned NaN inclusion probabilities, or silently planned the wrong number of labels (#325). A disabled policy is unchanged.

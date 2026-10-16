@@ -372,3 +372,87 @@ def test_an_all_improvement_policy_says_it_cannot_hit_a_half_width():
              resid_sd={"a": 0.4})
     assert any("calibration_fraction is 0" in warning for warning in p.warnings)
     assert all(0.0 <= r <= 1.0 for r in p.rates.values())
+
+
+# -- input validation (#325) -----------------------------------------------------
+
+_W = {"a": 0.5, "b": 0.5}
+_SD = {"a": 0.3, "b": 0.2}
+
+
+@pytest.mark.parametrize("kw, field", [
+    (dict(alpha=0.0), "alpha"),
+    (dict(alpha=1.0), "alpha"),
+    (dict(alpha=1.5), "alpha"),
+    (dict(alpha=-0.1), "alpha"),
+    (dict(alpha=float("nan")), "alpha"),
+    (dict(alpha="0.05"), "alpha"),
+    (dict(target_halfwidth=float("nan")), "target_halfwidth"),
+    (dict(calibration_fraction=2.0), "calibration_fraction"),
+    (dict(calibration_fraction=-0.1), "calibration_fraction"),
+    (dict(calibration_fraction=float("nan")), "calibration_fraction"),
+    (dict(max_labels=-5), "max_labels"),
+    (dict(max_labels=10.5), "max_labels"),
+    (dict(max_labels=400.0), "max_labels"),
+    (dict(min_per_stratum=20.0), "min_per_stratum"),
+    (dict(min_dominant=True), "min_dominant"),
+    (dict(min_per_stratum=-1), "min_per_stratum"),
+    (dict(min_dominant=float("inf")), "min_dominant"),
+])
+def test_an_out_of_range_policy_is_refused_by_name(kw, field):
+    with pytest.raises(ValueError, match=field):
+        plan(AuditPolicy(enabled=True, **kw), weights=_W,
+             expected_units=1000, resid_sd=_SD)
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -1.0, "x", None])
+def test_a_bad_weight_is_refused_not_planned_around(bad):
+    with pytest.raises(ValueError, match="stratum 'a'"):
+        plan(AuditPolicy(enabled=True), weights={"a": bad, "b": 1.0},
+             expected_units=1000)
+
+
+@pytest.mark.parametrize("bad", [-1, float("nan"), float("inf"), True])
+def test_bad_expected_units_are_refused(bad):
+    with pytest.raises(ValueError, match="expected_units"):
+        plan(AuditPolicy(enabled=True), weights=_W, expected_units=bad)
+
+
+def test_no_nan_inclusion_probability_can_come_back():
+    """`calibration_fraction=nan` used to return NaN rates silently."""
+    with pytest.raises(ValueError):
+        plan(AuditPolicy(enabled=True, calibration_fraction=float("nan")),
+             weights=_W, expected_units=1000, resid_sd=_SD)
+
+
+def test_a_disabled_policy_is_still_a_no_op_whatever_its_fields():
+    p = plan(AuditPolicy(enabled=False, alpha=2.0, calibration_fraction=9.0),
+             weights={"a": float("nan")}, expected_units=-1)
+    assert p.rates == {} and p.total_n == 0
+
+
+@pytest.mark.parametrize("kw", [
+    dict(), dict(calibration_fraction=0.0), dict(calibration_fraction=1.0),
+    dict(target_halfwidth=0.0), dict(target_halfwidth=float("inf")),
+    dict(max_labels=0), dict(alpha=0.5),
+])
+def test_boundary_values_that_already_meant_something_still_plan(kw):
+    p = plan(AuditPolicy(enabled=True, **kw), weights=_W,
+             expected_units=1000, resid_sd=_SD)
+    assert all(0.0 <= r <= 1.0 for r in p.rates.values())
+
+
+def test_numpy_integer_label_counts_are_accepted_and_counts_stay_ints():
+    np = pytest.importorskip("numpy")
+    p = plan(AuditPolicy(enabled=True, max_labels=np.int64(400),
+                         min_per_stratum=np.int32(20)),
+             weights=_W, expected_units=1000, resid_sd=_SD)
+    assert all(isinstance(n, int) or isinstance(n, np.integer)
+               for n in p.target_n.values())
+    assert float(p.total_n).is_integer()
+
+
+def test_a_zero_weight_stratum_is_still_allowed():
+    p = plan(AuditPolicy(enabled=True), weights={"a": 0.0, "b": 1.0},
+             expected_units=1000)
+    assert set(p.rates) == {"a", "b"}
