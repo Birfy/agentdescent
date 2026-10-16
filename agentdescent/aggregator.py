@@ -1345,6 +1345,16 @@ class Aggregator:
                     # and reporting a conflict would be truer than reporting a
                     # commit that did not happen.
                     return None
+                # The primary rebases via `fresh.apply(diff)`, but an adapter is
+                # a *final state*, not a diff -- it cannot be rebased here, only
+                # re-validated. If a concurrent commit advanced one of the
+                # artifacts an adapter writes, committing the old adapter state
+                # as its next version would delete whatever that commit added.
+                # Reject the stale transaction; it re-files and is re-prepared
+                # by the worker.
+                for ad in (adapters or ()):
+                    if snap.version.get(ad.id, 0) != ad.version - 1:
+                        return None
         return None
 
     def _known_artifacts(self):
@@ -1590,22 +1600,31 @@ class Aggregator:
         # A contract-breaking change must land **with** its adapted dependents
         # in the same atomic commit -- the design's "atomic adaptation
         # transaction". The worker produces the breaking diff; the adapted
-        # dependent states are what make it safe. If this artifact has declared
-        # dependents (`Contract.depends_on`) and the worker supplied none,
-        # committing just the breaking artifact would leave them registered
-        # against a superseded contract. Refuse rather than half-apply: the
-        # worker that wants the break must also produce the adapters.
-        if (c.diff.contract_breaking
-                and self.contract_dependents.get(c.artifact_id)
-                and not getattr(c, "adapters", None)):
-            _observe_outcome(False)
-            return report(None, None,
-                          f"contract-breaking change to {c.artifact_id} has "
-                          f"declared dependents "
-                          f"{sorted(self.contract_dependents[c.artifact_id])} "
-                          "but no adapted states to land with it; supply them "
-                          "as the same atomic commit's adapters",
-                          MergeOutcome.MISSING_ADAPTERS)
+        # dependent states are what make it safe. The adapters must cover
+        # *exactly* the declared dependents: every dependent that relies on
+        # this artifact's contract has to land adapted in the same commit, and
+        # a stray adapter for an unrelated artifact would leave a real
+        # dependent registered against the superseded contract while pretending
+        # the transaction is complete.
+        required = set(self.contract_dependents.get(c.artifact_id, ()))
+        if c.diff.contract_breaking and required:
+            adapters = list(getattr(c, "adapters", None) or ())
+            adapter_ids = [a.id for a in adapters]
+            missing = sorted(required - set(adapter_ids))
+            extra = sorted(set(adapter_ids) - required)
+            duplicated = len(adapter_ids) != len(set(adapter_ids))
+            if missing or extra or duplicated:
+                _observe_outcome(False)
+                return report(None, None,
+                              f"contract-breaking change to {c.artifact_id} has "
+                              f"declared dependents {sorted(required)}; its "
+                              f"adapters (ids {sorted(set(adapter_ids))}) must "
+                              f"cover exactly those, but they are missing "
+                              f"{missing}, extra {extra} and "
+                              f"duplicated={duplicated}. Refusing rather than "
+                              f"half-apply: every dependent must land adapted "
+                              f"in the same atomic commit.",
+                              MergeOutcome.MISSING_ADAPTERS)
         new_version = self._commit_with_retry(
             c.artifact_id, c.candidate, c.diff, c.head,
             branch=c.branch or Ledger.DEV,

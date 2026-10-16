@@ -259,6 +259,142 @@ def test_contract_breaking_with_adapters_commits_both_atomically(tmp_path):
         "dependents must be re-measured after the breaking change")
 
 
+def _agg_with_dependents(tmp_path, extra_ids=("artifact", "b"), dependents=None):
+    from agentdescent.aggregator import Aggregator, AggregatorConfig, _Candidate
+    from agentdescent.scheduler import AuditScheduler
+    from agentdescent.verifier import ThreeLayerVerifier, VerifierBudget
+    lg = _ledger(tmp_path, extra_ids=extra_ids)
+    agg = Aggregator(lg, ThreeLayerVerifier(
+        eval_fn=lambda a, t: 0.5, held_out=[1, 2, 3],
+        budget=VerifierBudget()), AuditScheduler(),
+        AggregatorConfig(batch_trigger=1))
+    agg.contract_dependents = dependents or {}
+    return lg, agg
+
+
+def test_contract_breaking_with_partial_adapters_is_refused(tmp_path):
+    """The adapters must cover *every* declared dependent: with dependents
+    ['b', 'c'], an adapter for only 'b' is still `missing-adapters` -- 'c'
+    would stay registered against the superseded contract."""
+    from agentdescent.aggregator import _Candidate
+    lg, agg = _agg_with_dependents(tmp_path, extra_ids=("artifact", "b", "c"),
+                                   dependents={"artifact": ["b", "c"]})
+    snap = lg.snapshot(Ledger.DEV)
+    base = snap.get("artifact")
+    cand = base.apply(Diff(diff_id="d", target="artifact", ops={"k": "v"},
+                           author="w", contract_breaking=True))
+    b_adapted = snap.get("b").apply(Diff(diff_id="adapter", target="b",
+                                         ops={"k2": "v2"}, author="w"))
+    c = _Candidate(
+        artifact_id="artifact", artifact=base, candidate=cand,
+        diff=Diff(diff_id="d", target="artifact", ops={"k": "v"},
+                  author="w", contract_breaking=True),
+        cards=[], survivor_cards=[], head=snap.version,
+        fused=False, considered=1, survived=1, discarded=0, conflicts=0,
+        adapters=[b_adapted],
+        base_counts=(2.0, 0.0), cand_counts=(3.0, 0.0),
+        base_cheap=1.0, cand_cheap=1.0)
+    report = agg._decide(c)
+    assert report.category == "missing-adapters", (
+        f"a partial adapter set must be refused, got {report.category}")
+    assert report.committed_version is None
+    assert "missing ['c']" in report.reason, report.reason
+
+
+def test_contract_breaking_with_unrelated_adapter_is_refused(tmp_path):
+    """An adapter for an artifact that is not a declared dependent must be
+    refused too: the real dependent would stay against the superseded contract
+    while the transaction pretends to be complete."""
+    from agentdescent.aggregator import _Candidate
+    lg, agg = _agg_with_dependents(tmp_path, extra_ids=("artifact", "b", "x"),
+                                   dependents={"artifact": ["b"]})
+    snap = lg.snapshot(Ledger.DEV)
+    base = snap.get("artifact")
+    cand = base.apply(Diff(diff_id="d", target="artifact", ops={"k": "v"},
+                           author="w", contract_breaking=True))
+    x_adapted = snap.get("x").apply(Diff(diff_id="adapter", target="x",
+                                         ops={"k3": "v3"}, author="w"))
+    c = _Candidate(
+        artifact_id="artifact", artifact=base, candidate=cand,
+        diff=Diff(diff_id="d", target="artifact", ops={"k": "v"},
+                  author="w", contract_breaking=True),
+        cards=[], survivor_cards=[], head=snap.version,
+        fused=False, considered=1, survived=1, discarded=0, conflicts=0,
+        adapters=[x_adapted],
+        base_counts=(2.0, 0.0), cand_counts=(3.0, 0.0),
+        base_cheap=1.0, cand_cheap=1.0)
+    report = agg._decide(c)
+    assert report.category == "missing-adapters", (
+        f"an adapter for an unrelated artifact must be refused, "
+        f"got {report.category}")
+    assert report.committed_version is None
+    assert "extra ['x']" in report.reason, report.reason
+
+
+def test_contract_breaking_with_duplicate_adapters_is_refused(tmp_path):
+    """Duplicating one dependent's adapter while another stays missing must be
+    refused, not treated as coverage."""
+    from agentdescent.aggregator import _Candidate
+    lg, agg = _agg_with_dependents(tmp_path, extra_ids=("artifact", "b", "c"),
+                                   dependents={"artifact": ["b", "c"]})
+    snap = lg.snapshot(Ledger.DEV)
+    base = snap.get("artifact")
+    cand = base.apply(Diff(diff_id="d", target="artifact", ops={"k": "v"},
+                           author="w", contract_breaking=True))
+    b_adapted = snap.get("b").apply(Diff(diff_id="adapter", target="b",
+                                         ops={"k2": "v2"}, author="w"))
+    c = _Candidate(
+        artifact_id="artifact", artifact=base, candidate=cand,
+        diff=Diff(diff_id="d", target="artifact", ops={"k": "v"},
+                  author="w", contract_breaking=True),
+        cards=[], survivor_cards=[], head=snap.version,
+        fused=False, considered=1, survived=1, discarded=0, conflicts=0,
+        adapters=[b_adapted, b_adapted],
+        base_counts=(2.0, 0.0), cand_counts=(3.0, 0.0),
+        base_cheap=1.0, cand_cheap=1.0)
+    report = agg._decide(c)
+    assert report.category == "missing-adapters", (
+        f"duplicated adapters must be refused, got {report.category}")
+    assert report.committed_version is None
+    assert "duplicated=True" in report.reason, report.reason
+
+
+def test_commit_atomic_retry_rejects_a_stale_adapter(tmp_path):
+    """A CAS conflict that advanced one of the adapter artifacts must not retry
+    the *old* adapter state over it: the adapter is a final state, not a diff,
+    so it cannot be rebased, and the retry rejects the stale transaction."""
+    from agentdescent.aggregator import _Candidate
+    lg, agg = _agg_with_dependents(tmp_path, extra_ids=("artifact", "b"),
+                                   dependents={"artifact": ["b"]})
+    snap = lg.snapshot(Ledger.DEV)
+    base = snap.get("artifact")
+    cand = base.apply(Diff(diff_id="d", target="artifact", ops={"k": "v"},
+                           author="w", contract_breaking=True))
+    b_old = snap.get("b")
+    b_adapted = b_old.apply(Diff(diff_id="adapter", target="b",
+                                 ops={"k2": "v2"}, author="w"))
+
+    # A concurrent writer commits to 'b' after the candidate was prepared but
+    # before our atomic commit lands -- the CAS on 'b' then fails, and the
+    # retry must refuse to commit the adapter written against the old head.
+    lg.commit(b_old.apply(Diff(diff_id="concurrent", target="b",
+                               ops={"concurrent": "field"})),
+              {"b": b_old.version}, branch=Ledger.DEV)
+
+    new_version = agg._commit_with_retry(
+        "artifact", cand,
+        Diff(diff_id="d", target="artifact", ops={"k": "v"},
+             author="w", contract_breaking=True),
+        snap.version, adapters=[b_adapted])
+    assert new_version is None, (
+        "a stale adapter must be rejected, not committed over the fresh head")
+    after = lg.snapshot(Ledger.DEV)
+    assert after.version.get("b") == 2, (
+        "the concurrent b commit must survive (no lost update)")
+    assert after.get("b").state.get("concurrent") == "field", (
+        "the concurrent adapter field must not be deleted by the retry")
+
+
 def test_contract_dependents_are_re_measured_after_a_breaking_change(tmp_path):
     """After a breaking commit on the primary, dependent 'b' loses its cached
     scores (they were measured under the superseded contract). The engine's
