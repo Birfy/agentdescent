@@ -122,6 +122,23 @@ def test_a_runaway_candidate_costs_its_score_and_not_the_run():
     assert list(results) == ["<workspace>"] and "timed out" in results["<workspace>"]
 
 
+def test_limits_are_applied_by_the_runner_not_a_threaded_preexec_hook():
+    """`preexec_fn` is unsafe in a multi-threaded parent (the engine's workers
+    are threads) and can hang the child before the parent's timeout starts."""
+    import inspect
+
+    assert "preexec_fn" not in inspect.getsource(_fixtures.run_tests)
+    assert "setrlimit" in (_fixtures.ROOT / "runner.py").read_text()
+
+
+def test_a_memory_hungry_candidate_costs_its_score_not_the_run():
+    pytest.importorskip("resource")
+    item = _fixtures.instance("in_window")
+    bomb = "_ = bytearray(4 << 30)\n" + item.gold_source()
+    outcome = _fixtures.judge(item, bomb)
+    assert outcome.status == _fixtures.F2P_FAILED and outcome.score == 0.0
+
+
 def test_splits_are_frozen_per_seed_disjoint_and_stratified():
     first = gs.gskill_splits(0)
     assert [[t.id for t in s] for s in first] == [[t.id for t in s] for s in gs.gskill_splits(0)]
@@ -236,6 +253,28 @@ def test_export_refuses_a_tree_a_host_could_not_load(tmp_path):
     with pytest.raises(ValueError, match="missing-skill-md"):
         gs.export_skill({"references/x.md": "x"}, str(tmp_path))
     assert not list(tmp_path.iterdir())
+
+
+def test_export_replaces_the_skill_directory_instead_of_overlaying_it(tmp_path):
+    """A reference the evolved skill dropped must not survive from an earlier
+    export: the deployed directory has to *be* the validated artifact."""
+    with_ref = {SKILL_FILE: gs.INITIAL_SKILL, "references/old.md": "stale guidance\n"}
+    first = gs.export_skill(with_ref, str(tmp_path))
+    assert ".claude/skills/kvtools-fixer/references/old.md" in first
+    gs.export_skill({SKILL_FILE: gs.INITIAL_SKILL + "\n- new note\n"}, str(tmp_path))
+    root = tmp_path / ".claude" / "skills" / gs.SKILL_NAME
+    assert sorted(p.name for p in root.rglob("*") if p.is_file()) == [SKILL_FILE]
+    assert "new note" in (root / SKILL_FILE).read_text()
+    assert [p.name for p in root.parent.iterdir()] == [gs.SKILL_NAME]   # no staging left
+
+
+def test_a_failed_export_leaves_no_staging_directory(tmp_path):
+    gs.export_skill({SKILL_FILE: gs.INITIAL_SKILL}, str(tmp_path))
+    with pytest.raises(ValueError):
+        gs.export_skill({"references/x.md": "x"}, str(tmp_path))
+    skills = tmp_path / ".claude" / "skills"
+    assert [p.name for p in skills.iterdir()] == [gs.SKILL_NAME]
+    assert (skills / gs.SKILL_NAME / SKILL_FILE).is_file()
 
 
 def test_the_initial_skill_is_itself_a_valid_skill():

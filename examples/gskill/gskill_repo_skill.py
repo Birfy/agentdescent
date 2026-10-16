@@ -48,7 +48,11 @@ Departures, each declared rather than hidden (and repeated in ``notes``):
 
 from __future__ import annotations
 
+import os
 import random
+import shutil
+import tempfile
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from agentdescent.evolution import Task
@@ -202,12 +206,31 @@ def export_skill(files: Dict[str, str], dest: str, *,
 
     Refuses a tree that is not a valid Agent Skills directory, with the reason
     codes -- the evolved artifact is only worth shipping if a host can load it.
-    Returns the written paths, relative to ``dest``.
+    The skill directory is **replaced**, not overlaid: the tree is written to a
+    sibling staging directory and swapped in, so a file the evolved skill deleted
+    or renamed does not linger from an earlier export and keep teaching the
+    agent something the validated artifact no longer says. Returns the written
+    paths, relative to ``dest``.
     """
     errors = validate_skill_tree(files, root_name=name)
     if errors:
         raise ValueError(f"not a valid skill tree: {', '.join(errors)}")
-    return materialize(files, dest, prefix=f".claude/skills/{name}")
+    skills = Path(dest) / ".claude" / "skills"
+    skills.mkdir(parents=True, exist_ok=True)
+    target = skills / name
+    staging = Path(tempfile.mkdtemp(prefix=f".{name}.", dir=str(skills)))
+    try:
+        written = materialize(files, str(staging))
+        staging.chmod(0o755)
+        if target.is_symlink() or target.is_file():
+            target.unlink()
+        elif target.exists():
+            shutil.rmtree(target)
+        os.replace(staging, target)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    return [f".claude/skills/{name}/{path}" for path in written]
 
 
 def build(seed: int, export_dir: str = "") -> MethodPolicy:

@@ -13,7 +13,30 @@ import sys
 import traceback
 
 
+def _limits():
+    """Cap CPU, address space and file size before any candidate code is imported.
+
+    Done here, in the child, rather than with ``preexec_fn`` in the parent: that
+    hook is unsafe when the parent has threads (the engine's workers do) and can
+    deadlock before ``exec``, so the parent's timeout would never even start.
+    Best effort -- absent on Windows, and some platforms refuse RLIMIT_AS.
+    """
+    try:
+        import resource
+    except ImportError:
+        return
+    for name, value in (("RLIMIT_CPU", 10), ("RLIMIT_AS", 1 << 30),
+                        ("RLIMIT_FSIZE", 1 << 22)):
+        limit = getattr(resource, name, None)
+        if limit is not None:
+            try:
+                resource.setrlimit(limit, (value, value))
+            except (ValueError, OSError):
+                pass
+
+
 def main(root):
+    _limits()
     sys.path.insert(0, root)
     results = {}
     tests = importlib.import_module("tests")

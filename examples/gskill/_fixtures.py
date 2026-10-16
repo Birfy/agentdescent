@@ -21,7 +21,9 @@ problem statement and nothing else.
 
 Boundary, stated rather than hidden: this is **not** SWE-smith and there is no
 Docker. Candidate code is executed in a throw-away directory under a plain
-subprocess with a wall-clock timeout (and POSIX CPU / memory / file-size limits),
+subprocess with a wall-clock timeout (and POSIX CPU / memory / file-size limits
+applied by ``runner.py`` itself, before it imports any candidate code -- not via
+``preexec_fn``, which is unsafe in a multi-threaded parent),
 which is containment against a runaway loop and not a sandbox against hostile
 code. Real gskill runs each rollout in a container for that reason.
 """
@@ -139,21 +141,6 @@ def repo_files() -> Dict[str, str]:
     return files
 
 
-def _limits() -> None:  # pragma: no cover - runs in the child
-    try:
-        import resource
-    except ImportError:
-        return
-    for name, value in (("RLIMIT_CPU", 10), ("RLIMIT_AS", 1 << 30),
-                        ("RLIMIT_FSIZE", 1 << 22)):
-        limit = getattr(resource, name, None)
-        if limit is not None:
-            try:
-                resource.setrlimit(limit, (value, value))
-            except (ValueError, OSError):
-                pass
-
-
 def run_tests(files: Mapping[str, str], *,
               timeout: float = TEST_TIMEOUT_S) -> Dict[str, str]:
     """Run the fixture tests on a workspace; test id -> failure text ('' = pass).
@@ -172,8 +159,7 @@ def run_tests(files: Mapping[str, str], *,
         try:
             done = subprocess.run(
                 [sys.executable, "-I", "runner.py", tmp], cwd=tmp, env=env,
-                capture_output=True, text=True, timeout=timeout,
-                preexec_fn=_limits if os.name == "posix" else None)
+                capture_output=True, text=True, timeout=timeout)
         except subprocess.TimeoutExpired:
             return {"<workspace>": f"timed out after {timeout:.0f}s"}
         try:
