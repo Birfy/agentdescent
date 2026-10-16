@@ -90,12 +90,6 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
-- `CladeThompson.tau()` reads `budget_remaining` like `CostEfficient` (#280):
-  `+inf` (no ceiling) and NaN mean a full budget (`tau = 1`) instead of an
-  exhausted one (`max_tau`); the power is taken in log space and capped, so a
-  small fraction with a steep `cool_down_beta` no longer raises
-  `OverflowError` mid-`select()`. Non-finite `cool_down_beta` / `max_tau` are
-  rejected with `ValueError`.
 - `audit.AuditStore` keeps its crash-safety contract (#274). A torn tail left
   by a killed process gets a newline before the next append, so the record
   written after the crash is no longer glued onto the fragment and lost; the
