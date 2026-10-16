@@ -92,7 +92,7 @@ def test_a_reply_without_the_tags_is_invalid_and_never_substituted():
                   f"{tg.TAGS[0]} opened but never closed"):
         proposal = policy.propose(Scripted(step=reply), STARTING_INSTRUCTION,
                                   _task(), "The answer is 5", 0.0)
-        assert proposal == ""
+        assert proposal, "a falsy proposal never reaches to_diff, so is uncounted"
         assert strategy.to_diff(strategy.initial(), proposal, "w", 1, "a") is None
     assert strategy.invalid_proposals == 2
 
@@ -100,7 +100,11 @@ def test_a_reply_without_the_tags_is_invalid_and_never_substituted():
 def test_an_empty_gradient_costs_the_candidate_without_a_step_call():
     policy = tg.build(0)
     llm = Scripted(gradient="   ")
-    assert policy.propose(llm, STARTING_INSTRUCTION, _task(), "5", 0.0) == ""
+    proposal = policy.propose(llm, STARTING_INSTRUCTION, _task(), "5", 0.0)
+    assert proposal and tg.TAGS[0] not in proposal
+    strategy = policy.strategy
+    assert strategy.to_diff(strategy.initial(), proposal, "w", 1, "a") is None
+    assert strategy.invalid_proposals == 1
     assert [phase for phase, _ in llm.calls] == ["backward"]
 
 
@@ -116,13 +120,35 @@ def test_the_gold_answer_appears_only_as_the_evaluators_line():
             assert row["question"].strip() not in fixed
 
 
+def test_malformed_replies_are_counted_through_the_real_proposal_adapter(capsys):
+    """Through `evolve`, not a hand call to `to_diff`: a falsy proposal is dropped
+    by the adapter before the strategy sees it, which would leave a spent
+    candidate out of the invalid count."""
+    def complete(prompt):
+        lower = prompt.lower()
+        if "you are the gradient (feedback) engine" in lower:
+            return "The instruction should change."
+        if "you are part of an optimization system that improves text" in lower:
+            return "I would rewrite it, but I will not use the tags."
+        return "The answer is 0"
+
+    usage = Usage()
+    recorder = Recorder(metered(complete, usage), usage)
+    policy = tg.build(0)
+    payload = run_port(policy, recorder, mode="sync_parallel", seed=0,
+                       workers=2, candidate_budget=4, max_seconds=60.0,
+                       shutdown_grace=5.0).compact()
+    assert payload["invalid_candidates"] >= 1
+    assert payload["accepted"] == 0
+
+
 # -- content addressing and no-ops ------------------------------------------------
 
 
 def test_a_rewrite_equal_to_the_current_text_is_a_noop():
     strategy = tg.build(0).strategy
     state = strategy.initial()
-    same = strategy.to_diff(state, f"  {STARTING_INSTRUCTION}\n", "w0", 1, "a")
+    same = strategy.to_diff(state, _tagged(f"  {STARTING_INSTRUCTION}\n"), "w0", 1, "a")
     assert same is None
     assert strategy.noop_steps == 1
     assert strategy.invalid_proposals == 0
@@ -139,7 +165,7 @@ def test_identical_critiques_give_the_same_text_hashed_diff_per_author():
     a = strategy.to_diff(state, first, "w0", 3, "a")
     b = strategy.to_diff(state, second, "w0", 3, "a")
     assert a.diff_id == b.diff_id and a.ops == b.ops
-    other = strategy.to_diff(state, "Show every step, then the number.", "w0", 3, "a")
+    other = strategy.to_diff(state, _tagged("Show every step, then the number."), "w0", 3, "a")
     assert other.diff_id != a.diff_id
     assert strategy.to_diff(state, first, "w1", 3, "a").diff_id != a.diff_id
 

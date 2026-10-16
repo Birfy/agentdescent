@@ -197,13 +197,18 @@ def tgd_prompt(system_prompt: str, task: Task, output: str,
     )
 
 
+#: Handed to `to_diff` when there is no gradient to step on. It carries no
+#: improved-variable tags, so it is refused and counted like any malformed reply.
+NO_GRADIENT = "[textgrad: the gradient engine returned no feedback]"
+
+
 def extract_improved(reply: str) -> str:
     """``new_text.split(tags[0])[1].split(tags[1])[0].strip()`` -- or ``""``.
 
     Upstream raises ``IndexError`` when either tag is missing. The empty string
-    is this port's version of that: it reaches ``to_diff`` as an invalid
-    proposal, which is counted and costs its candidate; the raw reply is never
-    used in its place.
+    is this port's version of that: ``TextVariable.to_diff`` refuses it as an
+    invalid proposal, which is counted and costs its candidate; the raw reply is
+    never used in its place.
     """
     parts = (reply or "").split(TAGS[0])
     if len(parts) < 2:
@@ -236,8 +241,11 @@ class TextVariable(ValidatedSlot):
 
     def to_diff(self, state, proposal, author, base_version,
                 target) -> Optional[Diff]:
+        # The proposal is the optimizer's raw reply; the improved span is read
+        # here, once, so a reply without the tags is counted as invalid rather
+        # than dropped upstream of this method.
         try:
-            value = self.validator(proposal or "")
+            value = self.validator(extract_improved(proposal or ""))
         except (KeyError, TypeError, ValueError):
             self._rejected()
             return None
@@ -290,10 +298,16 @@ def build(seed: int, *, dry_run: bool = False) -> MethodPolicy:
         gradient = llm(backward_prompt(rendered, task, output),
                        subphase="backward", unit=task.id)
         if not (gradient or "").strip():
-            return ""            # nothing to step on: counted, not substituted
+            # Nothing to step on. Not "": the proposal adapter drops falsy
+            # returns before `to_diff`, which would leave this spent candidate
+            # out of `invalid_proposals`. A non-empty reply with no tags reaches
+            # `to_diff`, which counts it and produces no diff.
+            return NO_GRADIENT
         reply = llm(tgd_prompt(rendered, task, output, gradient),
                     subphase="step", unit=task.id)
-        return extract_improved(reply)
+        # The raw reply, tags and all: `TextVariable.to_diff` reads the span, so
+        # a malformed one is a non-empty proposal that gets counted there.
+        return reply or NO_GRADIENT
 
     with _committed_sample(dry_run):
         train, held_out, test = gsm8k_splits(seed)
