@@ -138,6 +138,10 @@ class BoostState:
     error_after: float
     reason: str
     fit_at: float
+    #: Validation MSE of the best *constant* predictor (the train slice's mean
+    #: oracle score). ``inf`` -- also the default, so older constructors keep
+    #: working -- means "not measured".
+    error_const: float = math.inf
 
 
 class VerifierBoost:
@@ -253,7 +257,31 @@ class VerifierBoost:
                             [r.oracle_score for r in val])
         error_after = _mse([_apply_candidate(r.verifier_score) for r in val],
                            [r.oracle_score for r in val])
-        if error_after <= error_before * (1.0 - self.min_gain):
+        # A curve that only shifts the verifier's mean passes the raw-verifier
+        # test above while carrying no ranking information at all: it must also
+        # beat the best constant predictor. (A constant offset is the audit
+        # ``Calibrator``'s job -- ``delta_hat`` -- not the ranking layer's.)
+        const = float(np.mean(ys))
+        error_const = _mse([const] * len(val), [r.oracle_score for r in val])
+        beats_raw = error_after <= error_before * (1.0 - self.min_gain)
+        beats_const = error_after <= error_const * (1.0 - self.min_gain)
+        if beats_raw and not beats_const:
+            return self._deactivate(
+                f"no discrimination beyond a constant: corrected error "
+                f"{error_after:.4f} does not beat the constant-mean baseline "
+                f"{error_const:.4f} by min_gain {self.min_gain} (raw "
+                f"{error_before:.4f}); a pure bias shift is the Calibrator's "
+                f"job, not the ranking layer's",
+                n_train=len(train), n_val=len(val),
+                error_before=error_before, error_after=error_after,
+                error_const=error_const)
+        if beats_raw and np.unique(fit_vals).size < 2:
+            return self._deactivate(
+                "degenerate calibration curve: fewer than 2 distinct fitted levels",
+                n_train=len(train), n_val=len(val),
+                error_before=error_before, error_after=error_after,
+                error_const=error_const)
+        if beats_raw:
             digest = hashlib.sha256(json.dumps({
                 "xs": fit_xs.tolist(), "vals": fit_vals.tolist(),
                 "n_train": len(train)}, sort_keys=True).encode()).hexdigest()
@@ -265,19 +293,41 @@ class VerifierBoost:
             self._resid_sd = math.sqrt(error_after)
             self._state = BoostState(True, True, len(train), len(val),
                                      error_before, error_after,
-                                     "validated", time.time())
+                                     "validated", time.time(), error_const)
             return self._state
         return self._deactivate(
             f"bootstrap gate: corrected error {error_after:.4f} is not below "
-            f"raw {error_before:.4f} by min_gain {self.min_gain}")
+            f"raw {error_before:.4f} by min_gain {self.min_gain}",
+            n_train=len(train), n_val=len(val),
+            error_before=error_before, error_after=error_after,
+            error_const=error_const)
 
-    def _deactivate(self, reason: str) -> BoostState:
+    def _deactivate(
+        self,
+        reason: str,
+        *,
+        n_train: int = 0,
+        n_val: int = 0,
+        error_before: float = math.inf,
+        error_after: float = math.inf,
+        error_const: float = math.inf,
+    ) -> BoostState:
+        """Record a rejected fit. Preserve measured diagnostics when known.
+
+        Call sites that already computed validation MSE (and the constant
+        baseline) must pass them through so ``status()`` / ``retrain()`` report
+        the numbers that justified the rejection rather than the default
+        ``inf`` ("not measured").
+        """
         self._xs = None
         self._vals = None
         self._fit_hash = ""
         self._resid_sd = math.inf
-        self._state = BoostState(False, True, 0, 0, math.inf, math.inf,
-                                 reason, time.time())
+        self._state = BoostState(
+            False, True, int(n_train), int(n_val),
+            float(error_before), float(error_after),
+            reason, time.time(), float(error_const),
+        )
         return self._state
 
     @property
@@ -312,6 +362,7 @@ class VerifierBoost:
             "n_val": s.n_val,
             "error_before": s.error_before,
             "error_after": s.error_after,
+            "error_const": s.error_const,
             "resid_sd": self._resid_sd,
             "reason": s.reason,
             "fit_at": s.fit_at,
