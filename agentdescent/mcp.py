@@ -238,8 +238,6 @@ class Tools:
             # Before create: same rule as CLI -- budget without price must not
             # return ok/started and then fail only in log.txt (#342).
             runstore.require_budget_pair(budget_usd, usd_per_call)
-            # Same gate as plan / CLI evolve: missing CLI must not return ok/running (#346).
-            require_cli_on_path(es)
         except SpecError as e:
             return {"ok": False, "error": str(e)}
         except runstore.RunStoreError as e:
@@ -249,9 +247,18 @@ class Tools:
             # that hosts it is being evolved). The transcript should still show
             # that the host *called* start -- that is what the grader looks for --
             # but nothing may actually run, or every rollout would start a run.
+            # The PATH CLI gate stays *after* this stub: nested start must never
+            # launch, and the grader-visible refused response must not become
+            # ok:false just because the proposed CLI is absent here (#351).
             return {"ok": True, "run_id": "nested-stub", "state": "refused", "nested": True,
                     "note": f"{NESTED_ENV} is set: this session is itself a worker of an "
                             "evolution run, so no nested run was started."}
+        try:
+            # Same gate as plan / CLI evolve: missing CLI must not return ok/running (#346).
+            # After the nested stub above so #346 stays fail-closed for real starts.
+            require_cli_on_path(es)
+        except SpecError as e:
+            return {"ok": False, "error": str(e)}
         rd = runstore.create(es.to_dict(), store=self.store)
         try:
             # The run is a detached process, so a `host_model` reference in the
