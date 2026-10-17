@@ -200,8 +200,10 @@ def _validate(policy: AuditPolicy, weights: Dict[str, float],
     ``(0, 1)`` either crashed inside ``NormalDist.inv_cdf`` or quietly planned
     at ``z <= 0``; a NaN anywhere reached ``math.ceil`` or came back as a NaN
     inclusion probability; and a ``calibration_fraction`` above 1 halved every
-    rate without a word (#325). Same reasoning as ``audit.ppi`` (#314): NaN
-    compares false against every range check, so it has to be named.
+    rate without a word (#325). ``target_halfwidth`` must also be finite and
+    ``> 0``: 0 / negative used to silently substitute ``max_labels``, and ±inf
+    collapsed the Neyman total (#330). Same reasoning as ``audit.ppi`` (#314):
+    NaN compares false against every range check, so it has to be named.
     """
     def _real(value: Any) -> bool:
         # A numeric string would pass ``float()`` and then fail later inside
@@ -221,7 +223,13 @@ def _validate(policy: AuditPolicy, weights: Dict[str, float],
     if not (0.0 <= split <= 1.0):
         raise ValueError("AuditPolicy.calibration_fraction must be in [0, 1], "
                          f"got {split!r}")
-    _num("target_halfwidth", policy.target_halfwidth)
+    hw = _num("target_halfwidth", policy.target_halfwidth)
+    # Finite and strictly positive: NaN was already refused (#325); 0 / negative
+    # used to silently fall back to ``max_labels``, and ±inf collapsed the
+    # Neyman total to 0 so only the floors decided (#330). Same class as alpha.
+    if not (math.isfinite(hw) and hw > 0.0):
+        raise ValueError("AuditPolicy.target_halfwidth must be finite and "
+                         f"> 0, got {hw!r}")
     for name in ("max_labels", "min_per_stratum", "min_dominant"):
         value = getattr(policy, name)
         # Integral, not merely integral-valued: a float floor such as ``20.0``
@@ -269,9 +277,11 @@ def plan(policy: AuditPolicy, *, weights: Dict[str, float],
     ValueError
         For an enabled policy whose ``alpha`` is outside ``(0, 1)``, whose
         ``calibration_fraction`` is outside ``[0, 1]``, whose
-        ``target_halfwidth`` is NaN, whose label counts are not non-negative
-        integers, or for a negative / non-finite weight or ``expected_units``
-        (#325). A disabled policy is never checked: it plans nothing either way.
+        ``target_halfwidth`` is not finite and ``> 0``, whose label counts are
+        not non-negative integers, for a negative / non-finite weight or
+        ``expected_units`` (#325), or for a weight total that is not finite and
+        positive (#330). A disabled policy is never checked: it plans nothing
+        either way.
 
     Notes
     -----
@@ -297,8 +307,18 @@ def plan(policy: AuditPolicy, *, weights: Dict[str, float],
                           warnings=["no strata to plan for"])
 
     total_w = sum(weights.values())
-    if total_w <= 0:
-        raise ValueError("stratum weights sum to zero")
+    # Per-weight ``isfinite`` is not enough: two finite values can still overflow
+    # the sum to ``inf``, and ``v / total_w`` then yields zeros that crash later
+    # as ``ZeroDivisionError`` (#330). Same family as "stratum weights sum to
+    # zero". Huge integers stay exact until ``math.isfinite`` / ``float`` —
+    # convert carefully so OverflowError becomes the same ValueError (Codex P2).
+    try:
+        total_ok = math.isfinite(total_w) and total_w > 0
+    except OverflowError:
+        total_ok = False
+    if not total_ok:
+        raise ValueError("stratum weights must sum to a finite positive "
+                         f"number, got {total_w!r}")
     w = {k: v / total_w for k, v in weights.items()}
 
     sd = dict(resid_sd or {})

@@ -388,6 +388,10 @@ _SD = {"a": 0.3, "b": 0.2}
     (dict(alpha=float("nan")), "alpha"),
     (dict(alpha="0.05"), "alpha"),
     (dict(target_halfwidth=float("nan")), "target_halfwidth"),
+    (dict(target_halfwidth=0.0), "target_halfwidth"),
+    (dict(target_halfwidth=-0.05), "target_halfwidth"),
+    (dict(target_halfwidth=float("inf")), "target_halfwidth"),
+    (dict(target_halfwidth=float("-inf")), "target_halfwidth"),
     (dict(calibration_fraction=2.0), "calibration_fraction"),
     (dict(calibration_fraction=-0.1), "calibration_fraction"),
     (dict(calibration_fraction=float("nan")), "calibration_fraction"),
@@ -433,7 +437,6 @@ def test_a_disabled_policy_is_still_a_no_op_whatever_its_fields():
 
 @pytest.mark.parametrize("kw", [
     dict(), dict(calibration_fraction=0.0), dict(calibration_fraction=1.0),
-    dict(target_halfwidth=0.0), dict(target_halfwidth=float("inf")),
     dict(max_labels=0), dict(alpha=0.5),
 ])
 def test_boundary_values_that_already_meant_something_still_plan(kw):
@@ -456,3 +459,31 @@ def test_a_zero_weight_stratum_is_still_allowed():
     p = plan(AuditPolicy(enabled=True), weights={"a": 0.0, "b": 1.0},
              expected_units=1000)
     assert set(p.rates) == {"a", "b"}
+
+
+# -- weight-sum overflow and half-width positivity (#330) --------------------
+
+def test_finite_weights_that_overflow_the_sum_are_refused():
+    """Two finite 1e308 weights sum to inf; that used to be ZeroDivisionError."""
+    with pytest.raises(ValueError, match="sum"):
+        plan(AuditPolicy(enabled=True, alpha=0.05, target_halfwidth=0.05),
+             weights={"a": 1e308, "b": 1e308}, expected_units=1000)
+
+
+def test_huge_integer_weight_totals_raise_valueerror_not_overflowerror():
+    """Individually finite ints can sum past float range (#330 Codex P2)."""
+    with pytest.raises(ValueError, match="sum"):
+        plan(AuditPolicy(enabled=True, alpha=0.05, target_halfwidth=0.05),
+             weights={"a": 10**308, "b": 10**308}, expected_units=1000)
+
+
+def test_all_zero_weights_still_name_the_sum():
+    with pytest.raises(ValueError, match="sum"):
+        plan(AuditPolicy(enabled=True), weights={"a": 0.0, "b": 0.0},
+             expected_units=1000)
+
+
+def test_a_positive_finite_halfwidth_still_plans():
+    p = plan(AuditPolicy(enabled=True, target_halfwidth=0.05),
+             weights=_W, expected_units=1000, resid_sd=_SD)
+    assert all(0.0 <= r <= 1.0 for r in p.rates.values())
