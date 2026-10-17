@@ -35,7 +35,8 @@ from typing import Any, Dict, Optional, Sequence, Tuple
 
 from . import __version__, runstore
 from .cli import (NESTED_ENV, apply_payload, doctor_report, plan_payload,
-                 require_cli_on_path, show_payload, status_payload)
+                 require_cli_on_path, require_resume_host_on_path, show_payload,
+                 status_payload)
 from .evolvespec import EvolveSpec, SpecError, compose
 
 __all__ = ["RESCAN_ALLOW_ENV", "Tools", "TOOL_DESCRIPTIONS", "build_server",
@@ -298,10 +299,13 @@ class Tools:
             # A resumed run gets the *current* bridge: the session that started
             # it is likely gone, and its address with it.
             runstore.require_budget_pair(budget_usd, usd_per_call)
+            # Same host gate as CLI resume: an absent plugin host must not
+            # relaunch and report running (#370).
+            require_resume_host_on_path(run_id, store=self.store)
             return runstore.resume(run_id, store=self.store, budget_usd=budget_usd,
                                    usd_per_call=usd_per_call,
                                    env=self.host_model_env()).to_dict()
-        except runstore.RunStoreError as e:
+        except (runstore.RunStoreError, SpecError) as e:
             return {"error": str(e)}
 
     # -- resources --------------------------------------------------------------
