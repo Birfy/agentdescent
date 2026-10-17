@@ -104,6 +104,20 @@ class Challenger:
     config: ChallengerConfig = field(default_factory=ChallengerConfig)
 
 
+#: Meta the *driver* stamps on every generated task (``_CurriculumDriver.refresh``).
+#: They describe which generation spec drew the task, not what the task is, so
+#: they are not part of its identity: an identical task redrawn after the
+#: challenger changed its spec is the same task.
+_DRIVER_META = ("spec", "generated")
+
+
+def _identity(task: Task) -> Tuple[str, Any]:
+    """What makes two same-id tasks *the same task*: prompt and task meta,
+    without the driver-written bookkeeping fields."""
+    meta = {k: v for k, v in (task.meta or {}).items() if k not in _DRIVER_META}
+    return task.prompt, meta
+
+
 class FrontierSampler:
     """A :class:`~agentdescent.sampling.TaskSampler` that mixes the fixed seed
     tasks with a growable frontier pool the challenger generates.
@@ -174,6 +188,16 @@ class FrontierSampler:
         cfg = self.challenger.config
         for task in tasks:
             self._stats["generated"] += 1
+            known = next((t for t in self._frontier if t.id == task.id), None)
+            if known is not None:
+                # A redraw of a task already on the frontier must not erase its
+                # measured history (positive learning, or the attempts count
+                # toward the stuck threshold). An equivalent task keeps its
+                # entry; a *different* task under the same id is refused rather
+                # than silently inheriting someone else's measurements (#336).
+                if _identity(known) != _identity(task):
+                    self._stats["invalid"] += 1
+                continue
             self._frontier.append(task)
             self._book[task.id] = {"first": None, "last": None, "attempts": 0,
                                    "spec": task.meta.get("spec", "")}

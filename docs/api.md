@@ -2967,6 +2967,7 @@ A durable archive of what runs learned.
 | method | what it does |
 |---|---|
 | `archive(...)` | Archive one run's product. Idempotent by `run_id` (atomic rewrite). |
+| `find(run_id: str) -> Optional[ConsolidationRecord]` | Lookup by identity. |
 
 ### `SeedReport(...)`
 

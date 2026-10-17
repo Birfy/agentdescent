@@ -444,3 +444,22 @@ def test_invariant_rejections_advance_the_rrsi_schedule(tmp_path):
     if n_rej >= 3:
         assert state.stalled() is True
     assert state.budget() < 5, "rejection streak must anneal the edit budget"
+
+
+def test_resume_preserves_default_in_memory_history(tmp_path):
+    """#337: a fresh default bundle resumed from a checkpoint keeps the per-edit
+    evidence (accepted counts, attempts), not just S*/round/progress."""
+    run, reward = _offline_actors()
+    repo = str(tmp_path / "repo")
+    bundle1, state1 = build_rrsi_bundle(_complete_factory())
+    evolve(_tasks(), reward, run=run, strategy=SingleSlot(initial_value="seed"),
+           rounds=2, n_workers=2, repo_path=repo, policies=bundle1,
+           checkpointing=True)
+    assert state1.history.records(), "the first run measured nothing"
+    bundle2, state2 = build_rrsi_bundle(_complete_factory())
+    assert state2.history.records() == []
+    evolve(_tasks(), reward, run=run, strategy=SingleSlot(initial_value="seed"),
+           rounds=1, n_workers=2, repo_path=repo, policies=bundle2,
+           checkpointing=True)
+    before = state1.history.records()
+    assert state2.history.records()[:len(before)] == before

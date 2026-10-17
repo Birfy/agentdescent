@@ -33,7 +33,7 @@ import os
 import shutil
 import sys
 import time
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from . import runstore
 from .evolvespec import (EvolveSpec, SpecError, compose, estimate, load_spec,
@@ -78,9 +78,37 @@ def _status_line(st: runstore.RunStatus) -> str:
             f"  {st.kind or '?'}:{st.target or '?'}{tail}{err}")
 
 
+#: Which worker CLI ``init`` picks when several are on PATH (#361): the first
+#: present one wins. Same refs as ``_CLI_BINARIES``; ``claude_code`` stays the
+#: placeholder when none is installed.
+_DEFAULT_AGENT_ORDER = ("claude_code", "codex", "dsh", "opencode")
+_PLACEHOLDER_AGENT = "claude_code"
+
+
+def default_agent_ref() -> Tuple[str, bool]:
+    """``(ref, found)``: the worker CLI ``init`` writes when ``--agent`` is omitted.
+
+    Uses :func:`doctor_report` (the same view ``plan`` gates on, #346), so a
+    machine with only ``opencode`` on PATH gets ``opencode`` rather than a
+    ``claude_code`` spec that ``plan`` immediately refuses (#361). ``found`` is
+    False when no worker CLI is on PATH; the ref is then the ``claude_code``
+    placeholder and the caller should warn.
+    """
+    clis = doctor_report()["agent_clis"]
+    for ref in _DEFAULT_AGENT_ORDER:
+        if clis.get(_CLI_BINARIES[ref]):
+            return ref, True
+    return _PLACEHOLDER_AGENT, False
+
+
 def starter_spec(path: str, *, kind: Optional[str] = None, data: Optional[str] = None,
-                 agent: str = "claude_code") -> Dict[str, Any]:
-    """A spec to edit, with ``kind`` guessed from what ``path`` is."""
+                 agent: Optional[str] = None) -> Dict[str, Any]:
+    """A spec to edit, with ``kind`` guessed from what ``path`` is.
+
+    ``agent=None`` picks the worker from the CLIs on PATH (:func:`default_agent_ref`).
+    """
+    if agent is None:
+        agent = default_agent_ref()[0]
     p = os.path.expanduser(path)
     if kind is None:
         if os.path.isfile(p):
@@ -282,12 +310,21 @@ cases.jsonl, and a real agent instead of the offline one:
 
 
 def cmd_init(a: argparse.Namespace) -> int:
-    spec = starter_spec(a.path, kind=a.kind, data=a.data, agent=a.agent)
+    agent, found = (a.agent, True) if a.agent else default_agent_ref()
+    spec = starter_spec(a.path, kind=a.kind, data=a.data, agent=agent)
     out = a.out or os.path.join(".agentdescent", f"{os.path.basename(a.path.rstrip('/')) or 'spec'}.evolve.json")
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(spec, fh, indent=2)
     print(f"wrote {out}")
+    if not found and spec["kind"] not in ("text", "policy_slot"):
+        print(f"warning: no worker CLI (claude, codex, dsh, opencode) is on PATH; "
+              f"wrote the placeholder agent `{agent}`. Run `agentdescent doctor`, "
+              "install a CLI, or re-run with `--agent <ref>` / edit `agent.ref` "
+              "before `plan`")
+    elif a.agent is None and spec["kind"] not in ("text", "policy_slot"):
+        print(f"agent: `{agent}` (the worker CLI found on PATH; "
+              "override with `--agent <ref>`)")
     if spec["kind"] == "policy_slot":
         problems = spec["data"]["problems"]
         print(f"next: provide {problems} -- a zero-argument builder "
@@ -903,7 +940,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--kind", choices=("text", "skill_dir", "agent_dir", "agent_code",
                                   "plugin", "policy_slot"))
     s.add_argument("--data", help="cases file, or a module:attribute problems ref for policy_slot")
-    s.add_argument("--agent", default="claude_code", help="worker agent short name")
+    s.add_argument("--agent", default=None,
+                   help="worker agent short name (default: the first of claude_code, "
+                        "codex, dsh, opencode whose CLI is on PATH; claude_code if none)")
     s.add_argument("--out", help="where to write the spec")
     s.set_defaults(fn=cmd_init)
 

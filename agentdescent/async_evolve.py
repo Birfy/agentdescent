@@ -810,7 +810,8 @@ def async_evolve(
                         task=task, base_version={aid: art_v},
                         purpose="rollout", output=output, reward=score,
                         wallclock=time.time() - t_start, worker_id=f"w{wid}")
-                    sampler.record(task.id, score)     # learn which tasks carry signal
+                    if aid == eng.artifact_id:         # primary solver only (#336)
+                        sampler.record(task.id, score) # learn which tasks carry signal
                     # Before the solved-task branch, for the same reason as on the
                     # synchronous path: a group that only saw the failures has no
                     # variance to standardise against.

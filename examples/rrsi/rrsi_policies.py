@@ -57,6 +57,7 @@ construction.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
@@ -146,6 +147,11 @@ class _InMemoryHistory:
     def records(self) -> List[dict]:
         return list(self._records)
 
+    def load_records(self, records: List[dict]) -> None:
+        """Replace the ledger with ``records`` (a :meth:`records` snapshot), so a
+        resumed run starts from the evidence the checkpointed one had."""
+        self._records = [dict(r) for r in records]
+
     def append_candidate(self, t: int, variant: str, edits: Optional[List[dict]],
                          outcome: str, delta_S: Optional[float],
                          delta_C: Optional[float], accepted: bool,
@@ -234,24 +240,49 @@ from .components import K as _K_ALL  # noqa: E402
 _K_ALL = tuple(_K_ALL)
 
 
+_PATHLIKE = re.compile(r"[/\\]|\.\w{1,8}$")
+
+
+def _op_diff_text(key: Any, value: Any) -> str:
+    """One op as the unified-diff text ``components.normalize`` expects.
+
+    ``text_only`` reads ``+``/``-`` changed-line markers; feeding it the raw
+    ``key\nvalue`` made every line look like code, so prose that merely
+    *mentions* ``ToolRegistry`` was classified ``client_tool`` and won a
+    structural-novelty tie-break (#337). The key becomes the file header (its
+    path still carries ``skills/``-style signals) and every value line is an
+    added line, so a comment- or string-only edit is recognised as ``prompt``.
+    """
+    lines = [f"--- a/{key}", f"+++ b/{key}"]
+    if value is not None:
+        lines += ["+ " + ln for ln in str(value).splitlines()]
+    return "\n".join(lines)
+
+
 def upstream_components(diff: Any) -> Tuple[str, ...]:
     """Classify a diff's ops through the **pinned upstream vocabulary**.
 
     Each op is classified by :func:`~examples.rrsi.components.normalize`
-    (declared=None), which applies ``text_only`` (a pure prose/comment edit is
-    a ``prompt``) and then the shared structural signals (``skills/`` ->
-    ``skill``, ``Memory(`` -> ``memory``, tool registries -> ``client_tool``,
-    subagent calls -> ``subagent``). This replaces the first-path-segment
-    heuristic, so a FileTree harness's ``skills/x/SKILL.md`` attributes its
-    edit to the upstream ``skill`` component -- the vocabulary RRSI's novelty
-    and pruning rules actually count.
+    (declared=None) over a real changed-line diff of that op, which applies
+    ``text_only`` (a pure prose/comment/string edit is a ``prompt``) and then
+    the shared structural signals (``skills/`` -> ``skill``, ``Memory(`` ->
+    ``memory``, tool registries -> ``client_tool``, subagent calls ->
+    ``subagent``).
+
+    An op whose key is a *slot* rather than a file path (``value``, a rule id --
+    what ``SingleSlot`` / ``KeyedRules`` / ``AppendRules`` write) holds model
+    -facing prose: it is a ``prompt`` edit however it is worded, since no
+    machinery is added by words. A FileTree harness's ``skills/x/SKILL.md``
+    still attributes its edit to the upstream ``skill`` component.
     """
     from .components import normalize
 
     out: Set[str] = set()
     for key, value in (diff.ops or {}).items():
-        text = f"{key}\n{value}" if value is not None else str(key)
-        out.add(normalize(None, text))
+        if not _PATHLIKE.search(str(key)):
+            out.add("prompt")
+            continue
+        out.add(normalize(None, _op_diff_text(key, value)))
     return tuple(sorted(out))
 
 
@@ -268,7 +299,8 @@ class RRsiState:
     :mod:`~examples.rrsi.components` vocabulary (``upstream_components``), not
     a path-segment heuristic. ``checkpoint``/``restore`` carry the *search*
     state (``round``, ``S*``, ``incumbent_cost``, ``progress``); the per-edit
-    ledger is the History's own durable file.
+    ledger is the History's own durable file (the in-memory twin's records ride
+    the checkpoint instead).
     """
 
     def __init__(self, config: Optional[RRsiConfig] = None, *,
@@ -362,14 +394,23 @@ class RRsiState:
             S=self.best_score, C=self.incumbent_cost, diff=_diff_text(diff))
 
     def checkpoint(self) -> dict:
-        """Serialise the search state. The per-edit ledger is the History's
-        own durable file, so it is not part of this payload."""
-        return {
+        """Serialise the search state.
+
+        With a durable ``history_path`` the per-edit ledger is the History's
+        own file and is not part of this payload. The in-memory backend has no
+        file, so its records ride the checkpoint (``history``): without them a
+        resumed bundle kept ``S*``/round/progress but lost accepted component
+        counts, pruning and proposer evidence, and an already-accepted skill
+        became "novel" again (#337)."""
+        out = {
             "round": self.round,
             "best_score": self.best_score,
             "incumbent_cost": self.incumbent_cost,
-            "progress": self.progress,
+            "progress": list(self.progress),
         }
+        if isinstance(self.history, _InMemoryHistory):
+            out["history"] = self.history.records()
+        return out
 
     def restore(self, data: dict) -> None:
         """Restore :meth:`checkpoint`'s form. Unknown keys are ignored."""
@@ -383,6 +424,13 @@ class RRsiState:
             if isinstance(data.get("progress"), list):
                 self.progress = [float(v) for v in data["progress"]
                                  if isinstance(v, (int, float))]
+            # Only the in-memory twin restores records from the payload; a
+            # durable History already reads its own file, which stays the source
+            # of truth on an explicit resume.
+            if (isinstance(self.history, _InMemoryHistory)
+                    and isinstance(data.get("history"), list)):
+                self.history.load_records(
+                    [r for r in data["history"] if isinstance(r, dict)])
         except Exception:  # noqa: BLE001 - a bad payload must not take the run down
             return
 

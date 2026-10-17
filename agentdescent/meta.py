@@ -1649,19 +1649,48 @@ def _require_disjoint(
     seeds: Sequence[int],
     val_seeds: Sequence[int],
 ) -> None:
-    """Raise when the validation set is not isolated from training."""
-    train_names = set(_named_problems(problems))
-    val_names = set(_named_problems(val_problems))
-    overlap = train_names & val_names
-    if overlap:
+    """Raise when the validation set is not isolated from training.
+
+    Isolation is fail-closed on two axes:
+
+    * **explicit names** — when both sides are mappings, shared keys raise
+      (the same contract the existing named-overlap tests pin);
+    * **problem identity** — the same ``Problem`` object must not appear in
+      both sets. Sequence inputs get synthetic labels (``p0``, ``p1``, …)
+      independently per side via :func:`_named_problems`; those labels are
+      local and must *not* participate in the name check, or every pair of
+      nonempty sequences falsely collides on ``p0``. Identity comparison is
+      the explicit policy for genuine shared problems under the sequence API.
+    """
+    train_named = _named_problems(problems)
+    val_named = _named_problems(val_problems)
+    # Synthetic sequence labels are not a shared namespace — only explicit
+    # mapping keys count as names for the overlap gate.
+    if isinstance(problems, Mapping) and isinstance(val_problems, Mapping):
+        overlap = set(train_named) & set(val_named)
+        if overlap:
+            raise ValueError(
+                f"meta_run() val_problems overlap training problems: "
+                f"{sorted(overlap)}; "
+                "keep them disjoint so the verdict is not measured on the "
+                "problems that shaped the value")
+    shared_ids = ({id(p) for p in train_named.values()}
+                  & {id(p) for p in val_named.values()})
+    if shared_ids:
+        train_hit = sorted(
+            n for n, p in train_named.items() if id(p) in shared_ids)
+        val_hit = sorted(
+            n for n, p in val_named.items() if id(p) in shared_ids)
         raise ValueError(
-            f"meta_run() val_problems overlap training problems: {sorted(overlap)}; "
-            "keep them disjoint so the verdict is not measured on the problems "
-            "that shaped the value")
+            f"meta_run() val_problems overlap training problems: "
+            f"shared problem identity (train={train_hit}, val={val_hit}); "
+            "keep them disjoint so the verdict is not measured on the "
+            "problems that shaped the value")
     shared_seeds = set(seeds) & set(val_seeds)
     if shared_seeds:
         raise ValueError(
-            f"meta_run() val_seeds overlap training seeds: {sorted(shared_seeds)}; "
+            f"meta_run() val_seeds overlap training seeds: "
+            f"{sorted(shared_seeds)}; "
             "keep them disjoint so the verdict is not measured on the seeds "
             "that shaped the value")
 

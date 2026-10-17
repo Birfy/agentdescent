@@ -197,3 +197,81 @@ def test_retrieval_stays_inside_the_same_strategy(tmp_path):
     assert state is None
     assert report.matched_run is None
     assert "no archived run" in report.reason
+
+
+def test_distinct_run_ids_do_not_collide_on_sanitized_filenames(tmp_path):
+    """``a/b`` and ``ab`` must keep separate products and look up by identity.
+
+    Pre-#338 ``_path`` deleted unsafe characters, so both ids mapped to
+    ``runs/ab.json`` and a later archive replaced the earlier one.
+    """
+    store = ConsolidationStore(str(tmp_path))
+    a_slash_b = _run_evolve(_tasks(prefix="a"), repo=str(tmp_path / "r-ab"),
+                            rounds=2)
+    ab = _run_evolve(_tasks(prefix="b"), repo=str(tmp_path / "r-plain"),
+                     rounds=2)
+    store.archive(a_slash_b, run_id="a/b", strategy="SingleSlot",
+                  config=DOMAIN_CONFIG)
+    store.archive(ab, run_id="ab", strategy="SingleSlot",
+                  config=DOMAIN_CONFIG)
+    assert store.count() == 2
+    found_slash = store.find("a/b")
+    found_plain = store.find("ab")
+    assert found_slash is not None and found_slash.run_id == "a/b"
+    assert found_plain is not None and found_plain.run_id == "ab"
+    assert found_slash.state == a_slash_b.state
+    assert found_plain.state == ab.state
+    by_id = {r.run_id: r for r in store.iter_archive()}
+    assert set(by_id) == {"a/b", "ab"}
+
+
+def test_rewriting_one_run_id_leaves_the_other_untouched(tmp_path):
+    store = ConsolidationStore(str(tmp_path))
+    first = _run_evolve(_tasks(prefix="a"), repo=str(tmp_path / "r1"), rounds=2)
+    second = _run_evolve(_tasks(prefix="b"), repo=str(tmp_path / "r2"), rounds=2)
+    third = _run_evolve(_tasks(prefix="c"), repo=str(tmp_path / "r3"), rounds=2)
+    store.archive(first, run_id="a/b", config=DOMAIN_CONFIG)
+    store.archive(second, run_id="ab", config=DOMAIN_CONFIG)
+    store.archive(third, run_id="a/b", config=DOMAIN_CONFIG)  # rewrite slash id
+    assert store.count() == 2
+    assert store.find("a/b").state == third.state
+    assert store.find("ab").state == second.state
+
+
+def test_legacy_sanitized_filename_looks_up_only_matching_identity(tmp_path):
+    """A pre-#338 ``ab.json`` is returned for ``ab``, never for ``a/b``."""
+    import hashlib
+    import json
+    from agentdescent.evolution import EvolutionResult
+
+    store = ConsolidationStore(str(tmp_path))
+    legacy = {
+        "schema_version": 1,
+        "run_id": "ab",
+        "artifact_id": "artifact",
+        "strategy": "SingleSlot",
+        "config": DOMAIN_CONFIG,
+        "state": {"x": "legacy-ab"},
+        "rendered": "legacy-ab",
+        "final_reward": 0.5,
+        "rounds": 1,
+        "trajectory_store": None,
+        "created_at": 1.0,
+    }
+    (tmp_path / "runs").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "runs" / "ab.json").write_text(
+        json.dumps(legacy), encoding="utf-8")
+    assert store.find("ab") is not None
+    assert store.find("ab").state == {"x": "legacy-ab"}
+    # Colliding sanitized name must not silently return the other identity.
+    assert store.find("a/b") is None
+    # Archiving the slash id must not overwrite the legacy ``ab`` product.
+    result = EvolutionResult(state={"x": "slash"}, rendered="slash",
+                             final_reward=0.7, history=[], ledger_log=[])
+    store.archive(result, run_id="a/b", config=DOMAIN_CONFIG)
+    assert store.find("a/b").state == {"x": "slash"}
+    assert store.find("ab").state == {"x": "legacy-ab"}
+    assert store.count() == 2
+    digest = hashlib.sha256(b"a/b").hexdigest()
+    assert (tmp_path / "runs" / f"{digest}.json").is_file()
+    assert (tmp_path / "runs" / "ab.json").is_file()

@@ -148,6 +148,11 @@ SHORT_REFS: Dict[str, str] = {
 _POLICY_SLOTS = ("selection", "task_sampler", "proposal", "conflict", "fusion",
                  "acceptance", "promotion", "staleness")
 
+#: Spec refs that resolve to a WorkspaceAgent. One phrase for both the
+#: directory-kind requirement and the kind=text refusal so the two messages
+#: cannot drift apart again (#362); keep in step with ``agents.py``.
+WORKSPACE_AGENT_REFS = "claude_code / codex / dsh / opencode / cli_agent"
+
 _TEXT_TEMPLATE = "{skill}\n\n{prompt}"
 
 #: What a run against a real agent should default to, and why the plain engine
@@ -853,9 +858,8 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
             raise SpecError(
                 "agent: kind='text' needs a plain Completion "
                 "(openai_compatible / host_model / claude), not a WorkspaceAgent "
-                f"({type(agent).__name__}); claude_code / codex / dsh / opencode / "
-                "cli_agent are file-editing agents and cost a whole agent session "
-                "per case")
+                f"({type(agent).__name__}); {WORKSPACE_AGENT_REFS} are file-editing "
+                "agents and cost a whole agent session per case")
         if "{skill}" not in spec.template or "{prompt}" not in spec.template:
             raise SpecError("template must contain {skill} and {prompt}")
         template = spec.template
@@ -940,8 +944,8 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
         if spec.kind in ("skill_dir", "agent_dir"):
             if not isinstance(agent, WorkspaceAgent):
                 raise SpecError(
-                    f"kind={spec.kind!r} needs a WorkspaceAgent (claude_code, codex, dsh, "
-                    f"cli_agent) so the directory is put in front of it; got "
+                    f"kind={spec.kind!r} needs a WorkspaceAgent ({WORKSPACE_AGENT_REFS}) "
+                    f"so the directory is put in front of it; got "
                     f"{type(agent).__name__}")
             layout = spec.layout or ("claude_skill" if spec.kind == "skill_dir" else "claude_agent")
             extra = {"prompt_template": spec.prompt_template} if spec.prompt_template else {}
