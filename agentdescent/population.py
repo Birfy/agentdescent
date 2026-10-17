@@ -377,8 +377,23 @@ class PopulationAggregator(Aggregator):
                 idx = slot - 1
                 if self.island_count > 0 and idx < len(prev_forks):
                     fork_name = prev_forks[idx]        # keep the island's lineage
+                    # A clean finalize deletes these branches without rewriting
+                    # the on-disk checkpoint (#339). Reuse the name only when
+                    # the head still exists; otherwise recreate before commit.
+                    if fork_name not in self.ledger.live_heads():
+                        self.ledger.fork(fork_name, from_branch=Ledger.DEV)
                 else:
-                    fork_name = f"head/{idx}"
+                    # Canonical slot name, unless a surviving island (e.g. only
+                    # ``head/1`` after a partial loss) already owns it: two
+                    # slots must never share one branch.
+                    # (Ephemeral ``island_count == 0`` runs reset ``head/<idx>``
+                    # every step, so only persistent islands need the check.)
+                    taken = (set(prev_forks) | set(self._forks)
+                             if self.island_count > 0 else set())
+                    k = idx
+                    while f"head/{k}" in taken:
+                        k += 1
+                    fork_name = f"head/{k}"
                     self.ledger.fork(fork_name, from_branch=Ledger.DEV)
                 self._commit_state(target, f"population: head/{idx}",
                                    branch=fork_name)
@@ -545,13 +560,20 @@ class PopulationAggregator(Aggregator):
                 self._selections = int(state.get("selections", 0))
             except (TypeError, ValueError):
                 self._selections = 0
-            # Persistent islands survive a restart: the ledger's fork branches
-            # persist in the repo, so restoring the names (and the island
-            # count) is enough to keep the lineages. A checkpoint written
-            # before islands existed carries neither and stays at zero.
+            # Persistent islands survive a restart when the ledger still holds
+            # their branches. A clean finalize deletes those forks without
+            # rewriting the checkpoint (#339), so restore must drop names
+            # whose heads are gone -- otherwise head_for_worker routes to a
+            # missing branch and step() skips recreation. step() recreates
+            # any missing islands on the next selection.
             forks = state.get("forks")
             if isinstance(forks, list):
-                self._forks = [str(f) for f in forks if isinstance(f, str)]
+                names = [str(f) for f in forks if isinstance(f, str)]
+                try:
+                    live = set(self.ledger.live_heads())
+                except Exception:  # noqa: BLE001 - a closed/missing ledger
+                    live = set()
+                self._forks = [f for f in names if f in live]
             try:
                 self.island_count = int(state.get(
                     "island_count", getattr(self, "island_count", 0)))
