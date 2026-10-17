@@ -217,3 +217,92 @@ def test_island_count_requires_a_selection_policy():
         evolve(_tasks(), _reward, run=_run, propose=_propose,
                strategy=SingleSlot(initial_value="cap:0"),
                rounds=2, n_workers=2, population_islands=2)
+
+
+def test_restore_after_finalize_drops_deleted_island_forks(tmp_path):
+    """Clean-stop checkpoint must not revive forks finalize already deleted.
+
+    The engine saves aggregator state after a round (fork names included), then
+    clean completion calls ``finalize`` which discards those branches without
+    rewriting the checkpoint. Resume must drop the stale names and recreate
+    islands on the next ``step``, never route workers to missing heads (#339).
+    """
+    agg, ledger, runtime, strategy = _make_aggregator(tmp_path, island_count=2)
+    _seed_archive(agg, runtime, strategy)
+    for _ in range(3):
+        agg.step(n_workers=3)
+    assert agg._forks == ["head/0", "head/1"]
+    payload = agg.checkpoint()
+    assert payload["forks"] == ["head/0", "head/1"]
+    agg.finalize()
+    assert ledger.live_heads() == ["dev"]
+
+    fresh, ledger2, _, _ = _make_aggregator(tmp_path, island_count=2)
+    fresh.restore(payload)
+    assert fresh._forks == []
+    assert fresh.head_for_worker(1) == "dev"
+    assert fresh.head_for_worker(1) in ledger2.live_heads()
+
+    fresh.step(n_workers=3)
+    assert len(fresh._forks) == 2
+    for wid in range(3):
+        head = fresh.head_for_worker(wid)
+        assert head in ledger2.live_heads(), f"worker {wid} -> missing {head}"
+    assert set(fresh._forks).issubset(set(ledger2.live_heads()))
+
+
+def _island_evolve_kwargs(repo, *, rounds, n_workers=3):
+    from agentdescent import Policies
+    from agentdescent.evolution import SingleSlot
+    return dict(
+        tasks=_tasks(), reward=_reward, run=_run, propose=_propose,
+        strategy=SingleSlot(initial_value="cap:0"),
+        policies=Policies(selection=CladeThompson()),
+        rounds=rounds, n_workers=n_workers, max_concurrency=n_workers,
+        repo_path=repo, population_islands=2, target_reward=1.0,
+        checkpointing=True,
+    )
+
+
+def test_checkpointed_island_evolve_resumes_without_missing_heads(tmp_path):
+    """End-to-end: checkpointed island run, clean stop, resume on same repo."""
+    from agentdescent.checkpoint import load_checkpoint
+
+    repo = str(tmp_path / "repo")
+    r1 = evolve(**_island_evolve_kwargs(repo, rounds=4))
+    assert r1.outcomes().get("committed", 0) >= 1
+    assert _live_heads(repo) == ["dev"]
+    payload = load_checkpoint(repo)
+    assert payload is not None
+    assert payload.get("aggregator_type") == "PopulationAggregator"
+    # Stale fork names are exactly the post-finalize resume hazard.
+    assert isinstance(payload["archive_state"].get("forks"), list)
+
+    r2 = evolve(**_island_evolve_kwargs(repo, rounds=3))
+    assert r2.outcomes().get("committed", 0) >= 0
+    assert _live_heads(repo) == ["dev"]
+
+
+def test_checkpointed_island_async_evolve_resumes_without_missing_heads(tmp_path):
+    """Async counterpart of the checkpointed island resume regression."""
+    from agentdescent import Policies, async_evolve
+    from agentdescent.checkpoint import load_checkpoint
+    from agentdescent.evolution import SingleSlot
+
+    repo = str(tmp_path / "repo")
+    common = dict(
+        tasks=_tasks(), reward=_reward, run=_run, propose=_propose,
+        strategy=SingleSlot(initial_value="cap:0"),
+        policies=Policies(selection=CladeThompson()),
+        n_workers=3, repo_path=repo, population_islands=2,
+        checkpointing=True, max_seconds=8.0, max_iters=6,
+        target_reward=1.0,
+    )
+    r1 = async_evolve(**common)
+    assert _live_heads(repo) == ["dev"]
+    payload = load_checkpoint(repo)
+    assert payload is not None
+    assert isinstance(payload["archive_state"].get("forks"), list)
+    r2 = async_evolve(**{**common, "max_iters": 4, "max_seconds": 6.0})
+    assert r2 is not None
+    assert _live_heads(repo) == ["dev"]

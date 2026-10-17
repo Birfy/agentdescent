@@ -377,6 +377,11 @@ class PopulationAggregator(Aggregator):
                 idx = slot - 1
                 if self.island_count > 0 and idx < len(prev_forks):
                     fork_name = prev_forks[idx]        # keep the island's lineage
+                    # A clean finalize deletes these branches without rewriting
+                    # the on-disk checkpoint (#339). Reuse the name only when
+                    # the head still exists; otherwise recreate before commit.
+                    if fork_name not in self.ledger.live_heads():
+                        self.ledger.fork(fork_name, from_branch=Ledger.DEV)
                 else:
                     fork_name = f"head/{idx}"
                     self.ledger.fork(fork_name, from_branch=Ledger.DEV)
@@ -545,13 +550,20 @@ class PopulationAggregator(Aggregator):
                 self._selections = int(state.get("selections", 0))
             except (TypeError, ValueError):
                 self._selections = 0
-            # Persistent islands survive a restart: the ledger's fork branches
-            # persist in the repo, so restoring the names (and the island
-            # count) is enough to keep the lineages. A checkpoint written
-            # before islands existed carries neither and stays at zero.
+            # Persistent islands survive a restart when the ledger still holds
+            # their branches. A clean finalize deletes those forks without
+            # rewriting the checkpoint (#339), so restore must drop names
+            # whose heads are gone -- otherwise head_for_worker routes to a
+            # missing branch and step() skips recreation. step() recreates
+            # any missing islands on the next selection.
             forks = state.get("forks")
             if isinstance(forks, list):
-                self._forks = [str(f) for f in forks if isinstance(f, str)]
+                names = [str(f) for f in forks if isinstance(f, str)]
+                try:
+                    live = set(self.ledger.live_heads())
+                except Exception:  # noqa: BLE001 - a closed/missing ledger
+                    live = set()
+                self._forks = [f for f in names if f in live]
             try:
                 self.island_count = int(state.get(
                     "island_count", getattr(self, "island_count", 0)))
