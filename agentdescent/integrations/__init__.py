@@ -831,6 +831,18 @@ def _opencode_mcp_state(root: str) -> str:
     return "unknown" if unreadable else "missing"
 
 
+def _claude_mcp_state(path: str) -> str:
+    raw = _read(path)
+    if raw is None:
+        return "missing"
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return "missing"          # a manifest the host cannot read starts no server
+    servers = data.get("mcpServers") if isinstance(data, dict) else None
+    return "ok" if isinstance(servers, dict) and servers.get("agentdescent") else "missing"
+
+
 def host_status(host: str, *, home: Optional[str] = None) -> Dict[str, str]:
     """What ``install(host)`` left behind, read-only: is the host wired up, and
     is what it holds still what this package would write?
@@ -854,16 +866,19 @@ def host_status(host: str, *, home: Optional[str] = None) -> Dict[str, str]:
         root = os.environ.get("DSH_HOME") or os.path.join(home, ".dsh")
         skill = os.path.join(root, "skills", "agentdescent", "SKILL.md")
         patch = _read(os.path.join(root, "cordis.patch.yml")) or ""
-        mcp = "ok" if DSH_BLOCK_START in patch else "missing"
+        # Both markers: an interrupted write can leave only the start.
+        mcp = "ok" if DSH_BLOCK_START in patch and DSH_BLOCK_END in patch else "missing"
     elif host == "claude-code":
         root = os.path.join(home, ".agentdescent", "plugins", "claude-code")
         skill = os.path.join(root, "skills", "agentdescent", "SKILL.md")
-        mcp = "ok" if os.path.exists(os.path.join(root, ".mcp.json")) else "missing"
+        mcp = _claude_mcp_state(os.path.join(root, ".mcp.json"))
     elif host == "codex":
         root = os.environ.get("CODEX_HOME") or os.path.join(home, ".codex")
         skill = os.path.join(root, "skills", "agentdescent", "SKILL.md")
         cfg = _read(os.path.join(root, "config.toml")) or ""
-        mcp = "ok" if "[mcp_servers.agentdescent]" in cfg else "missing"
+        # A live table header, not a substring: a commented-out one is not wired.
+        mcp = ("ok" if re.search(r"^\s*\[mcp_servers\.agentdescent\]", cfg, re.M)
+               else "missing")
     else:
         root = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config"),
                             "opencode")

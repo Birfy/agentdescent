@@ -189,3 +189,22 @@ def test_an_mcp_entry_kept_in_opencode_json_counts(home):
 def test_the_marketplace_route_is_named_for_claude_code_too(home, monkeypatch):
     rep = _report(monkeypatch, present=("claude",))
     assert any("/plugin install agentdescent@agentdescent" in h for h in rep["hints"])
+
+
+def test_a_surviving_config_without_our_live_entry_is_not_ok(home):
+    """Review of #383: the file or a sentinel being present is not the entry."""
+    install("claude-code", home=str(home))
+    (open(os.path.join(_root(home, "claude-code"), ".mcp.json"), "w")).write("{}")
+    assert host_status("claude-code", home=str(home))["mcp"] == "missing"
+
+    install("dsh", home=str(home))
+    patch = os.path.join(_root(home, "dsh"), "cordis.patch.yml")
+    text = open(patch).read()
+    open(patch, "w").write(text[:text.index("# --- end agentdescent ---")])
+    assert host_status("dsh", home=str(home))["mcp"] == "missing"
+
+    install("codex", home=str(home))
+    cfg = os.path.join(_root(home, "codex"), "config.toml")
+    open(cfg, "w").write("# [mcp_servers.agentdescent]\n# command = \"agentdescent\"\n")
+    assert host_status("codex", home=str(home))["mcp"] == "missing"
+    assert host_status("codex", home=str(home))["state"] == "partial"
