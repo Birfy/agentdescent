@@ -17,7 +17,7 @@ trajectories that justify it — so a later run can adopt it.
 
 | Piece | What it is |
 | --- | --- |
-| `ConsolidationStore(path)` | A durable archive: one JSON record per run under `<path>/runs/<run_id>.json`. Atomic, idempotent by `run_id`, thread-safe. |
+| `ConsolidationStore(path)` | A durable archive: one JSON record per run under `<path>/runs/<sha256(run_id)>.json` (the complete id is hashed, so `a/b` and `ab` never collide; the full `run_id` is stored in the record, and a pre-#338 sanitized `<run_id>.json` is still found by `find` when its stored id matches). Atomic, idempotent by `run_id`, thread-safe. |
 | `ConsolidationStore.archive(result, *, run_id, artifact_id, strategy, config, trajectory_store)` | Writes a run's product (the artifact's `state`, `rendered`, `final_reward`, rounds) plus the caller's `config` (dataset/scorer/model/params) and a durable `trajectory_store` path — **linked, not copied**. |
 | `seed_from_archive(store, tasks, run, reward, *, strategy, config, sample, min_reward, seed)` | Retrieves a candidate and returns `(initial_state, SeedReport)`. Pass `initial_state` to `evolve(initial_state=...)`. |
 
