@@ -234,7 +234,12 @@ class Tools:
         try:
             es = EvolveSpec.from_dict(spec).absolutise()
             compose(es)                       # fail here, with the field, not in the child
+            # Before create: same rule as CLI -- budget without price must not
+            # return ok/started and then fail only in log.txt (#342).
+            runstore.require_budget_pair(budget_usd, usd_per_call)
         except SpecError as e:
+            return {"ok": False, "error": str(e)}
+        except runstore.RunStoreError as e:
             return {"ok": False, "error": str(e)}
         if os.environ.get(NESTED_ENV):
             # This server is running inside a worker of another run (the plugin
@@ -282,6 +287,7 @@ class Tools:
         try:
             # A resumed run gets the *current* bridge: the session that started
             # it is likely gone, and its address with it.
+            runstore.require_budget_pair(budget_usd, usd_per_call)
             return runstore.resume(run_id, store=self.store, budget_usd=budget_usd,
                                    usd_per_call=usd_per_call,
                                    env=self.host_model_env()).to_dict()

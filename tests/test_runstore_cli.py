@@ -538,3 +538,83 @@ def test_the_rollout_counter_is_not_a_sum_of_sums(tmp_path):
     assert st.rollouts == rounds[-1]["rollouts"], (
         st.rollouts, [r["rollouts"] for r in rounds])
     assert st.rollouts <= st.calls, (st.rollouts, st.calls)
+
+
+# ---------------------------------------------------------------------------
+# budget_usd needs usd_per_call (#342)
+# ---------------------------------------------------------------------------
+
+
+def test_require_budget_pair_raises_clearly():
+    with pytest.raises(RunStoreError, match="budget_usd needs usd_per_call"):
+        runstore.require_budget_pair(5.0, None)
+    with pytest.raises(RunStoreError, match="budget_usd needs usd_per_call"):
+        runstore.require_budget_pair(5.0, 0.0)
+    runstore.require_budget_pair(None, None)          # no budget: fine
+    runstore.require_budget_pair(5.0, 0.02)           # both set: fine
+
+
+def test_evolve_budget_without_usd_per_call_creates_no_run(store, tmp_path):
+    path, _ = _spec_file(tmp_path)
+    before = set(os.listdir(store)) if os.path.isdir(store) else set()
+    code, out = _cli("--store", store, "--json", "evolve", path, "--budget", "5")
+    assert code == 2
+    # stderr is not captured by _cli; the exit code + no new run dir is the
+    # acceptance criterion. Re-run via main with stderr captured for the message.
+    import io
+    from contextlib import redirect_stderr, redirect_stdout
+    err = io.StringIO()
+    with redirect_stdout(io.StringIO()), redirect_stderr(err):
+        code2 = cli.main(["--store", store, "evolve", path, "--budget", "5"])
+    assert code2 == 2 and "budget_usd needs usd_per_call" in err.getvalue()
+    after = set(os.listdir(store)) if os.path.isdir(store) else set()
+    assert after == before
+
+
+def test_evolve_detach_budget_without_usd_per_call_creates_no_run(store, tmp_path):
+    path, _ = _spec_file(tmp_path)
+    before = set(os.listdir(store)) if os.path.isdir(store) else set()
+    import io
+    from contextlib import redirect_stderr, redirect_stdout
+    err = io.StringIO()
+    with redirect_stdout(io.StringIO()), redirect_stderr(err):
+        code = cli.main(["--store", store, "evolve", path, "--detach", "--budget", "5"])
+    assert code == 2 and "budget_usd needs usd_per_call" in err.getvalue()
+    after = set(os.listdir(store)) if os.path.isdir(store) else set()
+    assert after == before
+
+
+def test_execute_budget_without_price_writes_status_error(store, tmp_path):
+    _, spec = _spec_file(tmp_path)
+    rd = runstore.create(spec.to_dict(), store=store)
+    with pytest.raises(RunStoreError, match="budget_usd needs usd_per_call"):
+        runstore.execute(rd, budget_usd=5.0, usd_per_call=None)
+    st = rd.status()
+    assert st.state == "failed"
+    assert "budget_usd needs usd_per_call" in (st.error or "")
+
+
+def test_status_surfaces_error_from_log_when_process_dies(store, tmp_path):
+    """A child that died after writing only log.txt must not read as
+    'process ended without reporting' when the log names the real failure."""
+    _, spec = _spec_file(tmp_path)
+    rd = runstore.create(spec.to_dict(), store=store)
+    # Pretend a detached child marked itself running, then died, leaving the
+    # clear message only in log.txt (the pre-fix detach/MCP failure mode).
+    # A pid that cannot be alive on this machine (not 0: kill(0,0) hits the group).
+    rd.update_status(state="running", pid=2_000_000_000, started=time.time())
+    with open(rd.log_path, "w", encoding="utf-8") as fh:
+        fh.write("error: budget_usd needs usd_per_call: the engine counts calls, "
+                 "and a tool-using agent's price per call is not known in advance\n")
+    st = rd.status()
+    assert st.state == "failed"
+    assert "budget_usd needs usd_per_call" in (st.error or "")
+    assert "process ended without reporting" not in (st.error or "")
+
+
+def test_launch_refuses_budget_without_usd_per_call(store, tmp_path):
+    _, spec = _spec_file(tmp_path)
+    rd = runstore.create(spec.to_dict(), store=store)
+    with pytest.raises(RunStoreError, match="budget_usd needs usd_per_call"):
+        runstore.launch(rd, budget_usd=5.0)
+    assert rd.status().state == "created"
