@@ -76,6 +76,14 @@ written back until the user says so.
    rather than assuming; only the sampling route dies with this session.
    Then poll **`status`** about once per round, not more. Summarise
    round deltas (reward, commits, refusal reasons), not raw JSON.
+   **Read `pending_calls` and `phase` before calling a run stuck.** `calls` can
+   sit still for minutes while work is in flight: `phase` is `propose` or `run`
+   while a worker or an evaluation is mid-call, and `merge` while the merger is
+   resolving conflicts, fusing edits or running the held-out gate (a reflective
+   merge on a reasoning model can take several minutes). `pending_calls > 0` with
+   a `phase` means alive. Judge liveness from `status`, not from `ps`: the
+   busiest process on the machine is usually your own host. If you wait with a
+   shell `sleep`, keep it under a minute -- host shell tools time out near two.
 5. When done, **`show`** with `diff=true`. Explain what changed and why using
    the `outcomes` histogram (`committed`, `below-threshold`, `oracle-rejected`
    ...). Do not paste the whole tree.

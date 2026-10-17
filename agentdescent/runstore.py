@@ -120,11 +120,13 @@ class RunStatus:
     last_reward: Optional[float] = None
     committed: int = 0
     calls: int = 0
-    #: Actor invocations started but not yet finished. Non-zero means work is
-    #: in flight even when ``calls`` is still 0 (long first propose, #358).
+    #: Work started but not yet finished: actor invocations, and the merge step
+    #: (``phase="merge"``). Non-zero means work is in flight even when ``calls``
+    #: is still 0 or has stopped moving (long first propose #358; a reflective
+    #: merge blocked on a model #380).
     pending_calls: int = 0
-    #: Live actor phase while ``pending_calls`` is non-zero (``propose`` /
-    #: ``run``). Cleared when nothing is pending.
+    #: Live phase while ``pending_calls`` is non-zero (``propose`` / ``run`` /
+    #: ``merge``). Cleared when nothing is pending.
     phase: Optional[str] = None
     rollouts: int = 0
     #: Total tokens consumed (prompt + completion), when the agent reports
