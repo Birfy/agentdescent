@@ -51,6 +51,23 @@ commands](plugin-quickstart.md) walks the whole path.
 | `codex` | `~/.codex/skills/agentdescent/SKILL.md`; an `[mcp_servers.agentdescent]` block appended to `~/.codex/config.toml` | restart Codex; check with `codex mcp list`. **Or skip `install` entirely** and use the plugin — see below |
 | `opencode` | `~/.config/opencode/skill/agentdescent/SKILL.md`; an `mcp.agentdescent` entry merged into `~/.config/opencode/opencode.jsonc` | restart OpenCode; check with `opencode mcp list` |
 
+`agentdescent doctor` also reads what `install` left behind, without writing
+anything: one `host <name>: ok | stale | partial | missing` line per host (the
+same data is `hosts` in the JSON report and the MCP `doctor` tool). `stale`
+means the `SKILL.md` a host holds differs from the one this package would write
+now -- what a `pip install -U` leaves behind -- and `partial` means the skill or
+the MCP entry is absent; both are problems (exit code 1) and the fix is to re-run
+`agentdescent install <host>`. A host CLI on `PATH` with nothing installed is a
+hint, not a problem, because `pip install` wires nothing and not every host on a
+machine should be touched. An OpenCode config with comments (`opencode.jsonc`, or an
+`opencode.json` you keep by hand) that cannot be parsed reports its MCP entry as
+`unknown` rather than guessing; `unknown` alone never makes a host `partial`, so
+a user who never installed anything is `missing`. An install made through a
+host's own marketplace (`codex plugin add`, Claude Code's `/plugin install`)
+leaves no files here, so it reads `missing` and the hint names that route too.
+Only presence is checked: a launcher pinned to an interpreter that has since
+been deleted still reads `ok`.
+
 ### Codex: the same plugin as Claude Code
 
 Codex reads the Claude Code plugin format, marketplace and all, so the package

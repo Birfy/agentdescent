@@ -23,7 +23,7 @@ import shlex
 import sys
 from typing import Callable, Dict, List, Optional
 
-__all__ = ["HOSTS", "install", "render_claude_plugin", "render_dsh_plugin",
+__all__ = ["HOSTS", "host_status", "install", "render_claude_plugin", "render_dsh_plugin",
            "skill_text", "hooks_text"]
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -779,12 +779,123 @@ def render_dsh_plugin(dest: str, w: Optional["_Writer"] = None) -> List[str]:
     return w.lines
 
 
+#: The binary each host is driven through, by ``install`` target.
+HOST_CLI = {"dsh": "dsh", "claude-code": "claude", "codex": "codex", "opencode": "opencode"}
+
 HOSTS: Dict[str, Callable[[str, _Writer], None]] = {
     "dsh": install_dsh,
     "claude-code": install_claude_code,
     "codex": install_codex,
     "opencode": install_opencode,
 }
+
+
+def _read(path: str) -> Optional[str]:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read()
+    except OSError:
+        return None
+
+
+def _skill_state(path: str) -> str:
+    """``ok`` / ``stale`` / ``missing`` for one installed ``SKILL.md``.
+
+    Compared byte for byte with the file this package would write now, so a
+    ``pip install -U`` that changed the procedure shows up as ``stale``."""
+    have = _read(path)
+    if have is None:
+        return "missing"
+    return "ok" if have == skill_text() else "stale"
+
+
+def _opencode_mcp_state(root: str) -> str:
+    """The MCP entry in OpenCode's config: ``opencode.jsonc`` (what ``install``
+    writes) or ``opencode.json`` (what a user may keep by hand).
+
+    ``unknown`` when neither file holds the entry and one of them cannot be
+    parsed -- JSONC allows comments and ``json`` cannot read them, so the entry
+    might be there and guessing either way would be wrong."""
+    unreadable = False
+    for name in ("opencode.jsonc", "opencode.json"):
+        raw = _read(os.path.join(root, name))
+        if raw is None:
+            continue
+        try:
+            data = json.loads(raw) if raw.strip() else {}
+        except json.JSONDecodeError:
+            unreadable = True
+            continue
+        if isinstance(data, dict) and (data.get("mcp") or {}).get("agentdescent"):
+            return "ok"
+    return "unknown" if unreadable else "missing"
+
+
+def _claude_mcp_state(path: str) -> str:
+    raw = _read(path)
+    if raw is None:
+        return "missing"
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return "missing"          # a manifest the host cannot read starts no server
+    servers = data.get("mcpServers") if isinstance(data, dict) else None
+    return "ok" if isinstance(servers, dict) and servers.get("agentdescent") else "missing"
+
+
+def host_status(host: str, *, home: Optional[str] = None) -> Dict[str, str]:
+    """What ``install(host)`` left behind, read-only: is the host wired up, and
+    is what it holds still what this package would write?
+
+    ``skill`` is ``ok`` / ``stale`` / ``missing``; ``mcp`` is ``ok`` /
+    ``missing`` / ``unknown`` (an OpenCode config with comments cannot be read
+    safely; it is also what ``doctor`` reports if reading a host's files raises).
+    Two limits: a launcher pinned to an interpreter that has since been deleted
+    still reads ``ok`` (only presence is checked), and an install made through a
+    host's own marketplace (``/plugin install``, ``codex plugin add``) leaves no
+    files here, so it reads ``missing``. ``state`` summarises them: ``ok``, ``stale`` (the skill is
+    behind the package), ``partial`` (one half is there) or ``missing``. Paths
+    follow ``install`` exactly, including ``DSH_HOME`` / ``CODEX_HOME`` /
+    ``XDG_CONFIG_HOME``. Codex can also be wired through ``codex plugin``, which
+    leaves nothing here, so its ``missing`` says where else to look.
+    """
+    if host not in HOSTS:
+        raise ValueError(f"unknown host {host!r}; choose from {sorted(HOSTS)}")
+    home = os.path.expanduser(home or "~")
+    if host == "dsh":
+        root = os.environ.get("DSH_HOME") or os.path.join(home, ".dsh")
+        skill = os.path.join(root, "skills", "agentdescent", "SKILL.md")
+        patch = _read(os.path.join(root, "cordis.patch.yml")) or ""
+        # Both markers: an interrupted write can leave only the start.
+        mcp = "ok" if DSH_BLOCK_START in patch and DSH_BLOCK_END in patch else "missing"
+    elif host == "claude-code":
+        root = os.path.join(home, ".agentdescent", "plugins", "claude-code")
+        skill = os.path.join(root, "skills", "agentdescent", "SKILL.md")
+        mcp = _claude_mcp_state(os.path.join(root, ".mcp.json"))
+    elif host == "codex":
+        root = os.environ.get("CODEX_HOME") or os.path.join(home, ".codex")
+        skill = os.path.join(root, "skills", "agentdescent", "SKILL.md")
+        cfg = _read(os.path.join(root, "config.toml")) or ""
+        # A live table header, not a substring: a commented-out one is not wired.
+        mcp = ("ok" if re.search(r"^\s*\[mcp_servers\.agentdescent\]", cfg, re.M)
+               else "missing")
+    else:
+        root = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config"),
+                            "opencode")
+        skill = os.path.join(root, "skill", "agentdescent", "SKILL.md")
+        mcp = _opencode_mcp_state(root)
+    skill_state = _skill_state(skill)
+    if skill_state == "missing" and mcp in ("missing", "unknown"):
+        # Nothing of ours is there. `unknown` only says a config this user wrote
+        # could not be read, which is no evidence that we were ever installed.
+        state = "missing"
+    elif skill_state == "stale":
+        state = "stale"
+    elif skill_state == "ok" and mcp in ("ok", "unknown"):
+        state = "ok"
+    else:
+        state = "partial"
+    return {"state": state, "skill": skill_state, "mcp": mcp, "path": skill}
 
 
 def mcp_sdk_missing() -> bool:
