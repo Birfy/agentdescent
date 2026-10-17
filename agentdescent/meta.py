@@ -101,6 +101,8 @@ __all__ = [
     "meta_evolve",
     "meta_validate",
     "transfer_ratio",
+    "meta_run",
+    "MetaRunReport",
 ]
 
 
@@ -1527,3 +1529,169 @@ def transfer_ratio(report: Mapping[str, Mapping[str, float]], source: str,
     if abs(src) < 1e-9:
         return None
     return report[target]["gain"] / src
+
+
+# ---------------------------------------------------------------------------
+# The product surface: run, validate, decide
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class MetaRunReport:
+    """What a :func:`meta_run` decided, and why.
+
+    ``meta_evolve`` returns a raw ``EvolutionResult`` whose ``rendered`` is the
+    evolved value; wiring it back and judging it is the caller's job. This
+    report is that job, done: the rendered value (``value``; compile with
+    ``spec.compile(report.value)``), the validation on problems the outer loop
+    never saw, the transfer ratio (mean val gain / mean train gain), and an
+    ``adopt`` / ``reject`` verdict with its reason. Attached to the run as
+    ``result.meta`` so a CLI or a plugin can show the decision without
+    recomputing it.
+    """
+
+    slot: str
+    seed_value: str
+    value: str
+    validation: Dict[str, Dict[str, float]]
+    mean_gain: float
+    transfer: Optional[float]
+    verdict: str
+    reason: str
+
+
+def meta_run(
+    problems: Union[Sequence[Problem], Mapping[str, Problem]],
+    val_problems: Union[Sequence[Problem], Mapping[str, Problem]],
+    *,
+    slot: str,
+    spec: SlotSpec,
+    propose: Optional[Callable[[str, Task, str, float], Optional[str]]] = None,
+    model: Optional[Completion] = None,
+    meta_reward: Optional[MetaReward] = None,
+    seeds: Sequence[int] = (0,),
+    val_seeds: Sequence[int] = (1, 2),
+    min_gain: float = 0.0,
+    transfer_floor: float = 0.0,
+    **evolve_kwargs: Any,
+) -> Tuple[MetaRunReport, EvolutionResult]:
+    """Evolve one decision slot, validate it on unseen problems, and decide.
+
+    ``meta_evolve`` on ``problems`` (the train set), then ``meta_validate`` of
+    the evolved value on both the train problems (at ``seeds``) and
+    ``val_problems`` (at ``val_seeds``), then the verdict:
+
+    * ``adopt`` -- the evolved value's mean gain on the unseen problems clears
+      ``min_gain`` **and** its transfer ratio (mean val gain / mean train gain)
+      is not below ``transfer_floor``;
+    * ``reject`` -- otherwise, with the reason (no gain / a fit that does not
+      transfer).
+
+    Returns ``(report, result)``. ``report.value`` is the rendered string;
+    ``spec.compile(report.value)`` is the object to hand
+    ``Policies(<slot>=...)``. ``result.meta`` carries the report so a CLI or
+    plugin shows the decision.
+
+    Governance: the caller must keep ``val_problems`` and ``val_seeds``
+    disjoint from the training set (overlap raises). That is the same
+    final-evaluation isolation every other development set in the framework
+    gets.
+    """
+    if not val_problems:
+        raise ValueError("meta_run() needs val_problems to judge the transfer")
+    _require_disjoint(problems, val_problems, seeds, val_seeds)
+    result = meta_evolve(
+        problems, slot=slot, spec=spec, propose=propose, model=model,
+        meta_reward=meta_reward, seeds=seeds, **evolve_kwargs)
+    seed_value = spec.render(spec.initial())
+    value = result.rendered or seed_value
+    # Source side: gain on the problems that shaped the value (train + seeds).
+    # Target side: gain on problems the outer loop never saw (val + val_seeds).
+    train_report = meta_validate(
+        spec, seed_value, value, problems,
+        seeds=seeds, meta_reward=meta_reward)
+    validation = meta_validate(
+        spec, seed_value, value, val_problems,
+        seeds=val_seeds, meta_reward=meta_reward)
+    mean_gain = _mean_gain(validation)
+    train_gain = _mean_gain(train_report)
+    transfer = _transfer_from(train_gain, mean_gain)
+    if mean_gain <= min_gain:
+        verdict, reason = "reject", (
+            f"evolved value gained {mean_gain:+.3f} on unseen problems, "
+            f"not above min_gain {min_gain:+.3f}")
+    elif transfer is not None and transfer < transfer_floor:
+        verdict, reason = "reject", (
+            f"transfer ratio {transfer:.3f} is below transfer_floor "
+            f"{transfer_floor:.3f} (a fit that does not transfer)")
+    else:
+        verdict, reason = "adopt", (
+            f"mean gain {mean_gain:+.3f} on unseen problems, "
+            f"transfer {transfer if transfer is None else round(transfer, 3)}")
+    report = MetaRunReport(
+        slot=slot, seed_value=seed_value, value=value,
+        validation=validation, mean_gain=mean_gain, transfer=transfer,
+        verdict=verdict, reason=reason)
+    result.meta = _report_dict(report)
+    return report, result
+
+
+def _named_problems(
+    problems: Union[Sequence[Problem], Mapping[str, Problem]],
+) -> Dict[str, Problem]:
+    return (dict(problems) if isinstance(problems, Mapping)
+            else {f"p{i}": p for i, p in enumerate(problems)})
+
+
+def _require_disjoint(
+    problems: Union[Sequence[Problem], Mapping[str, Problem]],
+    val_problems: Union[Sequence[Problem], Mapping[str, Problem]],
+    seeds: Sequence[int],
+    val_seeds: Sequence[int],
+) -> None:
+    """Raise when the validation set is not isolated from training."""
+    train_names = set(_named_problems(problems))
+    val_names = set(_named_problems(val_problems))
+    overlap = train_names & val_names
+    if overlap:
+        raise ValueError(
+            f"meta_run() val_problems overlap training problems: {sorted(overlap)}; "
+            "keep them disjoint so the verdict is not measured on the problems "
+            "that shaped the value")
+    shared_seeds = set(seeds) & set(val_seeds)
+    if shared_seeds:
+        raise ValueError(
+            f"meta_run() val_seeds overlap training seeds: {sorted(shared_seeds)}; "
+            "keep them disjoint so the verdict is not measured on the seeds "
+            "that shaped the value")
+
+
+def _mean_gain(report: Mapping[str, Mapping[str, float]]) -> float:
+    gains = [row["gain"] for row in report.values() if row.get("n", 0) > 0]
+    return statistics.fmean(gains) if gains else 0.0
+
+
+def _transfer_from(train_gain: float, val_gain: float) -> Optional[float]:
+    """Mean val gain over mean train gain — the aggregate of :func:`transfer_ratio`.
+
+    Near 1 is a better rule; near 0 with a positive train gain is a fit to the
+    problems it was evolved on; negative is a rule that traded generality for
+    them. ``None`` when the train gain is nil — nothing over nothing is not a
+    transfer result (the same contract as :func:`transfer_ratio`).
+    """
+    if abs(train_gain) < 1e-9:
+        return None
+    return val_gain / train_gain
+
+
+def _report_dict(report: MetaRunReport) -> Dict[str, Any]:
+    return {
+        "slot": report.slot,
+        "seed_value": report.seed_value,
+        "value": report.value,
+        "validation": report.validation,
+        "mean_gain": report.mean_gain,
+        "transfer": report.transfer,
+        "verdict": report.verdict,
+        "reason": report.reason,
+    }

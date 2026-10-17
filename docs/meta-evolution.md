@@ -249,3 +249,40 @@ which way to go; the domains want opposite things and the search finds each.
 | [A search rule on real scientific data](https://github.com/Birfy/agentdescent/blob/main/bench/results/metasearch-selection-srbench.md) | **positive, real data.** LLM-SRBench `lsr_synth`: 5 wins / 0 losses / 4 ties over nine held-out paired comparisons, sign test p = 0.031 — and the rule moves in the *opposite* direction to the synthetic one, as predicted in advance |
 | [Choosing a domain to evolve on](https://github.com/Birfy/agentdescent/blob/main/bench/results/metasearch-domain-selection.md) | **the method, and every null.** Four properties a domain must supply, three checks that cost one inner run apiece, and what each domain tried here actually supplied — AlgoTune (irreparable: the timing *is* the feedback) and SWE-bench-Science (three properties out of four; the fourth needs the agent phase) included |
 | [A benchmark x slot matrix](https://github.com/Birfy/agentdescent/blob/main/bench/results/metasearch-slots.md) | **mixed.** Seven cells on `task_sampler` and `acceptance`; four commit, unseen gains +0.02 to +0.04, none negative once the inner budget is adequate |
+
+## The product surface: `meta_run`
+
+`meta_evolve` returns a raw `EvolutionResult`; wiring the value back and
+judging the transfer is the caller's job. `meta_run()` is that job, done — one
+call that evolves, validates on problems the outer loop never saw, and decides:
+
+```python
+from agentdescent import meta_run, ParamSlot, DifficultyWeighted
+
+report, result = meta_run(
+    {"train-a": problem_a, "train-b": problem_b},   # the outer loop's train set
+    {"val-z": problem_z},                           # never seen by the outer loop
+    slot="task_sampler",
+    spec=ParamSlot(factory=lambda c: DifficultyWeighted(c=c),
+                   params={"c": 0.2}, bounds={"c": (0.05, 1.0)}),
+    propose=offline_propose,                        # or slot_reflector(model, spec)
+    seeds=(0, 1), val_seeds=(20, 21), rounds=3, n_workers=1)
+
+print(report.verdict, report.reason)                # "adopt" / "reject", with why
+value = spec.compile(report.value)                   # -> Policies(task_sampler=value)
+```
+
+`MetaRunReport` bundles the rendered value (`report.value`; compile with
+`spec.compile(...)`), the per-problem validation (`before` / `after` / `gain`),
+the transfer ratio (mean val gain / mean train gain) and an `adopt` / `reject`
+verdict: *adopt* when the mean gain on unseen problems clears `min_gain` and
+the transfer is not below `transfer_floor`, *reject* otherwise, with the
+reason. The report rides `result.meta`, so a CLI or a plugin shows the decision
+without recomputing it.
+
+**The verdict is honest.** The caller must keep validation problems and seeds
+disjoint from the training set (`meta_run` raises on overlap), so a verdict is
+never measured on the problems that shaped the value. The measured matrix
+(below) found transfer of +0.02 to +0.04 on unseen benchmarks — real, positive,
+and modest. `meta_run` does not dress that up: a rule that does not transfer is
+reported as `reject`, which is a result, not an error.
