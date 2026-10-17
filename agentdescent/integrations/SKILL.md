@@ -122,9 +122,15 @@ config directory redirected into the rollout workspace -- so it inherits
 environment keys but *not* the user's model choice or subscription login. Two
 fields change that, and the user should be told which one you used:
 
-- `"extra_args": ["--model", "..."]` pins a model, isolation intact. The flag is
-  the host's own (`claude --model`, `codex -m`, `opencode run -m provider/model`);
-  `dsh` has none -- its model comes from the profile.
+- `"extra_args": ["--model", "..."]` pins a model. The flag is the host's own
+  (`claude --model`, `codex -m`, `opencode run -m provider/model`); `dsh` has
+  none -- its model comes from the profile. Isolation stays intact for Claude
+  Code and Codex, but **not for an OpenCode custom provider** (an OpenAI-compatible
+  endpoint, a local server): that lives in the user's `opencode.json`, which an
+  isolated worker cannot read, so `-m` fails with an opaque `UnknownError`.
+  Either set `"isolate": false`, or keep isolation with
+  `"env": {"OPENCODE_CONFIG": "/abs/providers.json"}` -- a file holding only the
+  `provider` block, keys as `{env:VAR}`. `plan` warns about this case.
 - `"isolate": false` gives the worker the user's real setup: their configured
   model, their login, their plugins. Say so when you use it, and do not use it
   for `kind: plugin` -- the run would load the plugin it is rewriting.

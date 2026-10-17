@@ -359,6 +359,51 @@ def cmd_init(a: argparse.Namespace) -> int:
 #: promise: claiming a key would fix it is the false assurance this warning
 #: exists to remove.
 _CLI_ENV_FALLBACK = {"dsh": "DEEPSEEK_API_KEY"}
+
+
+def _opencode_model_arg(block: Any) -> Optional[str]:
+    """The ``provider/model`` an ``opencode`` agent block pins with ``-m/--model``.
+
+    A static look at ``extra_args`` -- no network, no OpenCode. ``None`` when the
+    block pins nothing or pins a bare model name with no provider part.
+    """
+    args = block.get("extra_args") if isinstance(block, dict) else None
+    if not isinstance(args, (list, tuple)):
+        return None
+    args = [a for a in args if isinstance(a, str)]
+    for i, a in enumerate(args):
+        value = None
+        if a in ("-m", "--model") and i + 1 < len(args):
+            value = args[i + 1]
+        elif a.startswith("--model="):
+            value = a[len("--model="):]
+        if value and "/" in value:
+            return value
+    return None
+
+
+def _opencode_provider_remedy(block: Any) -> Optional[str]:
+    """The plan warning's remedy for an isolated ``opencode`` pinning ``-m p/m``.
+
+    ``None`` -- keep the generic remedy -- unless a model with a provider part is
+    pinned and the caller has not already pointed ``OPENCODE_CONFIG`` at a file
+    through the block's ``env``.
+    """
+    model = _opencode_model_arg(block)
+    env = block.get("env") if isinstance(block, dict) else None
+    if not model or (isinstance(env, dict)
+                     and ("OPENCODE_CONFIG" in env or "OPENCODE_CONFIG_CONTENT" in env)):
+        return None
+    return (f"`-m {model}` works only if that provider is built into OpenCode: a "
+            "custom provider (an OpenAI-compatible endpoint, a local server, a "
+            "gateway) lives in your opencode.json, which an isolated worker cannot "
+            "read, and every call then fails with an opaque `UnknownError`. To keep "
+            "isolation instead, point the agent at a provider-only config file: "
+            '"env": {"OPENCODE_CONFIG": "/abs/path/providers.json"} (keys via '
+            "{env:VAR}, never inline; an OPENCODE_CONFIG exported in your shell is "
+            "dropped for an isolated worker)")
+
+
 _CLI_ENV_USELESS = {
     "codex": ("an environment key is not a substitute here: measured, `codex` "
               "ignored OPENAI_API_KEY and OPENAI_BASE_URL and called "
@@ -503,6 +548,7 @@ def _unusable_refs(spec: EvolveSpec) -> List[str]:
                 # directory redirected -- an interactive login does not carry
                 # over. Every rollout failed. Being present is not being usable.
                 remedy = _CLI_ENV_USELESS.get(ref) or (
+                    ref == "opencode" and _opencode_provider_remedy(block)) or (
                     f"or export {_CLI_ENV_FALLBACK[ref]}"
                     if ref in _CLI_ENV_FALLBACK else
                     "whether a provider key in the environment is enough instead "

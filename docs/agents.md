@@ -263,6 +263,18 @@ else:
     answer = agent(prompt_with_material_inlined)      # fall back to the prompt
 ```
 
+!!! warning "OpenCode and custom providers"
+    A CLI worker runs with the host's config directory redirected into the
+    workspace (`isolate=True`, the default). For `opencode(extra_args=["-m",
+    "provider/model"])` that means `-m` reaches only providers **built into
+    OpenCode**: a custom provider (an OpenAI-compatible endpoint such as Ark, a
+    local vLLM, a gateway) is defined in your `opencode.json`, which the isolated
+    worker cannot read, and every call fails with an opaque `UnknownError`. Pass
+    `isolate=False`, or keep isolation with
+    `env={"OPENCODE_CONFIG": "/abs/providers.json"}` -- a file holding only the
+    `provider` block, keys as `{env:VAR}`. See
+    [Which model a run uses](plugins.md#which-model-a-run-uses).
+
 ### Domain adapters and the OpenHands backend — see the backends page
 
 Document-shaped tasks (`answer(question, document, skills)`) and the OpenHands
