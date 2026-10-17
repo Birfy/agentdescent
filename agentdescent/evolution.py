@@ -3638,7 +3638,11 @@ def evolve(
                 base_version={aid: mine_v}, purpose="rollout",
                 output=output, reward=score, wallclock=outcome.seconds,
                 worker_id=f"w{unit.worker}", lease_id=outcome.lease_id)
-            sampler.record(task.id, score)               # learn which tasks carry signal
+            if aid == artifact_id:
+                # Learnability is the *designated solver's*: an extra artifact
+                # scoring the same task would otherwise read as first->last
+                # learning in the primary's bookkeeping (#336).
+                sampler.record(task.id, score)       # learn which tasks carry signal
             # Observed here, before the solved-task early return: a *group* is
             # every rollout against this base and cluster, and one that only saw
             # the failures would have no variance to standardise against on a
