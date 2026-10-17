@@ -43,6 +43,7 @@ below name each where it bites:
 from __future__ import annotations
 
 import math
+import numbers
 from dataclasses import dataclass, field
 from statistics import NormalDist
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -290,6 +291,27 @@ def _require_finite(owner: str, name: str, value: Any) -> None:
                        f"{owner}: {name} contains NaN or inf")
 
 
+def _require_real(owner: str, name: str, value: Any) -> float:
+    """``value`` as a finite ``float``, else :class:`PPIError`.
+
+    For the scalar fields of :class:`Stratum`. :func:`_require_finite` alone is
+    not enough there: ``np.asarray("0.5", dtype=float)`` is finite, so a numeric
+    string passed the check and was then stored as a string, to fail later as an
+    unrelated ``TypeError`` or not at all; and ``True`` passed as ``1.0`` while
+    the result kept reporting ``True``. Same rule as ``audit.sampler`` (#325):
+    only real numbers count, and ``bool`` is not one here (#327). numpy scalars
+    and 0-d numeric arrays are real numbers and stay accepted.
+    """
+    if isinstance(value, np.ndarray) and value.ndim == 0 \
+            and value.dtype.kind in "iuf":
+        value = value[()]
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, numbers.Real):
+        raise PPIError(f"{owner}: {name} must be a real number, got "
+                       f"{type(value).__name__} {value!r}")
+    _require_finite(owner, name, value)
+    return float(value)
+
+
 def _require_alpha(alpha: Any) -> float:
     """``alpha`` as a float in the open interval (0, 1), else :class:`PPIError`.
 
@@ -372,7 +394,8 @@ class Stratum:
                     f"{self.f_lab.size} labelled units")
             object.__setattr__(self, "clusters_lab", groups)
         owner = f"stratum {self.name!r}"
-        _require_finite(owner, "weight", self.weight)
+        object.__setattr__(self, "weight",
+                           _require_real(owner, "weight", self.weight))
         if self.weight < 0.0:
             raise PPIError(f"stratum {self.name!r}: weight {self.weight!r} < 0")
         _require_finite(owner, "f_lab", self.f_lab)
@@ -387,17 +410,19 @@ class Stratum:
             object.__setattr__(self, "var_unlab",
                                float(np.var(arr, ddof=1)) if arr.size >= 2 else 0.0)
         else:
-            _require_finite(owner, "n_unlab", self.n_unlab)
-            if float(self.n_unlab) != int(self.n_unlab):
+            n_unlab = _require_real(owner, "n_unlab", self.n_unlab)
+            if n_unlab != int(n_unlab):
                 raise PPIError(
                     f"stratum {self.name!r}: n_unlab {self.n_unlab!r} is not an "
                     "integer count")
-            object.__setattr__(self, "n_unlab", int(self.n_unlab))
+            object.__setattr__(self, "n_unlab", int(n_unlab))
             if self.n_unlab < 0:
                 raise PPIError(
                     f"stratum {self.name!r}: n_unlab {self.n_unlab!r} < 0")
-            _require_finite(owner, "mean_unlab", self.mean_unlab)
-            _require_finite(owner, "var_unlab", self.var_unlab)
+            object.__setattr__(self, "mean_unlab", _require_real(
+                owner, "mean_unlab", self.mean_unlab))
+            object.__setattr__(self, "var_unlab", _require_real(
+                owner, "var_unlab", self.var_unlab))
         if self.var_unlab < 0.0:
             raise PPIError(
                 f"stratum {self.name!r}: var_unlab {self.var_unlab!r} < 0")
@@ -414,7 +439,10 @@ class Stratum:
         """
         return cls(name=name, weight=weight, f_lab=f_lab, y_lab=y_lab,
                    f_unlab=None, n_unlab=n_unlab,
-                   mean_unlab=float(mean_unlab), var_unlab=float(var_unlab),
+                   # Not cast here: ``float("0.3")`` would launder a string
+                   # past the constructor's type check (#327), which does the
+                   # conversion itself.
+                   mean_unlab=mean_unlab, var_unlab=var_unlab,
                    clusters_lab=clusters_lab)
 
     @property

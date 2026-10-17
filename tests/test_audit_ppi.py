@@ -529,3 +529,68 @@ def test_valid_inputs_are_unchanged_by_the_validation():
     r = ppi_mean_stratified([Stratum("a", 1.0, f, y, f_unlab=fu)], alpha=0.1)
     assert np.isfinite(r.theta) and r.ci[0] < r.theta < r.ci[1]
     assert r.alpha == 0.1
+
+
+# ---------------------------------------------------------------------------
+# scalar fields must be real numbers, not strings or bools (#327)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("kwargs, field", [
+    (dict(weight="0.5"), "weight"),
+    (dict(weight=True), "weight"),
+    (dict(weight=None), "weight"),
+    (dict(weight=[1.0]), "weight"),
+    (dict(n_unlab=5, mean_unlab="0.3", var_unlab=0.1), "mean_unlab"),
+    (dict(n_unlab=5, mean_unlab=0.3, var_unlab="0.1"), "var_unlab"),
+    (dict(n_unlab=5, mean_unlab=True, var_unlab=0.1), "mean_unlab"),
+    (dict(n_unlab="5", mean_unlab=0.3, var_unlab=0.1), "n_unlab"),
+    (dict(n_unlab=True, mean_unlab=0.3, var_unlab=0.1), "n_unlab"),
+    (dict(n_unlab=np.bool_(True), mean_unlab=0.3, var_unlab=0.1), "n_unlab"),
+])
+def test_string_or_bool_scalars_are_a_ppi_error_naming_the_field(kwargs, field):
+    """A numeric string passed `np.asarray(..., float)` and was stored as-is:
+    `weight="0.5"` escaped as TypeError, `mean_unlab="0.3"` broke the estimator
+    later, and `True` was quietly read as 1."""
+    f, y, _ = _good()
+    base = dict(name="a", weight=1.0, f_lab=f, y_lab=y)
+    base.update(kwargs)
+    with pytest.raises(PPIError, match=field):
+        Stratum(**base)
+
+
+@pytest.mark.parametrize("kwargs, field", [
+    (dict(mean_unlab="0.3", var_unlab=0.1), "mean_unlab"),
+    (dict(mean_unlab=0.3, var_unlab="0.1"), "var_unlab"),
+    (dict(mean_unlab=0.3, var_unlab=0.1, n_unlab="5"), "n_unlab"),
+])
+def test_from_moments_does_not_launder_strings_through_float(kwargs, field):
+    f, y, _ = _good()
+    kwargs = {"n_unlab": 5, **kwargs}
+    with pytest.raises(PPIError, match=field):
+        Stratum.from_moments("a", 1.0, f, y, **kwargs)
+
+
+def test_numpy_scalars_are_accepted_and_stored_as_plain_numbers():
+    f, y, _ = _good()
+    s = Stratum.from_moments("a", np.float32(1.0), f, y, n_unlab=np.int64(50),
+                             mean_unlab=np.float64(0.5),
+                             var_unlab=np.array(0.05))
+    assert type(s.weight) is float and s.weight == 1.0
+    assert type(s.n_unlab) is int and s.n_unlab == 50
+    assert type(s.mean_unlab) is float and s.mean_unlab == 0.5
+    assert type(s.var_unlab) is float and s.var_unlab == 0.05
+    r = ppi_mean_stratified([s])
+    assert type(r.per_stratum["a"]["weight"]) is float
+
+
+def test_an_int_weight_is_stored_as_float():
+    f, y, fu = _good()
+    s = Stratum("a", 1, f, y, f_unlab=fu)
+    assert type(s.weight) is float and s.weight == 1.0
+
+
+def test_bool_label_arrays_are_still_accepted():
+    """Only the scalar fields are strict; scores convert as before."""
+    s = Stratum("a", 1.0, [True, False, True], [True, False, False],
+                f_unlab=[True, False, False, True])
+    assert s.f_lab.dtype == float and s.n_unlab == 4
