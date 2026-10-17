@@ -816,6 +816,62 @@ def _compose_policy_slot(spec: EvolveSpec, *, usage: Optional[Usage] = None,
     return Composition(tasks=tasks, reward=reward, kwargs=kwargs, notes=notes)
 
 
+#: ``evolve()`` parameters whose annotation is made only of these names take plain
+#: JSON values; everything else takes an object (a strategy, a factory, a callable).
+_JSON_ANNOTATION_NAMES = frozenset({
+    "int", "float", "bool", "str", "Optional", "None", "Sequence", "List", "Dict",
+    "Tuple", "Any", "Union", "Mapping", "Set", "FrozenSet", "Literal"})
+
+#: Object-typed parameters a spec *does* feed through ``evolve``: a mapping that
+#: ``compose`` turns into the object itself (``agg_config``), or merges with the
+#: ``extra_artifacts`` field.
+_EVOLVE_OBJECT_KNOBS_HANDLED = frozenset({"agg_config", "extra_artifacts"})
+
+
+def check_evolve_knobs(evolve_knobs: Mapping[str, Any]) -> None:
+    """Refuse a ``spec.evolve`` entry that ``evolve()`` could not use as given.
+
+    ``spec.evolve`` is JSON handed to ``evolve()`` as keyword arguments, so a
+    parameter that takes an *object* -- ``strategy``, ``aggregator_factory``,
+    ``run``, ``propose`` -- would receive a string. Before this, ``plan`` said
+    ``ok: true`` for ``{"evolve": {"strategy": "examples.ace...:ACEPlaybook"}}`` and
+    ``evolve`` then died in round setup with ``'str' object has no attribute
+    'initial'`` (#384): the same plan/run gap as #343 / #346 / #368. A key
+    ``evolve()`` does not have used to fail the same way, as a ``TypeError``.
+    """
+    import inspect
+
+    params = inspect.signature(evolve).parameters
+    for key in evolve_knobs:
+        param = params.get(key)
+        if param is None:
+            raise SpecError(
+                f"evolve.{key}: evolve() has no such parameter; valid JSON knobs are "
+                f"{sorted(_json_knobs(params))}")
+        if key in _EVOLVE_OBJECT_KNOBS_HANDLED or key in _json_knobs(params):
+            continue
+        raise SpecError(
+            f"evolve.{key}: evolve() takes an object here, and a spec can only hold "
+            "JSON, so the value would reach it as a plain string or dict and fail in "
+            "round setup. Name a rule through `policies` (one ref per slot), pick the "
+            "model with `agent` / `reflect`, or call evolve() from Python for a custom "
+            f"{key}")
+
+
+def _json_knobs(params: Mapping[str, Any]) -> List[str]:
+    import re
+
+    out = []
+    for name, p in params.items():
+        ann = p.annotation
+        if ann is p.empty:
+            continue
+        text = ann if isinstance(ann, str) else getattr(ann, "__name__", str(ann))
+        if set(re.findall(r"[A-Za-z_][A-Za-z_0-9.]*", text)) <= _JSON_ANNOTATION_NAMES:
+            out.append(name)
+    return out
+
+
 def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
             on_round: Optional[Callable] = None, repo_path: Optional[str] = None,
             workspace_root: Optional[str] = None, sandbox_pool: Any = None,
@@ -833,6 +889,7 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
         raise SpecError("agent is required (for kind='text' it is the model)")
     if spec.version != 1:
         raise SpecError(f"unsupported spec version {spec.version}")
+    check_evolve_knobs(spec.evolve)
 
     if spec.kind == "policy_slot":
         return _compose_policy_slot(spec, usage=usage, on_round=on_round, **overrides)
