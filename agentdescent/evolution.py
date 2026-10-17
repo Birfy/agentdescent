@@ -1434,6 +1434,11 @@ class EvolutionResult:
     #: stuck / invalid, and the frontier pool size. ``None`` on a plain
     #: :func:`evolve` run.
     curriculum: Optional[Dict[str, Any]] = None
+    #: Meta-evolution report, when the run was driven by
+    #: :func:`~agentdescent.meta.meta_run`: the evolved slot value, its
+    #: validation on problems the outer loop never saw, the transfer ratio and
+    #: an ``adopt`` / ``reject`` verdict. ``None`` on a plain run.
+    meta: Optional[Dict[str, Any]] = None
 
     # -- what the run cost ----------------------------------------------------
     #

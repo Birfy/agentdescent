@@ -43,6 +43,7 @@ EvolutionResult(
     audit_drained: int = 0,
     replay: Optional[Dict[str, Any]] = None,
     curriculum: Optional[Dict[str, Any]] = None,
+    meta: Optional[Dict[str, Any]] = None,
     usage: Usage = <factory>,
     wallclock: float = 0.0,
     rollouts: int = 0,

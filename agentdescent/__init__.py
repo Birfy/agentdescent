@@ -166,10 +166,11 @@ from .workspec import Ref, RefError, RolloutSpec
 from . import rewards                      # agentdescent.rewards.last_number(...)
 from .rewards import SCORERS, scorer, command_scorer, GraderError
 from .meta import (
-    SLOTS, SLOT_PROTOCOLS, MetaOutcome, ParamSlot, PrioritySelection, PRIORITY_SEED,
-    SlotSpec, SourceSlot, auc, compile_policy_source, compile_priority, evolve_problem,
-    final_reward, meta_evolve, meta_validate, policy_source, priority_selection,
-    rollouts_to, seed_source, slot_reflector, transfer_ratio,
+    SLOTS, SLOT_PROTOCOLS, MetaOutcome, MetaRunReport, ParamSlot, PrioritySelection,
+    PRIORITY_SEED, SlotSpec, SourceSlot, auc, compile_policy_source,
+    compile_priority, evolve_problem, final_reward, meta_evolve, meta_run,
+    meta_validate, policy_source, priority_selection, rollouts_to, seed_source,
+    slot_reflector, transfer_ratio,
 )
 from .filetree import (
     TreeError,

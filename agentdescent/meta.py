@@ -1527,3 +1527,129 @@ def transfer_ratio(report: Mapping[str, Mapping[str, float]], source: str,
     if abs(src) < 1e-9:
         return None
     return report[target]["gain"] / src
+
+
+# ---------------------------------------------------------------------------
+# The product surface: run, validate, decide
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class MetaRunReport:
+    """What a :func:`meta_run` decided, and why.
+
+    ``meta_evolve`` returns a raw ``EvolutionResult`` whose ``rendered`` is the
+    evolved value; wiring it back and judging it is the caller's job. This
+    report is that job, done: the compiled value, the validation on problems
+    the outer loop never saw, the transfer ratio, and an ``adopt`` / ``reject``
+    verdict with its reason. Attached to the run as ``result.meta`` so a CLI or
+    a plugin can show the decision without recomputing it.
+    """
+
+    slot: str
+    seed_value: str
+    value: str
+    validation: Dict[str, Dict[str, float]]
+    mean_gain: float
+    transfer: Optional[float]
+    verdict: str
+    reason: str
+
+
+def meta_run(
+    problems: Union[Sequence[Problem], Mapping[str, Problem]],
+    val_problems: Union[Sequence[Problem], Mapping[str, Problem]],
+    *,
+    slot: str,
+    spec: SlotSpec,
+    propose: Optional[Callable[[str, Task, str, float], Optional[str]]] = None,
+    model: Optional[Completion] = None,
+    meta_reward: Optional[MetaReward] = None,
+    seeds: Sequence[int] = (0,),
+    val_seeds: Sequence[int] = (1, 2),
+    min_gain: float = 0.0,
+    transfer_floor: float = 0.0,
+    **evolve_kwargs: Any,
+) -> Tuple[MetaRunReport, EvolutionResult]:
+    """Evolve one decision slot, validate it on unseen problems, and decide.
+
+    ``meta_evolve`` on ``problems`` (the train set), then ``meta_validate`` of
+    the evolved value against ``val_problems`` (the problems the outer loop
+    never saw, at ``val_seeds`` disjoint from the training ``seeds``), then the
+    verdict:
+
+    * ``adopt`` -- the evolved value's mean gain on the unseen problems clears
+      ``min_gain`` **and** its transfer ratio is not below ``transfer_floor``;
+    * ``reject`` -- otherwise, with the reason (no gain / a fit that does not
+      transfer).
+
+    Returns ``(report, result)``; ``report.compiled`` is the object to hand
+    ``Policies(<slot>=...)``, and ``result.meta`` carries the report so a CLI
+    or plugin shows the decision. ``spec.compile`` may be called on
+    ``report.value`` for a fresh object.
+
+    Governance: the validation problems are disjoint from the training set and
+    the seeds are fixed, so a verdict is never measured on the problems that
+    shaped the value -- the same final-evaluation isolation every other
+    development set in the framework gets.
+    """
+    if not val_problems:
+        raise ValueError("meta_run() needs val_problems to judge the transfer")
+    result = meta_evolve(
+        problems, slot=slot, spec=spec, propose=propose, model=model,
+        meta_reward=meta_reward, seeds=seeds, **evolve_kwargs)
+    value = result.rendered or spec.render(spec.initial())
+    validation = meta_validate(
+        spec, spec.render(spec.initial()), value, val_problems,
+        seeds=val_seeds, meta_reward=meta_reward)
+    gains = [row["gain"] for row in validation.values() if row["n"] > 0]
+    mean_gain = statistics.fmean(gains) if gains else 0.0
+    transfer = _transfer_from(validation, transfer_floor)
+    if mean_gain <= min_gain:
+        verdict, reason = "reject", (
+            f"evolved value gained {mean_gain:+.3f} on unseen problems, "
+            f"not above min_gain {min_gain:+.3f}")
+    elif transfer is not None and transfer < transfer_floor:
+        verdict, reason = "reject", (
+            f"transfer ratio {transfer:.3f} is below transfer_floor "
+            f"{transfer_floor:.3f}")
+    else:
+        verdict, reason = "adopt", (
+            f"mean gain {mean_gain:+.3f} on unseen problems, "
+            f"transfer {transfer if transfer is None else round(transfer, 3)}")
+    report = MetaRunReport(
+        slot=slot, seed_value=spec.render(spec.initial()), value=value,
+        validation=validation, mean_gain=mean_gain, transfer=transfer,
+        verdict=verdict, reason=reason)
+    try:
+        result.meta = _report_dict(report)
+    except AttributeError:
+        pass
+    return report, result
+
+
+def _transfer_from(validation: Dict[str, Dict[str, float]],
+                   floor: float) -> Optional[float]:
+    """The mean gain on every problem with a positive source gain, normalised.
+
+    ``transfer_ratio`` needs named source/target problems; ``meta_run`` does
+    not, so this is the aggregate: the mean gain across the validation
+    problems, with a ``None`` when nothing gained (nothing over nothing is not
+    a transfer result -- the same contract as ``transfer_ratio``)."""
+    gains = [row["gain"] for row in validation.values() if row["n"] > 0]
+    if not gains or max(abs(g) for g in gains) < 1e-9:
+        return None
+    return statistics.fmean(gains)
+
+
+def _report_dict(report: MetaRunReport) -> Dict[str, Any]:
+    return {
+        "slot": report.slot,
+        "seed_value": report.seed_value,
+        "value": report.value,
+        "validation": report.validation,
+        "mean_gain": report.mean_gain,
+        "transfer": report.transfer,
+        "verdict": report.verdict,
+        "reason": report.reason,
+    }
