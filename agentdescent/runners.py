@@ -264,8 +264,11 @@ def _sh(cmd: Sequence[str], ws: str, timeout: float,
     else:
         cwd = ws
     posix = os.name != "nt"
+    # `stdin=DEVNULL`: a gate command or plugin host never needs the caller's
+    # stdin, and inheriting an open pipe makes a CLI that reads it (`opencode
+    # run`) wait until the timeout.
     proc = subprocess.Popen(prefix + list(cmd), cwd=cwd, env=dict(env), text=True,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             start_new_session=posix)
     try:
         out, err = proc.communicate(timeout=timeout)
