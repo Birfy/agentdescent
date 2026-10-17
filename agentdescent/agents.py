@@ -43,6 +43,11 @@ class Usage:
     least count calls and time.
 
     Safe to share across worker threads.
+
+    ``pending`` / ``phase`` are live state for a long in-flight actor:
+    :meth:`begin` before the call and :meth:`record` (or a failed record)
+    after, so ``status`` can show work in flight rather than looking idle at
+    ``calls=0`` for minutes (#358).
     """
 
     calls: int = 0
@@ -59,11 +64,43 @@ class Usage:
     #: network outage mid-sweep and its 43-minute wall carried ~17 minutes of
     #: stall that had nothing to do with the architecture under test.
     failure_seconds: float = 0.0
+    #: Actor invocations that have started but not yet :meth:`record`-ed.
+    #: Visible on run ``status`` so a multi-minute first ``propose`` does not
+    #: look like a hung process at ``calls=0``.
+    pending: int = 0
+    #: Last :meth:`begin` phase still in flight (``"propose"``, ``"run"``, …).
+    #: ``None`` when nothing is pending.
+    phase: Optional[str] = None
+    #: Optional listener fired after ``begin`` / ``record`` (outside the lock).
+    #: The run store uses this to rewrite ``status.json`` mid-call.
+    on_change: Optional[Callable[[], None]] = field(default=None, repr=False,
+                                                    compare=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     @property
     def total_tokens(self) -> int:
         return self.prompt_tokens + self.completion_tokens
+
+    def _notify(self) -> None:
+        cb = self.on_change
+        if cb is None:
+            return
+        try:
+            cb()
+        except Exception:
+            pass
+
+    def begin(self, phase: Optional[str] = None) -> None:
+        """Mark an actor invocation as started but not yet finished.
+
+        Pairs with :meth:`record`: ``pending`` goes up here and down there, so a
+        reader of ``status`` can tell a long HTTP propose from a wedged process.
+        """
+        with self._lock:
+            self.pending += 1
+            if phase is not None:
+                self.phase = phase
+        self._notify()
 
     def record(self, *, prompt_tokens: int = 0, completion_tokens: int = 0,
                seconds: float = 0.0, failed: bool = False) -> None:
@@ -75,6 +112,11 @@ class Usage:
             if failed:
                 self.failures += 1
                 self.failure_seconds += seconds
+            if self.pending > 0:
+                self.pending -= 1
+                if self.pending == 0:
+                    self.phase = None
+        self._notify()
 
     def estimated_cost(self, per_1m_prompt: float, per_1m_completion: float) -> float:
         """Cost at the given per-million-token prices (both provider-specific)."""
@@ -96,6 +138,7 @@ def metered(completion: Completion, usage: Usage) -> Completion:
     them -- so use the ``usage=`` argument of :func:`claude` /
     :func:`openai_compatible` when you need exact tokens."""
     def complete(prompt: str) -> str:
+        usage.begin()
         t0 = time.time()
         try:
             out = completion(prompt)

@@ -119,6 +119,12 @@ class RunStatus:
     last_reward: Optional[float] = None
     committed: int = 0
     calls: int = 0
+    #: Actor invocations started but not yet finished. Non-zero means work is
+    #: in flight even when ``calls`` is still 0 (long first propose, #358).
+    pending_calls: int = 0
+    #: Live actor phase while ``pending_calls`` is non-zero (``propose`` /
+    #: ``run``). Cleared when nothing is pending.
+    phase: Optional[str] = None
     rollouts: int = 0
     #: Total tokens consumed (prompt + completion), when the agent reports
     #: them. 0 for an opaque `run`/`propose` with no `usage=` shared — which is
@@ -581,6 +587,17 @@ def execute(rd: RunDir, *, budget_usd: Optional[float] = None,
 
     spec = EvolveSpec.from_dict(rd.spec_dict())
     usage = Usage()
+
+    def _progress() -> None:
+        # Mid-call rewrite so CLI/MCP status shows work in flight (#358).
+        # Advisory: a write failure must not take the actor down with it.
+        try:
+            rd.update_status(calls=usage.calls, pending_calls=usage.pending,
+                             phase=usage.phase)
+        except Exception:
+            pass
+
+    usage.on_change = _progress
     rd.update_status(state="running", pid=os.getpid(), started=time.time(),
                      kind=spec.kind, target=spec.target)
     best: List[float] = []
@@ -596,7 +613,8 @@ def execute(rd: RunDir, *, budget_usd: Optional[float] = None,
             best.append(reward)
         changes: Dict[str, Any] = dict(
             round=info.round + 1, last_reward=reward,
-            best_reward=max(best) if best else None, calls=usage.calls)
+            best_reward=max(best) if best else None, calls=usage.calls,
+            pending_calls=usage.pending, phase=usage.phase)
         st = rd.status()
         # `committed` is per round and accumulates; `rollouts` is already a
         # running total ("Rollouts completed by the end of this round,
@@ -629,6 +647,7 @@ def execute(rd: RunDir, *, budget_usd: Optional[float] = None,
         result = comp.run()
     except BaseException as e:  # noqa: BLE001 - the child must report before dying
         rd.update_status(state="failed", finished=time.time(),
+                         pending_calls=0, phase=None,
                          error=f"{type(e).__name__}: {e}"[:2000])
         raise
     result.save(rd.result_path)
@@ -640,7 +659,7 @@ def execute(rd: RunDir, *, budget_usd: Optional[float] = None,
         state="failed" if result.error else "done", finished=time.time(),
         stop_reason=result.stop_reason, error=result.error,
         best_reward=max(best) if best else final,
-        last_reward=final, calls=usage.calls,
+        last_reward=final, calls=usage.calls, pending_calls=0, phase=None,
         usd=None if usd_per_call is None else round(usage.calls * usd_per_call, 4))
     return result
 

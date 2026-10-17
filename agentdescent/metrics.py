@@ -67,6 +67,10 @@ class MeterSnapshot:
     evals_skipped: int = 0
     bounded_scans_cut: int = 0
     calls: int = 0
+    #: Actor invocations started but not yet finished (see ``Usage.pending``).
+    pending_calls: int = 0
+    #: Live phase label while ``pending_calls`` is non-zero (``propose`` / ``run``).
+    phase: Optional[str] = None
     prompt_tokens: int = 0
     completion_tokens: int = 0
     model_seconds: float = 0.0
@@ -317,6 +321,8 @@ class Meter:
                 evals_skipped=self.evals_skipped,
                 bounded_scans_cut=self.bounded_scans_cut,
                 calls=u.calls,
+                pending_calls=u.pending,
+                phase=u.phase,
                 prompt_tokens=u.prompt_tokens,
                 completion_tokens=u.completion_tokens,
                 model_seconds=u.seconds,
@@ -363,7 +369,8 @@ class Meter:
         return " | ".join(out)
 
 
-def measured(fn: Callable[..., T], meter: Optional[Meter]) -> Callable[..., T]:
+def measured(fn: Callable[..., T], meter: Optional[Meter],
+             *, phase: Optional[str] = None) -> Callable[..., T]:
     """Wrap an actor so each invocation lands in ``meter.usage``.
 
     ``agents.metered`` does the same job for a ``Completion`` (``prompt -> str``);
@@ -371,10 +378,16 @@ def measured(fn: Callable[..., T], meter: Optional[Meter]) -> Callable[..., T]:
     ``propose(rendered, task, output, reward)``, which that signature cannot
     accept. Same accounting, arbitrary arity.
 
-    **Records the call, not the phase.** ``run`` is invoked from two places --
-    a worker exploring, and `_Runtime.eval_one` scoring -- so timing the phase
-    here would put evaluation seconds into whichever counter the wrapper was
-    given. Each phase times itself; this only counts what the actor cost.
+    **Records the call, not the phase timer.** ``run`` is invoked from two
+    places -- a worker exploring, and `_Runtime.eval_one` scoring -- so timing
+    the wall-clock phase here would put evaluation seconds into whichever
+    counter the wrapper was given. Each phase times itself; this only counts
+    what the actor cost.
+
+    The optional ``phase`` label (``"propose"``, ``"run"``, …) is live status,
+    not a timer: :meth:`Usage.begin` runs before ``fn`` so a multi-minute first
+    propose is visible on ``status`` as ``pending_calls`` / ``phase`` instead of
+    looking idle at ``calls=0`` (#358).
 
     Returns ``fn`` unchanged when ``meter`` is ``None``, so the un-instrumented
     path stays exactly one function call deep.
@@ -383,6 +396,7 @@ def measured(fn: Callable[..., T], meter: Optional[Meter]) -> Callable[..., T]:
         return fn
 
     def call(*args: Any, **kwargs: Any) -> T:
+        meter.usage.begin(phase=phase)
         t0 = time.time()
         try:
             out = fn(*args, **kwargs)

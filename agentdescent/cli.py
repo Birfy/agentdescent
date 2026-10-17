@@ -65,9 +65,16 @@ def _status_line(st: runstore.RunStatus) -> str:
     rounds = f"{st.round}/{st.rounds}" if st.rounds else f"{st.round}"
     usd = "" if st.usd is None else f" ${st.usd:.2f}"
     tok = f" tok={st.tokens:,}" if st.tokens else ""
+    # Show in-flight work so a long first propose is not mistaken for a hang
+    # at calls=0 (#358). Hidden when nothing is pending.
+    pending = ""
+    if st.pending_calls:
+        ph = f" phase={st.phase}" if st.phase else ""
+        pending = f" pending={st.pending_calls}{ph}"
     tail = f" [{st.stop_reason}]" if st.stop_reason else ""
     err = f" error: {st.error}" if st.error else ""
-    return (f"{st.run_id}  {st.state:<9} round {rounds:<6} calls={st.calls}{tok}{reward}{usd}"
+    return (f"{st.run_id}  {st.state:<9} round {rounds:<6} "
+            f"calls={st.calls}{pending}{tok}{reward}{usd}"
             f"  {st.kind or '?'}:{st.target or '?'}{tail}{err}")
 
 

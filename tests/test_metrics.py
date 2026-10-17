@@ -131,6 +131,48 @@ def test_measured_without_a_meter_is_the_identity():
     assert measured(f, None) is f
 
 
+def test_measured_exposes_pending_and_phase_while_in_flight():
+    """A long propose must be visible before the actor returns (#358)."""
+    m = Meter()
+    seen = {}
+
+    def slow(a, b):
+        snap = m.snapshot()
+        seen["pending"] = snap.pending_calls
+        seen["phase"] = snap.phase
+        seen["calls_mid"] = snap.calls
+        return "x"
+
+    ok = measured(slow, m, phase="propose")
+    assert ok(1, 2) == "x"
+    assert seen == {"pending": 1, "phase": "propose", "calls_mid": 0}
+    assert m.usage.pending == 0 and m.usage.phase is None
+    assert m.usage.calls == 1
+    assert m.snapshot().pending_calls == 0
+
+
+def test_measured_clears_pending_on_failure():
+    m = Meter()
+
+    def boom(a, b):
+        assert m.usage.pending == 1
+        raise RuntimeError("nope")
+
+    bad = measured(boom, m, phase="run")
+    with pytest.raises(RuntimeError):
+        bad(1, 2)
+    assert m.usage.pending == 0 and m.usage.phase is None
+    assert m.usage.calls == 1 and m.usage.failures == 1
+
+
+def test_usage_on_change_fires_on_begin_and_record():
+    events = []
+    u = Usage(on_change=lambda: events.append((u.pending, u.calls, u.phase)))
+    u.begin(phase="propose")
+    u.record(seconds=0.1)
+    assert events == [(1, 0, "propose"), (0, 1, None)]
+
+
 # ---------------------------------------------------------------------------
 # End to end, on the deterministic offline domain
 # ---------------------------------------------------------------------------
