@@ -40,6 +40,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field, asdict
@@ -231,6 +232,24 @@ def _sanitize_jsonable(obj: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
+#: One re-entrant lock per status file, shared by every `RunDir` for the same
+#: path in this process. `update_status` is a read-modify-replace of the whole
+#: JSON document, and async / multi-worker runs call it from actor threads
+#: (``Usage.on_change``) concurrently with ``on_round``; unserialized, a
+#: delayed write can restore stale ``round`` / ``calls`` / ``pending_calls``.
+_STATUS_LOCKS: Dict[str, "threading.RLock"] = {}
+_STATUS_LOCKS_GUARD = threading.Lock()
+
+
+def _status_lock(path: str) -> "threading.RLock":
+    key = os.path.abspath(path)
+    with _STATUS_LOCKS_GUARD:
+        lock = _STATUS_LOCKS.get(key)
+        if lock is None:
+            lock = _STATUS_LOCKS[key] = threading.RLock()
+        return lock
+
+
 @dataclass
 class RunDir:
     """One run's directory and the files in it."""
@@ -346,16 +365,24 @@ class RunDir:
 
     # -- writes --------------------------------------------------------------
 
+    def status_lock(self) -> "threading.RLock":
+        """Re-entrant lock serializing this run's status read-modify-writes
+        within the process. Hold it around reading live values (``Usage``)
+        *and* the :meth:`update_status` that stores them, so a slower writer
+        cannot overwrite a newer snapshot with older numbers."""
+        return _status_lock(self.status_path)
+
     def update_status(self, **changes: Any) -> RunStatus:
-        try:
-            st = RunStatus.from_dict(_read_json(self.status_path))
-        except FileNotFoundError:
-            st = RunStatus(run_id=self.run_id)
-        for k, v in changes.items():
-            setattr(st, k, v)
-        st.updated = time.time()
-        _write_json(self.status_path, st.to_dict())
-        return st
+        with self.status_lock():
+            try:
+                st = RunStatus.from_dict(_read_json(self.status_path))
+            except FileNotFoundError:
+                st = RunStatus(run_id=self.run_id)
+            for k, v in changes.items():
+                setattr(st, k, v)
+            st.updated = time.time()
+            _write_json(self.status_path, st.to_dict())
+            return st
 
     def append_round(self, info: RoundInfo) -> None:
         """Append one round as a single strict-JSON line.
@@ -591,9 +618,13 @@ def execute(rd: RunDir, *, budget_usd: Optional[float] = None,
     def _progress() -> None:
         # Mid-call rewrite so CLI/MCP status shows work in flight (#358).
         # Advisory: a write failure must not take the actor down with it.
+        # Values are read under the status lock so concurrent callbacks from
+        # actor threads store snapshots in order, never an older one last.
         try:
-            rd.update_status(calls=usage.calls, pending_calls=usage.pending,
-                             phase=usage.phase)
+            with rd.status_lock():
+                rd.update_status(calls=usage.calls,
+                                 pending_calls=usage.pending,
+                                 phase=usage.phase)
         except Exception:
             pass
 
@@ -611,6 +642,10 @@ def execute(rd: RunDir, *, budget_usd: Optional[float] = None,
         reward = _finite_or_none(info.held_out_reward)
         if reward is not None:
             best.append(reward)
+        with rd.status_lock():
+            _store_round(info, reward)
+
+    def _store_round(info: RoundInfo, reward: Optional[float]) -> None:
         changes: Dict[str, Any] = dict(
             round=info.round + 1, last_reward=reward,
             best_reward=max(best) if best else None, calls=usage.calls,

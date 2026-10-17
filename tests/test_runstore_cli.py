@@ -903,3 +903,41 @@ def test_execute_writes_pending_while_propose_is_in_flight(store, tmp_path):
     assert done.state == "done"
     assert done.pending_calls == 0 and done.phase is None
     assert done.calls > 0
+
+
+def test_update_status_serializes_concurrent_rewrites(tmp_path, monkeypatch):
+    """``update_status`` is a read-modify-replace; actor-thread progress
+    callbacks overlap ``on_round`` in async runs, so a delayed writer must
+    not restore the document it read before a newer write (#358 review)."""
+    run_dir = tmp_path / "r1"
+    run_dir.mkdir()
+    rd = runstore.RunDir(str(run_dir))
+    rd.update_status(state="running")
+
+    real_read = runstore._read_json
+    first_read = threading.Event()
+    release = threading.Event()
+    calls = {"n": 0}
+
+    def slow_first_read(path):
+        out = real_read(path)
+        calls["n"] += 1
+        if calls["n"] == 1:
+            first_read.set()
+            assert release.wait(5)
+        return out
+
+    monkeypatch.setattr(runstore, "_read_json", slow_first_read)
+    slow = threading.Thread(target=lambda: rd.update_status(calls=1,
+                                                            pending_calls=1))
+    slow.start()
+    assert first_read.wait(5)
+    fast = threading.Thread(
+        target=lambda: runstore.RunDir(str(run_dir)).update_status(round=5))
+    fast.start()
+    time.sleep(0.2)  # unserialized, `fast` would finish its write here
+    release.set()
+    slow.join(5)
+    fast.join(5)
+    st = rd.status()
+    assert (st.round, st.calls, st.pending_calls) == (5, 1, 1)

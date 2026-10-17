@@ -396,14 +396,20 @@ def measured(fn: Callable[..., T], meter: Optional[Meter],
         return fn
 
     def call(*args: Any, **kwargs: Any) -> T:
-        meter.usage.begin(phase=phase)
+        token = meter.usage.begin(phase=phase)
         t0 = time.time()
         try:
             out = fn(*args, **kwargs)
         except Exception:
-            meter.usage.record(seconds=time.time() - t0, failed=True)
+            meter.usage.record(seconds=time.time() - t0, failed=True,
+                               finishes=token)
             raise
-        meter.usage.record(seconds=time.time() - t0)
+        except BaseException:
+            # KeyboardInterrupt / SystemExit: not a model failure, but the
+            # call is no longer in flight either.
+            meter.usage.end(token)
+            raise
+        meter.usage.record(seconds=time.time() - t0, finishes=token)
         return out
 
     # Preserve the signature so `_check_callable` still sees the real arity: it
