@@ -59,6 +59,7 @@ __all__ = [
     "get",
     "launch",
     "list_runs",
+    "require_budget_pair",
     "resume",
     "root",
 ]
@@ -70,6 +71,26 @@ _ENV_ROOT = "AGENTDESCENT_HOME"
 
 class RunStoreError(RuntimeError):
     """A run directory that is missing, malformed, or in the wrong state."""
+
+
+#: Raised when ``budget_usd`` / ``--budget`` is set without a per-call price.
+#: Shared by CLI, MCP, ``launch``, and ``execute`` so the message never drifts.
+_BUDGET_NEEDS_PRICE = (
+    "budget_usd needs usd_per_call: the engine counts calls, "
+    "and a tool-using agent's price per call is not known in advance"
+)
+
+
+def require_budget_pair(budget_usd: Optional[float],
+                        usd_per_call: Optional[float]) -> None:
+    """Refuse a dollar budget that has no per-call price.
+
+    Must run **before** :func:`create` / :func:`launch`: otherwise a detach or
+    MCP ``start`` reports success, then ``status`` only shows the generic
+    "process ended without reporting" while the real reason sits in ``log.txt``.
+    """
+    if budget_usd is not None and not usd_per_call:
+        raise RunStoreError(_BUDGET_NEEDS_PRICE)
 
 
 def root() -> str:
@@ -271,7 +292,9 @@ class RunDir:
         # machine rebooted -- must not read as "running" forever.
         if st.state == "running" and not st.alive():
             st.state = "failed"
-            st.error = st.error or "process ended without reporting (killed, or the machine went away)"
+            st.error = (st.error
+                        or _error_from_log(self.log_path)
+                        or "process ended without reporting (killed, or the machine went away)")
             st.finished = st.finished or st.updated
             _write_json(self.status_path, st.to_dict())
         return st
@@ -430,6 +453,26 @@ _BOOTSTRAP = (
 )
 
 
+def _error_from_log(log_path: str) -> Optional[str]:
+    """Best-effort failure reason from a detached child's ``log.txt``.
+
+    Prefers a line the CLI already printed as ``error: …``; otherwise the last
+    non-empty line (often the exception after a traceback). Returns ``None`` when
+    the log is missing or empty so the caller can keep its generic fallback.
+    """
+    try:
+        with open(log_path, encoding="utf-8", errors="replace") as fh:
+            lines = [ln.strip() for ln in fh if ln.strip()]
+    except OSError:
+        return None
+    if not lines:
+        return None
+    for line in reversed(lines):
+        if line.lower().startswith("error:"):
+            return line.split(":", 1)[1].strip()[:2000] or line[:2000]
+    return lines[-1][:2000]
+
+
 def launch(rd: RunDir, *, budget_usd: Optional[float] = None,
            usd_per_call: Optional[float] = None,
            env: Optional[Dict[str, str]] = None) -> RunStatus:
@@ -442,6 +485,7 @@ def launch(rd: RunDir, *, budget_usd: Optional[float] = None,
     reaped when it ends instead of lingering as a zombie that still looks alive).
     Its stdout and stderr go to ``log.txt``.
     """
+    require_budget_pair(budget_usd, usd_per_call)
     st = rd.status()
     if st.state == "running" and st.alive():
         raise RunStoreError(f"{rd.run_id} is already running (pid {st.pid})")
@@ -527,6 +571,14 @@ def execute(rd: RunDir, *, budget_usd: Optional[float] = None,
     from .evolvespec import EvolveSpec, compose
     from .filetree import materialize
 
+    # Refuse before marking running: a missing usd_per_call must not look like a
+    # live run that later "ended without reporting".
+    try:
+        require_budget_pair(budget_usd, usd_per_call)
+    except RunStoreError as e:
+        rd.update_status(state="failed", finished=time.time(), error=str(e)[:2000])
+        raise
+
     spec = EvolveSpec.from_dict(rd.spec_dict())
     usage = Usage()
     rd.update_status(state="running", pid=os.getpid(), started=time.time(),
@@ -563,11 +615,6 @@ def execute(rd: RunDir, *, budget_usd: Optional[float] = None,
 
     overrides: Dict[str, Any] = {}
     if budget_usd is not None:
-        if not usd_per_call:
-            raise RunStoreError("budget_usd needs usd_per_call: the engine counts calls, "
-                                "and a tool-using agent's price per call is not known "
-                                "in advance")
-
         def stop_when(info: RoundInfo) -> bool:
             # Asked between rounds, where max_calls is; the run overshoots by at
             # most one round and reports the spend it actually incurred.

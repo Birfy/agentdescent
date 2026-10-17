@@ -461,6 +461,9 @@ def cmd_evolve(a: argparse.Namespace) -> int:
     except SpecError as e:
         print(f"spec error: {e}", file=sys.stderr)
         return 2
+    # Before create/launch: a missing --usd-per-call must not leave an orphan run
+    # whose status later reads as "process ended without reporting" (#342).
+    runstore.require_budget_pair(a.budget, a.usd_per_call)
     _warn_unusable(spec)
     rd = runstore.create(spec.to_dict(), store=a.store)
     if a.detach:
@@ -718,6 +721,7 @@ def cmd_resume(a: argparse.Namespace) -> int:
     # The environment that resumes is rarely the one that started: a run begun
     # from an agent session and resumed from a shell has lost whatever
     # `host_model` was borrowing.
+    runstore.require_budget_pair(a.budget, a.usd_per_call)
     try:
         _warn_unusable(EvolveSpec.from_dict(runstore.get(a.run_id, store=a.store).spec_dict()))
     except Exception:  # noqa: BLE001 - a warning must never block a resume

@@ -77,6 +77,18 @@ def test_start_refuses_a_bad_spec_without_creating_a_run(store, tmp_path):
     assert runstore.list_runs(store=store) == []
 
 
+def test_start_budget_without_usd_per_call_creates_no_run(store, tmp_path):
+    t = Tools(store)
+    spec = _dir_spec(str(tmp_path)).to_dict()
+    before = set(os.listdir(store)) if os.path.isdir(store) else set()
+    out = t.start(spec, budget_usd=5.0)
+    assert out["ok"] is False
+    assert "budget_usd needs usd_per_call" in out["error"]
+    assert "run_id" not in out
+    after = set(os.listdir(store)) if os.path.isdir(store) else set()
+    assert after == before
+
+
 def test_start_is_a_stub_inside_a_worker(store, tmp_path, monkeypatch):
     monkeypatch.setenv(NESTED_ENV, "1")
     t = Tools(store)

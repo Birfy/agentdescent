@@ -187,7 +187,9 @@ Two habits worth keeping from the first run:
 
 * `agentdescent plan` before `evolve`, every time. It is free, and the call
   count it prints is the upper bound you are agreeing to.
-* `--budget 5` on the first real run. It stops at five dollars rather than
+* `--budget 5 --usd-per-call 0.02` on the first real run. A dollar budget
+  needs a per-call price (the engine counts calls; a tool-using agent's price
+  is not known in advance). Together they stop at five dollars rather than
   discovering the cost afterwards.
 
 ## Where to go next
