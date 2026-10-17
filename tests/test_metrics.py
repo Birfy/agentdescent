@@ -131,6 +131,97 @@ def test_measured_without_a_meter_is_the_identity():
     assert measured(f, None) is f
 
 
+def test_measured_exposes_pending_and_phase_while_in_flight():
+    """A long propose must be visible before the actor returns (#358)."""
+    m = Meter()
+    seen = {}
+
+    def slow(a, b):
+        snap = m.snapshot()
+        seen["pending"] = snap.pending_calls
+        seen["phase"] = snap.phase
+        seen["calls_mid"] = snap.calls
+        return "x"
+
+    ok = measured(slow, m, phase="propose")
+    assert ok(1, 2) == "x"
+    assert seen == {"pending": 1, "phase": "propose", "calls_mid": 0}
+    assert m.usage.pending == 0 and m.usage.phase is None
+    assert m.usage.calls == 1
+    assert m.snapshot().pending_calls == 0
+
+
+def test_measured_clears_pending_on_failure():
+    m = Meter()
+
+    def boom(a, b):
+        assert m.usage.pending == 1
+        raise RuntimeError("nope")
+
+    bad = measured(boom, m, phase="run")
+    with pytest.raises(RuntimeError):
+        bad(1, 2)
+    assert m.usage.pending == 0 and m.usage.phase is None
+    assert m.usage.calls == 1 and m.usage.failures == 1
+
+
+def test_usage_on_change_fires_on_begin_and_record():
+    events = []
+    u = Usage(on_change=lambda: events.append((u.pending, u.calls, u.phase)))
+    tok = u.begin(phase="propose")
+    u.record(seconds=0.1, finishes=tok)
+    assert events == [(1, 0, "propose"), (0, 1, None)]
+
+
+def test_unpaired_record_does_not_consume_actor_pending():
+    """A token-reporting provider sharing the Usage records its own attempts
+    (including a failed one before a retry); those must not end the measured
+    actor call that is still in flight."""
+    m = Meter()
+    seen = {}
+
+    def actor(a, b):
+        # What `openai_compatible(usage=...)` does on a failed attempt and
+        # then a successful retry, both inside one actor call.
+        m.usage.record(prompt_tokens=3, seconds=0.1, failed=True)
+        seen["after_failed_attempt"] = (m.usage.pending, m.usage.phase)
+        m.usage.record(prompt_tokens=3, completion_tokens=2, seconds=0.1)
+        seen["after_retry"] = (m.usage.pending, m.usage.phase)
+        return "x"
+
+    assert measured(actor, m, phase="propose")(1, 2) == "x"
+    assert seen == {"after_failed_attempt": (1, "propose"),
+                    "after_retry": (1, "propose")}
+    assert m.usage.pending == 0 and m.usage.phase is None
+
+
+def test_phase_tracks_calls_still_in_flight():
+    """A later propose that finishes before an older run must not leave
+    ``phase`` claiming propose is still active."""
+    u = Usage()
+    run_tok = u.begin(phase="run")
+    prop_tok = u.begin(phase="propose")
+    assert (u.pending, u.phase) == (2, "propose")
+    u.record(seconds=0.1, finishes=prop_tok)
+    assert (u.pending, u.phase) == (1, "run")
+    u.end(run_tok)
+    assert (u.pending, u.phase) == (0, None)
+    u.end(run_tok)  # idempotent: unknown / ended tokens are ignored
+    assert u.pending == 0
+
+
+def test_measured_ends_pending_on_base_exception():
+    m = Meter()
+
+    def interrupted(a, b):
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        measured(interrupted, m, phase="run")(1, 2)
+    assert m.usage.pending == 0 and m.usage.phase is None
+    assert m.usage.failures == 0
+
+
 # ---------------------------------------------------------------------------
 # End to end, on the deterministic offline domain
 # ---------------------------------------------------------------------------

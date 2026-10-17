@@ -43,6 +43,15 @@ class Usage:
     least count calls and time.
 
     Safe to share across worker threads.
+
+    ``pending`` / ``phase`` are live state for a long in-flight actor:
+    :meth:`begin` returns a token before the call, and the matching
+    :meth:`end` (or ``record(..., finishes=token)``) clears it after, so
+    ``status`` can show work in flight rather than looking idle at
+    ``calls=0`` for minutes (#358). A plain :meth:`record` never touches
+    pending work: a token-reporting provider sharing this ``Usage`` records
+    its own attempts, and those must not end the actor call wrapped around
+    them.
     """
 
     calls: int = 0
@@ -59,14 +68,86 @@ class Usage:
     #: network outage mid-sweep and its 43-minute wall carried ~17 minutes of
     #: stall that had nothing to do with the architecture under test.
     failure_seconds: float = 0.0
+    #: In-flight invocations, token -> phase, in :meth:`begin` order. Read
+    #: through :attr:`pending` / :attr:`phase`.
+    _inflight: Dict[int, Optional[str]] = field(
+        default_factory=dict, init=False, repr=False, compare=False)
+    _next_token: int = field(default=0, init=False, repr=False, compare=False)
+    #: Optional listener fired after ``begin`` / ``end`` / ``record`` (outside
+    #: the lock, so it may run concurrently from several threads).
+    #: The run store uses this to rewrite ``status.json`` mid-call.
+    on_change: Optional[Callable[[], None]] = field(default=None, repr=False,
+                                                    compare=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     @property
     def total_tokens(self) -> int:
         return self.prompt_tokens + self.completion_tokens
 
+    def _notify(self) -> None:
+        cb = self.on_change
+        if cb is None:
+            return
+        try:
+            cb()
+        except Exception:
+            pass
+
+    @property
+    def pending(self) -> int:
+        """Actor invocations started by :meth:`begin` and not yet ended.
+
+        Visible on run ``status`` so a multi-minute first ``propose`` does not
+        look like a hung process at ``calls=0``."""
+        with self._lock:
+            return len(self._inflight)
+
+    @property
+    def phase(self) -> Optional[str]:
+        """Phase of the most recently begun invocation that is still in
+        flight (``"propose"``, ``"run"``, ...); ``None`` when nothing is.
+
+        Derived from the calls actually pending, so a ``propose`` that
+        finishes while an older ``run`` is still going reports ``run``."""
+        with self._lock:
+            return self._phase_locked()
+
+    def _phase_locked(self) -> Optional[str]:
+        for ph in reversed(list(self._inflight.values())):
+            if ph is not None:
+                return ph
+        return None
+
+    def begin(self, phase: Optional[str] = None) -> int:
+        """Mark an actor invocation as started; returns its token.
+
+        Pass the token to :meth:`end` (or ``record(..., finishes=token)``)
+        when the invocation finishes, success or failure, so a reader of
+        ``status`` can tell a long HTTP propose from a wedged process.
+        """
+        with self._lock:
+            self._next_token += 1
+            token = self._next_token
+            self._inflight[token] = phase
+        self._notify()
+        return token
+
+    def end(self, token: int) -> None:
+        """Finish the invocation :meth:`begin` returned ``token`` for.
+
+        Unknown or already-ended tokens are ignored."""
+        with self._lock:
+            found = token in self._inflight
+            self._inflight.pop(token, None)
+        if found:
+            self._notify()
+
     def record(self, *, prompt_tokens: int = 0, completion_tokens: int = 0,
-               seconds: float = 0.0, failed: bool = False) -> None:
+               seconds: float = 0.0, failed: bool = False,
+               finishes: Optional[int] = None) -> None:
+        """Account one finished call. ``finishes`` is the :meth:`begin` token
+        of the invocation this record completes; without it, in-flight state
+        is left alone (an unpaired provider attempt is not the actor call)."""
         with self._lock:
             self.calls += 1
             self.prompt_tokens += prompt_tokens
@@ -75,6 +156,9 @@ class Usage:
             if failed:
                 self.failures += 1
                 self.failure_seconds += seconds
+            if finishes is not None:
+                self._inflight.pop(finishes, None)
+        self._notify()
 
     def estimated_cost(self, per_1m_prompt: float, per_1m_completion: float) -> float:
         """Cost at the given per-million-token prices (both provider-specific)."""
@@ -96,13 +180,17 @@ def metered(completion: Completion, usage: Usage) -> Completion:
     them -- so use the ``usage=`` argument of :func:`claude` /
     :func:`openai_compatible` when you need exact tokens."""
     def complete(prompt: str) -> str:
+        token = usage.begin()
         t0 = time.time()
         try:
             out = completion(prompt)
         except Exception:
-            usage.record(seconds=time.time() - t0, failed=True)
+            usage.record(seconds=time.time() - t0, failed=True, finishes=token)
             raise
-        usage.record(seconds=time.time() - t0)
+        except BaseException:
+            usage.end(token)
+            raise
+        usage.record(seconds=time.time() - t0, finishes=token)
         return out
     return complete
 

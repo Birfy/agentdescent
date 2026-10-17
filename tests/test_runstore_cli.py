@@ -7,6 +7,7 @@ agent. Everything uses the stub workspace agent from `test_evolvespec.py`.
 """
 
 import json
+import threading
 from pathlib import Path
 import os
 import subprocess
@@ -818,3 +819,125 @@ def test_plan_rejects_text_with_cli_workspace_agent(tmp_path, monkeypatch):
     assert code == 2
     out = json.loads(buf.getvalue())
     assert out["ok"] is False and "WorkspaceAgent" in out["error"] and "agent" in out["error"]
+
+
+# ---------------------------------------------------------------------------
+# in-flight status during a long actor call (#358)
+# ---------------------------------------------------------------------------
+
+
+_SLOW_REFLECT_GATE = threading.Event()
+_SLOW_REFLECT_ENTERED = threading.Event()
+
+
+def _slow_stub_reflect(prompt: str) -> str:
+    """Blocks until the test releases the gate, so status can observe pending."""
+    from tests.test_evolvespec import stub_reflect
+    _SLOW_REFLECT_ENTERED.set()
+    if not _SLOW_REFLECT_GATE.wait(timeout=30):
+        raise TimeoutError("test gate was not released")
+    return stub_reflect(prompt)
+
+
+def test_status_line_shows_pending_phase():
+    st = RunStatus(run_id="r1", state="running", round=0, rounds=1,
+                   calls=0, pending_calls=1, phase="propose",
+                   kind="skill_dir", target="/tmp/x")
+    line = cli._status_line(st)
+    assert "calls=0" in line
+    assert "pending=1" in line
+    assert "phase=propose" in line
+    # quiet when idle
+    idle = RunStatus(run_id="r1", state="running", calls=3)
+    assert "pending=" not in cli._status_line(idle)
+
+
+def test_execute_writes_pending_while_propose_is_in_flight(store, tmp_path):
+    """status.json must show pending/phase before the first propose returns."""
+    _SLOW_REFLECT_GATE.clear()
+    _SLOW_REFLECT_ENTERED.clear()
+    _, spec = _spec_file(
+        tmp_path,
+        reflect={"ref": "tests.test_runstore_cli:_slow_stub_reflect", "call": False},
+        evolve={"rounds": 1, "n_workers": 1, "seed": 0},
+    )
+    # allow the test module as a reflect target
+    d = spec.to_dict()
+    d["allow"] = list(dict.fromkeys((d.get("allow") or []) + ["tests."]))
+    rd = runstore.create(d, store=store)
+
+    errors = []
+
+    def runner():
+        try:
+            runstore.execute(rd)
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+
+    t = threading.Thread(target=runner, daemon=True)
+    t.start()
+    assert _SLOW_REFLECT_ENTERED.wait(timeout=30), "propose never started"
+
+    # Poll until the progress hook has rewritten status.json
+    deadline = time.time() + 10
+    st = None
+    while time.time() < deadline:
+        st = rd.status()
+        if st.pending_calls >= 1:
+            break
+        time.sleep(0.05)
+    assert st is not None and st.pending_calls >= 1, st
+    assert st.phase == "propose"
+    assert st.state == "running"
+    # A prior run() may already have recorded completed calls; the bug is that
+    # status showed no in-flight signal at all during a long propose (#358).
+
+    payload = cli.status_payload(rd.run_id, store=store)
+    assert payload["pending_calls"] >= 1 and payload["phase"] == "propose"
+
+    _SLOW_REFLECT_GATE.set()
+    t.join(timeout=120)
+    assert not t.is_alive(), "execute did not finish"
+    assert not errors, errors
+    done = rd.status()
+    assert done.state == "done"
+    assert done.pending_calls == 0 and done.phase is None
+    assert done.calls > 0
+
+
+def test_update_status_serializes_concurrent_rewrites(tmp_path, monkeypatch):
+    """``update_status`` is a read-modify-replace; actor-thread progress
+    callbacks overlap ``on_round`` in async runs, so a delayed writer must
+    not restore the document it read before a newer write (#358 review)."""
+    run_dir = tmp_path / "r1"
+    run_dir.mkdir()
+    rd = runstore.RunDir(str(run_dir))
+    rd.update_status(state="running")
+
+    real_read = runstore._read_json
+    first_read = threading.Event()
+    release = threading.Event()
+    calls = {"n": 0}
+
+    def slow_first_read(path):
+        out = real_read(path)
+        calls["n"] += 1
+        if calls["n"] == 1:
+            first_read.set()
+            assert release.wait(5)
+        return out
+
+    monkeypatch.setattr(runstore, "_read_json", slow_first_read)
+    slow = threading.Thread(target=lambda: rd.update_status(calls=1,
+                                                            pending_calls=1))
+    slow.start()
+    assert first_read.wait(5)
+    fast = threading.Thread(
+        target=lambda: runstore.RunDir(str(run_dir)).update_status(round=5))
+    fast.start()
+    time.sleep(0.2)  # unserialized, `fast` would finish its write here
+    release.set()
+    slow.join(5)
+    fast.join(5)
+    st = rd.status()
+    assert (st.round, st.calls, st.pending_calls) == (5, 1, 1)

@@ -2267,7 +2267,8 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     if usage is None:
         usage = getattr(agent, "usage", None)
     meter = Meter(usage=usage) if usage is not None else Meter()
-    run, propose = measured(run, meter), measured(propose, meter)
+    run, propose = (measured(run, meter, phase="run"),
+                    measured(propose, meter, phase="propose"))
 
     cache = (policies_bundle.eval_cache if policies_bundle is not None
              and policies_bundle.eval_cache is not None else MemoryCache(meter))

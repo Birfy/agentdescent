@@ -637,13 +637,17 @@ Usage(
     seconds: float = 0.0,
     failures: int = 0,
     failure_seconds: float = 0.0,
+    on_change: Optional[Callable[[], None]] = None,
     _lock: threading.Lock = <factory>
 ) -> None
 ```
 
 | method | what it does |
 |---|---|
+| `begin(phase: Optional[str] = None) -> int` | Mark an actor invocation as started; returns its token. |
+| `end(token: int) -> None` | Finish the invocation `begin` returned `token` for. |
 | `estimated_cost(per_1m_prompt: float, per_1m_completion: float) -> float` | Cost at the given per-million-token prices (both provider-specific). |
+| `record(...)` | Account one finished call. `finishes` is the `begin` token of the invocation this record completes; without it, in-flight state is left alone (an unpaired provider attempt is not the actor call). |
 
 ### `WorkspaceAgent`
 
