@@ -244,10 +244,53 @@ Two switches, both ordinary spec fields:
 "reflect": {"ref": "claude_code", "extra_args": ["--model", "opus"]}
 ```
 
-**`extra_args` pins a model** without giving up isolation — the flag is the
-host's own: `claude --model`, `codex exec -m/--model`, `opencode run -m/--model`
-(as `provider/model`). `dsh` has **no** `--model`: its model comes from the
-profile, so select it with `--patch` or a prepared `DSH_HOME`.
+**`extra_args` pins a model** — the flag is the host's own: `claude --model`,
+`codex exec -m/--model`, `opencode run -m/--model` (as `provider/model`). For
+Claude Code and Codex that is all it takes, isolation intact. `dsh` has **no**
+`--model`: its model comes from the profile, so select it with `--patch` or a
+prepared `DSH_HOME`.
+
+!!! warning "OpenCode: `-m` only reaches providers built into OpenCode"
+    An isolated OpenCode worker cannot read `~/.config/opencode`, and a **custom
+    provider** — an OpenAI-compatible endpoint such as Volcengine Ark, a local
+    vLLM, a company gateway — is defined in your `opencode.json`. `-m ark/model`
+    then fails every call with OpenCode's opaque
+    `UnknownError: Unexpected server error` (the same text as `-m nosuch/model`),
+    while `plan` still says `ok`. Two fixes:
+
+    - `"isolate": false` — the worker uses your own OpenCode setup (see below).
+    - **Keep isolation and hand the worker a provider-only config file** through
+      the agent's `env`:
+
+    ```json
+    "agent": {"ref": "opencode", "extra_args": ["-m", "ark/deepseek-v4-flash"],
+              "env": {"OPENCODE_CONFIG": "/abs/path/providers.json"}}
+    ```
+
+    ```json
+    {
+      "$schema": "https://opencode.ai/config.json",
+      "provider": {
+        "ark": {
+          "npm": "@ai-sdk/openai-compatible",
+          "name": "Ark",
+          "options": {"baseURL": "https://ark.cn-beijing.volces.com/api/coding/v3",
+                      "apiKey": "{env:ARK_API_KEY}"},
+          "models": {"deepseek-v4-flash": {"name": "deepseek-v4-flash"}}
+        }
+      }
+    }
+    ```
+
+    Put **only** the `provider` block in that file, and take keys from the
+    environment with `{env:VAR}` — never inline, the file is read by a model-driven
+    process. It must go in `env`: an `OPENCODE_CONFIG` exported in the shell that
+    launches `agentdescent` is dropped for an isolated worker (a config file would
+    otherwise bring its MCP servers with it). AgentDescent does not copy providers
+    out of your `opencode.json` for you, because that file also holds inline keys,
+    MCP servers and plugins that isolation exists to keep out. A failed isolated
+    call now says this in its error, and `plan` warns when `extra_args` pins a
+    `provider/model`.
 
 ```json
 "agent": {"ref": "claude_code", "isolate": false}

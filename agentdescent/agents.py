@@ -309,6 +309,44 @@ def worker_env(workspace: Optional[str], extra: Optional[Mapping[str, str]] = No
     return env
 
 
+#: What OpenCode prints when it cannot resolve the provider or model named by
+#: `-m`. It is the same opaque `UnknownError` for `-m nosuch/model` and for a
+#: custom provider that is simply not visible to this process, so the text names
+#: nothing -- measured, opencode 1.19.3.
+_OPENCODE_PROVIDER_ERRORS = ("UnknownError", "ProviderModelNotFound",
+                             "ModelNotFoundError")
+
+
+def _opencode_provider_hint(command: Sequence[str], output: str, *,
+                            isolate: bool, env: Optional[Mapping[str, str]]) -> str:
+    """Why an isolated ``opencode`` worker most likely failed, or ``""``.
+
+    An isolated worker gets ``XDG_CONFIG_HOME`` and ``OPENCODE_CONFIG_DIR`` inside
+    the workspace, so a **custom provider** defined in the user's ``opencode.json``
+    -- an OpenAI-compatible endpoint such as Volcengine Ark, a local vLLM, a
+    company gateway -- is invisible, and every call dies with an
+    ``UnknownError`` that says nothing about why. Providers built into OpenCode
+    are unaffected. Only said for an isolated ``opencode`` worker whose caller has
+    not already pointed ``OPENCODE_CONFIG`` at something: then the cause is
+    elsewhere and this would mislead.
+    """
+    if not isolate or os.path.basename(str(command[0])) != "opencode":
+        return ""
+    if not any(marker in output for marker in _OPENCODE_PROVIDER_ERRORS):
+        return ""
+    if env and any(k in env for k in ("OPENCODE_CONFIG", "OPENCODE_CONFIG_CONTENT")):
+        return ""
+    return (
+        " -- hint: if -m names a custom provider (an OpenAI-compatible endpoint, a "
+        "local server, a gateway), note this worker runs isolated: it cannot read "
+        "~/.config/opencode (opencode.json), so that provider is invisible to it. Either set "
+        '"isolate": false to use your own OpenCode setup, or keep isolation and '
+        'point the worker at a provider-only config file: "env": '
+        '{"OPENCODE_CONFIG": "/abs/path/providers.json"} (keys via {env:VAR}, never '
+        "inline). An OPENCODE_CONFIG exported in the launching shell is dropped "
+        "for an isolated worker; pass it in `env`.")
+
+
 class _CliAgent:
     """A command-line agent: a Completion that can be rebound to a workspace."""
 
@@ -352,8 +390,11 @@ class _CliAgent:
         if self.usage is not None:
             self.usage.record(seconds=time.time() - t0, failed=proc.returncode != 0)
         if proc.returncode != 0:
-            detail = (proc.stderr or proc.stdout or "").strip()[:400] or "no output"
-            raise AgentError(f"{self.command[0]} exited {proc.returncode}: {detail}")
+            full = (proc.stderr or proc.stdout or "").strip()
+            detail = full[:400] or "no output"
+            hint = _opencode_provider_hint(self.command, full, isolate=self.isolate,
+                                           env=self.env)
+            raise AgentError(f"{self.command[0]} exited {proc.returncode}: {detail}{hint}")
         return proc.stdout.strip()
 
 
@@ -419,6 +460,14 @@ def opencode(*, workspace: Optional[str] = None, extra_args: Sequence[str] = (),
     ``opencode run "<task>"`` answers one message and exits, using the working
     directory as the project -- which is what :func:`cli_agent`'s ``workspace``
     binding gives it. Verified against opencode 1.18.
+
+    ``extra_args=["-m", "provider/model"]`` pins a model, and under the default
+    ``isolate=True`` that works only for providers built into OpenCode: a custom
+    provider (an OpenAI-compatible endpoint, a local server) lives in the user's
+    ``opencode.json``, which an isolated worker cannot read. Pass
+    ``env={"OPENCODE_CONFIG": "/abs/providers.json"}`` -- a file holding only the
+    ``provider`` block, keys through ``{env:VAR}`` -- or ``isolate=False``. A
+    failed isolated call says so in its :class:`AgentError`.
     """
     return cli_agent(["opencode", "run", *extra_args], workspace=workspace, **kwargs)
 
