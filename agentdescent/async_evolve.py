@@ -668,6 +668,18 @@ def async_evolve(
         gate_inflight[:] = still
         return reports
 
+    def _measure_live(items: List[Any]) -> Any:
+        """`aggregator.measure`, marked in flight for as long as it runs.
+
+        The `merge_gate_seconds` block around `_gated_step` ends when the future
+        is *submitted*, so without this a long pipelined measurement is invisible
+        to `status` between its verifier calls (#380)."""
+        token = eng.meter.usage.begin(phase="merge")
+        try:
+            return eng.aggregator.measure(items)
+        finally:
+            eng.meter.usage.end(token)
+
     def _gated_step() -> List[Any]:
         """`aggregator.step()`, with phase 2 off this thread when asked."""
         if not _pipelined:
@@ -676,7 +688,7 @@ def async_evolve(
         items = eng.aggregator.begin_step(skip_in_flight=True)
         if any(not hasattr(i, "committed_version") for i in items):
             gate_inflight.append(
-                (gate_pool.submit(eng.aggregator.measure, items), items))
+                (gate_pool.submit(_measure_live, items), items))
         elif items:                       # nothing to score: decide them now
             reports.extend(eng.aggregator.finish_step(items))
         return reports
