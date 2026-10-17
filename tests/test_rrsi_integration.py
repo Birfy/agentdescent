@@ -109,37 +109,45 @@ def test_protected_strings_never_come_from_the_holdout():
 
 def test_record_measurement_builds_the_history_ledger():
     state = RRsiState()
-    state.record_measurement(_diff({"skills/x.md": "a"}), delta_score=0.1,
-                             delta_cost=0.0, accepted=True)
-    state.record_measurement(_diff({"memory/y.md": "b"}), delta_score=-0.1,
-                             delta_cost=0.0, accepted=False)
-    assert state.attempts["skills"] == 1
-    assert state.attempts["memory"] == 1
-    assert len(state.ledger) == 2
-    assert state.ledger[0].accepted is True
-    assert state.ledger[1].accepted is False
+    # the diffs carry upstream-visible content signals: `skills/` -> skill,
+    # `Memory(` -> memory (not the path-segment heuristic)
+    state.record_measurement(
+        _diff({"skills/x/SKILL.md": "always call the SkillRegistry"}),
+        delta_score=0.1, delta_cost=0.0, accepted=True)
+    state.record_measurement(
+        _diff({"memory/y.md": "Memory().remember(...)"}),
+        delta_score=-0.1, delta_cost=0.0, accepted=False)
+    assert state.history.attempted()["skill"] == 1
+    assert state.history.attempted()["memory"] == 1
+    recs = state.history.records()
+    assert len(recs) == 2
+    assert recs[0]["accepted"] is True
+    assert recs[1]["accepted"] is False
 
 
 def test_stall_detection_and_pruning_targets():
     state = RRsiState(RRsiConfig(noise_band=0.05, prune_window=2,
                                  stall_window=3))
     # a component that never yields positive gain is a pruning target
-    state.record_measurement(_diff({"tools/a.md": "x"}), delta_score=0.0,
-                             delta_cost=0.0, accepted=False)
-    state.record_measurement(_diff({"tools/b.md": "x"}), delta_score=-0.05,
-                             delta_cost=0.0, accepted=False)
-    state._round_gains = state._round_gains[-2:]
-    assert "tools" in state.pruning_targets()
+    state.record_measurement(
+        _diff({"tools/a.md": "ToolRegistry.register_tool('a')"}),
+        delta_score=0.0, delta_cost=0.0, accepted=False)
+    state.record_measurement(
+        _diff({"tools/b.md": "ToolRegistry.register_tool('b')"}),
+        delta_score=-0.05, delta_cost=0.0, accepted=False)
+    assert "client_tool" in state.pruning_targets()
     # a healthy component is not
     state2 = RRsiState(RRsiConfig(prune_window=2))
-    state2.record_measurement(_diff({"skill/a.md": "x"}), delta_score=0.3,
-                              delta_cost=0.0, accepted=True)
+    state2.record_measurement(
+        _diff({"skill/a.md": "skills/SKILL.md: use the registry"}),
+        delta_score=0.3, delta_cost=0.0, accepted=True)
     assert state2.pruning_targets() == []
-    # a flat S* trajectory beyond the noise band is a stall
+    # a flat S* trajectory beyond the noise band is a stall (the pinned
+    # stall_flag needs a window of points; progress[i] is S* after merge i+1)
     state3 = RRsiState(RRsiConfig(noise_band=0.05, stall_window=3))
-    state3.progress = [0.5, 0.51, 0.5]
+    state3.progress = [0.5, 0.5, 0.5, 0.5, 0.5]
     assert state3.stalled() is True
-    state3.progress = [0.5, 0.6, 0.7]
+    state3.progress = [0.5, 0.5, 0.6, 0.7, 0.8]
     assert state3.stalled() is False
 
 
@@ -152,10 +160,11 @@ def test_the_proposer_prompt_carries_budget_history_pruning_and_stall():
         calls["prompts"].append(prompt)
         return "always state the year"
 
-    state = RRsiState(RRsiConfig(T=10, prune_window=2))
-    state.record_measurement(_diff({"tools/a.md": "x"}), delta_score=0.0,
-                             delta_cost=0.0, accepted=False)
-    state.progress = [0.5, 0.5, 0.5, 0.5]     # stalled
+    state = RRsiState(RRsiConfig(T=10, prune_window=2, stall_window=3))
+    state.record_measurement(
+        _diff({"tools/a.md": "ToolRegistry.register_tool('a')"}),
+        delta_score=0.0, delta_cost=0.0, accepted=False)
+    state.progress = [0.5, 0.5, 0.5, 0.5, 0.5]     # stalled
     policy = RRsiProposalPolicy(complete, state)
     out = policy.propose(ProposalContext(
         rendered="seed", task=_task(0), output="answer", reward=0.0))
@@ -163,23 +172,28 @@ def test_the_proposer_prompt_carries_budget_history_pruning_and_stall():
     assert out == ["always state the year"]
     assert f"Round {state.round}" in prompt
     assert "[RRSI history]" in prompt
-    assert "[RRSI pruning]" in prompt and "tools" in prompt
+    assert "[RRSI pruning]" in prompt and "client_tool" in prompt
     assert "[RRSI exploration]" in prompt
 
 
-def test_state_checkpoint_round_trip():
-    state = RRsiState()
+def test_state_checkpoint_round_trip(tmp_path):
+    # the search state (round / S* / cost / progress) rides the aggregator
+    # checkpoint; the per-edit ledger is the durable History at history_path,
+    # so a reopened state reads the same evidence the loop conditioned on
+    hist = str(tmp_path / "rrsi-history.jsonl")
+    state = RRsiState(history_path=hist)
     state.best_score = 0.9
     state.round = 3
-    state.record_measurement(_diff({"skill/a.md": "x"}), delta_score=0.4,
-                             delta_cost=0.0, accepted=True)
-    fresh = RRsiState()
+    state.record_measurement(
+        _diff({"skill/a.md": "skills/SKILL.md: use the registry"}),
+        delta_score=0.4, delta_cost=0.0, accepted=True)
+    fresh = RRsiState(history_path=hist)
     fresh.restore(state.checkpoint())
     assert fresh.best_score == 0.9
     assert fresh.round == 3
-    assert len(fresh.ledger) == 1
-    assert fresh.ledger[0].components == ("skill",)
-    assert fresh.attempts["skill"] == 1
+    assert len(fresh.history.records()) == 1
+    assert fresh.history.records()[0]["component"] == "skill"
+    assert fresh.history.attempted()["skill"] == 1
 
 
 # -- the selector: pinned Algorithm 2 via the engine's acceptance slot ----------
@@ -317,9 +331,9 @@ def test_acceptance_within_band_rule_counts_novelty():
     state = RRsiState(cfg, base_score=0.5)
     policy = RRsiAcceptance(state)
     # deltaS = 0.1 <= band(0.05)? no -> 0.1 > 0.05 is large-gain. Use cand=0.52
-    # deltaS=0.02 <= band: within-band; novel component skill (unseen) -> w_n*1
+    # deltaS=0.02 <= band: within-band; novel structural skill (unseen) -> w_n*1
     d = policy.accept(_context(state, base=(50, 50), cand=(52, 48),
-                               ops=("skill/x.md",)))
+                               ops=("skills/x/SKILL.md",)))
     assert d.accept is True
     assert state.best_score == pytest.approx(0.52)
 
@@ -415,7 +429,7 @@ def test_invariant_rejections_advance_the_rrsi_schedule(tmp_path):
                                       config=cfg)
     contract = Contract(invariants=(Invariant("mutable_keys", ("other",)),))
     result = evolve(_tasks(), reward, run=run,
-                    strategy=SingleSlot(initial_value="seed"), rounds=3,
+                    strategy=SingleSlot(initial_value="seed"), rounds=4,
                     n_workers=2, repo_path=str(tmp_path / "repo"),
                     policies=bundle, contract=contract)
     assert result.outcomes().get("violates-invariant", 0) >= 1

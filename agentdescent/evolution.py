@@ -1428,6 +1428,12 @@ class EvolutionResult:
     #: ``{"settled": int, "picks": int, "replay_affected": int}``. ``None`` when no
     #: ``ReplaySampler`` was wired.
     replay: Optional[Dict[str, Any]] = None
+    #: Solver-challenger self-play statistics, when the run was driven by
+    #: :func:`~agentdescent.selfplay.curriculum_evolve`. Carries the measured
+    #: learnability (``r0_mean``), how many generated tasks were learned /
+    #: stuck / invalid, and the frontier pool size. ``None`` on a plain
+    #: :func:`evolve` run.
+    curriculum: Optional[Dict[str, Any]] = None
 
     # -- what the run cost ----------------------------------------------------
     #
@@ -3737,7 +3743,12 @@ def evolve(
         def _run_unit_inner(unit) -> None:
             if not unit.keys:
                 return
-            task = by_id[sampler.pick(unit.keys, r)]     # a task from this worker's shard
+            # A sampler may return a Task object directly rather than an id: a
+            # growable pool (a self-play frontier, say) cannot pre-register its
+            # tasks in `by_id`, so it hands the engine the task itself. An id
+            # still resolves through the shard as before.
+            _picked = sampler.pick(unit.keys, r)
+            task = _picked if isinstance(_picked, Task) else by_id[_picked]
             for aid in _artifact_targets(unit):
                 _propose_one(unit, task, aid)
 

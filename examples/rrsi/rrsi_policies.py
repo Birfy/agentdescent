@@ -1,9 +1,11 @@
 """RRSI policies wired into ``evolve()`` through the engine's seams.
 
 This is the integration the upstream-faithful fixtures were waiting for. The
-selection core (``selection.py``, pinned to Algorithm 2) and the cosine-annealed
-edit budget (``schedule.py``) are **reused here, not rewritten**; this module
-only adapts them to the engine's ``Policies`` slots:
+selection core (``selection.py``, pinned to Algorithm 2), the cosine-annealed
+edit budget (``schedule.py``), the component vocabulary (``components.py``, the
+pinned ``K`` / ``K_STR`` / ``normalize`` evidence rules) and the per-edit JSONL
+ledger (``history.py``, ``History``) are **reused here, not rewritten**; this
+module only adapts them to the engine's ``Policies`` slots:
 
 * :class:`RRsiCritic` -- the pre-evaluation screen (``Policies(screen=...)``):
   leakage screening against the evolve set plus the annealed edit-budget gate.
@@ -54,7 +56,7 @@ construction.
 
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+import math
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
@@ -126,44 +128,160 @@ class RRsiConfig:
 
 
 @dataclass
-class EditRecord:
-    """One measured candidate, as the proposer conditions on in later rounds."""
+class _InMemoryHistory:
+    """A memory-only twin of the pinned ``history.History`` (JSONL) backend.
 
-    round: int
-    components: Tuple[str, ...]
-    diff_size: int
-    delta_score: float
-    delta_cost: float
-    accepted: bool
+    The durable product case passes ``history_path`` to
+    :func:`build_rrsi_bundle` and uses :class:`~examples.rrsi.history.History`
+    -- the pinned per-edit JSONL ledger, readable across processes and resume.
+    A run that does not ask for durability (a scratch run, a test) gets this
+    in-memory twin, which mirrors the same summaries (:meth:`prune_set`,
+    :meth:`yield_g`, :meth:`incumbent_component_counts`, :meth:`render`).
+    A parity test pins the two backends to the same answers, so the twin cannot
+    silently drift from the pinned file backend."""
+
+    def __init__(self) -> None:
+        self._records: List[dict] = []
+
+    def records(self) -> List[dict]:
+        return list(self._records)
+
+    def append_candidate(self, t: int, variant: str, edits: Optional[List[dict]],
+                         outcome: str, delta_S: Optional[float],
+                         delta_C: Optional[float], accepted: bool,
+                         S: Optional[float], C: Optional[float],
+                         diff: Optional[str], detail: str = "") -> None:
+        for e in edits or [{"id": "C1", "component": None, "hypothesis": None}]:
+            self._records.append({
+                "t": t, "variant": variant, "edit_id": e.get("id"),
+                "component": e.get("component"),
+                "hypothesis": e.get("hypothesis") or e.get("mechanism"),
+                "diff": diff, "delta_S": delta_S, "delta_C": delta_C,
+                "accepted": bool(accepted), "outcome": outcome,
+                "S": S, "C": C, "bundle": len(edits or []), "detail": detail,
+            })
+
+    def _measured(self) -> List[dict]:
+        from .components import K
+        return [r for r in self._records if r.get("delta_S") is not None
+                and r.get("component") in K]
+
+    def tried(self) -> Set[str]:
+        return {r["component"] for r in self._measured()}
+
+    def attempted(self) -> Dict[str, int]:
+        counts: Dict[str, int] = {c: 0 for c in _K_ALL}
+        for r in self._records:
+            if r.get("component") in counts and r.get("edit_id"):
+                counts[r["component"]] += 1
+        return counts
+
+    def accepted_edits(self) -> Dict[str, List[dict]]:
+        out: Dict[str, List[dict]] = {c: [] for c in _K_ALL}
+        for r in self._records:
+            if r.get("accepted") and r.get("component") in out:
+                out[r["component"]].append(
+                    {"t": r["t"], "edit_id": r.get("edit_id"),
+                     "hypothesis": r.get("hypothesis"),
+                     "delta_S": r.get("delta_S")})
+        return out
+
+    def incumbent_component_counts(self) -> Dict[str, int]:
+        return {c: len(v) for c, v in self.accepted_edits().items()}
+
+    def yield_g(self, t: int, n_prune: int) -> Dict[str, float]:
+        g = {c: -math.inf for c in self.tried()}
+        for r in self._measured():
+            if t - int(r["t"]) <= n_prune:
+                c = r["component"]
+                g[c] = max(g.get(c, -math.inf), float(r["delta_S"]))
+        return g
+
+    def prune_set(self, t: int, n_prune: int) -> List[dict]:
+        g = self.yield_g(t, n_prune)
+        acc = self.accepted_edits()
+        out = []
+        for c in sorted(g):
+            if g[c] <= 0:
+                out.append({"component": c,
+                            "recent_best_gain": (None if g[c] == -math.inf
+                                                 else round(g[c], 5)),
+                            "accepted_edits_in_incumbent": acc.get(c, [])})
+        return out
+
+    def render(self, n: int = 40) -> List[dict]:
+        recs = list(reversed(self._records))
+        kept, unmeasured = [], 0
+        for r in recs:
+            if r.get("delta_S") is None:
+                unmeasured += 1
+                if unmeasured > 4:
+                    continue
+            kept.append(r)
+            if len(kept) >= n:
+                break
+        keys = ("t", "variant", "edit_id", "component", "hypothesis",
+                "targets_mode", "delta_S", "delta_C", "accepted", "outcome",
+                "bundle", "detail")
+        return [{k: r.get(k) for k in keys if r.get(k) is not None}
+                for r in reversed(kept)]
 
 
-#: A diff -> component-set extractor. The default takes the first path segment
-#: of each op key, so a FileTree harness ("skills/x/SKILL.md") attributes an
-#: edit to its top-level component ("skills"), which is what RRSI's novelty and
-#: pruning rules count.
-def default_components(diff: Any) -> Tuple[str, ...]:
+#: The full component vocabulary (structural + non-structural), for the
+#: in-memory twin's ``attempted()`` default keys -- the same ``K`` the pinned
+#: file backend initialises its counts from.
+from .components import K as _K_ALL  # noqa: E402
+_K_ALL = tuple(_K_ALL)
+
+
+def upstream_components(diff: Any) -> Tuple[str, ...]:
+    """Classify a diff's ops through the **pinned upstream vocabulary**.
+
+    Each op is classified by :func:`~examples.rrsi.components.normalize`
+    (declared=None), which applies ``text_only`` (a pure prose/comment edit is
+    a ``prompt``) and then the shared structural signals (``skills/`` ->
+    ``skill``, ``Memory(`` -> ``memory``, tool registries -> ``client_tool``,
+    subagent calls -> ``subagent``). This replaces the first-path-segment
+    heuristic, so a FileTree harness's ``skills/x/SKILL.md`` attributes its
+    edit to the upstream ``skill`` component -- the vocabulary RRSI's novelty
+    and pruning rules actually count.
+    """
+    from .components import normalize
+
     out: Set[str] = set()
-    for key in diff.ops:
-        head = str(key).split("/", 1)[0]
-        if head:
-            out.add(head)
+    for key, value in (diff.ops or {}).items():
+        text = f"{key}\n{value}" if value is not None else str(key)
+        out.add(normalize(None, text))
     return tuple(sorted(out))
 
 
 class RRsiState:
-    """S*, the per-edit ledger, component bookkeeping and the annealed round.
+    """S*, the per-edit history, component bookkeeping and the annealed round.
 
     One instance is shared by the critic, the proposer and the selector -- that
-    sharing is what makes the three slots one regularized algorithm. It is
-    checkpointable (see :meth:`checkpoint`) so a resumed run does not lose the
-    historical-best floor or the measured history.
+    sharing is what makes the three slots one regularized algorithm.
+
+    **Fidelity.** The per-edit ledger and the pruning/stall summaries live in a
+    :class:`~examples.rrsi.history.History` backend (the pinned upstream JSONL
+    ledger) when ``history_path`` is given, or an :class:`_InMemoryHistory`
+    twin otherwise. Component attribution goes through the pinned
+    :mod:`~examples.rrsi.components` vocabulary (``upstream_components``), not
+    a path-segment heuristic. ``checkpoint``/``restore`` carry the *search*
+    state (``round``, ``S*``, ``incumbent_cost``, ``progress``); the per-edit
+    ledger is the History's own durable file.
     """
 
     def __init__(self, config: Optional[RRsiConfig] = None, *,
                  base_score: float = 0.0,
-                 components: Optional[Callable[[Any], Tuple[str, ...]]] = None):
+                 components: Optional[Callable[[Any], Tuple[str, ...]]] = None,
+                 history_path: Optional[str] = None):
         self.config = config or RRsiConfig()
-        self.components = components or default_components
+        self.components = components or upstream_components
+        if history_path is not None:
+            from .history import History
+            self.history = History(history_path)
+        else:
+            self.history = _InMemoryHistory()
         #: The annealed round counter. Advanced once per merge (see the module
         #: docstring for the barrier-free deviation). Never reset on resume.
         self.round = 0
@@ -174,13 +292,6 @@ class RRsiState:
         #: accepted candidate carried cost telemetry. ``None`` is "unknown",
         #: which the pinned cost rule reads as ``dC = 0``.
         self.incumbent_cost: Optional[float] = None
-        #: component -> how often it appeared in a proposed diff (novelty's
-        #: denominator, and the pruner's "has it been exercised" test).
-        self.attempts: Counter = Counter()
-        #: component -> rolling measured gain per round, for the pruner.
-        self._round_gains: List[Dict[str, float]] = []
-        #: The measured per-edit history the proposer conditions on.
-        self.ledger: List[EditRecord] = []
         #: ``S*`` after each merge, for stall detection.
         self.progress: List[float] = []
 
@@ -205,66 +316,58 @@ class RRsiState:
     def stalled(self) -> bool:
         """True when ``S*`` has not moved beyond the noise band recently.
 
-        Structured exploration fires here: the proposer reserves part of its
-        budget for components never yet exercised."""
-        window = (self.progress[-self.config.stall_window:]
-                  if self.config.stall_window > 0 else [])
-        if len(window) < 2:
+        Uses the pinned ``history.stall_flag`` over the ``progress``
+        trajectory: ``progress[i]`` is ``S*`` after merge ``i+1`` (the anneal
+        advances on every merge), so the latest point is the last element and
+        the pinned guard "0 while fewer than ``w`` rounds exist" applies
+        through its ``t < w`` check. Structured exploration fires here: the
+        proposer reserves part of its budget for components never yet
+        exercised."""
+        if self.config.stall_window <= 0 or not self.progress:
             return False
-        return (window[-1] - window[0]) <= self.config.noise_band
+        from .history import stall_flag
+        return bool(stall_flag(self.progress, len(self.progress) - 1,
+                               self.config.stall_window, self.config.noise_band))
 
     def pruning_targets(self) -> List[str]:
-        """Components whose recent measured gain is non-positive (L1-style).
+        """Components whose recent measured gain is non-positive (L1-style),
+        from the pinned ``history.prune_set``."""
+        return sorted({t["component"] for t in
+                       self.history.prune_set(self.round, self.config.prune_window)})
 
-        A component that has been exercised in the last ``prune_window`` rounds
-        but whose net gain over that window is not strictly positive has stopped
-        earning its place; the proposer is told it is a deletion candidate. A
-        component with no gain record is not a target (it may simply be new)."""
-        window = self._round_gains[-self.config.prune_window:]
-        if not window:
-            return []
-        totals: Dict[str, float] = defaultdict(float)
-        exercised: Set[str] = set()
-        for gains in window:
-            for comp, gain in gains.items():
-                totals[comp] += gain
-                exercised.add(comp)
-        return sorted(comp for comp in exercised
-                      if totals.get(comp, 0.0) <= 0.0
-                      and self.attempts.get(comp, 0) > 0)
+    def pruning_edits(self) -> List[dict]:
+        """The actionable deletion list from ``history.prune_set``: component +
+        the accepted machinery to remove."""
+        return self.history.prune_set(self.round, self.config.prune_window)
 
     def components_of(self, diff: Any) -> Tuple[str, ...]:
         return self.components(diff)
 
     def record_measurement(self, diff: Any, *, delta_score: float,
                            delta_cost: float, accepted: bool) -> None:
-        """Record one measured candidate into the ledger and the pruner's books.
+        """Record one measured candidate into the per-edit History.
 
         Called for accepted *and* rejected candidates: rejected mechanisms are
         negative evidence the proposer conditions on (the paper's evidence-aware
         credit assignment), and a rejection is exactly what the pruner should
-        count against a component."""
+        count against a component. Each op is its own edit record, tagged with
+        its upstream component."""
         comps = self.components_of(diff)
-        for c in comps:
-            self.attempts[c] += 1
-        gains = {c: delta_score for c in comps}
-        self._round_gains.append(gains)
-        self.ledger.append(EditRecord(
-            round=self.round, components=comps, diff_size=len(diff.ops),
-            delta_score=delta_score, delta_cost=delta_cost, accepted=accepted))
+        self.history.append_candidate(
+            t=self.round, variant=getattr(diff, "diff_id", "?"),
+            edits=[{"id": f"e{i}", "component": c}
+                   for i, c in enumerate(comps)],
+            outcome="accepted" if accepted else "rejected",
+            delta_S=delta_score, delta_C=delta_cost, accepted=accepted,
+            S=self.best_score, C=self.incumbent_cost, diff=_diff_text(diff))
 
     def checkpoint(self) -> dict:
-        """Serialise the state the ledger does not persist."""
+        """Serialise the search state. The per-edit ledger is the History's
+        own durable file, so it is not part of this payload."""
         return {
             "round": self.round,
             "best_score": self.best_score,
             "incumbent_cost": self.incumbent_cost,
-            "attempts": dict(self.attempts),
-            "round_gains": self._round_gains,
-            "ledger": [{"round": r.round, "components": list(r.components),
-                        "diff_size": r.diff_size, "delta_score": r.delta_score,
-                        "delta_cost": r.delta_cost, "accepted": r.accepted}
-                       for r in self.ledger],
             "progress": self.progress,
         }
 
@@ -277,30 +380,6 @@ class RRsiState:
                 self.best_score = float(data["best_score"])
             if data.get("incumbent_cost") is not None:
                 self.incumbent_cost = float(data["incumbent_cost"])
-            if isinstance(data.get("attempts"), dict):
-                self.attempts = Counter(
-                    {k: int(v) for k, v in data["attempts"].items()
-                     if isinstance(v, (int, float))})
-            if isinstance(data.get("round_gains"), list):
-                self._round_gains = [
-                    {k: float(v) for k, v in gains.items()
-                     if isinstance(v, (int, float))}
-                    for gains in data["round_gains"] if isinstance(gains, dict)]
-            if isinstance(data.get("ledger"), list):
-                self.ledger = []
-                for r in data["ledger"]:
-                    if not isinstance(r, dict):
-                        continue
-                    try:
-                        self.ledger.append(EditRecord(
-                            round=int(r["round"]),
-                            components=tuple(r.get("components", ())),
-                            diff_size=int(r.get("diff_size", 0)),
-                            delta_score=float(r.get("delta_score", 0.0)),
-                            delta_cost=float(r.get("delta_cost", 0.0)),
-                            accepted=bool(r.get("accepted", False))))
-                    except (TypeError, ValueError, KeyError):
-                        continue
             if isinstance(data.get("progress"), list):
                 self.progress = [float(v) for v in data["progress"]
                                  if isinstance(v, (int, float))]
@@ -397,18 +476,27 @@ def _expected_block(task: Any, show_meta: bool, limit: int) -> str:
     return f"\nWhat the scorer expected (task metadata):\n{text}\n"
 
 
-def _history_summary(ledger: Sequence[EditRecord], max_chars: int) -> str:
-    """A compact recent-history summary for the reflection prompt."""
-    if not ledger:
+def _history_summary(state: "RRsiState", max_chars: int) -> str:
+    """A compact recent-history summary for the reflection prompt, from the
+    pinned ``History.render`` (measured outcomes dominate; a wall of
+    unmeasured aborts is not evidence)."""
+    records = state.history.render(n=8)
+    if not records:
         return ""
-    recent = ledger[-8:]
     lines = []
-    for r in recent:
-        tag = "accepted" if r.accepted else "rejected"
-        comps = ",".join(r.components) or "?"
-        lines.append(
-            f"- r{r.round} [{tag}] {comps}: dS={r.delta_score:+.2f} "
-            f"dC={r.delta_cost:+.2f} ({r.diff_size} edit(s))")
+    for r in records:
+        tag = "accepted" if r.get("accepted") else "rejected"
+        comps = r.get("component") or "?"
+        dS = r.get("delta_S")
+        dC = r.get("delta_C")
+        head = f"- r{r.get('t')} [{tag}] {comps}: "
+        if isinstance(dS, (int, float)):
+            line = head + f"dS={dS:+.2f}"
+        else:
+            line = head + "dS=?"
+        if isinstance(dC, (int, float)):
+            line += f" dC={dC:+.2f}"
+        lines.append(line)
     out = "\n".join(lines)
     if len(out) > max_chars:
         out = out[:max_chars] + " ..."
@@ -457,16 +545,22 @@ class RRsiProposalPolicy:
             f"{budget} independent edit(s) in one candidate; bundle fewer, more "
             "attributable edits later in the run.",
         ]
-        history = _history_summary(self.state.ledger, config.max_history_chars)
+        history = _history_summary(self.state, config.max_history_chars)
         if history:
             lines.append("")
             lines.append("[RRSI history] Measured so far:")
             lines.append(history)
-        targets = self.state.pruning_targets()
+        targets = self.state.pruning_edits()
         if targets:
+            parts = []
+            for t in targets:
+                edits = t["accepted_edits_in_incumbent"]
+                ids = ", ".join(e["edit_id"] for e in edits) if edits else ""
+                parts.append(f"{t['component']}" + (f" (remove {ids})" if ids else ""))
             lines.append("")
             lines.append("[RRSI pruning] These components have not earned their "
-                         f"place recently; consider deleting them: {', '.join(targets)}")
+                         "place recently; consider deleting them: "
+                         + "; ".join(parts))
         if self.state.stalled():
             lines.append("")
             lines.append("[RRSI exploration] The search has stalled within the "
@@ -538,7 +632,7 @@ class RRsiAcceptance:
             w_s=config.w_s, w_c=config.w_c, w_n=config.w_n)
         decision = judge(
             candidate, incumbent, self.state.best_score, config.noise_band,
-            selection_config, dict(self.state.attempts))
+            selection_config, self.state.history.incumbent_component_counts())
 
         # The schedule advances on *every* decision this policy makes -- a
         # rejection is a round the search spent stuck, not a free one (see
@@ -596,6 +690,7 @@ def build_rrsi_bundle(
     reviewer: Optional[Any] = None,
     config: Optional[RRsiConfig] = None,
     base_score: float = 0.0,
+    history_path: Optional[str] = None,
 ) -> Tuple[Policies, RRsiState]:
     """Assemble the three RRSI policies into one ``Policies`` bundle.
 
@@ -604,8 +699,12 @@ def build_rrsi_bundle(
     set's distinctive strings (task ids, gold answers, names) -- never the
     final holdout. ``complete`` drives the proposer; an optional ``reviewer``
     drives the model critic. ``base_score`` seeds ``S*`` (the base harness's
-    evolve-set score when you have it)."""
-    state = RRsiState(config, base_score=base_score)
+    evolve-set score when you have it). ``history_path``, when given, is the
+    durable per-edit ledger (the pinned ``history.History`` JSONL) -- pass the
+    run's ``repo_path``-adjacent file for resume that reads the same evidence
+    the loop conditioned on; ``None`` keeps an in-memory ledger (scratch runs,
+    tests)."""
+    state = RRsiState(config, base_score=base_score, history_path=history_path)
     bundle = Policies(
         screen=RRsiCritic(state, protected=protected, reviewer=reviewer),
         proposal=RRsiProposalPolicy(complete, state),
