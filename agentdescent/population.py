@@ -383,7 +383,17 @@ class PopulationAggregator(Aggregator):
                     if fork_name not in self.ledger.live_heads():
                         self.ledger.fork(fork_name, from_branch=Ledger.DEV)
                 else:
-                    fork_name = f"head/{idx}"
+                    # Canonical slot name, unless a surviving island (e.g. only
+                    # ``head/1`` after a partial loss) already owns it: two
+                    # slots must never share one branch.
+                    # (Ephemeral ``island_count == 0`` runs reset ``head/<idx>``
+                    # every step, so only persistent islands need the check.)
+                    taken = (set(prev_forks) | set(self._forks)
+                             if self.island_count > 0 else set())
+                    k = idx
+                    while f"head/{k}" in taken:
+                        k += 1
+                    fork_name = f"head/{k}"
                     self.ledger.fork(fork_name, from_branch=Ledger.DEV)
                 self._commit_state(target, f"population: head/{idx}",
                                    branch=fork_name)

@@ -265,21 +265,26 @@ def _island_evolve_kwargs(repo, *, rounds, n_workers=3):
 
 
 def test_checkpointed_island_evolve_resumes_without_missing_heads(tmp_path):
-    """End-to-end: checkpointed island run, clean stop, resume on same repo."""
+    """End-to-end: checkpointed island run, clean stop, resume on same repo.
+
+    On unfixed main the resumed run dies with ``GitError: pathspec 'head/0' did
+    not match`` (restored forks finalize already deleted), surfaced as
+    ``result.error`` -- so the guard is that the resume completes and works."""
     from agentdescent.checkpoint import load_checkpoint
 
     repo = str(tmp_path / "repo")
     r1 = evolve(**_island_evolve_kwargs(repo, rounds=4))
-    assert r1.outcomes().get("committed", 0) >= 1
+    assert r1.error is None
     assert _live_heads(repo) == ["dev"]
     payload = load_checkpoint(repo)
     assert payload is not None
     assert payload.get("aggregator_type") == "PopulationAggregator"
     # Stale fork names are exactly the post-finalize resume hazard.
-    assert isinstance(payload["archive_state"].get("forks"), list)
+    assert payload["archive_state"]["forks"] == ["head/0", "head/1"]
 
     r2 = evolve(**_island_evolve_kwargs(repo, rounds=3))
-    assert r2.outcomes().get("committed", 0) >= 0
+    assert r2.error is None, r2.error
+    assert r2.history, "the resumed run did not advance"
     assert _live_heads(repo) == ["dev"]
 
 
@@ -299,10 +304,32 @@ def test_checkpointed_island_async_evolve_resumes_without_missing_heads(tmp_path
         target_reward=1.0,
     )
     r1 = async_evolve(**common)
+    assert r1.error is None
     assert _live_heads(repo) == ["dev"]
     payload = load_checkpoint(repo)
     assert payload is not None
-    assert isinstance(payload["archive_state"].get("forks"), list)
+    assert payload["archive_state"]["forks"] == ["head/0", "head/1"]
     r2 = async_evolve(**{**common, "max_iters": 4, "max_seconds": 6.0})
-    assert r2 is not None
+    assert r2.error is None, r2.error
+    assert r2.history, "the resumed run did not advance"
     assert _live_heads(repo) == ["dev"]
+
+
+def test_partial_island_loss_never_assigns_two_slots_one_branch(tmp_path):
+    """If only ``head/1`` survives, the other slot gets a distinct branch."""
+    agg, ledger, runtime, strategy = _make_aggregator(tmp_path, island_count=2)
+    _seed_archive(agg, runtime, strategy)
+    for _ in range(3):
+        agg.step(n_workers=3)
+    payload = agg.checkpoint()
+    ledger.discard_head("head/0")            # head/1 survives, head/0 is gone
+
+    fresh, ledger2, _, _ = _make_aggregator(tmp_path, island_count=2)
+    fresh.restore(payload)
+    assert fresh._forks == ["head/1"]
+    fresh.step(n_workers=3)
+    assert len(fresh._forks) == 2
+    assert len(set(fresh._forks)) == 2, fresh._forks
+    assert set(fresh._forks).issubset(set(ledger2.live_heads()))
+    for wid in range(3):
+        assert fresh.head_for_worker(wid) in ledger2.live_heads()
