@@ -231,3 +231,97 @@ def test_start_refuses_missing_agent_cli_without_creating_a_run(store, tmp_path,
     plan = t.plan(spec)
     assert plan["ok"] is False
     assert "claude" in plan["error"]
+
+
+_CLI_HOSTS = (
+    ("claude_code", "claude"),
+    ("codex", "codex"),
+    ("dsh", "dsh"),
+    ("opencode", "opencode"),
+)
+
+
+def _fake_all_clis_absent(monkeypatch):
+    import agentdescent.cli as cli_mod
+
+    real = cli_mod.doctor_report
+
+    def fake():
+        rep = real()
+        clis = dict(rep["agent_clis"])
+        for name in ("claude", "codex", "dsh", "opencode"):
+            clis[name] = None
+        return {**rep, "agent_clis": clis}
+
+    monkeypatch.setattr(cli_mod, "doctor_report", fake)
+
+
+@pytest.mark.parametrize("field", ("agent", "reflect"))
+@pytest.mark.parametrize("ref,binary", _CLI_HOSTS)
+def test_nested_start_stub_when_proposed_cli_absent(
+        store, tmp_path, monkeypatch, field, ref, binary):
+    """Nested start keeps the refused stub even if the CLI is missing (#351)."""
+    _fake_all_clis_absent(monkeypatch)
+    monkeypatch.setenv(NESTED_ENV, "1")
+
+    create_calls, launch_calls = [], []
+
+    def _no_create(*a, **k):
+        create_calls.append((a, k))
+        raise AssertionError("create/launch must not run in nested mode")
+
+    def _no_launch(*a, **k):
+        launch_calls.append((a, k))
+        raise AssertionError("create/launch must not run in nested mode")
+
+    monkeypatch.setattr(runstore, "create", _no_create)
+    monkeypatch.setattr(runstore, "launch", _no_launch)
+
+    t = Tools(store)
+    spec = _dir_spec(str(tmp_path / f"{field}-{ref}")).to_dict()
+    spec[field] = {"ref": ref}
+    before = set(os.listdir(store)) if os.path.isdir(store) else set()
+    out = t.start(spec)
+    assert out["ok"] is True
+    assert out["nested"] is True
+    assert out["state"] == "refused"
+    assert out["run_id"] == "nested-stub"
+    assert create_calls == [] and launch_calls == []
+    after = set(os.listdir(store)) if os.path.isdir(store) else set()
+    assert after == before
+    assert runstore.list_runs(store=store) == []
+
+
+@pytest.mark.parametrize("field", ("agent", "reflect"))
+@pytest.mark.parametrize("ref,binary", _CLI_HOSTS)
+def test_non_nested_start_still_refuses_missing_cli(
+        store, tmp_path, monkeypatch, field, ref, binary):
+    """Non-nested missing-CLI start stays fail-closed before create (#346/#351)."""
+    _fake_all_clis_absent(monkeypatch)
+    monkeypatch.delenv(NESTED_ENV, raising=False)
+
+    create_calls, launch_calls = [], []
+
+    def _no_create(*a, **k):
+        create_calls.append((a, k))
+        raise AssertionError("create/launch must not run when CLI missing")
+
+    def _no_launch(*a, **k):
+        launch_calls.append((a, k))
+        raise AssertionError("create/launch must not run when CLI missing")
+
+    monkeypatch.setattr(runstore, "create", _no_create)
+    monkeypatch.setattr(runstore, "launch", _no_launch)
+
+    t = Tools(store)
+    spec = _dir_spec(str(tmp_path / f"{field}-{ref}")).to_dict()
+    spec[field] = {"ref": ref}
+    before = set(os.listdir(store)) if os.path.isdir(store) else set()
+    out = t.start(spec)
+    assert out["ok"] is False
+    assert ref in out["error"] and binary in out["error"]
+    assert "run_id" not in out
+    assert "nested" not in out
+    assert create_calls == [] and launch_calls == []
+    after = set(os.listdir(store)) if os.path.isdir(store) else set()
+    assert after == before
