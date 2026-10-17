@@ -40,11 +40,12 @@ quietly:
 from __future__ import annotations
 
 import math
+import numbers
 import threading
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -60,6 +61,21 @@ __all__ = ["Calibrator", "Rectification", "STALE_INFLATION",
 #: -- but a widening, so a gate that cannot be told how biased its verifier is
 #: commits less rather than the same amount with more confidence.
 STALE_INFLATION = 2.0
+
+def _require_nonneg_int(name: str, value: Any) -> int:
+    """``value`` as a non-negative ``int``, else ``ValueError`` naming ``name``.
+
+    Mirrors the Integral check on ``AuditPolicy`` label floors (#325). ``bool``
+    is refused (it is an ``Integral`` in Python); floats and numeric strings are
+    refused rather than coerced, matching the rule ``Stratum`` adopted in #327.
+    numpy integer scalars are accepted and normalised to plain ``int``.
+    """
+    if (isinstance(value, bool)
+            or not isinstance(value, numbers.Integral)
+            or value < 0):
+        raise ValueError(f"Calibrator.{name} must be a non-negative integer, "
+                         f"got {value!r}")
+    return int(value)
 
 
 @dataclass(frozen=True)
@@ -206,6 +222,12 @@ class Calibrator:
             alpha = _require_alpha(alpha)
         except PPIError as exc:
             raise ValueError(f"Calibrator: {exc}") from None
+        # Same Integral rule AuditPolicy uses in ``audit.sampler`` (#325): a
+        # float floor such as ``30.0`` or a string ``"5"`` used to be stored and
+        # then poison folding / the stale message as TypeError, and a negative
+        # floor disabled thin-stratum folding entirely (#331). Do not coerce.
+        min_labels = _require_nonneg_int("min_labels", min_labels)
+        min_per_stratum = _require_nonneg_int("min_per_stratum", min_per_stratum)
         self.store = store
         self.alpha = alpha
         self.seed = seed

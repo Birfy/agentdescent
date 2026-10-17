@@ -570,3 +570,36 @@ def test_a_bad_alpha_set_after_construction_cannot_escape_the_merge_path():
         cal.alpha = bad
         r = cal.recompute("v1")
         assert r.is_stale, bad
+
+
+# -- min_labels / min_per_stratum construction (#331) ------------------------
+
+@pytest.mark.parametrize("kw", [
+    dict(min_per_stratum="5"),
+    dict(min_labels=30.0),
+    dict(min_per_stratum=-1),
+    dict(min_labels="30"),
+    dict(min_labels=True),
+    dict(min_per_stratum=True),
+    dict(min_labels=-5),
+    dict(min_per_stratum=5.0),
+])
+def test_invalid_min_labels_or_min_per_stratum_are_refused_at_construction(kw):
+    """Bad floors are a setup error, not an early-audit stale state (#331)."""
+    store, _ = _populated(n=40, n_unlab=40)
+    field = next(iter(kw))
+    with pytest.raises(ValueError, match=field):
+        Calibrator(store, **kw)
+
+
+def test_valid_min_labels_and_min_per_stratum_are_kept_as_ints():
+    store, _ = _populated(n=40, n_unlab=40)
+    cal = Calibrator(store, min_labels=30, min_per_stratum=5)
+    assert cal.min_labels == 30 and cal.min_per_stratum == 5
+    assert type(cal.min_labels) is int and type(cal.min_per_stratum) is int
+
+
+def test_numpy_integer_min_floors_are_accepted():
+    store, _ = _populated(n=40, n_unlab=40)
+    cal = Calibrator(store, min_labels=np.int64(30), min_per_stratum=np.int32(5))
+    assert cal.min_labels == 30 and cal.min_per_stratum == 5
