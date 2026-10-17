@@ -89,6 +89,8 @@ untouched context. Not "equivalent to": the same call.
 from __future__ import annotations
 
 import fnmatch
+import math
+import numbers
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Iterable, Optional, Sequence, Tuple, Union
 
@@ -273,10 +275,17 @@ class RectifiedAcceptance(_ForwardsInstall):
                  min_kappa: float = MIN_KAPPA) -> None:
         from ..defaults import DefaultAcceptance
 
-        if inflate_when_stale < 1.0:
-            raise ValueError("inflate_when_stale below 1.0 would make an "
-                             "unmeasured verifier count for more than a "
-                             "measured one")
+        # Finite and >= 1.0: ``nan < 1.0`` is false, so NaN used to construct and
+        # then yield ``var_after=nan`` on the stale path; ``inf`` zeroed evidence
+        # without ever being validated as a knob (#332). ``bool`` is not a real
+        # number here (``True`` would pass as 1.0). Same pattern as #305 / #314.
+        if (isinstance(inflate_when_stale, bool)
+                or not isinstance(inflate_when_stale, numbers.Real)
+                or not math.isfinite(float(inflate_when_stale))
+                or float(inflate_when_stale) < 1.0):
+            raise ValueError("inflate_when_stale must be a finite real number "
+                             f">= 1.0, got {inflate_when_stale!r}")
+        inflate_when_stale = float(inflate_when_stale)
         if not 0.0 < min_kappa <= 1.0:
             raise ValueError("min_kappa must be in (0, 1]")
         self.inner = inner if inner is not None else DefaultAcceptance()
