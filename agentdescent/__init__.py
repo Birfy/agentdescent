@@ -95,6 +95,7 @@ from .aggregator import (
     EvidenceBuffer,
 )
 from .population import PopulationAggregator, population_factory
+from .selfplay import Challenger, ChallengerConfig, FrontierSampler, curriculum_evolve
 from .staleness import (
     StaleAction,
     StalenessPolicy,

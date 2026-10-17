@@ -112,6 +112,7 @@ nav:
     - Runtime matrix: matrix-overview.md
     - Runtime matrix — report: matrix-report.md
     - Molecule search — porous crystals: porous-molecules.md
+    - Solver-challenger self-play: selfplay.md
   - Self-evolution algorithms:
     - Overview: self-evolution-examples.md
     - Porting checklist: porting-checklist.md
