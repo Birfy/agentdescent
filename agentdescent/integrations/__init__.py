@@ -779,6 +779,9 @@ def render_dsh_plugin(dest: str, w: Optional["_Writer"] = None) -> List[str]:
     return w.lines
 
 
+#: The binary each host is driven through, by ``install`` target.
+HOST_CLI = {"dsh": "dsh", "claude-code": "claude", "codex": "codex", "opencode": "opencode"}
+
 HOSTS: Dict[str, Callable[[str, _Writer], None]] = {
     "dsh": install_dsh,
     "claude-code": install_claude_code,
@@ -806,15 +809,26 @@ def _skill_state(path: str) -> str:
     return "ok" if have == skill_text() else "stale"
 
 
-def _opencode_mcp_state(path: str) -> str:
-    raw = _read(path)
-    if raw is None:
-        return "missing"
-    try:
-        data = json.loads(raw) if raw.strip() else {}
-    except json.JSONDecodeError:
-        return "unknown"            # JSONC with comments; do not guess
-    return "ok" if (data.get("mcp") or {}).get("agentdescent") else "missing"
+def _opencode_mcp_state(root: str) -> str:
+    """The MCP entry in OpenCode's config: ``opencode.jsonc`` (what ``install``
+    writes) or ``opencode.json`` (what a user may keep by hand).
+
+    ``unknown`` when neither file holds the entry and one of them cannot be
+    parsed -- JSONC allows comments and ``json`` cannot read them, so the entry
+    might be there and guessing either way would be wrong."""
+    unreadable = False
+    for name in ("opencode.jsonc", "opencode.json"):
+        raw = _read(os.path.join(root, name))
+        if raw is None:
+            continue
+        try:
+            data = json.loads(raw) if raw.strip() else {}
+        except json.JSONDecodeError:
+            unreadable = True
+            continue
+        if isinstance(data, dict) and (data.get("mcp") or {}).get("agentdescent"):
+            return "ok"
+    return "unknown" if unreadable else "missing"
 
 
 def host_status(host: str, *, home: Optional[str] = None) -> Dict[str, str]:
@@ -822,8 +836,12 @@ def host_status(host: str, *, home: Optional[str] = None) -> Dict[str, str]:
     is what it holds still what this package would write?
 
     ``skill`` is ``ok`` / ``stale`` / ``missing``; ``mcp`` is ``ok`` /
-    ``missing`` / ``unknown`` (an ``opencode.jsonc`` with comments cannot be
-    read safely). ``state`` summarises them: ``ok``, ``stale`` (the skill is
+    ``missing`` / ``unknown`` (an OpenCode config with comments cannot be read
+    safely; it is also what ``doctor`` reports if reading a host's files raises).
+    Two limits: a launcher pinned to an interpreter that has since been deleted
+    still reads ``ok`` (only presence is checked), and an install made through a
+    host's own marketplace (``/plugin install``, ``codex plugin add``) leaves no
+    files here, so it reads ``missing``. ``state`` summarises them: ``ok``, ``stale`` (the skill is
     behind the package), ``partial`` (one half is there) or ``missing``. Paths
     follow ``install`` exactly, including ``DSH_HOME`` / ``CODEX_HOME`` /
     ``XDG_CONFIG_HOME``. Codex can also be wired through ``codex plugin``, which
@@ -850,9 +868,11 @@ def host_status(host: str, *, home: Optional[str] = None) -> Dict[str, str]:
         root = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config"),
                             "opencode")
         skill = os.path.join(root, "skill", "agentdescent", "SKILL.md")
-        mcp = _opencode_mcp_state(os.path.join(root, "opencode.jsonc"))
+        mcp = _opencode_mcp_state(root)
     skill_state = _skill_state(skill)
-    if skill_state == "missing" and mcp == "missing":
+    if skill_state == "missing" and mcp in ("missing", "unknown"):
+        # Nothing of ours is there. `unknown` only says a config this user wrote
+        # could not be read, which is no evidence that we were ever installed.
         state = "missing"
     elif skill_state == "stale":
         state = "stale"

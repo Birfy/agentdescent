@@ -160,3 +160,32 @@ def test_doctor_text_output_names_the_hosts(home, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "host opencode: ok" in out and "host dsh: missing" in out
     assert code == 1                                    # no agent CLI on PATH: unchanged
+
+
+# -- review of #383 -----------------------------------------------------------
+
+
+def test_an_unreadable_opencode_config_on_a_fresh_home_is_missing_not_partial(
+        home, monkeypatch):
+    """A user who never installed anything but keeps comments in their own
+    opencode.jsonc must not get exit code 1 for it."""
+    cfg = home / ".config" / "opencode"
+    cfg.mkdir(parents=True)
+    (cfg / "opencode.jsonc").write_text('{\n  // my providers\n  "provider": {}\n}\n')
+    info = host_status("opencode", home=str(home))
+    assert (info["state"], info["skill"], info["mcp"]) == ("missing", "missing", "unknown")
+    rep = _report(monkeypatch, present=("opencode",))
+    assert not any("integration" in p for p in rep["problems"]), rep["problems"]
+    assert any("install opencode" in h for h in rep["hints"])
+
+
+def test_an_mcp_entry_kept_in_opencode_json_counts(home):
+    install("opencode", home=str(home))
+    root = _root(home, "opencode")
+    os.replace(os.path.join(root, "opencode.jsonc"), os.path.join(root, "opencode.json"))
+    assert host_status("opencode", home=str(home))["mcp"] == "ok"
+
+
+def test_the_marketplace_route_is_named_for_claude_code_too(home, monkeypatch):
+    rep = _report(monkeypatch, present=("claude",))
+    assert any("/plugin install agentdescent@agentdescent" in h for h in rep["hints"])

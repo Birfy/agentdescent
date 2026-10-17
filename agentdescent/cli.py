@@ -243,10 +243,6 @@ def doctor_report() -> Dict[str, Any]:
     }
 
 
-#: The host CLI each ``install`` target is driven through.
-_HOST_CLI = {"dsh": "dsh", "claude-code": "claude", "codex": "codex", "opencode": "opencode"}
-
-
 def _host_integrations(clis: Dict[str, Any]):
     """Per-host install state for :func:`doctor_report`, plus the hints.
 
@@ -255,11 +251,11 @@ def _host_integrations(clis: Dict[str, Any]):
     host on the machine touched, so the exit code stays about what is broken.
     A stale or half-written integration is a problem, because it is installed
     and teaching the host a procedure the package no longer has."""
-    from .integrations import host_status
+    from .integrations import HOST_CLI, host_status
 
     hosts: Dict[str, Dict[str, Any]] = {}
     hints: List[str] = []
-    for name, binary in _HOST_CLI.items():
+    for name, binary in HOST_CLI.items():
         try:
             info: Dict[str, Any] = dict(host_status(name))
         except Exception:  # noqa: BLE001 - reading a config must never fail doctor
@@ -267,8 +263,10 @@ def _host_integrations(clis: Dict[str, Any]):
         info["cli"] = clis.get(binary)
         hosts[name] = info
         if info["cli"] and info["state"] == "missing":
-            extra = (" (or `codex plugin add agentdescent@agentdescent`)"
-                     if name == "codex" else "")
+            # Installed through the host's own marketplace leaves no files here.
+            extra = {"codex": " (or `codex plugin add agentdescent@agentdescent`)",
+                     "claude-code": " (or `/plugin install agentdescent@agentdescent`)",
+                     }.get(name, "")
             hints.append(f"{binary} is on PATH but agentdescent is not wired into it: "
                          f"`agentdescent install {name}`{extra}")
     return hosts, hints

@@ -59,9 +59,14 @@ now -- what a `pip install -U` leaves behind -- and `partial` means the skill or
 the MCP entry is absent; both are problems (exit code 1) and the fix is to re-run
 `agentdescent install <host>`. A host CLI on `PATH` with nothing installed is a
 hint, not a problem, because `pip install` wires nothing and not every host on a
-machine should be touched. An `opencode.jsonc` with comments reports its MCP entry
-as `unknown` rather than guessing, and Codex wired through `codex plugin` leaves
-no files here, so its `missing` is not final.
+machine should be touched. An OpenCode config with comments (`opencode.jsonc`, or an
+`opencode.json` you keep by hand) that cannot be parsed reports its MCP entry as
+`unknown` rather than guessing; `unknown` alone never makes a host `partial`, so
+a user who never installed anything is `missing`. An install made through a
+host's own marketplace (`codex plugin add`, Claude Code's `/plugin install`)
+leaves no files here, so it reads `missing` and the hint names that route too.
+Only presence is checked: a launcher pinned to an interpreter that has since
+been deleted still reads `ok`.
 
 ### Codex: the same plugin as Claude Code
 
