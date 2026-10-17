@@ -386,8 +386,31 @@ def test_no_source_at_all_is_stale_not_a_free_pass():
 
 
 def test_inflate_below_one_is_refused():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="inflate_when_stale"):
         RectifiedAcceptance(_inner(), inflate_when_stale=0.5)
+
+
+@pytest.mark.parametrize("bad", [
+    float("nan"), float("inf"), float("-inf"), "2", True, None, -1.0, 0.0,
+])
+def test_non_finite_or_non_real_inflate_when_stale_is_refused(bad):
+    """NaN/inf used to construct and poison var_after; strings/bools too (#332)."""
+    with pytest.raises(ValueError, match="inflate_when_stale"):
+        RectifiedAcceptance(_inner(), inflate_when_stale=bad)
+
+
+@pytest.mark.parametrize("ok", [1.0, 2.0, STALE_INFLATION])
+def test_finite_inflate_when_stale_at_or_above_one_still_works(ok):
+    gate = RectifiedAcceptance(_inner(), inflate_when_stale=ok,
+                               rectification=Rectification.stale("v1", "no"))
+    assert gate.inflate_when_stale == float(ok)
+    adj = gate.explain(_ctx())
+    # 1.0 is the documented pass-through (not marked stale); >1.0 widens.
+    assert math.isfinite(adj.var_after)
+    if ok > 1.0:
+        assert adj.stale
+    else:
+        assert not adj.stale and "pass-through" in adj.reason
 
 
 # -- attribution -------------------------------------------------------------
