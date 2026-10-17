@@ -200,3 +200,34 @@ def test_serve_without_the_sdk_says_how_to_get_it(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", fake)
     with pytest.raises(ImportError, match=r"agentdescent\[mcp\]"):
         m._server_class()
+
+
+def test_start_refuses_missing_agent_cli_without_creating_a_run(store, tmp_path, monkeypatch):
+    """MCP start must return ok:false before create when the CLI binary is gone (#346)."""
+    import agentdescent.cli as cli_mod
+
+    real = cli_mod.doctor_report
+
+    def fake():
+        rep = real()
+        clis = dict(rep["agent_clis"])
+        for name in ("claude", "codex", "dsh", "opencode"):
+            clis[name] = None
+        return {**rep, "agent_clis": clis}
+
+    monkeypatch.setattr(cli_mod, "doctor_report", fake)
+
+    t = Tools(store)
+    spec = _dir_spec(str(tmp_path)).to_dict()
+    spec["agent"] = {"ref": "claude_code"}
+    before = set(os.listdir(store)) if os.path.isdir(store) else set()
+    out = t.start(spec)
+    assert out["ok"] is False
+    assert "claude_code" in out["error"] and "claude" in out["error"]
+    assert "run_id" not in out
+    after = set(os.listdir(store)) if os.path.isdir(store) else set()
+    assert after == before
+
+    plan = t.plan(spec)
+    assert plan["ok"] is False
+    assert "claude" in plan["error"]

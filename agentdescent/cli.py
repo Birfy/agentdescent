@@ -314,6 +314,63 @@ _CLI_ENV_USELESS = {
               "api.openai.com unauthenticated"),
 }
 
+#: Short ref -> binary on PATH. Missing binary is a hard plan/start error (#346);
+#: isolation/login when the binary *is* present stays a soft warning.
+_CLI_BINARIES = {
+    "claude_code": "claude",
+    "codex": "codex",
+    "dsh": "dsh",
+    "opencode": "opencode",
+}
+
+
+def _missing_cli_messages(spec: EvolveSpec) -> List[str]:
+    """Hard-fail messages when a named CLI agent binary is absent from PATH.
+
+    ``plan`` exists so a host does not start a doomed run; soft ``warnings`` were
+    easy for MCP hosts to ignore while ``ok`` stayed true (#346).
+    """
+    report = doctor_report()
+    clis = report["agent_clis"]
+    present = [b for b in ("claude", "codex", "dsh", "opencode") if clis.get(b)]
+    out: List[str] = []
+    for field in ("agent", "reflect"):
+        block = getattr(spec, field, None)
+        if isinstance(block, dict):
+            ref = block.get("ref")
+        elif isinstance(block, str):
+            ref = block
+        else:
+            ref = None
+        if not ref or ref not in _CLI_BINARIES:
+            continue
+        binary = _CLI_BINARIES[ref]
+        if clis.get(binary):
+            continue
+        if present:
+            # Map binary -> short ref for the switch hint.
+            bin_to_ref = {v: k for k, v in _CLI_BINARIES.items()}
+            alts = ", ".join(f"`{bin_to_ref[b]}`" for b in present)
+            remedy = (f"install `{binary}`, or switch `{field}.ref` to a CLI that "
+                      f"is on PATH ({alts}), or use a non-CLI agent "
+                      f"(e.g. `openai_compatible`); see `agentdescent doctor`")
+        else:
+            remedy = (f"install `{binary}`, or set `{field}.ref` to a non-CLI agent "
+                      f"(e.g. `openai_compatible`); see `agentdescent doctor`")
+        out.append(f"{field}: `{ref}` needs `{binary}` on PATH; {remedy}")
+    return out
+
+
+def require_cli_on_path(spec: EvolveSpec) -> None:
+    """Refuse evolve/MCP start when a CLI agent binary is missing (#346).
+
+    Shared with :func:`plan_payload` so plan and start fail closed the same way,
+    before ``runstore.create`` / ``launch``.
+    """
+    msgs = _missing_cli_messages(spec)
+    if msgs:
+        raise SpecError("; ".join(msgs))
+
 
 def _unusable_refs(spec: EvolveSpec) -> List[str]:
     """Warnings for agents this machine cannot actually run.
@@ -329,7 +386,12 @@ def _unusable_refs(spec: EvolveSpec) -> List[str]:
     out: List[str] = []
     for field in ("agent", "reflect"):
         block = getattr(spec, field, None)
-        ref = (block or {}).get("ref") if isinstance(block, dict) else None
+        if isinstance(block, dict):
+            ref = block.get("ref")
+        elif isinstance(block, str):
+            ref = block
+        else:
+            ref = None
         if not ref:
             continue
         if ref == "host_model":
@@ -357,11 +419,12 @@ def _unusable_refs(spec: EvolveSpec) -> List[str]:
                            f"CLI is `claude_code`) and needs {' and '.join(missing)}")
         elif ref == "openai_compatible" and not keys.get("OPENAI_API_KEY"):
             out.append(f"{field}: `openai_compatible` needs OPENAI_API_KEY")
-        elif ref in ("claude_code", "codex", "dsh", "opencode"):
-            binary = {"claude_code": "claude"}.get(ref, ref)
-            if not clis.get(binary):
-                out.append(f"{field}: `{ref}` needs `{binary}` on PATH")
-            elif block.get("isolate") is not False and not keys.get(
+        elif ref in _CLI_BINARIES:
+            binary = _CLI_BINARIES[ref]
+            # Missing binary is a hard error via _missing_cli_messages / plan ok
+            # and require_cli_on_path (#346); only soft-warn about isolation here.
+            isolate = block.get("isolate") if isinstance(block, dict) else None
+            if clis.get(binary) and isolate is not False and not keys.get(
                     _CLI_ENV_FALLBACK.get(ref, ""), False):
                 # The trap that ate a 60-round run: `codex` was on PATH, so
                 # nothing complained, but a worker runs with the host's config
@@ -430,8 +493,16 @@ def plan_payload(spec: EvolveSpec, *, usd_per_call: Optional[float] = None) -> D
     n_tasks = len(comp.tasks)
     # Fail closed here: plan exists to catch what evolve would raise, before a
     # background run is started. Soft "8-20" notes stay for 4 <= n < 8 (#343).
+    # Missing CLI binaries are hard errors, not warnings (#346).
     too_few = n_tasks < _MIN_TASKS_FOR_SPLIT
-    payload = {"ok": not too_few, "spec": spec.to_dict(), "tasks": n_tasks,
+    hard_errors: List[str] = []
+    if too_few:
+        hard_errors.append(
+            f"{_MIN_TASKS_MSG} (plan saw {n_tasks}; add cases until you have at "
+            f"least {_MIN_TASKS_FOR_SPLIT}, then re-run plan)"
+        )
+    hard_errors.extend(_missing_cli_messages(spec))
+    payload = {"ok": not hard_errors, "spec": spec.to_dict(), "tasks": n_tasks,
             "warnings": warnings,
             "artifact_id": spec.artifact_id(),
             **({"audit": audit} if audit else {}),
@@ -439,11 +510,8 @@ def plan_payload(spec: EvolveSpec, *, usd_per_call: Optional[float] = None) -> D
                                   else type(v).__name__)
                               for k, v in comp.kwargs.items()},
             "estimate": estimate(comp, usd_per_call=usd_per_call), "notes": comp.notes}
-    if too_few:
-        payload["error"] = (
-            f"{_MIN_TASKS_MSG} (plan saw {n_tasks}; add cases until you have at "
-            f"least {_MIN_TASKS_FOR_SPLIT}, then re-run plan)"
-        )
+    if hard_errors:
+        payload["error"] = "; ".join(hard_errors)
     return payload
 
 
@@ -479,6 +547,8 @@ def cmd_evolve(a: argparse.Namespace) -> int:
     # Before create/launch: a missing --usd-per-call must not leave an orphan run
     # whose status later reads as "process ended without reporting" (#342).
     runstore.require_budget_pair(a.budget, a.usd_per_call)
+    # Same gate as plan / MCP start: missing CLI binary must not report started (#346).
+    require_cli_on_path(spec)
     _warn_unusable(spec)
     rd = runstore.create(spec.to_dict(), store=a.store)
     if a.detach:
