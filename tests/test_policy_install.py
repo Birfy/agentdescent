@@ -181,3 +181,69 @@ def test_a_policy_without_hooks_is_left_alone():
             return list(cards), 0
 
     install_policy(Bare(), _verifier(), AggregatorConfig())     # no error, no effect
+
+
+# -- the merge step is visible on status while a policy runs (#380) -----------
+
+
+def _phase_seen_by_conflict_policy(**evolve_kw):
+    from agentdescent import Usage
+
+    usage = Usage()
+    seen = []
+
+    class Watching(AdvantageConflict):
+        def resolve(self, artifact, cards):
+            seen.append((usage.phase, usage.pending))
+            return super().resolve(artifact, cards)
+
+    r = _contradicting_run(policies=Policies(conflict=Watching()), usage=usage,
+                           **evolve_kw)
+    assert r.error is None
+    assert seen, "the run never produced a contradiction to resolve"
+    return seen, usage
+
+
+def test_status_reports_phase_merge_while_a_conflict_policy_runs():
+    """A reflective merge is a policy call inside the merge step, so a host
+    polling `status` saw `calls` stand still with nothing in flight."""
+    seen, usage = _phase_seen_by_conflict_policy()
+    assert {ph for ph, _ in seen} == {"merge"}
+    assert all(pending >= 1 for _, pending in seen)
+    assert usage.pending == 0 and usage.phase is None
+
+
+def test_status_reports_phase_merge_on_the_barrier_free_path_too():
+    """The merger thread of `async_evolve` takes the same timed gate."""
+    from agentdescent import AppendRules, Usage
+    from agentdescent.async_evolve import async_evolve
+
+    class Composer:
+        def solve(self, rendered, task):
+            return "yes" if task.meta["hint"] in rendered else "no"
+
+        def propose(self, rendered, task, output, reward):
+            return task.meta["hint"]
+
+    usage = Usage()
+    seen = []
+
+    class Watching(AdvantageAcceptance):
+        def accept(self, ctx):
+            seen.append((usage.phase, usage.pending))
+            return super().accept(ctx)
+
+    tasks = [Task(id=f"t{i}", prompt=f"q{i}", meta={"hint": f"H{i % 3}"})
+             for i in range(18)]
+    r = async_evolve(tasks, lambda t, o: 1.0 if o.strip() == "yes" else 0.0,
+                     agent=Composer(), strategy=AppendRules(), n_workers=4,
+                     async_ratio=3, max_seconds=8.0, target_reward=1.0,
+                     held_out_frac=0.5, usage=usage,
+                     policies=Policies(acceptance=Watching()))
+    assert r.error is None
+    assert seen, "the run never reached the acceptance rule"
+    # Workers keep running here, and `phase` names the most recently begun call
+    # still in flight, so a worker that starts mid-merge can mask it: demand
+    # that the merge is *seen*, not that nothing else ever is.
+    assert "merge" in {ph for ph, _ in seen}
+    assert usage.pending == 0 and usage.phase is None

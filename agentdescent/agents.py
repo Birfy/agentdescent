@@ -95,7 +95,8 @@ class Usage:
 
     @property
     def pending(self) -> int:
-        """Actor invocations started by :meth:`begin` and not yet ended.
+        """Work started by :meth:`begin` and not yet ended: actor invocations
+        and, since #380, the merge step (``phase="merge"``).
 
         Visible on run ``status`` so a multi-minute first ``propose`` does not
         look like a hung process at ``calls=0``."""

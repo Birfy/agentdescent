@@ -69,7 +69,8 @@ class MeterSnapshot:
     calls: int = 0
     #: Actor invocations started but not yet finished (see ``Usage.pending``).
     pending_calls: int = 0
-    #: Live phase label while ``pending_calls`` is non-zero (``propose`` / ``run``).
+    #: Live phase label while ``pending_calls`` is non-zero (``propose`` / ``run`` /
+    #: ``merge``).
     phase: Optional[str] = None
     prompt_tokens: int = 0
     completion_tokens: int = 0
@@ -98,6 +99,11 @@ class MeterSnapshot:
     sandbox_failures: int = 0
     env_mismatch: int = 0
 
+
+#: Timed counters whose block is also live status, by the phase label ``status``
+#: reports while it runs. Only the merge gate: the other timers either wrap
+#: actor calls that already carry their own phase or are too short to matter.
+_LIVE_PHASES = {"merge_gate_seconds": "merge"}
 
 #: Every counter `add` accepts. Spelled out rather than derived from `__dict__`
 #: so a typo raises instead of quietly creating a field nothing ever reads --
@@ -284,6 +290,13 @@ class Meter:
     def timed(self, counter: str) -> Iterator[None]:
         """Add the wall-clock of a block to ``counter``, exception or not.
 
+        A counter listed in :data:`_LIVE_PHASES` also marks the block as work in
+        flight, so ``status`` reads ``pending=1 phase=merge`` while it runs. The
+        merge step is not an actor call (nothing in it goes through
+        :func:`measured`), yet it can block on a model for minutes -- reflective
+        fusion is one blocking completion -- and without the marker a host
+        polling ``status`` sees a run that has stopped moving (#380).
+
         The alternative is `t0 = time.time()` / `try` / `finally` at every site,
         and the phase counters have enough sites -- three inside one merger sweep
         -- that the version which forgets the `finally` gets written eventually.
@@ -294,11 +307,15 @@ class Meter:
         if counter not in _COUNTERS:      # fail here, not after the block has run
             raise KeyError(
                 f"unknown meter counter {counter!r}; known: {', '.join(sorted(_COUNTERS))}")
+        phase = _LIVE_PHASES.get(counter)
+        token = self.usage.begin(phase=phase) if phase else None
         t0 = time.time()
         try:
             yield
         finally:
             self.add(counter, time.time() - t0)
+            if token is not None:
+                self.usage.end(token)
 
     # -- reading ---------------------------------------------------------------
 

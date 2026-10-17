@@ -400,3 +400,34 @@ def test_roundinfo_defaults_keep_positional_construction_working():
     """Existing callers build RoundInfo positionally; the new fields are last."""
     info = RoundInfo(0, 0.5, 3, 1, 2, {"committed": 1})
     assert (info.elapsed_s, info.rollouts) == (0.0, 0)
+
+
+# -- the merge step is live status too (#380) ---------------------------------
+
+
+def test_timed_merge_gate_is_in_flight_as_phase_merge():
+    """The merge step is not an actor call, but it can block on a model for
+    minutes (reflective fusion); `status` must not read idle meanwhile."""
+    m = Meter()
+    seen = {}
+    with m.timed("merge_gate_seconds"):
+        snap = m.snapshot()
+        seen["pending"], seen["phase"] = snap.pending_calls, snap.phase
+    assert seen == {"pending": 1, "phase": "merge"}
+    assert m.usage.pending == 0 and m.usage.phase is None
+    assert m.usage.calls == 0, "a merge is not a model call"
+    assert m.snapshot().merge_gate_seconds > 0
+
+
+def test_timed_merge_gate_clears_the_phase_when_the_block_raises():
+    m = Meter()
+    with pytest.raises(RuntimeError):
+        with m.timed("merge_gate_seconds"):
+            raise RuntimeError("nope")
+    assert m.usage.pending == 0 and m.usage.phase is None
+
+
+def test_other_timers_are_not_live_status():
+    m = Meter()
+    with m.timed("merge_seconds"):
+        assert m.usage.pending == 0 and m.usage.phase is None
