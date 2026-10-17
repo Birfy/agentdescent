@@ -219,6 +219,9 @@ def _child_env(ws: str, extra: Optional[Mapping[str, str]]) -> Dict[str, str]:
     # be able to read ~/.claude or ~/.aws just because it can read files.
     env["HOME"] = ws
     env["TMPDIR"] = ws
+    # The child's cwd is `ws`; `$PWD` must agree, or a CLI that reads it (OpenCode)
+    # works in the caller's directory instead.
+    env["PWD"] = os.path.abspath(ws)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     if extra:
         env.update(extra)
