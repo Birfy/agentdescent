@@ -173,6 +173,28 @@ def test_a_plain_completion_cannot_evolve_a_directory(tmp_path):
         compose(spec)
 
 
+@pytest.mark.parametrize("ref", ["claude_code", "codex", "dsh", "opencode", "cli_agent"])
+def test_text_refuses_a_workspace_agent(ref):
+    """kind=text + CLI WorkspaceAgent must fail closed at compose (#340)."""
+    agent = {"ref": "cli_agent", "command": [sys.executable, "-c", "print(1)"]} if ref == "cli_agent" else ref
+    spec = EvolveSpec(
+        kind="text", target="Be helpful.",
+        data={"inline": [{"prompt": "q", "gold": "a"}] * 6},
+        agent=agent)
+    with pytest.raises(SpecError, match=r"agent:.*kind='text'.*WorkspaceAgent"):
+        compose(spec)
+
+
+def test_text_still_composes_with_a_plain_completion():
+    """openai_compatible / echo / plain Completion stay valid for kind=text (#340)."""
+    spec = EvolveSpec(
+        kind="text", target="Be helpful.",
+        data={"inline": [{"prompt": "q", "gold": "a"}] * 6},
+        agent="echo")
+    comp = compose(spec)
+    assert isinstance(comp.kwargs["strategy"], SingleSlot)
+
+
 def test_text_template_must_carry_both_slots():
     spec = EvolveSpec(kind="text", target="x", data={"inline": [{"prompt": "q", "gold": "a"}]},
                       agent="echo", template="{skill}")
