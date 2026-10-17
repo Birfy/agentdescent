@@ -372,6 +372,7 @@ def test_the_exec_prefix_sets_pwd_to_the_container_workdir(engine):
     assert sorted(p.split("=", 1)[0] for p in pairs) == ["HOME", "PWD", "TMPDIR"]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="the fake engine is a POSIX shebang script")
 def test_sh_passes_the_container_pwd_through_the_engine_cli(tmp_path):
     """Through `runners._sh`, the path `code_runner` uses: the engine CLI gets
     `PWD=/work` on its argv and the host's own environment, not the trimmed
