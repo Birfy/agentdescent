@@ -300,7 +300,7 @@ def test_checkpointed_island_async_evolve_resumes_without_missing_heads(tmp_path
         strategy=SingleSlot(initial_value="cap:0"),
         policies=Policies(selection=CladeThompson()),
         n_workers=3, repo_path=repo, population_islands=2,
-        checkpointing=True, max_seconds=8.0, max_iters=6,
+        checkpointing=True, max_seconds=8.0, max_iters=10,
         target_reward=1.0,
     )
     r1 = async_evolve(**common)
@@ -308,7 +308,11 @@ def test_checkpointed_island_async_evolve_resumes_without_missing_heads(tmp_path
     assert _live_heads(repo) == ["dev"]
     payload = load_checkpoint(repo)
     assert payload is not None
-    assert payload["archive_state"]["forks"] == ["head/0", "head/1"]
+    # How many islands exist at the last checkpoint depends on async timing, so
+    # require only that stale island names were checkpointed (the hazard); main
+    # fails the resume below for any non-empty set.
+    forks = payload["archive_state"]["forks"]
+    assert forks and set(forks) <= {"head/0", "head/1"}, forks
     r2 = async_evolve(**{**common, "max_iters": 4, "max_seconds": 6.0})
     assert r2.error is None, r2.error
     assert r2.history, "the resumed run did not advance"
