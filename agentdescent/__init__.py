@@ -323,6 +323,17 @@ __all__ = [
     "AggregatorContractError",
     "PopulationAggregator",
     "population_factory",
+    # cross-run consolidation (#334 / #341)
+    "ConsolidationStore",
+    "ConsolidationRecord",
+    "SeedReport",
+    "config_fingerprint",
+    "seed_from_archive",
+    # solver-challenger self-play (#329 / #341)
+    "Challenger",
+    "ChallengerConfig",
+    "FrontierSampler",
+    "curriculum_evolve",
     "diffs_conflict",
     "diffs_contradict",
     "fuse_diffs",

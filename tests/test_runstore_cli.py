@@ -474,15 +474,16 @@ def test_applying_a_text_target_twice_keeps_both_backups(store, tmp_path):
     whole promise is that it keeps one. The directory path has always numbered
     them; this is that, for a file.
     """
-    from tests.test_evolvespec import _agent_ref, _rows_file
+    from tests.test_evolvespec import _rows_file
 
     target = tmp_path / "prompt.txt"
     target.write_text("original\n", encoding="utf-8")
+    # kind=text needs a plain Completion, not a WorkspaceAgent (#340)
     spec = {"kind": "text", "target": str(target),
             "data": {"path": _rows_file(str(tmp_path)), "prompt": "prompt", "gold": "gold"},
-            "score": "contains", "agent": _agent_ref(),
-            "reflect": {"ref": "tests.test_evolvespec:stub_reflect", "call": False},
-            "allow": ["tests."], "prompt_template": "{prompt}",
+            "score": "contains", "agent": "echo",
+            "reflect": {"ref": "tests.test_evolvespec:text_reflect", "call": False},
+            "allow": ["tests."],
             "evolve": {"rounds": 1, "n_workers": 1, "seed": 0}}
     path = tmp_path / "text-spec.json"
     path.write_text(json.dumps(spec))
@@ -679,6 +680,8 @@ def test_launch_refuses_budget_without_usd_per_call(store, tmp_path):
 
 # ---------------------------------------------------------------------------
 # missing CLI binary → plan/evolve fail closed (#346)
+# kind=text + CLI WorkspaceAgent is refused at compose (#340); PATH checks use
+# skill_dir so the missing-binary gate stays covered for directory kinds.
 # ---------------------------------------------------------------------------
 
 
@@ -703,6 +706,14 @@ def _fake_doctor_clis(monkeypatch, *, present=(), absent=None):
     monkeypatch.setattr(cli_mod, "doctor_report", fake)
 
 
+def _dir_spec_with_cli_agent(tmp_path, agent, *, sub="cli"):
+    """skill_dir + named CLI agent — compose succeeds; PATH gate can fire (#346)."""
+    root = tmp_path / sub
+    root.mkdir(exist_ok=True)
+    return _dir_spec(str(root), agent=agent, reflect="echo",
+                     evolve={"rounds": 1, "n_workers": 1, "seed": 0})
+
+
 def _text_spec_with_agent(tmp_path, agent, n_tasks=8):
     from agentdescent.evolvespec import EvolveSpec
 
@@ -725,7 +736,7 @@ def test_plan_rejects_missing_agent_cli(tmp_path, monkeypatch):
     from agentdescent.evolvespec import SpecError
 
     _fake_doctor_clis(monkeypatch, present=(), absent=("claude", "codex", "dsh", "opencode"))
-    spec = _text_spec_with_agent(tmp_path, {"ref": "claude_code"})
+    spec = _dir_spec_with_cli_agent(tmp_path, {"ref": "claude_code"})
     payload = plan_payload(spec)
     assert payload["ok"] is False
     err = payload["error"]
@@ -738,7 +749,7 @@ def test_plan_rejects_missing_agent_cli(tmp_path, monkeypatch):
         require_cli_on_path(spec)
 
     # string short name is checked the same way
-    spec_str = _text_spec_with_agent(tmp_path, "codex")
+    spec_str = _dir_spec_with_cli_agent(tmp_path, "codex", sub="cli-codex")
     payload2 = plan_payload(spec_str)
     assert payload2["ok"] is False and "codex" in payload2["error"]
 
@@ -748,13 +759,13 @@ def test_plan_ok_when_named_cli_is_on_path(tmp_path, monkeypatch):
                       absent=("codex", "dsh", "opencode"))
     from agentdescent.cli import plan_payload, require_cli_on_path
 
-    spec = _text_spec_with_agent(tmp_path, {"ref": "claude_code", "isolate": False})
+    spec = _dir_spec_with_cli_agent(tmp_path, {"ref": "claude_code", "isolate": False})
     payload = plan_payload(spec)
     assert payload["ok"] is True
     assert "error" not in payload
     require_cli_on_path(spec)  # does not raise
 
-    # non-CLI agents stay ok regardless of CLI PATH
+    # non-CLI agents stay ok regardless of CLI PATH (kind=text + echo)
     _fake_doctor_clis(monkeypatch, present=(), absent=("claude", "codex", "dsh", "opencode"))
     echo_spec = _text_spec_with_agent(tmp_path, "echo")
     assert plan_payload(echo_spec)["ok"] is True
@@ -766,14 +777,14 @@ def test_plan_suggests_present_cli_when_default_missing(tmp_path, monkeypatch):
                       absent=("claude", "codex", "dsh"))
     from agentdescent.cli import plan_payload
 
-    payload = plan_payload(_text_spec_with_agent(tmp_path, {"ref": "claude_code"}))
+    payload = plan_payload(_dir_spec_with_cli_agent(tmp_path, {"ref": "claude_code"}))
     assert payload["ok"] is False
     assert "`opencode`" in payload["error"]
 
 
 def test_evolve_refuses_missing_cli_without_creating_a_run(store, tmp_path, monkeypatch):
     _fake_doctor_clis(monkeypatch, present=(), absent=("claude", "codex", "dsh", "opencode"))
-    spec = _text_spec_with_agent(tmp_path, {"ref": "claude_code"})
+    spec = _dir_spec_with_cli_agent(tmp_path, {"ref": "claude_code"})
     path = tmp_path / "missing-cli-spec.json"
     path.write_text(json.dumps(spec.to_dict()))
     before = set(os.listdir(store)) if os.path.isdir(store) else set()
@@ -786,3 +797,24 @@ def test_evolve_refuses_missing_cli_without_creating_a_run(store, tmp_path, monk
     assert "claude" in err.getvalue() and "on PATH" in err.getvalue()
     after = set(os.listdir(store)) if os.path.isdir(store) else set()
     assert after == before
+
+
+def test_plan_rejects_text_with_cli_workspace_agent(tmp_path, monkeypatch):
+    """kind=text + claude_code fails at compose even when the CLI is on PATH (#340)."""
+    from agentdescent.evolvespec import SpecError, compose
+
+    _fake_doctor_clis(monkeypatch, present=("claude", "codex", "dsh", "opencode"))
+    spec = _text_spec_with_agent(tmp_path, {"ref": "claude_code", "isolate": False})
+    with pytest.raises(SpecError, match=r"agent:.*kind='text'.*WorkspaceAgent"):
+        compose(spec)
+    # cmd_plan / MCP plan catch SpecError → ok: false (plan_payload raises)
+    import io
+    from contextlib import redirect_stdout
+    path = tmp_path / "text-cli-spec.json"
+    path.write_text(json.dumps(spec.to_dict()))
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        code = cli.main(["--json", "plan", str(path)])
+    assert code == 2
+    out = json.loads(buf.getvalue())
+    assert out["ok"] is False and "WorkspaceAgent" in out["error"] and "agent" in out["error"]

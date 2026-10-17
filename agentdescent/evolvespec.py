@@ -843,6 +843,19 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
     tree: Optional[Dict[str, str]] = None
 
     if spec.kind == "text":
+        # Mirror of the skill_dir / agent_dir WorkspaceAgent *requirement*:
+        # kind=text is a one-shot Completion per case. A CLI coding agent is also
+        # a Completion (WorkspaceAgent), so without this gate compose/plan would
+        # green-light claude_code / codex / dsh / opencode on a prompt and spend
+        # a whole agent session per case -- exactly what SKILL.md / #165 forbid
+        # (#340). Directory kinds keep needing WorkspaceAgent; this is the reverse.
+        if isinstance(agent, WorkspaceAgent):
+            raise SpecError(
+                "agent: kind='text' needs a plain Completion "
+                "(openai_compatible / host_model / claude), not a WorkspaceAgent "
+                f"({type(agent).__name__}); claude_code / codex / dsh / opencode / "
+                "cli_agent are file-editing agents and cost a whole agent session "
+                "per case")
         if "{skill}" not in spec.template or "{prompt}" not in spec.template:
             raise SpecError("template must contain {skill} and {prompt}")
         template = spec.template

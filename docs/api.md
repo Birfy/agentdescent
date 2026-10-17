@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-345 public names across 56 modules.
+354 public names across 58 modules.
 
 ---
 
@@ -2929,6 +2929,153 @@ population_factory(
     screen = None,
     island_count: int = 0
 )
+```
+
+---
+
+## Cross-run consolidation
+
+What a run learned survives it: archive, retrieve, mini-eval gate. &nbsp;·&nbsp; `agentdescent.consolidation` &nbsp;·&nbsp; [guide](consolidation.md)
+
+### `ConsolidationRecord(...)`
+
+One archived run: the artifact it produced, and the configuration that produced it.
+
+```python
+ConsolidationRecord(
+    run_id: str,
+    artifact_id: str,
+    strategy: str,
+    config: Dict[str, Any],
+    state: Dict[str, str],
+    rendered: str,
+    final_reward: float,
+    rounds: int,
+    trajectory_store: Optional[str] = None,
+    created_at: float = <factory>
+) -> None
+```
+
+### `ConsolidationStore(root: str) -> None`
+
+A durable archive of what runs learned.
+
+| method | what it does |
+|---|---|
+| `archive(...)` | Archive one run's product. Idempotent by `run_id` (atomic rewrite). |
+
+### `SeedReport(...)`
+
+What `seed_from_archive` decided, and why.
+
+```python
+SeedReport(
+    matched_run: Optional[str],
+    archived_reward: float,
+    seeded_score: float,
+    empty_score: float,
+    accepted: bool,
+    reason: str,
+    sample_n: int
+) -> None
+```
+
+### `config_fingerprint(config: Optional[Dict[str, Any]]) -> str`
+
+A stable id for the run configuration (dataset, scorer, model, params).
+
+### `seed_from_archive(...)`
+
+Retrieve a seed for a new run, gated by a mini-eval on its own tasks.
+
+```python
+seed_from_archive(
+    store: ConsolidationStore,
+    tasks: Sequence[Task],
+    run: Any,
+    reward: Any,
+    *,
+    strategy: Any,
+    artifact_id: str = 'artifact',
+    config: Optional[Dict[str, Any]] = None,
+    sample: int = 8,
+    min_reward: float = 0.0,
+    seed: int = 0
+) -> Tuple[Optional[Dict[str, str]], SeedReport]
+```
+
+---
+
+## Solver-challenger self-play
+
+The task distribution evolves too: challenger, frontier, curriculum. &nbsp;·&nbsp; `agentdescent.selfplay` &nbsp;·&nbsp; [guide](selfplay.md)
+
+### `Challenger(...)`
+
+The task-generation artifact's behavior: generate, validate, propose.
+
+```python
+Challenger(
+    generate: Callable[[str, int], Dict[str, Any]],
+    validate: Callable[[Dict[str, Any]], Task],
+    propose: Callable[[str, Dict[str, float]], str],
+    spec: str = '',
+    config: ChallengerConfig = <factory>
+) -> None
+```
+
+### `ChallengerConfig(...)`
+
+The challenger's dials: how much of the task budget goes to the frontier, what counts as learned or stuck, and how long a generator may keep trying.
+
+```python
+ChallengerConfig(
+    generated_per_round: int = 4,
+    frontier_share: float = 0.5,
+    before_gap: float = 0.05,
+    stuck_gap: float = 0.0,
+    max_attempts: int = 8,
+    r0_floor: float = 0.05,
+    max_generate_attempts: int = 20,
+    max_frontier_pool: int = 64
+) -> None
+```
+
+### `FrontierSampler(challenger: Challenger, *, seed: int = 0) -> None`
+
+A `TaskSampler` that mixes the fixed seed tasks with a growable frontier pool the challenger generates.
+
+| method | what it does |
+|---|---|
+| `count_invalid() -> None` | A validity gate refused a generated payload. |
+| `install(tasks: Sequence[Task]) -> None` | Add a freshly generated, validated frontier batch. |
+| `pick(keys: Sequence[str], r: int) -> Any` | A seed id (from the shard) or a frontier Task object. |
+| `record(task_id: str, score: float) -> None` | Learn one rollout's outcome. The engine calls this for every task, seed or frontier; only frontier ids are tracked. |
+| `sweep(solved_threshold: float) -> Dict[str, float]` | Close one solver round: judge every frontier task that was attempted, return the learnability report for the challenger. |
+
+### `curriculum_evolve(...)`
+
+Co-evolve the solver and its task distribution.
+
+```python
+curriculum_evolve(
+    seed_tasks: Sequence[Task],
+    reward: Reward,
+    *,
+    run: Run,
+    propose: Propose,
+    strategy: Strategy,
+    challenger: Challenger,
+    rounds: int = 15,
+    n_workers: int = 4,
+    held_out_frac: float = 0.4,
+    repo_path: Optional[str] = None,
+    seed: int = 0,
+    max_concurrency: int = 1,
+    solved_threshold: float = 0.999,
+    verbose: bool = False,
+    **evolve_kwargs: Any
+) -> EvolutionResult
 ```
 
 ---
