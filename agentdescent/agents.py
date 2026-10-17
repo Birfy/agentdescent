@@ -337,8 +337,13 @@ class _CliAgent:
                 if env.get(key, "").startswith(self.workspace):
                     os.makedirs(env[key], exist_ok=True)
         try:
+            # A worker that takes its prompt as an argument must not read the
+            # caller's stdin: `opencode run "<prompt>"` waits on an inherited
+            # pipe that never reaches EOF and burns the whole timeout. So stdin
+            # is the prompt (`via_stdin`) or nothing at all, never the caller's.
+            stdin = {"input": prompt} if self.via_stdin else {"stdin": subprocess.DEVNULL}
             proc = subprocess.run(
-                argv, input=prompt if self.via_stdin else None,
+                argv, **stdin,
                 capture_output=True, text=True, timeout=self.timeout,
                 cwd=self.workspace, env=env,
             )
