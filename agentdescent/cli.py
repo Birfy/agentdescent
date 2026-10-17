@@ -325,6 +325,13 @@ def cmd_init(a: argparse.Namespace) -> int:
     elif a.agent is None and spec["kind"] not in ("text", "policy_slot"):
         print(f"agent: `{agent}` (the worker CLI found on PATH; "
               "override with `--agent <ref>`)")
+    host = spec.get("host") if spec["kind"] == "plugin" else None
+    if host in _CLI_BINARIES and not doctor_report()["agent_clis"].get(_CLI_BINARIES[host]):
+        # The plugin's format fixes its host; the worker found on PATH does
+        # not run it, so say so here rather than only at `plan` (#368).
+        print(f"warning: this plugin's host `{host}` needs `{_CLI_BINARIES[host]}` "
+              f"on PATH to load it and run rollouts, and it is not there; "
+              f"`plan` will refuse until it is installed")
     if spec["kind"] == "policy_slot":
         problems = spec["data"]["problems"]
         print(f"next: provide {problems} -- a zero-argument builder "
@@ -369,15 +376,22 @@ _CLI_BINARIES = {
 
 
 def _missing_cli_messages(spec: EvolveSpec) -> List[str]:
-    """Hard-fail messages when a named CLI agent binary is absent from PATH.
+    """Hard-fail messages when a CLI the run will execute is absent from PATH.
 
     ``plan`` exists so a host does not start a doomed run; soft ``warnings`` were
     easy for MCP hosts to ignore while ``ok`` stayed true (#346).
+
+    Checks every role separately: ``agent`` and ``reflect``, and for
+    ``kind="plugin"`` the ``host`` CLI that actually loads the plugin and runs
+    each rollout (``plugin_runner(spec.host)``). An installed agent must not
+    make an absent host pass (#368). Spec-driven runs execute the host on this
+    machine's PATH, so that is the context checked here.
     """
     report = doctor_report()
     clis = report["agent_clis"]
     present = [b for b in ("claude", "codex", "dsh", "opencode") if clis.get(b)]
-    out: List[str] = []
+    bin_to_ref = {v: k for k, v in _CLI_BINARIES.items()}
+    roles: List[Tuple[str, Optional[str]]] = []
     for field in ("agent", "reflect"):
         block = getattr(spec, field, None)
         if isinstance(block, dict):
@@ -386,14 +400,27 @@ def _missing_cli_messages(spec: EvolveSpec) -> List[str]:
             ref = block
         else:
             ref = None
+        roles.append((field, ref))
+    if spec.kind == "plugin":
+        roles.append(("host", spec.host))
+    out: List[str] = []
+    for field, ref in roles:
         if not ref or ref not in _CLI_BINARIES:
             continue
         binary = _CLI_BINARIES[ref]
         if clis.get(binary):
             continue
+        if field == "host":
+            # The host is fixed by the plugin's format (a `.claude-plugin/`
+            # tree is a Claude Code plugin); switching it to whatever CLI is
+            # installed would load the plugin into a host that cannot read it.
+            out.append(f"host: `{ref}` loads the plugin and runs every rollout, "
+                       f"and needs `{binary}` on PATH; install `{binary}` (the "
+                       f"host must match the plugin's format, so a different "
+                       f"`agent.ref` does not help); see `agentdescent doctor`")
+            continue
         if present:
             # Map binary -> short ref for the switch hint.
-            bin_to_ref = {v: k for k, v in _CLI_BINARIES.items()}
             alts = ", ".join(f"`{bin_to_ref[b]}`" for b in present)
             remedy = (f"install `{binary}`, or switch `{field}.ref` to a CLI that "
                       f"is on PATH ({alts}), or use a non-CLI agent "
@@ -406,7 +433,8 @@ def _missing_cli_messages(spec: EvolveSpec) -> List[str]:
 
 
 def require_cli_on_path(spec: EvolveSpec) -> None:
-    """Refuse evolve/MCP start when a CLI agent binary is missing (#346).
+    """Refuse evolve/MCP start when a CLI binary the run needs is missing
+    (#346; the plugin ``host`` too, #368).
 
     Shared with :func:`plan_payload` so plan and start fail closed the same way,
     before ``runstore.create`` / ``launch``.
