@@ -674,7 +674,7 @@ def test_a_provider_error_survives_to_the_user_whole():
     assert _describe(ValueError("boom")) == "ValueError: boom"
 
 
-def test_plan_says_when_workers_buy_selection_rather_than_merging(tmp_path):
+def test_plan_says_when_workers_buy_selection_rather_than_merging(tmp_path, monkeypatch):
     """The one case left where `n_workers` does not buy a merge.
 
     A one-key artifact -- every `kind: "text"` target is a `SingleSlot` -- has
@@ -682,15 +682,19 @@ def test_plan_says_when_workers_buy_selection_rather_than_merging(tmp_path):
     policy conflict resolution collapses them to one candidate and `n_workers`
     is per-round best-of-N. The reflective pair is the default now, built from
     the model the spec names, so the warning must stay quiet for an ordinary
-    spec and fire only where no model is reachable to merge with: a spec whose
-    only agent is a file-editing CLI, where paying an agent session per merge
-    is not something to switch on unasked.
+    spec and fire only where no model is reachable to merge with: a directory
+    kind whose only agent is a file-editing CLI (kind=text + CLI is refused at
+    compose — #340).
     """
     from agentdescent.cli import plan_payload
-    from agentdescent.evolvespec import EvolveSpec
+    from agentdescent.evolvespec import EvolveSpec, SpecError, compose
+    import agentdescent.cli as cli_mod
 
     cases = tmp_path / "cases.jsonl"
-    cases.write_text('{"prompt": "q", "gold": "a"}\n', encoding="utf-8")
+    # plan needs >=4 tasks (#343); selection warning is independent of that count
+    cases.write_text(
+        "\n".join(f'{{"prompt": "q{i}", "gold": "a{i}"}}' for i in range(8)) + "\n",
+        encoding="utf-8")
     target = tmp_path / "prompt.txt"
     target.write_text("hi\n", encoding="utf-8")
 
@@ -706,8 +710,38 @@ def test_plan_says_when_workers_buy_selection_rather_than_merging(tmp_path):
         "the merge pair is the default; there is nothing to warn about"
     assert not warnings_for(model, n_workers=1), \
         "one worker has nothing to say about merging either way"
-    assert warnings_for({"ref": "claude_code"}, n_workers=4), \
-        "no model to merge with, so four workers really are selection"
+
+    # kind=text + CLI WorkspaceAgent is SpecError (#340), not a soft warning
+    with pytest.raises(SpecError, match=r"agent:.*kind='text'.*WorkspaceAgent"):
+        compose(EvolveSpec.from_dict({
+            "kind": "text", "target": str(target),
+            "data": {"path": str(cases), "prompt": "prompt", "gold": "gold"},
+            "score": "contains", "agent": {"ref": "claude_code"},
+            "evolve": {"n_workers": 4}}))
+
+    # Directory kind + CLI only: still the soft selection warning (CLI present)
+    real = cli_mod.doctor_report
+    def fake_doctor():
+        rep = real()
+        clis = dict(rep["agent_clis"])
+        clis["claude"] = clis.get("claude") or "/fake/claude"
+        return {**rep, "agent_clis": clis}
+    monkeypatch.setattr(cli_mod, "doctor_report", fake_doctor)
+
+    skill = tmp_path / "shout-skill"
+    skill.mkdir()
+    (skill / "rules.md").write_text("MODE: forward\n", encoding="utf-8")
+    dir_spec = EvolveSpec.from_dict({
+        "kind": "skill_dir", "target": str(skill),
+        "data": {"path": str(cases), "prompt": "prompt", "gold": "gold"},
+        "score": "exact",
+        "agent": {"ref": "claude_code", "isolate": False},
+        "reflect": {"ref": "claude_code", "isolate": False},
+        "prompt_template": "{prompt}",
+        "evolve": {"n_workers": 4, "rounds": 1, "seed": 0},
+    })
+    warns = [w for w in plan_payload(dir_spec)["warnings"] if "best-of-N" in w]
+    assert warns, "no model to merge with, so four workers really are selection"
 
 
 def test_doctor_reports_the_base_url_not_just_that_one_is_set():
