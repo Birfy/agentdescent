@@ -236,6 +236,10 @@ worker therefore starts clean: it cannot read your plugins, your memory, your
 MCP servers — or your model choice and your subscription login, which live in
 those directories. That isolation is what makes a rollout reproducible, and it
 is what keeps a plugin evolving *itself* from reading the copy being rewritten.
+The worker's working directory **and** its `PWD` are the rollout workspace
+(`isolate: false` included): a CLI that resolves its project from `$PWD` rather
+than the real cwd, as OpenCode does, would otherwise run in the directory you
+launched `agentdescent` from.
 
 Two switches, both ordinary spec fields:
 

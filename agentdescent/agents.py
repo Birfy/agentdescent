@@ -289,17 +289,27 @@ def worker_env(workspace: Optional[str], extra: Optional[Mapping[str, str]] = No
 
     Starts from the caller's environment (a worker needs its provider keys and
     PATH), drops every :data:`SESSION_MARKERS` variable, marks the process as
-    nested, and -- when there is a workspace -- points each host's config
+    nested, and -- when there is a workspace -- sets ``PWD`` to it (the child's
+    ``cwd`` alone is not enough: some CLIs read ``$PWD``) and points each host's config
     directory *inside* it (``CLAUDE_CONFIG_DIR``, ``CODEX_HOME``, ``DSH_HOME``,
     ``OPENCODE_CONFIG_DIR``),
     so the worker starts clean and cannot read the user's real plugins, memory or
     MCP servers. ``extra`` wins over all of it. ``isolate=False`` keeps only the
-    nested marker, for callers who want the worker to see the user's setup.
+    nested marker and the ``PWD`` fix, for callers who want the worker to see
+    the user's setup.
     """
     env = {k: v for k, v in os.environ.items()
            if not (isolate and any(k == m.rstrip("_") or k.startswith(m)
                                    for m in SESSION_MARKERS))}
     env[NESTED_MARKER] = "1"
+    if workspace:
+        # `cwd=` moves the process, not `$PWD`, and a runtime that resolves its
+        # project directory from `$PWD` (OpenCode, on Bun) would otherwise keep
+        # working in the directory the *caller* was launched from -- reading
+        # its files, the gold labels among them, and never seeing the staged
+        # candidate. Both `isolate` values: this is about where the worker runs,
+        # not about whose config it reads.
+        env["PWD"] = os.path.abspath(workspace)
     if isolate and workspace:
         home = os.path.join(workspace, ".agentdescent-worker")
         for var, leaf in WORKER_CONFIG_DIRS.items():
