@@ -158,7 +158,7 @@ def test_adopt_and_reject_verdicts():
     report, _ = meta_run(
         {"a": helping, "b": helping}, {"v": helping}, slot="task_sampler",
         spec=slot, propose=_deterministic_propose, seeds=(0, 1),
-        val_seeds=(1, 2), rounds=1, n_workers=1)
+        val_seeds=(10, 11), rounds=1, n_workers=1)
     assert report.verdict == "adopt"
     assert report.mean_gain >= 0.0
 
@@ -166,7 +166,7 @@ def test_adopt_and_reject_verdicts():
     report2, _ = meta_run(
         {"a": helping, "b": helping}, {"v": harming}, slot="task_sampler",
         spec=slot, propose=_deterministic_propose, seeds=(0, 1),
-        val_seeds=(1, 2), rounds=1, n_workers=1)
+        val_seeds=(10, 11), rounds=1, n_workers=1)
     assert report2.verdict == "reject"
     assert "not above min_gain" in report2.reason or "below" in report2.reason
 
@@ -178,6 +178,110 @@ def test_transfer_ratio_contract():
     }
     assert transfer_ratio(report, "a", "b") == pytest.approx(0.5)
     assert transfer_ratio({"a": {"gain": 0.0}}, "a", "b") is None
+
+
+def test_transfer_detects_overfit_that_does_not_transfer():
+    """Positive val gain that fails to transfer must reject; genuine transfer adopts.
+
+    ``transfer`` is mean val gain / mean train gain. A buggy implementation that
+    sets ``transfer = mean_gain`` cannot satisfy both branches below: the
+    overfit case has ``mean_gain`` below the floor (so the bug would also
+    reject — caught by asserting ``transfer != mean_gain`` and the ratio),
+    and the transferring case has ``mean_gain`` below the floor while the
+    true ratio clears it (so the bug would reject an adopt).
+    """
+    from agentdescent.meta import MetaOutcome, _mean_gain, meta_validate
+
+    slot = _sampler_slot()
+    seed_text = slot.render(slot.initial())
+
+    def strong_train(value, seed):
+        # evolved beats seed by ~0.8 (not 1.0) so ratio != mean_gain
+        if getattr(value, "c", 0.2) > 0.2:
+            return MetaOutcome(curve=[0.9, 0.9], final=0.9)
+        return MetaOutcome(curve=[0.1, 0.1], final=0.1)
+
+    def weak_val(value, seed):
+        # positive but small val gain (~0.05) — classic overfit row
+        if getattr(value, "c", 0.2) > 0.2:
+            return MetaOutcome(curve=[0.15, 0.15], final=0.15)
+        return MetaOutcome(curve=[0.1, 0.1], final=0.1)
+
+    def matched_val(value, seed):
+        # val gain ~0.3; paired with modest_train (~0.3) so ratio ~1
+        if getattr(value, "c", 0.2) > 0.2:
+            return MetaOutcome(curve=[0.55, 0.55], final=0.55)
+        return MetaOutcome(curve=[0.25, 0.25], final=0.25)
+
+    def modest_train(value, seed):
+        if getattr(value, "c", 0.2) > 0.2:
+            return MetaOutcome(curve=[0.6, 0.6], final=0.6)
+        return MetaOutcome(curve=[0.3, 0.3], final=0.3)
+
+    # --- overfit: large train gain, small positive val gain ---------------
+    overfit, _ = meta_run(
+        {"a": strong_train, "b": strong_train}, {"v": weak_val},
+        slot="task_sampler", spec=slot, propose=_deterministic_propose,
+        seeds=(0, 1), val_seeds=(10, 11),
+        min_gain=0.0, transfer_floor=0.3, rounds=1, n_workers=1)
+    assert overfit.mean_gain > 0.0
+    assert overfit.transfer is not None
+    # recover the train gain the decision used
+    train_rows = meta_validate(
+        slot, seed_text, overfit.value, {"a": strong_train, "b": strong_train},
+        seeds=(0, 1))
+    train_gain = _mean_gain(train_rows)
+    assert train_gain > overfit.mean_gain > 0.0
+    assert overfit.transfer == pytest.approx(
+        overfit.mean_gain / train_gain, rel=1e-6)
+    assert overfit.transfer != overfit.mean_gain, (
+        "transfer must be a ratio vs train gain, not a duplicate of mean_gain")
+    assert overfit.transfer < 0.3
+    assert overfit.verdict == "reject"
+    assert "does not transfer" in overfit.reason or "transfer_floor" in overfit.reason
+
+    # --- transfers: ratio clears a floor that mean_gain alone would miss -
+    # train gain ~0.3, val gain ~0.3 → ratio ~1.0; floor=0.5.
+    # mean_gain (~0.3) < 0.5 so transfer==mean_gain would reject; true ratio
+    # adopts.
+    ok, _ = meta_run(
+        {"a": modest_train, "b": modest_train}, {"v": matched_val},
+        slot="task_sampler", spec=slot, propose=_deterministic_propose,
+        seeds=(0, 1), val_seeds=(10, 11),
+        min_gain=0.0, transfer_floor=0.5, rounds=1, n_workers=1)
+    assert ok.mean_gain > 0.0
+    assert ok.mean_gain < 0.5, (
+        "fixture must keep mean_gain below transfer_floor so a buggy "
+        "transfer==mean_gain would reject")
+    train_rows_ok = meta_validate(
+        slot, seed_text, ok.value, {"a": modest_train, "b": modest_train},
+        seeds=(0, 1))
+    train_gain_ok = _mean_gain(train_rows_ok)
+    assert ok.transfer == pytest.approx(ok.mean_gain / train_gain_ok, rel=1e-6)
+    assert ok.transfer >= 0.5
+    assert ok.verdict == "adopt"
+
+
+def test_meta_run_rejects_overlapping_val_set():
+    slot = _sampler_slot()
+    train = {"a": _inner_problem(_tasks(prefix="a"))}
+    with pytest.raises(ValueError, match="overlap training problems"):
+        meta_run(train, {"a": _inner_problem(_tasks(prefix="z"))},
+                 slot="task_sampler", spec=slot,
+                 propose=_deterministic_propose, seeds=(0,), val_seeds=(10,))
+    with pytest.raises(ValueError, match="overlap training seeds"):
+        meta_run(train, {"v": _inner_problem(_tasks(prefix="z"))},
+                 slot="task_sampler", spec=slot,
+                 propose=_deterministic_propose, seeds=(0, 1), val_seeds=(1, 2))
+
+
+def test_meta_run_exports():
+    import agentdescent
+    import agentdescent.meta as meta
+    assert "meta_run" in agentdescent.__all__
+    assert "MetaRunReport" in agentdescent.__all__
+    assert "meta_run" in meta.__all__
+    assert "MetaRunReport" in meta.__all__
 
 
 def test_meta_run_offline_and_deterministic(tmp_path):

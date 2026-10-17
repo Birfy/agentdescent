@@ -269,19 +269,20 @@ report, result = meta_run(
     seeds=(0, 1), val_seeds=(20, 21), rounds=3, n_workers=1)
 
 print(report.verdict, report.reason)                # "adopt" / "reject", with why
-value = _sampler_slot().compile(report.value)        # -> Policies(task_sampler=value)
+value = spec.compile(report.value)                   # -> Policies(task_sampler=value)
 ```
 
-`MetaRunReport` bundles the compiled value, the per-problem validation
-(`before` / `after` / `gain`), the transfer ratio and an `adopt` / `reject`
+`MetaRunReport` bundles the rendered value (`report.value`; compile with
+`spec.compile(...)`), the per-problem validation (`before` / `after` / `gain`),
+the transfer ratio (mean val gain / mean train gain) and an `adopt` / `reject`
 verdict: *adopt* when the mean gain on unseen problems clears `min_gain` and
 the transfer is not below `transfer_floor`, *reject* otherwise, with the
 reason. The report rides `result.meta`, so a CLI or a plugin shows the decision
 without recomputing it.
 
-**The verdict is honest.** The validation problems and seeds are disjoint from
-the training set by construction, so a verdict is never measured on the
-problems that shaped the value. The measured matrix (below) found transfer of
-+0.02 to +0.04 on unseen benchmarks — real, positive, and modest. `meta_run`
-does not dress that up: a rule that does not transfer is reported as `reject`,
-which is a result, not an error.
+**The verdict is honest.** The caller must keep validation problems and seeds
+disjoint from the training set (`meta_run` raises on overlap), so a verdict is
+never measured on the problems that shaped the value. The measured matrix
+(below) found transfer of +0.02 to +0.04 on unseen benchmarks — real, positive,
+and modest. `meta_run` does not dress that up: a rule that does not transfer is
+reported as `reject`, which is a result, not an error.

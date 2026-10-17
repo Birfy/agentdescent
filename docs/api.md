@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-343 public names across 56 modules.
+345 public names across 56 modules.
 
 ---
 
@@ -376,6 +376,23 @@ MetaOutcome(
 |---|---|
 | `from_result(result: EvolutionResult, **detail: Any) -> 'MetaOutcome'` | Read an inner `EvolutionResult`. |
 
+### `MetaRunReport(...)`
+
+What a `meta_run` decided, and why.
+
+```python
+MetaRunReport(
+    slot: str,
+    seed_value: str,
+    value: str,
+    validation: Dict[str, Dict[str, float]],
+    mean_gain: float,
+    transfer: Optional[float],
+    verdict: str,
+    reason: str
+) -> None
+```
+
 ### `ParamSlot(...)`
 
 The numeric hyper-parameters of any policy class, one key each.
@@ -501,6 +518,28 @@ meta_evolve(
 | `blast_radius` | `float` | `0.6` | Governance. `0.6` is L1: the value is a harness and every merge also passes the oracle. |
 | `artifact_id` | `str` | `'policy-slot'` | As `blast_radius`. |
 | `**evolve_kwargs` | `Any` |  | Everything else `evolve` takes -- `rounds`, `n_workers`, `max_concurrency`, `held_out_frac`, `max_rollouts` ... `strategy`, `run` and `reward` are this function's and cannot be passed. Returns the ordinary `EvolutionResult`; `spec.compile(result.rendered)` is the evolved value, and `result.rendered` is what to hand `meta_validate`. |
+
+### `meta_run(...)`
+
+Evolve one decision slot, validate it on unseen problems, and decide.
+
+```python
+meta_run(
+    problems: Union[Sequence[Problem], Mapping[str, Problem]],
+    val_problems: Union[Sequence[Problem], Mapping[str, Problem]],
+    *,
+    slot: str,
+    spec: SlotSpec,
+    propose: Optional[Callable[[str, Task, str, float], Optional[str]]] = None,
+    model: Optional[Completion] = None,
+    meta_reward: Optional[MetaReward] = None,
+    seeds: Sequence[int] = (0,),
+    val_seeds: Sequence[int] = (1, 2),
+    min_gain: float = 0.0,
+    transfer_floor: float = 0.0,
+    **evolve_kwargs: Any
+) -> Tuple[MetaRunReport, EvolutionResult]
+```
 
 ### `meta_validate(...)`
 

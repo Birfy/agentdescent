@@ -426,6 +426,8 @@ __all__ = [
     "load_spec",
     "run_spec",
     "meta_evolve",
+    "meta_run",
+    "MetaRunReport",
     "meta_validate",
     "evolve_problem",
     "MetaOutcome",
