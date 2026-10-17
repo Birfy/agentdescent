@@ -171,6 +171,12 @@ agentdescent evolve spec.json --detach
 agentdescent status
 ```
 
+`init` writes the worker CLI it finds on `PATH` (`claude`, then `codex`, `dsh`,
+`opencode`), the same view `agentdescent doctor` reports, so an OpenCode-only
+machine gets `agent.ref: opencode`. Pass `--agent <ref>` to choose another. With
+no worker CLI installed it writes `claude_code` as a placeholder and warns;
+`plan` refuses a CLI that is not on `PATH`.
+
 `cases.jsonl` is one JSON object per line, and it is the only thing you have to
 build yourself:
 
