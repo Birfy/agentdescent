@@ -174,6 +174,16 @@ class FrontierSampler:
         cfg = self.challenger.config
         for task in tasks:
             self._stats["generated"] += 1
+            known = next((t for t in self._frontier if t.id == task.id), None)
+            if known is not None and task.id in self._book:
+                # A redraw of a task already on the frontier must not erase its
+                # measured history (positive learning, or the attempts count
+                # toward the stuck threshold). An equivalent task keeps its
+                # entry; a *different* task under the same id is refused rather
+                # than silently inheriting someone else's measurements (#336).
+                if (known.prompt, known.meta) != (task.prompt, task.meta):
+                    self._stats["invalid"] += 1
+                continue
             self._frontier.append(task)
             self._book[task.id] = {"first": None, "last": None, "attempts": 0,
                                    "spec": task.meta.get("spec", "")}

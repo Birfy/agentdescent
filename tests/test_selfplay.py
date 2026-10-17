@@ -11,6 +11,7 @@ rises as it learns, measured online from first-vs-last attempt.
 import random
 
 from agentdescent import (
+    evolve,
     Challenger,
     ChallengerConfig,
     SingleSlot,
@@ -216,3 +217,76 @@ def test_seed_tasks_are_still_sampled():
     picks = [sampler.pick(["s1", "s2", "s3"], i) for i in range(50)]
     assert any(isinstance(p, str) for p in picks)      # seed ids appear
     assert any(isinstance(p, Task) for p in picks)     # frontier tasks appear
+
+
+# -- #336: history and solver identity in the learnability measurement ----------
+
+
+def test_reinstalling_an_equivalent_task_keeps_its_history():
+    ch = _make_challenger()
+    ch.config = ChallengerConfig(frontier_share=1.0, before_gap=0.05,
+                                 stuck_gap=0.0, max_attempts=3)
+    sampler = FrontierSampler(ch, seed=0)
+    sampler.install([Task(id="g", prompt="p", meta={"gold": "1"})])
+    sampler.record("g", 0.0)
+    # the challenger redraws the equivalent task before the solver learns it
+    sampler.install([Task(id="g", prompt="p", meta={"gold": "1"})])
+    assert len(sampler._frontier) == 1
+    assert sampler._book["g"]["first"] == 0.0 and sampler._book["g"]["attempts"] == 1
+    sampler.record("g", 1.0)
+    report = sampler.sweep(0.999)
+    assert report["learned"] == 1
+    assert report["r0"] == 1.0          # first 0 -> last 1 survived the redraw
+
+
+def test_redrawing_a_failing_task_does_not_reset_the_stuck_threshold():
+    ch = _make_challenger()
+    ch.config = ChallengerConfig(frontier_share=1.0, before_gap=0.05,
+                                 stuck_gap=0.0, max_attempts=3)
+    sampler = FrontierSampler(ch, seed=0)
+    task = Task(id="g", prompt="p", meta={"gold": "1"})
+    for _ in range(3):
+        sampler.install([Task(id="g", prompt="p", meta={"gold": "1"})])
+        sampler.record("g", 0.0)
+    report = sampler.sweep(0.999)
+    assert report["stuck"] == 1
+    assert "g" not in sampler._book
+
+
+def test_a_conflicting_task_under_a_known_id_is_refused_not_inherited():
+    ch = _make_challenger()
+    ch.config = ChallengerConfig(frontier_share=1.0, max_frontier_pool=64)
+    sampler = FrontierSampler(ch, seed=0)
+    sampler.install([Task(id="g", prompt="p", meta={"gold": "1"})])
+    sampler.record("g", 0.0)
+    sampler.install([Task(id="g", prompt="other", meta={"gold": "2"})])
+    assert [t.prompt for t in sampler._frontier] == ["p"]
+    assert sampler._book["g"]["attempts"] == 1
+    assert sampler.stats()["invalid_total"] == 1
+
+
+def test_extra_artifact_rollouts_are_not_primary_solver_learning(tmp_path):
+    """Primary always scores 0 and an unchanged extra always scores 1 on the one
+    frontier task: that is not the primary learning, so r0 must stay 0."""
+    from agentdescent import EvolvingArtifact
+
+    ch = _make_challenger()
+    ch.config = ChallengerConfig(frontier_share=1.0, before_gap=0.05,
+                                 stuck_gap=0.0, max_attempts=50)
+    sampler = FrontierSampler(ch, seed=0)
+    sampler.install([Task(id="g", prompt="p", meta={"gold": "1"})])
+    seen = []
+    orig = sampler.record
+    sampler.record = lambda tid, s: (seen.append(s), orig(tid, s))[1]
+    extra = {"skill-b": EvolvingArtifact("skill-b", {"value": "EXTRA"})}
+    evolve(
+        [Task(id=f"s{i}", prompt="p", meta={"gold": "1"}) for i in range(10)],
+        _reward,
+        run=lambda rendered, task: "1" if "EXTRA" in rendered else "0",
+        propose=lambda *a: None,
+        strategy=SingleSlot(initial_value="primary"),
+        extra_artifacts=extra, task_sampler=sampler,
+        rounds=3, n_workers=1, repo_path=str(tmp_path / "repo"), seed=0)
+    assert seen, "the primary solver's rollouts were never recorded"
+    assert set(seen) == {0.0}, f"extra artifact leaked into the sampler: {seen}"
+    assert sampler.sweep(0.999)["r0"] == 0.0
