@@ -123,8 +123,12 @@ class ConsolidationRecord:
 class ConsolidationStore:
     """A durable archive of what runs learned.
 
-    One JSON record per run under ``<root>/runs/<run_id>.json``. Writes are
-    atomic (tmp + rename) and idempotent by ``run_id``; a corrupt record is
+    One JSON record per run under ``<root>/runs/<sha256(run_id)>.json``.
+    Filenames hash the complete ``run_id`` so distinct identities never share
+    a path (the character-stripping mapper that preceded #338 collapsed
+    ``"a/b"`` and ``"ab"`` onto the same file). Writes are atomic (tmp +
+    rename) and idempotent by ``run_id``; ``find`` still accepts a pre-#338
+    sanitized filename when the stored identity matches. A corrupt record is
     skipped on read, never raised -- this is derived data and a bad file must
     not take the next run down.
     """
@@ -135,10 +139,40 @@ class ConsolidationStore:
         os.makedirs(self._runs_dir, exist_ok=True)
         self._lock = threading.RLock()
 
-    def _path(self, run_id: str) -> str:
-        # run_ids are caller-chosen; keep them filesystem-safe.
+    @staticmethod
+    def _digest_name(run_id: str) -> str:
+        """Collision-resistant filename for the complete ``run_id``.
+
+        Distinct identities never share a path: hashing the full string keeps
+        filesystem safety without collapsing ``"a/b"`` and ``"ab"`` onto the
+        same file the way character stripping did.
+        """
+        digest = hashlib.sha256(run_id.encode("utf-8")).hexdigest()
+        return f"{digest}.json"
+
+    @staticmethod
+    def _legacy_name(run_id: str) -> str:
+        """Pre-#338 sanitized filename (unsafe chars deleted).
+
+        Kept only so ``find`` can still locate archives written before the
+        digest mapper, and so a colliding legacy file is never returned for a
+        different identity.
+        """
         safe = "".join(c for c in run_id if c.isalnum() or c in "._-") or "run"
-        return os.path.join(self._runs_dir, f"{safe}.json")
+        return f"{safe}.json"
+
+    def _path(self, run_id: str) -> str:
+        return os.path.join(self._runs_dir, self._digest_name(run_id))
+
+    def _legacy_path(self, run_id: str) -> str:
+        return os.path.join(self._runs_dir, self._legacy_name(run_id))
+
+    def _load(self, path: str) -> Optional["ConsolidationRecord"]:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                return ConsolidationRecord.from_dict(json.load(fh))
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
 
     def archive(
         self,
@@ -181,6 +215,16 @@ class ConsolidationStore:
                     json.dump(record.to_dict(), fh, sort_keys=True,
                               default=str, allow_nan=False)
                 os.replace(tmp, path)
+                # Drop a pre-#338 sanitized copy of *this* identity so
+                # ``iter_archive`` / ``count`` stay unique after rewrite.
+                legacy = self._legacy_path(run_id)
+                if legacy != path and os.path.exists(legacy):
+                    old = self._load(legacy)
+                    if old is not None and old.run_id == run_id:
+                        try:
+                            os.remove(legacy)
+                        except OSError:
+                            pass
             finally:
                 try:
                     if os.path.exists(tmp):
@@ -190,12 +234,21 @@ class ConsolidationStore:
         return record
 
     def find(self, run_id: str) -> Optional[ConsolidationRecord]:
-        path = self._path(run_id)
-        try:
-            with open(path, encoding="utf-8") as fh:
-                return ConsolidationRecord.from_dict(json.load(fh))
-        except (OSError, ValueError, KeyError, TypeError):
-            return None
+        """Lookup by identity.
+
+        Prefer the digest path. Fall back to a pre-#338 sanitized filename
+        only when the stored ``run_id`` matches -- never return a different
+        run that shared the old character-stripped name.
+        """
+        seen = set()
+        for path in (self._path(run_id), self._legacy_path(run_id)):
+            if path in seen:
+                continue
+            seen.add(path)
+            rec = self._load(path)
+            if rec is not None and rec.run_id == run_id:
+                return rec
+        return None
 
     def iter_archive(self) -> Iterator[ConsolidationRecord]:
         try:
