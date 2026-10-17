@@ -131,3 +131,118 @@ def test_novelty_carries_a_flat_candidate_inside_the_band():
     # the component recorded is the upstream `skill`, and it was novel
     assert state.history.records()[0]["component"] == "skill"
     assert state.history.incumbent_component_counts().get("skill", 0) == 1
+
+
+# -- #337: default (in-memory) checkpoint evidence + prose-only classification ----
+
+
+def _json_round_trip(payload):
+    import json
+    return json.loads(json.dumps(payload))
+
+
+def _accept(state, ops, *, base=(5, 5), cand=(5, 5)):
+    from agentdescent.evolvable import EvidenceCard
+    from agentdescent.evolution import EvolvingArtifact
+    from agentdescent.policies import MergeContext
+    from agentdescent.evolution import SingleSlot, Task
+    diff = _diff(ops)
+    card = EvidenceCard(diff=diff, base_version={}, touched=["artifact"],
+                        trajectory_refs=[Task(id="t0", prompt="p")])
+    ctx = MergeContext(
+        artifact=EvolvingArtifact("artifact", {"value": "seed"}, strategy=SingleSlot()),
+        candidate=EvolvingArtifact("artifact", {"value": "new"}, strategy=SingleSlot()),
+        cards=[card], base_counts=base, cand_counts=cand, diff=diff)
+    from examples.rrsi.rrsi_policies import RRsiAcceptance
+    return RRsiAcceptance(state).accept(ctx)
+
+
+def _novelty_config():
+    from examples.rrsi.rrsi_policies import RRsiConfig
+    return RRsiConfig(w_n=1.0, noise_band=0.1)
+
+
+def test_in_memory_checkpoint_round_trips_the_evidence():
+    state = RRsiState(_novelty_config())            # default: in-memory history
+    state.record_measurement(
+        _diff({"skills/x/SKILL.md": "use SkillRegistry"}),
+        delta_score=0.2, delta_cost=0.0, accepted=True)
+    state.record_measurement(
+        _diff({"tools/a.py": "ToolRegistry.register_tool('a')"}),
+        delta_score=-0.1, delta_cost=0.0, accepted=False)
+    state.round, state.best_score = 2, 0.7
+
+    fresh = RRsiState(_novelty_config())
+    fresh.restore(_json_round_trip(state.checkpoint()))
+    assert fresh.history.records() == state.history.records()
+    assert fresh.history.incumbent_component_counts() == \
+        state.history.incumbent_component_counts()
+    assert fresh.history.attempted() == state.history.attempted()
+    assert fresh.history.prune_set(2, 5) == state.history.prune_set(2, 5)
+    assert fresh.history.accepted_edits()["skill"], "accepted skill was lost"
+
+
+def test_a_previously_accepted_skill_is_not_novel_after_resume():
+    skill = {"skills/y/SKILL.md": "use SkillRegistry again"}
+
+    def run(state):
+        state.round, state.best_score = 1, 0.5
+        return _accept(state, skill)
+
+    live = RRsiState(_novelty_config())
+    live.record_measurement(_diff({"skills/x/SKILL.md": "use SkillRegistry"}),
+                            delta_score=0.2, delta_cost=0.0, accepted=True)
+    resumed = RRsiState(_novelty_config())
+    resumed.restore(_json_round_trip(live.checkpoint()))
+    # the resumed bundle must decide the next candidate exactly as the
+    # uninterrupted one does: a skill the incumbent already has is no longer
+    # structurally novel
+    assert run(resumed).accept == run(live).accept is False
+    # control: a never-accepted structural component *is* novel at equal score
+    fresh = RRsiState(_novelty_config())
+    fresh.round, fresh.best_score = 1, 0.5
+    assert _accept(fresh, skill).accept is True
+
+
+def test_a_durable_history_is_not_overwritten_by_the_payload(tmp_path):
+    path = str(tmp_path / "rrsi.jsonl")
+    state = RRsiState(history_path=path)
+    state.record_measurement(
+        _diff({"skills/x/SKILL.md": "use SkillRegistry"}),
+        delta_score=0.1, delta_cost=0.0, accepted=True)
+    payload = state.checkpoint()
+    assert "history" not in payload                    # the file is the ledger
+    fresh = RRsiState(history_path=path)
+    fresh.restore({**payload, "history": [{"component": "memory"}]})
+    assert [r["component"] for r in fresh.history.records()] == ["skill"]
+
+
+def test_prose_that_mentions_machinery_is_a_prompt_edit():
+    from agentdescent.strategies import SingleSlot as Slot
+    slot = Slot(initial_value="seed")
+    diff = slot.to_diff({"value": "seed"},
+                        "Do not mention ToolRegistry in the final answer",
+                        "w0", 0, "artifact")
+    assert diff is not None
+    assert upstream_components(diff) == ("prompt",)
+
+
+def test_prose_only_edit_gets_no_structural_novelty():
+    from agentdescent.strategies import SingleSlot as Slot
+    diff = Slot(initial_value="seed").to_diff(
+        {"value": "seed"}, "Do not mention ToolRegistry in the final answer",
+        "w0", 0, "artifact")
+    state = RRsiState(_novelty_config())
+    state.round, state.best_score = 1, 0.5
+    # equal score and cost: only a (wrongly) structural tag could win this
+    assert _accept(state, dict(diff.ops)).accept is False
+
+
+def test_comment_and_string_only_file_edits_are_prompt():
+    assert upstream_components(_diff(
+        {"tools/a.py": "# TODO: maybe add a ToolRegistry later"})) == ("prompt",)
+    assert upstream_components(_diff(
+        {"tools/a.py": '"Never call register_tool in the answer"'})) == ("prompt",)
+    # a real code edit is still structural
+    assert upstream_components(_diff(
+        {"tools/a.py": "ToolRegistry.register_tool('a')"})) == ("client_tool",)
