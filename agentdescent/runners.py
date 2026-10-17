@@ -173,8 +173,8 @@ def tree_runner(agent: Completion, *, layout: str = "claude_skill",
         raise TypeError(
             f"tree_runner needs a WorkspaceAgent so the evolving directory can be "
             f"put in front of it; {type(agent).__name__} is a plain Completion and "
-            "would only ever see the prompt. Use claude_code(), codex(), "
-            "cli_agent([...]) or openhands().")
+            "would only ever see the prompt. Use claude_code(), codex(), dsh(), "
+            "opencode(), cli_agent([...]) or openhands().")
     prefix = layout_prefix(layout, name)
     pool, spec = _pool_for(sandbox_pool, workspace_root)
 
