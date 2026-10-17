@@ -175,7 +175,10 @@ agentdescent status
 `opencode`), the same view `agentdescent doctor` reports, so an OpenCode-only
 machine gets `agent.ref: opencode`. Pass `--agent <ref>` to choose another. With
 no worker CLI installed it writes `claude_code` as a placeholder and warns;
-`plan` refuses a CLI that is not on `PATH`.
+`plan` refuses a CLI that is not on `PATH`. For a host plugin (`kind: plugin`)
+the `host` CLI is checked on its own: it comes from the plugin's format (a
+`.claude-plugin/` tree needs `claude`), so an installed `agent` does not make
+a missing host pass, and `plan`, `evolve` and MCP `start` refuse it by name.
 
 `cases.jsonl` is one JSON object per line, and it is the only thing you have to
 build yourself:
