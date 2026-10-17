@@ -86,13 +86,24 @@ class PopulationAggregator(Aggregator):
     def __init__(self, ledger, verifier, audit, config, staleness_policy=None,
                  *, selection: SelectionPolicy, artifact_id: str, meter=None,
                  conflict=None, fusion=None, acceptance=None, promotion=None,
-                 screen=None):
+                 screen=None, island_count: int = 0):
         super().__init__(ledger, verifier, audit, config,
                          staleness_policy=staleness_policy, meter=meter,
                          conflict=conflict, fusion=fusion, acceptance=acceptance,
                          promotion=promotion, screen=screen)
+        if not (isinstance(island_count, int) and island_count >= 0):
+            raise ValueError("island_count must be an int >= 0")
         self.selection = selection
         self.population_artifact = artifact_id
+        #: How many **persistent** head-islands the population explores in
+        #: parallel, on top of ``dev``. ``0`` (the default) keeps the old
+        #: behaviour exactly: forks are created per step and discarded at
+        #: ``finalize``, so a selection policy's lineage resets every step.
+        #: Above zero, ``island_count`` forks survive across steps and each
+        #: keeps its own ``_branch_parent`` lineage, so tree-shaped policies
+        #: (CladeThompson, FlatPuct) score *clades* -- a lineage that
+        #: accumulates is what metaproductivity means.
+        self.island_count = int(island_count)
         self._archive: List[Dict[str, object]] = []
         #: Rendered candidates already in the archive, for `_admit`'s dedup.
         #:
@@ -136,7 +147,6 @@ class PopulationAggregator(Aggregator):
         if worker_id == 0 or not self._forks:
             return Ledger.DEV
         return self._forks[(worker_id - 1) % len(self._forks)]
-
     # -- the archive ---------------------------------------------------------
 
     def _admit(self, artifact, version: int,
@@ -336,37 +346,44 @@ class PopulationAggregator(Aggregator):
                                round=self._selections, n_workers=n_workers,
                                budget_remaining=self.budget_remaining)
         self._selections += 1
-        # Ask for as many starting points as there are workers, so a multi-head
-        # run can explore several candidates in parallel. The ledger's fork
-        # mechanism (``head/<slot>``) holds each one as its own branch.
-        n_heads = min(len(candidates), n_workers if n_workers else 1)
+        # Ask for as many starting points as the run explores in parallel: with
+        # persistent islands that is exactly ``island_count + 1`` (dev + each
+        # island); without them it is the worker count, the old behaviour. The
+        # ledger's fork mechanism (``head/<slot>``) holds each one as its own
+        # branch.
+        if self.island_count > 0:
+            n_heads = min(len(candidates), self.island_count + 1)
+        else:
+            n_heads = min(len(candidates), n_workers if n_workers else 1)
         chosen = list(self.selection.select(ctx, n_heads))
         if not chosen:
             return reports
-        # chosen[0] is the primary head -> dev. The rest become forks, and each
-        # fork is **created before** the candidate is committed to it, so a
-        # worker that starts from head/1 mid-step never sees a half-written fork.
+        # chosen[0] is the primary head -> dev. The rest become forks. In a
+        # **persistent-island** run the forks already exist (``head/<slot-1>``
+        # from a previous step) and are *reused*, so each island keeps its own
+        # lineage and tree-shaped policies score real clades; a missing island
+        # is created before the candidate is committed to it, so a worker that
+        # starts from head/1 mid-step never sees a half-written fork.
+        prev_forks = list(self._forks)
         self._forks = []
         self._offered(chosen[0], candidates)
         for slot, cand in enumerate(chosen):
             target = dict(cand.state)
-            # Subtree visit counts: bump the chosen node *and* every ancestor
-            # (cycle-guarded), so Candidate.selected matches FlatPuct's
-            # contract under evolve() (#275). Archive(novelty) then sees the
-            # same subtree signal the tree policies need; port-equivalence
-            # tests build Candidate.selected by hand and stay unchanged.
             self._bump_selected(int(cand.version))
             if slot == 0:
                 branch_name = Ledger.DEV
                 version = self._commit_state(target, "population: select parent")
             else:
-                fork_name = f"head/{slot - 1}"
-                self.ledger.fork(fork_name, from_branch=Ledger.DEV)
-                self._commit_state(target, f"population: head/{slot - 1}",
+                idx = slot - 1
+                if self.island_count > 0 and idx < len(prev_forks):
+                    fork_name = prev_forks[idx]        # keep the island's lineage
+                else:
+                    fork_name = f"head/{idx}"
+                    self.ledger.fork(fork_name, from_branch=Ledger.DEV)
+                self._commit_state(target, f"population: head/{idx}",
                                    branch=fork_name)
                 self._forks.append(fork_name)
                 branch_name = fork_name
-            # Next new state admitted from this branch is a child of cand.
             self._branch_parent[branch_name] = int(cand.version)
         if version is not None:
             reports.append(MergeReport(
@@ -425,6 +442,11 @@ class PopulationAggregator(Aggregator):
                     str(k): (int(v) if v is not None else None)
                     for k, v in getattr(self, "_branch_parent", {}).items()
                 },
+                # Persistent islands survive a restart: the ledger's fork
+                # branches persist in the repo, so a resumed run keeps them and
+                # the lineages accumulated on them.
+                "forks": list(getattr(self, "_forks", [])),
+                "island_count": getattr(self, "island_count", 0),
             }
         if parent is not None:
             own.update(parent)
@@ -523,11 +545,23 @@ class PopulationAggregator(Aggregator):
                 self._selections = int(state.get("selections", 0))
             except (TypeError, ValueError):
                 self._selections = 0
+            # Persistent islands survive a restart: the ledger's fork branches
+            # persist in the repo, so restoring the names (and the island
+            # count) is enough to keep the lineages. A checkpoint written
+            # before islands existed carries neither and stays at zero.
+            forks = state.get("forks")
+            if isinstance(forks, list):
+                self._forks = [str(f) for f in forks if isinstance(f, str)]
+            try:
+                self.island_count = int(state.get(
+                    "island_count", getattr(self, "island_count", 0)))
+            except (TypeError, ValueError):
+                pass
 
 
 def population_factory(selection: SelectionPolicy, artifact_id: str, *,
                        meter=None, conflict=None, fusion=None, acceptance=None,
-                       promotion=None, screen=None):
+                       promotion=None, screen=None, island_count: int = 0):
     """The ``aggregator_factory=`` adapter for one run.
 
     The factory path bypasses the engine's default-aggregator construction, so
@@ -535,13 +569,19 @@ def population_factory(selection: SelectionPolicy, artifact_id: str, *,
     bundle must travel through here instead -- passing them in the bundle *and*
     a factory would silently drop them, which is the exact failure
     ``require_supported`` exists to prevent on the other path.
+
+    ``island_count`` is the number of **persistent** head-islands the
+    population explores in parallel (see :class:`PopulationAggregator`); ``0``
+    keeps the old per-step-fork behaviour exactly.
     """
+    if not (isinstance(island_count, int) and island_count >= 0):
+        raise ValueError("island_count must be an int >= 0")
 
     def build(ledger, verifier, audit, config, staleness_policy=None):
         return PopulationAggregator(
             ledger, verifier, audit, config, staleness_policy,
             selection=selection, artifact_id=artifact_id, meter=meter,
             conflict=conflict, fusion=fusion, acceptance=acceptance,
-            promotion=promotion, screen=screen)
+            promotion=promotion, screen=screen, island_count=island_count)
 
     return build

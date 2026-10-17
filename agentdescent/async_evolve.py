@@ -166,6 +166,8 @@ def async_evolve(
     #: the reference skill contract, which declares nothing and enforces
     #: nothing.
     contract: Optional[Contract] = None,
+    #: Persistent head-islands for a population run. See ``evolve()``.
+    population_islands: int = 0,
     #: Additional artifacts to register alongside the primary. Each value is an
     #: :class:`EvolvingArtifact` with its own ``id``, ``blast_radius`` and
     #: ``strategy``. The worker loop proposes against each of them too, and the
@@ -427,6 +429,10 @@ def async_evolve(
         contract, where governance invariants are declared. ``None`` (the
         default) is the reference skill contract, which declares nothing and
         enforces nothing.
+    population_islands:
+        Persistent head-islands for a population run. Exactly as in
+        :func:`~agentdescent.evolution.evolve`; ``0`` (the default) keeps the
+        per-step-fork behaviour.
     extra_artifacts:
         Exactly as in :func:`~agentdescent.evolution.evolve`: additional
         artifacts to register alongside the primary, as ``{aid: EvolvingArtifact}``.
@@ -481,7 +487,8 @@ def async_evolve(
         policies_bundle=_pol, checkpointing=checkpointing,
         allocator=allocator, record_trajectories=record_trajectories,
         trajectory_store=trajectory_store, contract=contract,
-        extra_artifacts=extra_artifacts)
+        extra_artifacts=extra_artifacts,
+        population_islands=population_islands)
     eng.meter.start()
     # The cost-aware governor for the async path. The merger loop has no round
     # barrier, so the governor checks per sweep (after each merge, before the
