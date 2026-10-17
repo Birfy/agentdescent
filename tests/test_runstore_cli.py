@@ -377,6 +377,63 @@ def test_plan_reports_estimate_and_notes(store, tmp_path):
     assert payload["evolve_kwargs"]["strategy"] == "FileTree"
 
 
+def test_plan_rejects_fewer_than_four_tasks(tmp_path):
+    """plan must fail closed on the same 4-task rule evolve raises (#343)."""
+    from agentdescent.cli import plan_payload
+    from agentdescent.evolvespec import EvolveSpec
+
+    rows = [{"prompt": f"q{i}", "gold": f"a{i}"} for i in range(3)]
+    cases = tmp_path / "cases.jsonl"
+    cases.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("Answer.\n")
+    spec = EvolveSpec.from_dict({
+        "kind": "text", "target": str(prompt),
+        "data": {"path": str(cases)}, "score": "contains",
+        "agent": "echo", "reflect": "echo",
+        "evolve": {"rounds": 1, "n_workers": 1, "seed": 0},
+    })
+    payload = plan_payload(spec)
+    assert payload["ok"] is False
+    assert payload["tasks"] == 3
+    assert "need at least 4 tasks to split train/held-out" in payload["error"]
+
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps(spec.to_dict()))
+    code, out = _cli("--json", "plan", str(spec_path))
+    assert code == 2
+    assert json.loads(out)["ok"] is False
+
+
+def test_plan_ok_at_four_tasks_with_soft_note_below_eight(tmp_path):
+    from agentdescent.cli import plan_payload
+    from agentdescent.evolvespec import EvolveSpec, compose
+
+    rows = [{"prompt": f"q{i}", "gold": f"a{i}"} for i in range(4)]
+    cases = tmp_path / "cases.jsonl"
+    cases.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("Answer.\n")
+    spec = EvolveSpec.from_dict({
+        "kind": "text", "target": str(prompt),
+        "data": {"path": str(cases)}, "score": "contains",
+        "agent": "echo", "reflect": "echo",
+        "evolve": {"rounds": 1, "n_workers": 1, "seed": 0},
+    })
+    payload = plan_payload(spec)
+    assert payload["ok"] is True and payload["tasks"] == 4
+    assert any("8-20 is a workable minimum" in n for n in payload["notes"])
+    # compose itself no longer soft-notes below 4 (that is a hard plan error)
+    few = EvolveSpec.from_dict({
+        "kind": "text", "target": str(prompt),
+        "data": {"inline": rows[:1]}, "score": "contains",
+        "agent": "echo", "reflect": "echo",
+        "evolve": {"rounds": 1},
+    })
+    notes = compose(few).notes
+    assert not any("8-20 is a workable minimum" in n for n in notes)
+
+
 def test_evolve_status_show_apply_round_trip(store, tmp_path):
     path, spec = _spec_file(tmp_path)
     code, out = _cli("--store", store, "--json", "evolve", path)

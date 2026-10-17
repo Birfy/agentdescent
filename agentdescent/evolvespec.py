@@ -1025,7 +1025,9 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
         knobs["repo_path"] = repo_path
     kwargs.update(knobs)
 
-    if len(tasks) < 4:
+    # Soft guidance for small-but-legal sets. Below 4, evolve() hard-fails
+    # ("need at least 4 tasks…"); plan_payload sets ok=False for that case (#343).
+    if 4 <= len(tasks) < 8:
         notes.append(f"only {len(tasks)} tasks: the held-out split will be tiny and the "
                      "acceptance test weak; 8-20 is a workable minimum.")
     return Composition(tasks=tasks, reward=reward, kwargs=kwargs, tree=tree,

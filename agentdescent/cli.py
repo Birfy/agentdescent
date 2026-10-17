@@ -408,6 +408,11 @@ def _selection_not_merging(comp) -> Optional[str]:
     return None
 
 
+#: Same rule as ``evolve()`` / ``_build_engine`` — keep the strings aligned (#343).
+_MIN_TASKS_FOR_SPLIT = 4
+_MIN_TASKS_MSG = "need at least 4 tasks to split train/held-out"
+
+
 def plan_payload(spec: EvolveSpec, *, usd_per_call: Optional[float] = None) -> Dict[str, Any]:
     comp = compose(spec)
     warnings = _unusable_refs(spec)
@@ -422,7 +427,11 @@ def plan_payload(spec: EvolveSpec, *, usd_per_call: Optional[float] = None) -> D
                  "oracle": type(comp.audit.reward.oracle).__name__,
                  "sample_rate": comp.audit.reward.sample_rate,
                  "draw_by": comp.audit.reward.draw_by}
-    return {"ok": True, "spec": spec.to_dict(), "tasks": len(comp.tasks),
+    n_tasks = len(comp.tasks)
+    # Fail closed here: plan exists to catch what evolve would raise, before a
+    # background run is started. Soft "8-20" notes stay for 4 <= n < 8 (#343).
+    too_few = n_tasks < _MIN_TASKS_FOR_SPLIT
+    payload = {"ok": not too_few, "spec": spec.to_dict(), "tasks": n_tasks,
             "warnings": warnings,
             "artifact_id": spec.artifact_id(),
             **({"audit": audit} if audit else {}),
@@ -430,6 +439,12 @@ def plan_payload(spec: EvolveSpec, *, usd_per_call: Optional[float] = None) -> D
                                   else type(v).__name__)
                               for k, v in comp.kwargs.items()},
             "estimate": estimate(comp, usd_per_call=usd_per_call), "notes": comp.notes}
+    if too_few:
+        payload["error"] = (
+            f"{_MIN_TASKS_MSG} (plan saw {n_tasks}; add cases until you have at "
+            f"least {_MIN_TASKS_FOR_SPLIT}, then re-run plan)"
+        )
+    return payload
 
 
 def cmd_plan(a: argparse.Namespace) -> int:
@@ -440,7 +455,7 @@ def cmd_plan(a: argparse.Namespace) -> int:
         _out({"ok": False, "error": str(e)}, as_json=a.json)
         return 2
     _out(payload, as_json=a.json)
-    return 0
+    return 0 if payload.get("ok", True) else 2
 
 
 def _warn_unusable(spec: EvolveSpec) -> None:
