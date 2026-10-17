@@ -144,6 +144,13 @@ from .checkpoint import (
     list_checkpoints,
 )
 from .budget import BudgetGovernor, CallBudget, budgeted_completion
+from .consolidation import (
+    ConsolidationRecord,
+    ConsolidationStore,
+    SeedReport,
+    config_fingerprint,
+    seed_from_archive,
+)
 from .allocator import (
     AllocatorContext,
     AllocatorPolicy,
