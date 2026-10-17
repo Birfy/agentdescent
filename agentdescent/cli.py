@@ -420,7 +420,8 @@ _CLI_BINARIES = {
 }
 
 
-def _missing_cli_messages(spec: EvolveSpec) -> List[str]:
+def _missing_cli_messages(spec: EvolveSpec,
+                          fields: Optional[Sequence[str]] = None) -> List[str]:
     """Hard-fail messages when a CLI the run will execute is absent from PATH.
 
     ``plan`` exists so a host does not start a doomed run; soft ``warnings`` were
@@ -431,6 +432,9 @@ def _missing_cli_messages(spec: EvolveSpec) -> List[str]:
     each rollout (``plugin_runner(spec.host)``). An installed agent must not
     make an absent host pass (#368). Spec-driven runs execute the host on this
     machine's PATH, so that is the context checked here.
+
+    ``fields`` limits the check to those roles (``"agent"``, ``"reflect"``,
+    ``"host"``); ``None`` checks all of them.
     """
     report = doctor_report()
     clis = report["agent_clis"]
@@ -448,6 +452,8 @@ def _missing_cli_messages(spec: EvolveSpec) -> List[str]:
         roles.append((field, ref))
     if spec.kind == "plugin":
         roles.append(("host", spec.host))
+    if fields is not None:
+        roles = [(f, r) for f, r in roles if f in fields]
     out: List[str] = []
     for field, ref in roles:
         if not ref or ref not in _CLI_BINARIES:
@@ -487,6 +493,34 @@ def require_cli_on_path(spec: EvolveSpec) -> None:
     msgs = _missing_cli_messages(spec)
     if msgs:
         raise SpecError("; ".join(msgs))
+
+
+def require_resume_host_on_path(run_id: str, *, store: Optional[str] = None) -> None:
+    """Refuse to relaunch a stopped plugin run whose ``host`` CLI is not on PATH (#370).
+
+    The environment that resumes is often not the one that started: a run begun
+    where ``claude`` was installed and resumed where it is not would otherwise
+    reach :func:`runstore.launch`, write a fresh ``running`` status and only fail
+    inside the detached child. Only the plugin ``host`` is gated here -- the
+    agent/reflect roles keep their soft resume warnings -- and the check reads
+    the *stored* spec, never switching the host to whatever CLI is installed.
+
+    A still-live run is left to :func:`runstore.resume`'s own rejection, and a
+    stored spec that no longer parses keeps the old behaviour (no gate).
+    """
+    rd = runstore.get(run_id, store=store)
+    st = rd.status()
+    if st.state == "running" and st.alive():
+        return
+    try:
+        spec = EvolveSpec.from_dict(rd.spec_dict())
+    except Exception:  # noqa: BLE001 - an unreadable spec fails in the child as before
+        return
+    if spec.kind != "plugin":
+        return
+    msgs = _missing_cli_messages(spec, fields=("host",))
+    if msgs:
+        raise SpecError(f"cannot resume {run_id}: " + "; ".join(msgs))
 
 
 def _unusable_refs(spec: EvolveSpec) -> List[str]:
@@ -925,6 +959,9 @@ def cmd_resume(a: argparse.Namespace) -> int:
     # from an agent session and resumed from a shell has lost whatever
     # `host_model` was borrowing.
     runstore.require_budget_pair(a.budget, a.usd_per_call)
+    # Hard gate, unlike the warnings below: a missing plugin host cannot run a
+    # single rollout, so do not relaunch the detached process at all (#370).
+    require_resume_host_on_path(a.run_id, store=a.store)
     try:
         _warn_unusable(EvolveSpec.from_dict(runstore.get(a.run_id, store=a.store).spec_dict()))
     except Exception:  # noqa: BLE001 - a warning must never block a resume
