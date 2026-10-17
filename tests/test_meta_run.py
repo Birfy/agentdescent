@@ -154,9 +154,14 @@ def test_adopt_and_reject_verdicts():
             return MetaOutcome(curve=[0.0], final=0.0)
         return MetaOutcome(curve=[0.5, 1.0], final=1.0)
 
+    # Distinct callables with the same helping behavior: #356 forbids sharing
+    # the same Problem object across train and val even when names differ.
+    def helping_val(value, seed):
+        return helping(value, seed)
+
     # helping on unseen -> adopt
     report, _ = meta_run(
-        {"a": helping, "b": helping}, {"v": helping}, slot="task_sampler",
+        {"a": helping, "b": helping}, {"v": helping_val}, slot="task_sampler",
         spec=slot, propose=_deterministic_propose, seeds=(0, 1),
         val_seeds=(10, 11), rounds=1, n_workers=1)
     assert report.verdict == "adopt"
@@ -273,6 +278,58 @@ def test_meta_run_rejects_overlapping_val_set():
         meta_run(train, {"v": _inner_problem(_tasks(prefix="z"))},
                  slot="task_sampler", spec=slot,
                  propose=_deterministic_propose, seeds=(0, 1), val_seeds=(1, 2))
+
+
+def test_meta_run_accepts_distinct_sequence_problems(tmp_path):
+    """#356: sequence train/val must not collide on synthetic p0/p1 labels.
+
+    Distinct Problem callables with disjoint seeds must pass isolation and
+    reach meta_evolve — the advertised Sequence[Problem] API.
+    """
+    train_a = _inner_problem(_tasks(prefix="a"))
+    train_b = _inner_problem(_tasks(prefix="b"))
+    unseen_c = _inner_problem(_tasks(prefix="c"))
+    report, result = meta_run(
+        [train_a, train_b], [unseen_c],
+        slot="task_sampler", spec=_sampler_slot(),
+        propose=_deterministic_propose,
+        seeds=(0, 1), val_seeds=(10, 11),
+        rounds=1, n_workers=1,
+        repo_path=str(tmp_path / "seq"),
+    )
+    assert isinstance(report, MetaRunReport)
+    assert report.verdict in ("adopt", "reject")
+    assert result.meta is not None
+    # validation keys are the sequence-local synthetic names for val only
+    assert set(report.validation.keys()) == {"p0"}
+
+
+def test_meta_run_rejects_shared_sequence_problem_identity():
+    """#356: genuine shared Problem objects still raise under the sequence API.
+
+    Cosmetic name prefixes alone must not weaken the guard — the same
+    callable in both train and val is an isolation failure even when the
+    synthetic labels would otherwise differ after a naive rename.
+    """
+    slot = _sampler_slot()
+    shared = _inner_problem(_tasks(prefix="shared"))
+    other = _inner_problem(_tasks(prefix="other"))
+    with pytest.raises(ValueError, match="overlap training problems"):
+        meta_run(
+            [shared, other], [shared],
+            slot="task_sampler", spec=slot,
+            propose=_deterministic_propose,
+            seeds=(0, 1), val_seeds=(10, 11),
+        )
+    # mapping + sequence sharing the same object: names differ, identity must
+    # still catch the leak
+    with pytest.raises(ValueError, match="overlap training problems"):
+        meta_run(
+            {"a": shared}, [shared],
+            slot="task_sampler", spec=slot,
+            propose=_deterministic_propose,
+            seeds=(0,), val_seeds=(10,),
+        )
 
 
 def test_meta_run_exports():
