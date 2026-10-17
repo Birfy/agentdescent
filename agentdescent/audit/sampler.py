@@ -310,8 +310,13 @@ def plan(policy: AuditPolicy, *, weights: Dict[str, float],
     # Per-weight ``isfinite`` is not enough: two finite values can still overflow
     # the sum to ``inf``, and ``v / total_w`` then yields zeros that crash later
     # as ``ZeroDivisionError`` (#330). Same family as "stratum weights sum to
-    # zero".
-    if not math.isfinite(total_w) or total_w <= 0:
+    # zero". Huge integers stay exact until ``math.isfinite`` / ``float`` —
+    # convert carefully so OverflowError becomes the same ValueError (Codex P2).
+    try:
+        total_ok = math.isfinite(total_w) and total_w > 0
+    except OverflowError:
+        total_ok = False
+    if not total_ok:
         raise ValueError("stratum weights must sum to a finite positive "
                          f"number, got {total_w!r}")
     w = {k: v / total_w for k, v in weights.items()}

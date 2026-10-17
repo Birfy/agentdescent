@@ -470,6 +470,13 @@ def test_finite_weights_that_overflow_the_sum_are_refused():
              weights={"a": 1e308, "b": 1e308}, expected_units=1000)
 
 
+def test_huge_integer_weight_totals_raise_valueerror_not_overflowerror():
+    """Individually finite ints can sum past float range (#330 Codex P2)."""
+    with pytest.raises(ValueError, match="sum"):
+        plan(AuditPolicy(enabled=True, alpha=0.05, target_halfwidth=0.05),
+             weights={"a": 10**308, "b": 10**308}, expected_units=1000)
+
+
 def test_all_zero_weights_still_name_the_sum():
     with pytest.raises(ValueError, match="sum"):
         plan(AuditPolicy(enabled=True), weights={"a": 0.0, "b": 0.0},
