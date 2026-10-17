@@ -675,3 +675,114 @@ def test_launch_refuses_budget_without_usd_per_call(store, tmp_path):
     with pytest.raises(RunStoreError, match="budget_usd needs usd_per_call"):
         runstore.launch(rd, budget_usd=5.0)
     assert rd.status().state == "created"
+
+
+# ---------------------------------------------------------------------------
+# missing CLI binary → plan/evolve fail closed (#346)
+# ---------------------------------------------------------------------------
+
+
+def _fake_doctor_clis(monkeypatch, *, present=(), absent=None):
+    """Patch doctor_report so named agent binaries look present or missing."""
+    import agentdescent.cli as cli_mod
+
+    absent = set(absent or ("claude", "codex", "dsh", "opencode"))
+    present = set(present)
+    real = cli_mod.doctor_report
+
+    def fake():
+        rep = real()
+        clis = dict(rep["agent_clis"])
+        for name in ("claude", "codex", "dsh", "opencode"):
+            if name in present:
+                clis[name] = clis.get(name) or f"/fake/{name}"
+            elif name in absent:
+                clis[name] = None
+        return {**rep, "agent_clis": clis}
+
+    monkeypatch.setattr(cli_mod, "doctor_report", fake)
+
+
+def _text_spec_with_agent(tmp_path, agent, n_tasks=8):
+    from agentdescent.evolvespec import EvolveSpec
+
+    rows = [{"prompt": f"q{i}", "gold": f"a{i}"} for i in range(n_tasks)]
+    cases = tmp_path / "cases-cli.jsonl"
+    cases.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    prompt = tmp_path / "prompt-cli.txt"
+    prompt.write_text("Answer.\n")
+    return EvolveSpec.from_dict({
+        "kind": "text", "target": str(prompt),
+        "data": {"path": str(cases)}, "score": "contains",
+        "agent": agent, "reflect": "echo",
+        "evolve": {"rounds": 1, "n_workers": 1, "seed": 0},
+    })
+
+
+def test_plan_rejects_missing_agent_cli(tmp_path, monkeypatch):
+    """plan must fail closed when claude_code's binary is not on PATH (#346)."""
+    from agentdescent.cli import plan_payload, require_cli_on_path
+    from agentdescent.evolvespec import SpecError
+
+    _fake_doctor_clis(monkeypatch, present=(), absent=("claude", "codex", "dsh", "opencode"))
+    spec = _text_spec_with_agent(tmp_path, {"ref": "claude_code"})
+    payload = plan_payload(spec)
+    assert payload["ok"] is False
+    err = payload["error"]
+    assert "claude_code" in err and "claude" in err and "on PATH" in err
+    assert "install" in err or "openai_compatible" in err
+    # missing binary is a hard error, not a soft warning
+    assert not any("needs `claude` on PATH" in w for w in payload["warnings"])
+
+    with pytest.raises(SpecError, match="claude_code"):
+        require_cli_on_path(spec)
+
+    # string short name is checked the same way
+    spec_str = _text_spec_with_agent(tmp_path, "codex")
+    payload2 = plan_payload(spec_str)
+    assert payload2["ok"] is False and "codex" in payload2["error"]
+
+
+def test_plan_ok_when_named_cli_is_on_path(tmp_path, monkeypatch):
+    _fake_doctor_clis(monkeypatch, present=("claude",),
+                      absent=("codex", "dsh", "opencode"))
+    from agentdescent.cli import plan_payload, require_cli_on_path
+
+    spec = _text_spec_with_agent(tmp_path, {"ref": "claude_code", "isolate": False})
+    payload = plan_payload(spec)
+    assert payload["ok"] is True
+    assert "error" not in payload
+    require_cli_on_path(spec)  # does not raise
+
+    # non-CLI agents stay ok regardless of CLI PATH
+    _fake_doctor_clis(monkeypatch, present=(), absent=("claude", "codex", "dsh", "opencode"))
+    echo_spec = _text_spec_with_agent(tmp_path, "echo")
+    assert plan_payload(echo_spec)["ok"] is True
+    require_cli_on_path(echo_spec)
+
+
+def test_plan_suggests_present_cli_when_default_missing(tmp_path, monkeypatch):
+    _fake_doctor_clis(monkeypatch, present=("opencode",),
+                      absent=("claude", "codex", "dsh"))
+    from agentdescent.cli import plan_payload
+
+    payload = plan_payload(_text_spec_with_agent(tmp_path, {"ref": "claude_code"}))
+    assert payload["ok"] is False
+    assert "`opencode`" in payload["error"]
+
+
+def test_evolve_refuses_missing_cli_without_creating_a_run(store, tmp_path, monkeypatch):
+    _fake_doctor_clis(monkeypatch, present=(), absent=("claude", "codex", "dsh", "opencode"))
+    spec = _text_spec_with_agent(tmp_path, {"ref": "claude_code"})
+    path = tmp_path / "missing-cli-spec.json"
+    path.write_text(json.dumps(spec.to_dict()))
+    before = set(os.listdir(store)) if os.path.isdir(store) else set()
+    import io
+    from contextlib import redirect_stderr, redirect_stdout
+    err = io.StringIO()
+    with redirect_stdout(io.StringIO()), redirect_stderr(err):
+        code = cli.main(["--store", store, "--json", "evolve", str(path), "--detach"])
+    assert code == 2
+    assert "claude" in err.getvalue() and "on PATH" in err.getvalue()
+    after = set(os.listdir(store)) if os.path.isdir(store) else set()
+    assert after == before

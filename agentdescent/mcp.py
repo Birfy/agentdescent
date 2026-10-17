@@ -34,7 +34,8 @@ import os
 from typing import Any, Dict, Optional, Sequence, Tuple
 
 from . import __version__, runstore
-from .cli import NESTED_ENV, apply_payload, doctor_report, plan_payload, show_payload, status_payload
+from .cli import (NESTED_ENV, apply_payload, doctor_report, plan_payload,
+                 require_cli_on_path, show_payload, status_payload)
 from .evolvespec import EvolveSpec, SpecError, compose
 
 __all__ = ["RESCAN_ALLOW_ENV", "Tools", "TOOL_DESCRIPTIONS", "build_server",
@@ -237,6 +238,8 @@ class Tools:
             # Before create: same rule as CLI -- budget without price must not
             # return ok/started and then fail only in log.txt (#342).
             runstore.require_budget_pair(budget_usd, usd_per_call)
+            # Same gate as plan / CLI evolve: missing CLI must not return ok/running (#346).
+            require_cli_on_path(es)
         except SpecError as e:
             return {"ok": False, "error": str(e)}
         except runstore.RunStoreError as e:
