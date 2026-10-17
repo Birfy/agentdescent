@@ -262,7 +262,8 @@ evolve(
     record_trajectories: bool = False,
     trajectory_store: Optional['TrajectoryStore'] = None,
     contract: Optional[Contract] = None,
-    extra_artifacts: Optional[Dict[str, 'EvolvingArtifact']] = None
+    extra_artifacts: Optional[Dict[str, 'EvolvingArtifact']] = None,
+    population_islands: int = 0
 ) -> EvolutionResult
 ```
 
@@ -323,6 +324,7 @@ evolve(
 | `trajectory_store` | `Optional['TrajectoryStore']` | `None` | An explicit `TrajectoryStore` to record into. Pass one to control where records land (a shared store, a custom root, a custom privacy configuration) without going through the `<repo_path>/trajectories/` default. The explicit store wins over `record_trajectories`; `None` + `record_trajectories` builds the default store. |
 | `contract` | `Optional[Contract]` | `None` | The artifact's contract -- the externally-visible interface, and where governance invariants are declared. Pass `Contract(invariants=(Invariant("mutable_keys", ("a", "b")),))` and the aggregator enforces each rule **before** a candidate is measured (see `invariants`); a diff that breaks one reports a `violates-invariant` outcome and never buys a held-out sweep. `None` (the default) is the reference skill contract, which declares nothing and enforces nothing -- the untouched path exactly. |
 | `extra_artifacts` | `Optional[Dict[str, 'EvolvingArtifact']]` | `None` | Additional artifacts to register alongside the primary (`artifact_id`), as `{aid: EvolvingArtifact}`. The primary is the one the worker loop rolls out and proposes on; each extra is registered in the ledger and the worker proposes against it too, so a proposal can name one of them as a diff target and the aggregator merges it there (the evidence buffer already buckets by `diff.target`). `depends_on` on an extra's `Contract` declares which artifacts it relies on: a contract-breaking change to one re-measures its dependents (their cached scores were taken under the superseded contract) and lands atomically via `Ledger.commit_atomic`. Empty (the default) is the old single-artifact behaviour exactly. |
+| `population_islands` | `int` | `0` | How many **persistent head-islands** the population explores in parallel, on top of `dev` (see `PopulationAggregator`). Requires a declared selection policy (`Policies(selection=...)`). `0` (the default) keeps the old behaviour exactly: per-step forks that reset a policy's lineage. Above zero, `island_count` forks survive across steps and each keeps its own lineage, so tree-shaped policies (`CladeThompson`, `FlatPuct`) score *clades* -- the metaproductivity signal HGM's population search is built on. Islands checkpoint and resume like the rest of the population archive. |
 
 ### `reflector(...)`
 
@@ -2857,7 +2859,8 @@ PopulationAggregator(
     fusion = None,
     acceptance = None,
     promotion = None,
-    screen = None
+    screen = None,
+    island_count: int = 0
 )
 ```
 
@@ -2883,7 +2886,8 @@ population_factory(
     fusion = None,
     acceptance = None,
     promotion = None,
-    screen = None
+    screen = None,
+    island_count: int = 0
 )
 ```
 
@@ -3255,6 +3259,7 @@ async_evolve(
     record_trajectories: bool = False,
     trajectory_store: Optional[Any] = None,
     contract: Optional[Contract] = None,
+    population_islands: int = 0,
     extra_artifacts: Optional[Dict[str, 'EvolvingArtifact']] = None
 ) -> EvolutionResult
 ```
@@ -3314,6 +3319,7 @@ async_evolve(
 | `record_trajectories` | `bool` | `False` | Exactly as in `evolve`: persist every rollout and gate evaluation as a `Trajectory` under `<repo_path>/trajectories/`. Off by default; pass `trajectory_store=` to control where records land. |
 | `trajectory_store` | `Optional[Any]` | `None` | An explicit `TrajectoryStore` to record into. `None` + `record_trajectories` builds the default store at `<repo_path>/trajectories`. |
 | `contract` | `Optional[Contract]` | `None` | Exactly as in `evolve`: the artifact's contract, where governance invariants are declared. `None` (the default) is the reference skill contract, which declares nothing and enforces nothing. |
+| `population_islands` | `int` | `0` | Persistent head-islands for a population run. Exactly as in `evolve`; `0` (the default) keeps the per-step-fork behaviour. |
 | `extra_artifacts` | `Optional[Dict[str, 'EvolvingArtifact']]` | `None` | Exactly as in `evolve`: additional artifacts to register alongside the primary, as `{aid: EvolvingArtifact}`. The barrier-free worker proposes against each of them too (no parallel strategy, so it is the primary plus every extra), and the aggregator merges their diffs by target. Empty (the default) is the old single-artifact behaviour exactly. |
 
 ---

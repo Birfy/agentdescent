@@ -2149,7 +2149,8 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
                   record_trajectories: bool = False,
                   trajectory_store: Optional[Any] = None,
                   contract: Optional[Contract] = None,
-                  extra_artifacts: Optional[Dict[str, "EvolvingArtifact"]] = None) -> _Engine:
+                  extra_artifacts: Optional[Dict[str, "EvolvingArtifact"]] = None,
+                  population_islands: int = 0) -> _Engine:
     """Wire the ledger, runtime, verifier and aggregator (shared by
     :func:`evolve` and :func:`~agentdescent.async_evolve.async_evolve`)."""
     import tempfile
@@ -2537,7 +2538,17 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
         aggregator_factory = population_factory(
             selection, artifact_id, meter=meter, conflict=pol.conflict,
             fusion=pol.fusion, acceptance=pol.acceptance, promotion=pol.promotion,
-            screen=pol.screen)
+            screen=pol.screen, island_count=population_islands)
+    elif population_islands > 0:
+        # A knob accepted and ignored reads as a knob honoured. Population
+        # islands are a property of the population aggregator, which only a
+        # declared selection policy installs -- without one the argument would
+        # change nothing and look like it changed everything.
+        raise ValueError(
+            f"population_islands={population_islands} needs a population layer, "
+            "which only a declared selection policy installs. Pass "
+            "Policies(selection=...) -- e.g. CladeThompson() -- or leave "
+            "population_islands=0 (the default).")
 
     # `None` defers to whatever the config already says, so `agg_config=` keeps
     # working and the two cannot silently disagree; an explicit True or False
@@ -2801,6 +2812,16 @@ def evolve(
     #: diff whose ``target`` names one of them, and the aggregator merges it.
     #: Empty (the default) is the old single-artifact behaviour exactly.
     extra_artifacts: Optional[Dict[str, "EvolvingArtifact"]] = None,
+    #: How many **persistent head-islands** the population explores in
+    #: parallel, on top of ``dev`` (see
+    #: :class:`~agentdescent.population.PopulationAggregator`). Requires a
+    #: declared selection policy (``Policies(selection=...)``). ``0`` (the
+    #: default) keeps the old behaviour exactly: per-step forks that reset a
+    #: policy's lineage. Above zero, ``island_count`` forks survive across
+    #: steps and each keeps its own lineage, so tree-shaped policies
+    #: (``CladeThompson``, ``FlatPuct``) score *clades* -- the metaproductivity
+    #: signal HGM's population search is built on.
+    population_islands: int = 0,
 ) -> EvolutionResult:
     """Evolve an artifact. Provide either ``agent`` (with ``solve``/``propose``)
     or the ``run`` / ``propose`` callables directly.
@@ -3177,6 +3198,17 @@ def evolve(
         scores were taken under the superseded contract) and lands atomically via
         ``Ledger.commit_atomic``. Empty (the default) is the old single-artifact
         behaviour exactly.
+    population_islands:
+        How many **persistent head-islands** the population explores in
+        parallel, on top of ``dev`` (see
+        :class:`~agentdescent.population.PopulationAggregator`). Requires a
+        declared selection policy (``Policies(selection=...)``). ``0`` (the
+        default) keeps the old behaviour exactly: per-step forks that reset a
+        policy's lineage. Above zero, ``island_count`` forks survive across
+        steps and each keeps its own lineage, so tree-shaped policies
+        (``CladeThompson``, ``FlatPuct``) score *clades* -- the metaproductivity
+        signal HGM's population search is built on. Islands checkpoint and
+        resume like the rest of the population archive.
 
     Returns
     -------
@@ -3264,7 +3296,8 @@ def evolve(
             call_budget=call_budget, allocator=allocator,
             record_trajectories=record_trajectories,
             trajectory_store=trajectory_store, contract=contract,
-            extra_artifacts=extra_artifacts)
+            extra_artifacts=extra_artifacts,
+            population_islands=population_islands)
 
     if pipelined_gate:
         # The mirror of the block above, and the same reasoning: a knob accepted
@@ -3326,7 +3359,8 @@ def evolve(
         policies_bundle=_pol, checkpointing=checkpointing,
         allocator=allocator, record_trajectories=record_trajectories,
         trajectory_store=trajectory_store, contract=contract,
-        extra_artifacts=extra_artifacts)
+        extra_artifacts=extra_artifacts,
+        population_islands=population_islands)
     # Start the clock after the wiring, before the first unit of work: setup
     # is not what a time-to-quality number is asking about.
     eng.meter.start()

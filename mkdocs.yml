@@ -77,6 +77,7 @@ nav:
     - Agents & LLMs: agents.md
     - Document backends: backends.md
     - The aggregator (the optimizer): aggregator.md
+    - Population engine: population.md
     - The ledger: ledger.md
     - The verifier: verifier.md
     - Sparse audit (cheap verifier vs truth): audit.md
