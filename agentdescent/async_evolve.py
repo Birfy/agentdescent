@@ -756,11 +756,17 @@ def async_evolve(
                     with counter_lock:
                         resumed_count[0] += 1
                 else:
-                    task = by_shard_id[sampler.pick(shard_ids, i)]
+                    _picked = sampler.pick(shard_ids, i)
                     i += 1
+                    task = (_picked if isinstance(_picked, Task)
+                            else by_shard_id[_picked])
             else:
-                task = by_shard_id[sampler.pick(shard_ids, i)]
+                # A sampler may return a Task object directly (a growable
+                # self-play frontier cannot pre-register its tasks in the shard
+                # dict); an id still resolves through the shard as before.
+                _picked = sampler.pick(shard_ids, i)
                 i += 1
+                task = _picked if isinstance(_picked, Task) else by_shard_id[_picked]
             # Duration-aware straggler detection (design spec 5.1, L-traj). It
             # existed only in the reference runtime, which accepts nothing but the
             # synthetic router domain -- so the whole L-traj mechanism was

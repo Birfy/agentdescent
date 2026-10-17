@@ -97,16 +97,28 @@ out of the tried set \(T_t\) and the yield \(g_t\). From it:
 ## Wired into `evolve()` (`examples/rrsi/rrsi_policies.py`)
 
 `build_rrsi_bundle(complete, protected=..., reviewer=..., config=...,
-base_score=...)` assembles the three slots into one `Policies` bundle and
-returns `(bundle, state)`. The three share one :class:`RRsiState` — `S*`, the
-measured per-edit ledger, the component bookkeeping and the annealed round
-counter — which is what makes them one algorithm rather than three knobs.
+base_score=..., history_path=...)` assembles the three slots into one
+`Policies` bundle and returns `(bundle, state)`. The three share one
+:class:`RRsiState` — `S*`, the measured per-edit history, the component
+bookkeeping and the annealed round counter — which is what makes them one
+algorithm rather than three knobs.
+
+**Fidelity.** The wiring consumes the pinned fixtures, not approximations:
+component attribution goes through :mod:`~examples.rrsi.components` (the
+upstream `K` / `K_STR` / `normalize` evidence rules — `skills/x/SKILL.md` is a
+`skill` edit, `ToolRegistry(...)` is `client_tool`, pure prose is `prompt`),
+and the per-edit ledger is :class:`~examples.rrsi.history.History` (the pinned
+durable JSONL) when `history_path` is given, with an in-memory twin for scratch
+runs pinned to the same summaries by a parity test. The search state (round,
+`S*`, incumbent cost, progress) rides the aggregator checkpoint; the per-edit
+evidence is the History's own file, so a resumed run reads the same evidence
+the loop conditioned on.
 
 | Slot | Policy | What it regularizes |
 |---|---|---|
 | `Policies(screen=...)` | `RRsiCritic` | Pre-evaluation screen: annealed edit-budget gate (`len(ops) > b_t` rejected) and deterministic leakage screening against the evolve set (`protected` strings), plus an optional model `reviewer`. Runs **before measurement** (issue #221: "screening before evaluation is important"), so a leaking or over-budget card is settled and reported as `critic-rejected` without a held-out sweep. |
-| `Policies(proposal=...)` | `RRsiProposalPolicy` | The regularized proposer: injects the annealed budget, the measured per-edit history, pruning targets and the stall-exploration note into the reflection prompt. |
-| `Policies(acceptance=...)` | `RRsiAcceptance` | The pinned `selection.judge` decision — historical-best floor, both cost-rule branches, novelty — with `S*` advanced through the pinned `update_best_score`. `S*`, the ledger and the round counter checkpoint/restore through the aggregator's optional acceptance hook, so a resumed run does not lose the floor. |
+| `Policies(proposal=...)` | `RRsiProposalPolicy` | The regularized proposer: injects the annealed budget, the measured per-edit history (`History.render`), pruning targets with the actionable accepted edits (`History.prune_set`) and the stall-exploration note (`History.stall_flag`) into the reflection prompt. |
+| `Policies(acceptance=...)` | `RRsiAcceptance` | The pinned `selection.judge` decision — historical-best floor, both cost-rule branches, novelty over `History.incumbent_component_counts` — with `S*` advanced through the pinned `update_best_score`. `S*`, the round counter and the progress trajectory checkpoint/restore through the aggregator's optional acceptance hook, so a resumed run does not lose the floor. |
 
 ### Declared deviations (recorded, not silent)
 
