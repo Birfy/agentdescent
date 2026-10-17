@@ -129,9 +129,16 @@ class ContainerSandbox:
 
         The candidate's environment is set here rather than inherited: `HOME` and
         `TMPDIR` have to name paths that exist *inside* the container, and the
-        host's values name paths that do not."""
+        host's values name paths that do not.
+
+        `PWD` is set for the same reason `_child_env` sets it locally (#371,
+        #377): `-w` moves the process but not the variable, and `exec` inherits
+        whatever `PWD` the image or the `run` left behind. A CLI that finds its
+        project from `$PWD` would then look somewhere other than the staged
+        candidate. It names the container path, never the host workspace."""
         return [self.engine, "exec", "-w", CONTAINER_WORKDIR,
                 "-e", f"HOME={CONTAINER_WORKDIR}", "-e", "TMPDIR=/tmp",
+                "-e", f"PWD={CONTAINER_WORKDIR}",
                 self.container_id]
 
     def kill(self) -> None:

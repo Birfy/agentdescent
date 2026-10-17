@@ -353,6 +353,54 @@ def test_the_exec_prefix_lands_in_the_container_with_a_usable_environment():
     assert f"HOME={CONTAINER_WORKDIR}" in prefix and "TMPDIR=/tmp" in prefix
 
 
+@pytest.mark.parametrize("engine", ["docker", "podman"])
+def test_the_exec_prefix_sets_pwd_to_the_container_workdir(engine):
+    """`-w` moves the process; it does not touch `$PWD`, which `exec` inherits
+    from the image or the `run` (#377). A CLI that reads `$PWD` to find its
+    project would look past the staged candidate, so the prefix sets it -- to
+    the path *inside* the container, never the host workspace."""
+    sb = ContainerSandbox(id="s", root="/host/ws", fingerprint="f", lease_id="l",
+                          container_id="abc123", engine=engine)
+    prefix = sb.exec_prefix()
+    pairs = [prefix[i + 1] for i, a in enumerate(prefix[:-1]) if a == "-e"]
+    assert f"PWD={CONTAINER_WORKDIR}" in pairs
+    assert prefix.index(f"PWD={CONTAINER_WORKDIR}") < prefix.index("abc123"), (
+        "an -e after the container id is part of the command, not the env")
+    assert not any("/host/ws" in a for a in prefix), (
+        "the host workspace path leaked into the container's environment")
+    # The candidate environment stays the allowlisted one: no host PATH, no keys.
+    assert sorted(p.split("=", 1)[0] for p in pairs) == ["HOME", "PWD", "TMPDIR"]
+
+
+def test_sh_passes_the_container_pwd_through_the_engine_cli(tmp_path):
+    """Through `runners._sh`, the path `code_runner` uses: the engine CLI gets
+    `PWD=/work` on its argv and the host's own environment, not the trimmed
+    candidate one whose `PWD` is the host workspace."""
+    import json
+    import sys
+
+    from agentdescent.runners import _child_env, _sh
+
+    fake = tmp_path / "fake-engine"
+    fake.write_text("#!" + sys.executable + "\n"
+                    "import json, os, sys\n"
+                    "print(json.dumps({'argv': sys.argv[1:],"
+                    " 'pwd': os.environ.get('PWD')}))\n")
+    fake.chmod(0o755)
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    sb = ContainerSandbox(id="s", root=str(ws), fingerprint="f", lease_id="l",
+                          container_id="abc123", engine=str(fake))
+    out = _sh(["python", "-c", "pass"], str(ws), 30, _child_env(str(ws), None),
+              sandbox=sb)
+    assert out.returncode == 0, out.stderr
+    seen = json.loads(out.stdout)
+    assert f"PWD={CONTAINER_WORKDIR}" in seen["argv"]
+    assert seen["argv"][-3:] == ["python", "-c", "pass"]
+    assert not any(str(ws) in a for a in seen["argv"]), (
+        "the host workspace path was handed to the container")
+
+
 def test_a_timeout_kills_the_container_not_the_exec():
     """Killing an `exec` leaves the process running inside. The container is
     per-lease and disposable, so killing it is both simpler and complete."""
@@ -606,6 +654,27 @@ def test_an_unmounted_workspace_says_so_instead_of_looking_like_a_missing_file(
 # ---------------------------------------------------------------------------
 # The whole chain, against a real engine
 # ---------------------------------------------------------------------------
+
+
+@needs_engine
+@every_engine
+def test_cwd_and_pwd_agree_inside_the_container(engine, shared_root):
+    """#377, against a real engine. A stale `PWD` injected ahead of ours stands
+    in for one baked into the image; the probe is executed directly, with no
+    shell to repair `$PWD` and hide the mismatch."""
+    p = ContainerProvider(IMAGE, engine=engine)
+    sb = p.acquire(SandboxSpec(workspace_root=shared_root))
+    try:
+        prefix = sb.exec_prefix()
+        stale = prefix[:2] + ["-e", "PWD=/stale-project"] + prefix[2:]
+        probe = "import os; print(os.getcwd()); print(os.environ.get('PWD'))"
+        for argv in (prefix, stale):
+            out = subprocess.run([*argv, "python", "-c", probe],
+                                 capture_output=True, text=True, timeout=120)
+            assert out.returncode == 0, out.stderr
+            assert out.stdout.split() == [CONTAINER_WORKDIR, CONTAINER_WORKDIR]
+    finally:
+        p.release(sb)
 
 
 @needs_engine
