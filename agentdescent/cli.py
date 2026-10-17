@@ -225,15 +225,53 @@ def doctor_report() -> Dict[str, Any]:
     why = mcp_unavailable()
     if why:
         problems.append(why)
+    hosts, hints = _host_integrations(clis)
+    for name, info in hosts.items():
+        if info["state"] in ("stale", "partial"):
+            problems.append(
+                f"{name}: the installed integration is {info['state']} "
+                f"(skill {info['skill']}, mcp {info['mcp']}); run `agentdescent install {name}`")
     return {
         "python": sys.version.split()[0],
         "agent_clis": clis, "provider_keys_present": keys,
         "openai_base_url": base_url,
         "optional": optional, "container_engine": container,
+        "hosts": hosts, "hints": hints,
         "nested": bool(os.environ.get(NESTED_ENV)),
         "run_store": runstore.root(),
         "problems": problems,
     }
+
+
+#: The host CLI each ``install`` target is driven through.
+_HOST_CLI = {"dsh": "dsh", "claude-code": "claude", "codex": "codex", "opencode": "opencode"}
+
+
+def _host_integrations(clis: Dict[str, Any]):
+    """Per-host install state for :func:`doctor_report`, plus the hints.
+
+    A host whose CLI is on ``PATH`` but has no integration gets a *hint*, not a
+    problem: ``pip install`` does not wire anything, and nobody wants every
+    host on the machine touched, so the exit code stays about what is broken.
+    A stale or half-written integration is a problem, because it is installed
+    and teaching the host a procedure the package no longer has."""
+    from .integrations import host_status
+
+    hosts: Dict[str, Dict[str, Any]] = {}
+    hints: List[str] = []
+    for name, binary in _HOST_CLI.items():
+        try:
+            info: Dict[str, Any] = dict(host_status(name))
+        except Exception:  # noqa: BLE001 - reading a config must never fail doctor
+            info = {"state": "unknown", "skill": "unknown", "mcp": "unknown", "path": ""}
+        info["cli"] = clis.get(binary)
+        hosts[name] = info
+        if info["cli"] and info["state"] == "missing":
+            extra = (" (or `codex plugin add agentdescent@agentdescent`)"
+                     if name == "codex" else "")
+            hints.append(f"{binary} is on PATH but agentdescent is not wired into it: "
+                         f"`agentdescent install {name}`{extra}")
+    return hosts, hints
 
 
 def _tree_diff(before: Dict[str, str], after: Dict[str, str]) -> str:
@@ -978,8 +1016,13 @@ def cmd_doctor(a: argparse.Namespace) -> int:
         _out(rep, as_json=True)
     else:
         for k, v in rep.items():
-            if k != "problems":
+            if k not in ("problems", "hosts", "hints"):
                 print(f"{k}: {v}")
+        for name, info in rep["hosts"].items():
+            print(f"host {name}: {info['state']}"
+                  + (f" (cli {info['cli']})" if info["cli"] else " (cli not on PATH)"))
+        for h in rep["hints"]:
+            print(f"- {h}")
         for p in rep["problems"]:
             print(f"! {p}")
         if not rep["problems"]:
