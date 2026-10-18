@@ -579,6 +579,14 @@ def require_resume_host_on_path(run_id: str, *, store: Optional[str] = None) -> 
         raise SpecError(f"cannot resume {run_id}: " + "; ".join(msgs))
 
 
+def _key_env(block: Any, default: str, *, field: str = "api_key_env") -> str:
+    """The variable the adapter will read: the block's own ``api_key_env`` /
+    ``base_url_env`` when the spec sets one, else the adapter's default. A string
+    ref (``"reflect": "openai_compatible"``) has no kwargs, so it is the default."""
+    name = block.get(field) if isinstance(block, dict) else None
+    return name if isinstance(name, str) and name else default
+
+
 def _unusable_refs(spec: EvolveSpec) -> List[str]:
     """Warnings for agents this machine cannot actually run.
 
@@ -619,14 +627,17 @@ def _unusable_refs(spec: EvolveSpec) -> List[str]:
             missing = []
             if not report["optional"].get("anthropic"):
                 missing.append("the `anthropic` package")
-            if not keys.get("ANTHROPIC_API_KEY"):
-                missing.append("ANTHROPIC_API_KEY")
+            key_env = _key_env(block, "ANTHROPIC_API_KEY")
+            if not os.environ.get(key_env):
+                missing.append(key_env)
             if missing:
                 out.append(f"{field}: `claude` is the Anthropic SDK completion (the "
                            f"CLI is `claude_code`) and needs {' and '.join(missing)}")
-        elif ref == "openai_compatible" and not keys.get("OPENAI_API_KEY"):
-            out.append(f"{field}: `openai_compatible` needs OPENAI_API_KEY (and "
-                       "OPENAI_BASE_URL for a non-OpenAI endpoint); without it "
+        elif ref == "openai_compatible" and not os.environ.get(
+                key_env := _key_env(block, "OPENAI_API_KEY")):
+            url_env = _key_env(block, "OPENAI_BASE_URL", field="base_url_env")
+            out.append(f"{field}: `openai_compatible` needs {key_env} (and "
+                       f"{url_env} for a non-OpenAI endpoint); without it "
                        + ("every proposal raises and the run fails after two rounds "
                           "with nothing learned" if field == "reflect"
                           else "every call raises"))

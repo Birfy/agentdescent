@@ -687,6 +687,7 @@ claude(
     usage: Optional[Usage] = None,
     retries: int = 3,
     timeout: float = 120.0,
+    api_key_env: Optional[str] = None,
     **create_kwargs
 ) -> Completion
 ```
