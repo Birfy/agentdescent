@@ -216,14 +216,22 @@ def resolve_params(algorithm: Algorithm, params: Optional[Mapping[str, Any]], *,
 
 
 _loaded = False
+_load_error: Optional[BaseException] = None
 
 
 def _load_builtin() -> None:
-    global _loaded
+    """Register the shipped algorithms once.
+
+    A failure is remembered and raised again on every later call: retrying would
+    hit a half-populated registry (``already registered``) and bury the real
+    error under a confusing one."""
+    global _loaded, _load_error
+    if _load_error is not None:
+        raise _load_error
     if not _loaded:
         _loaded = True
         try:
             from . import builtin  # noqa: F401  (registers on import)
-        except BaseException:
-            _loaded = False
+        except BaseException as e:
+            _load_error = e
             raise

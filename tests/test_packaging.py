@@ -102,3 +102,25 @@ def test_dataloader_caches_outside_the_repo():
     assert not str(root).startswith(str(ROOT)), \
         f"cache must not live inside the package tree: {root}"
     assert ".cache" in str(root)
+
+
+def test_apache_code_in_the_package_is_declared_licensed_and_shipped():
+    """``agentdescent/algorithms/rrsi`` carries files adapted from google-research/rrsi
+    (Apache-2.0), so the wheel must say so and ship the text (#386 review)."""
+    cfg = (ROOT / "pyproject.toml").read_text()
+    assert re.search(r'(?m)^license\s*=\s*"MIT AND Apache-2\.0"', cfg)
+    m = re.search(r"license-files\s*=\s*\[([^\]]*)\]", cfg)
+    assert m, "license-files must list the license texts and NOTICE"
+    for entry in ("LICENSE", "NOTICE", "LICENSES/*"):
+        assert f'"{entry}"' in m.group(1)
+    assert "License :: OSI Approved :: MIT License" not in cfg    # clashes with an SPDX expression
+    text = (ROOT / "LICENSES" / "Apache-2.0.txt").read_text()
+    assert "Apache License" in text and "Version 2.0, January 2004" in text
+    notice = (ROOT / "NOTICE").read_text()
+    # every packaged file that keeps an Apache header is named in NOTICE
+    apache = [p for p in (ROOT / "agentdescent").rglob("*.py")
+              if "Licensed under the Apache License" in p.read_text()]
+    assert apache, "expected the adapted RRSI files"
+    for path in apache:
+        rel = path.relative_to(ROOT / "agentdescent" / "algorithms" / "rrsi")
+        assert str(rel) in notice and "google-research/rrsi" in notice, path

@@ -1,0 +1,20 @@
+AgentDescent
+Copyright (c) 2026 AgentDescent (MIT License, see LICENSE)
+
+This distribution includes code adapted from third-party software:
+
+google-research/rrsi
+  Copyright 2026 Google LLC; Copyright 2026 The rrsi Authors
+  https://github.com/google-research/rrsi
+  Licensed under the Apache License, Version 2.0 (LICENSES/Apache-2.0.txt).
+
+  Adapted from commit be50316e1db05914068a973f322770ef08ed7ba1 into
+  agentdescent/algorithms/rrsi/:
+    components.py   (from rrsi/components.py)
+    history.py      (from rrsi/history.py)
+    schedule.py     (from rrsi/schedule.py)
+    selection.py    (from rrsi/selection.py)
+  Each of these files keeps its upstream copyright and license header and
+  states what was changed. agentdescent/algorithms/rrsi/rrsi_policies.py is
+  original to AgentDescent. The same files remain importable as
+  examples.rrsi.* (source checkout only).

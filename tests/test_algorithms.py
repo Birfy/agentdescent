@@ -79,6 +79,30 @@ def test_resolve_params_fills_defaults_and_widens_int_to_float():
     assert out["b_max"] == 3 and out["T"] == 20 and out["protected"] == []
 
 
+def test_a_zero_temperature_is_refused_by_the_schema_not_deep_in_build():
+    with pytest.raises(AlgorithmError, match=r"temperature: must be >="):
+        resolve_params(algorithms.get("archive_selection"), {"temperature": 0})
+
+
+def test_rrsi_with_no_protected_strings_warns_that_the_screen_is_vacuous():
+    note = " ".join(compose(_spec(algorithm="rrsi")).notes)
+    assert "`protected` is empty" in note and "never reject" in note
+    quiet = compose(_spec(algorithm={"name": "rrsi", "params": {"protected": ["zzz1"]}}))
+    assert "protected` is empty" not in " ".join(quiet.notes)
+
+
+def test_a_failed_builtin_load_keeps_its_original_error(monkeypatch):
+    monkeypatch.setattr(algorithms, "_loaded", False)
+    monkeypatch.setattr(algorithms, "_load_error", None)
+    monkeypatch.delattr(algorithms, "builtin", raising=False)
+    monkeypatch.setitem(sys.modules, "agentdescent.algorithms.builtin", None)
+    with pytest.raises(ImportError) as first:
+        algorithms.names()
+    with pytest.raises(ImportError) as second:
+        algorithms.names()
+    assert second.value is first.value          # not "already registered"
+
+
 def test_choices_are_enforced():
     with pytest.raises(AlgorithmError, match=r"sampling: must be one of \[.*'best'"):
         resolve_params(algorithms.get("archive_selection"), {"sampling": "greedy"})

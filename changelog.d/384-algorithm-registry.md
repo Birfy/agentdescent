@@ -12,3 +12,10 @@ acceptance policies) and `archive_selection` (DGM-style archive parent sampling,
 any kind). The RRSI mechanisms moved from `examples/rrsi/` into
 `agentdescent/algorithms/rrsi/` so the wheel carries them; the `examples.rrsi.*`
 modules remain as aliases.
+Because four of those modules are adapted from google-research/rrsi
+(Apache-2.0), the wheel now declares `MIT AND Apache-2.0` (PEP 639; build
+requires setuptools>=77) and ships `LICENSE`, `NOTICE` and
+`LICENSES/Apache-2.0.txt` in its `.dist-info/licenses/`. `plan` warns when
+`rrsi` runs with an empty `protected` list (the leakage screen is then
+vacuous), `archive_selection`'s `temperature` now declares its real lower
+bound, and a failed built-in registry load re-raises the original error.
