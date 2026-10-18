@@ -174,3 +174,13 @@ def test_foreground_evolve_prints_one_plain_line(store, tmp_path):
     assert len(lines) == 1 and lines[0].startswith("warning: the held-out set has only 2")
     # no `file.py:123: RuntimeWarning:` prefix and no echoed source line
     assert "Warning:" not in proc.stderr and "return evolve(" not in proc.stderr
+
+
+def test_one_task_is_all_held_out_and_the_train_count_agrees():
+    """`_train_count` is `evolve()`'s slice: train + held-out never exceeds n."""
+    from agentdescent.evolvespec import _train_count
+
+    assert held_out_size(1, 0.4) == 1 and _train_count(1, 0.4) == 0
+    for n in range(1, 40):
+        for frac in (0.1, 0.3, 0.4, 0.5, 0.9):
+            assert _train_count(n, frac) + held_out_size(n, frac) == n, (n, frac)

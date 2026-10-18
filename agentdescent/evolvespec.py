@@ -669,7 +669,9 @@ class Composition:
 
 
 def _train_count(n_tasks: int, held_out_frac: float) -> int:
-    return max(1, n_tasks - held_out_size(n_tasks, held_out_frac))
+    # Exactly `evolve()`'s slice (it may be empty: one task is all held-out), so a
+    # note built from this never claims more tasks than there are.
+    return max(0, n_tasks - held_out_size(n_tasks, held_out_frac))
 
 
 def _read_text_target(target: str) -> str:
@@ -818,13 +820,20 @@ def _compose_policy_slot(spec: EvolveSpec, *, usage: Optional[Usage] = None,
         kwargs.setdefault("on_round", on_round)
 
     n_train = _train_count(len(tasks), kwargs.get("held_out_frac", 0.4))
-    n_gate = len(tasks) - n_train
+    n_gate = held_out_size(len(tasks), kwargs.get("held_out_frac", 0.4))
     notes = [f"one rollout is a whole inner search on one of {len(problems)} problem(s); "
              f"{len(tasks)} outer task(s), {n_train} for training and {n_gate} for the gate"]
     # The recurring defect in this line of work, at four different levels: a
     # gate too small to resolve the effect it is judging. It has failed closed
     # (nothing commits) and open (a rule that loses on its own family was
     # committed on 9 held-out instances). Say it before the run, not after.
+    if n_train == 0:
+        # One task: `evolve()` holds it out and trains on nothing, so the gate is
+        # the whole set and there is no separate data for the search to learn from.
+        notes.append(
+            "NO training task: the split leaves every task in the held-out gate, so "
+            "nothing is left for the search to train on apart from the data it is "
+            "judged on. Add problems, or lower held_out_frac.")
     if n_gate == 0:
         notes.append(
             "NO held-out task: every acceptance decision would be made on data the search "
