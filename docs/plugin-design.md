@@ -362,6 +362,7 @@ composed by a profile. Verified against the current developer preview:
       # before starting an MCP server, so provider keys must be forwarded here.
       DEEPSEEK_API_KEY: !!js process.env.DEEPSEEK_API_KEY
       OPENAI_API_KEY:   !!js process.env.OPENAI_API_KEY
+      # ... the shared FORWARDED_ENV list, including ARK_API_KEY
 - id: hooks-agentdescent
   name: '@deepseek-ai/dsh-hooks-claude-code'
   config:
