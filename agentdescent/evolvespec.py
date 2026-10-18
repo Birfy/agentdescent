@@ -755,7 +755,7 @@ def _compose_policy_slot(spec: EvolveSpec, *, usage: Optional[Usage] = None,
     # the recorded run asked for 8 and got 2 inside a 90-minute budget.
     defaults: Dict[str, Any] = {"rounds": 4, "n_workers": 2, "held_out_frac": 0.4}
     kwargs.update({k: v for k, v in defaults.items() if k not in spec.evolve})
-    kwargs.update(spec.evolve)
+    kwargs.update(_evolve_pass_through(spec.evolve))
     kwargs.update(overrides)
 
     # `policies` and `agg_config` are generic and were being dropped on the
@@ -849,16 +849,23 @@ def check_evolve_knobs(evolve_knobs: Mapping[str, Any]) -> None:
     ``evolve`` then died in round setup with ``'str' object has no attribute
     'initial'`` (#384): the same plan/run gap as #343 / #346 / #368. A key
     ``evolve()`` does not have used to fail the same way, as a ``TypeError``.
+
+    ``null`` is different: for an Optional object knob (``parallel`` is the
+    motivating case) it is the evolve() default, not a string or dict that would
+    fail mid-run. Accept it here; :func:`_evolve_pass_through` then drops it so
+    it cannot clear objects ``compose`` already assembled (#392).
     """
     import inspect
 
     params = inspect.signature(evolve).parameters
-    for key in evolve_knobs:
+    for key, value in evolve_knobs.items():
         param = params.get(key)
         if param is None:
             raise SpecError(
                 f"evolve.{key}: evolve() has no such parameter; valid JSON knobs are "
                 f"{sorted(_json_knobs(params))}")
+        if value is None:
+            continue
         if key in _EVOLVE_OBJECT_KNOBS_HANDLED or key in _json_knobs(params):
             continue
         raise SpecError(
@@ -867,6 +874,23 @@ def check_evolve_knobs(evolve_knobs: Mapping[str, Any]) -> None:
             "round setup. Name a rule through `policies` (one ref per slot), pick the "
             "model with `agent` / `reflect`, or call evolve() from Python for a custom "
             f"{key}")
+
+
+def _evolve_pass_through(evolve_knobs: Mapping[str, Any]) -> Dict[str, Any]:
+    """``spec.evolve`` entries to hand to ``evolve()`` kwargs.
+
+    ``null`` on an object-typed knob means "use the engine default" and is
+    dropped, so it cannot clear ``strategy`` / ``run`` / ``propose`` /
+    ``policies`` that ``compose`` just built. JSON knobs and the handled
+    ``agg_config`` mapping keep ``null`` (they already mean the engine
+    default). See #392.
+    """
+    import inspect
+
+    params = inspect.signature(evolve).parameters
+    keep_null = set(_json_knobs(params)) | _EVOLVE_OBJECT_KNOBS_HANDLED
+    return {k: v for k, v in evolve_knobs.items()
+            if v is not None or k in keep_null}
 
 
 def _json_knobs(params: Mapping[str, Any]) -> List[str]:
@@ -1053,7 +1077,7 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
         default_workers = 4
 
     # -- knobs: kind defaults < spec.evolve < caller overrides ------------------
-    knobs: Dict[str, Any] = {**defaults, **spec.evolve, **overrides}
+    knobs: Dict[str, Any] = {**defaults, **_evolve_pass_through(spec.evolve), **overrides}
     # The dedicated field and the pass-through agree; an explicit `spec.evolve`
     # entry wins, exactly as it would for any other knob.
     if spec.extra_artifacts:
