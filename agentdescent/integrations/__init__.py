@@ -1000,9 +1000,25 @@ def _uninstall_dsh(home: str, e: _Eraser) -> None:
         return
     head = current[:current.index(DSH_BLOCK_START)]
     rest = current[current.index(DSH_BLOCK_START):]
-    # A block written before the end marker existed was always appended last, so
-    # it runs to the end of the file -- the same reading `sync_block` uses.
-    tail = rest[rest.index(DSH_BLOCK_END) + len(DSH_BLOCK_END):] if DSH_BLOCK_END in rest else ""
+    if DSH_BLOCK_END in rest:
+        # The block is owned by its two markers and removed whole, whatever was
+        # edited inside it -- the same ownership `sync_block` applies on install.
+        tail = rest[rest.index(DSH_BLOCK_END) + len(DSH_BLOCK_END):]
+    else:
+        # A block from before the end marker existed. `sync_block` reads it as
+        # running to the end of the file, but that was only true when it was
+        # written: rows the user appended since are theirs. The block's last
+        # line was always the hooks row's `configPath: .../agentdescent/hooks.json`,
+        # so end it there; if that line is not found, say so rather than guess.
+        lines = rest.split("\n")
+        last = next((i for i, line in enumerate(lines)
+                     if line.strip().startswith("configPath:")
+                     and "agentdescent/hooks.json" in line), None)
+        if last is None:
+            e.kept(path, "an old agentdescent block with no end marker whose last row "
+                         "was not recognised; delete it from the marker line yourself")
+            return
+        tail = "\n".join(lines[last + 1:])
     remaining = head + tail.lstrip("\n")
     if not remaining.strip():
         e.remove_file(path)
@@ -1022,6 +1038,46 @@ def _uninstall_claude_code(home: str, e: _Eraser) -> None:
         e.kept(dest, "holds files this install did not write")
 
 
+def _codex_block_to_remove(current: str) -> Optional[str]:
+    """The exact text ``install codex`` appended, wherever it now sits in the file.
+
+    ``_stock_codex_block`` only recognises it as the *last* thing in
+    ``config.toml``, which is what install's repair needs and is wrong here:
+    Codex itself appends tables after it (``[projects."..."]`` when a folder is
+    trusted). So: our marker line, the table header, ``command`` and ``args``
+    byte for byte as ``codex_config_block`` writes them for a stock launcher, and
+    then the end of the file or the next table header (blank lines and comments
+    aside). A further key under our table means the user edited it.
+    """
+    marker = "\n# --- agentdescent (written by `agentdescent install codex`) ---\n"
+    if current.count(marker) != 1 or current.count("[mcp_servers.agentdescent]") != 1:
+        return None
+    start = current.index(marker)
+    lines = current[start:].split("\n")       # "", marker, header, command, args, ...
+    if (len(lines) < 5 or lines[2] != "[mcp_servers.agentdescent]"
+            or not lines[3].startswith("command = ") or not lines[4].startswith("args = ")):
+        return None
+    try:
+        command = json.loads(lines[3][len("command = "):])
+        args = json.loads(lines[4][len("args = "):])
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(args, list) or not _stock_mcp_argv([command, *args]):
+        return None
+    block = codex_config_block([command, *args[:-len(MCP_ARGS)]])
+    if not current[start:].startswith(block):
+        return None
+    after = current[start + len(block):]
+    for line in after.split("\n"):
+        text = line.strip()
+        if not text or text.startswith("#"):
+            continue
+        if not text.startswith("["):
+            return None                          # another key of our table
+        break
+    return block
+
+
 def _uninstall_codex(home: str, e: _Eraser) -> None:
     root = os.environ.get("CODEX_HOME") or os.path.join(home, ".codex")
     skill_dir = os.path.join(root, "skills", "agentdescent")
@@ -1031,7 +1087,7 @@ def _uninstall_codex(home: str, e: _Eraser) -> None:
     current = _read(path)
     if current is None or "[mcp_servers.agentdescent]" not in current:
         return
-    block = _stock_codex_block(current)
+    block = _codex_block_to_remove(current)
     if block is None:
         e.kept(path, "its [mcp_servers.agentdescent] table is not the one `install` wrote "
                      "(edited, or added by hand); remove it yourself if you want it gone")
@@ -1065,8 +1121,13 @@ def _uninstall_opencode(home: str, e: _Eraser) -> None:
     existing = servers.get("agentdescent") if isinstance(servers, dict) else None
     if existing is None:
         return
+    # Pinned launcher only. The bare `["agentdescent", "mcp"]` shape is also what
+    # `opencode mcp add agentdescent -- agentdescent mcp` writes, and with no
+    # ownership marker it cannot be told from the user's own entry, so it stays.
     stock = (isinstance(existing, dict) and set(existing) == {"type", "command"}
-             and existing["type"] == "local" and _stock_mcp_argv(existing["command"]))
+             and existing["type"] == "local"
+             and existing["command"] != [MCP_COMMAND, *MCP_ARGS]
+             and _stock_mcp_argv(existing["command"]))
     if not stock:
         e.kept(path, "its mcp entry is not the one `install` wrote (edited, or added by "
                      "hand); remove it yourself if you want it gone")

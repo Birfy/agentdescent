@@ -9,7 +9,7 @@ import pytest
 
 from agentdescent import cli
 from agentdescent.integrations import (DSH_BLOCK_END, DSH_BLOCK_START, HOSTS,
-                                       host_status, install, uninstall)
+                                       dsh_patch_block, host_status, install, uninstall)
 
 
 @pytest.fixture(autouse=True)
@@ -129,13 +129,29 @@ def test_unknown_host_is_refused():
         uninstall("vim")
 
 
-def test_dsh_block_without_an_end_marker_runs_to_the_end_of_the_file(tmp_path):
-    """Installs from before the end marker existed appended the block last."""
+def test_a_legacy_dsh_block_without_an_end_marker_is_removed_up_to_its_last_row(tmp_path):
+    """Installs from before the end marker existed appended the block last; rows the
+    user added after it since are theirs and must survive."""
     home = str(tmp_path)
     patch = os.path.join(home, ".dsh", "cordis.patch.yml")
-    _write(patch, "- insert:\n    - id: mine\n" + DSH_BLOCK_START + "\n- insert:\n    - id: x\n")
+    mine = "- insert:\n    - id: mine\n"
+    later = "- insert:\n    - id: later\n      name: '@acme/later'\n"
+    _write(patch, mine + DSH_BLOCK_START + "\n" + dsh_patch_block())
     uninstall("dsh", home=home)
-    assert _snapshot(home) == {os.path.join(".dsh", "cordis.patch.yml"): "- insert:\n    - id: mine\n"}
+    assert _snapshot(home) == {os.path.join(".dsh", "cordis.patch.yml"): mine}
+    _write(patch, mine + DSH_BLOCK_START + "\n" + dsh_patch_block() + later)
+    uninstall("dsh", home=home)
+    assert _snapshot(home) == {os.path.join(".dsh", "cordis.patch.yml"): mine + later}
+
+
+def test_an_unrecognisable_legacy_dsh_block_is_kept_and_reported(tmp_path, capsys):
+    home = str(tmp_path)
+    patch = os.path.join(home, ".dsh", "cordis.patch.yml")
+    text = "- insert:\n    - id: mine\n" + DSH_BLOCK_START + "\n- insert:\n    - id: x\n"
+    _write(patch, text)
+    lines = uninstall("dsh", home=home)
+    assert _snapshot(home) == {os.path.join(".dsh", "cordis.patch.yml"): text}
+    assert any(line.startswith("kept ") and "no end marker" in line for line in lines)
 
 
 def test_dsh_keeps_what_the_user_wrote_after_the_block(tmp_path):
@@ -179,6 +195,51 @@ def test_codex_keeps_a_table_the_user_edited(tmp_path):
     assert not os.path.exists(os.path.join(home, ".codex", "skills", "agentdescent"))
 
 
+PROJECTS = '\n[projects."/home/me/proj"]\ntrust_level = "trusted"\n'
+
+
+def _codex_cfg(home):
+    return os.path.join(home, ".codex", "config.toml")
+
+
+def test_codex_removes_our_table_when_other_tables_follow_it(tmp_path):
+    """Codex itself appends ``[projects."..."]`` when a folder is trusted: the normal
+    install -> use -> uninstall lifecycle (#387 review)."""
+    home = str(tmp_path)
+    rel, text = USER_FILES["codex"]
+    _write(os.path.join(home, rel), text)
+    install("codex", home=home)
+    with open(_codex_cfg(home), "a", encoding="utf-8") as fh:
+        fh.write(PROJECTS)
+    lines = uninstall("codex", home=home)
+    assert not any(line.startswith("kept ") for line in lines)
+    assert _snapshot(home) == {rel: text + PROJECTS}
+    assert host_status("codex", home=home)["mcp"] == "missing"
+
+
+def test_codex_removes_our_table_from_the_middle_of_the_file(tmp_path):
+    home = str(tmp_path)
+    install("codex", home=home)
+    with open(_codex_cfg(home), "a", encoding="utf-8") as fh:
+        fh.write(PROJECTS + "\n# a comment\n[mcp_servers.other]\ncommand = \"other\"\n")
+    uninstall("codex", home=home)
+    after = _snapshot(home)[os.path.join(".codex", "config.toml")]
+    assert "[mcp_servers.agentdescent]" not in after and "install codex" not in after
+    assert after == PROJECTS + "\n# a comment\n[mcp_servers.other]\ncommand = \"other\"\n"
+
+
+def test_codex_keeps_a_table_with_a_key_added_under_it_even_if_tables_follow(tmp_path):
+    home = str(tmp_path)
+    install("codex", home=home)
+    with open(_codex_cfg(home), encoding="utf-8") as fh:
+        text = fh.read()
+    edited = text + 'env = { AGENTDESCENT_HOME = "/x" }\n' + PROJECTS
+    _write(_codex_cfg(home), edited)
+    lines = uninstall("codex", home=home)
+    assert _snapshot(home)[os.path.join(".codex", "config.toml")] == edited
+    assert any(line.startswith("kept ") for line in lines)
+
+
 def test_codex_keeps_a_table_written_by_hand(tmp_path):
     home = str(tmp_path)
     cfg = os.path.join(home, ".codex", "config.toml")
@@ -200,6 +261,19 @@ def test_opencode_keeps_an_entry_the_user_customised(tmp_path):
     assert _snapshot(home) == {os.path.relpath(path, home): custom}
     assert any(line.startswith("kept ") and "not the one `install` wrote" in line
                for line in lines)
+
+
+def test_opencode_keeps_the_bare_entry_that_opencode_mcp_add_writes(tmp_path):
+    """``opencode mcp add agentdescent -- agentdescent mcp`` writes the bare shape;
+    `install` writes a pinned launcher, so the bare one is the user's (#387 review)."""
+    home = str(tmp_path)
+    path = os.path.join(home, ".config", "opencode", "opencode.jsonc")
+    bare = json.dumps({"mcp": {"agentdescent": {
+        "type": "local", "command": ["agentdescent", "mcp"]}}}, indent=2) + "\n"
+    _write(path, bare)
+    lines = uninstall("opencode", home=home)
+    assert _snapshot(home) == {os.path.relpath(path, home): bare}
+    assert any(line.startswith("kept ") for line in lines)
 
 
 def test_opencode_with_comments_is_never_rewritten(tmp_path):
@@ -238,6 +312,16 @@ def test_cli_uninstall_prints_what_it_did(tmp_path, capsys):
     assert cli.main(["uninstall", "codex", "--home", home]) == 0
     assert "removed" in capsys.readouterr().out
     assert host_status("codex", home=home)["state"] == "missing"
+
+
+def test_cli_exit_status_says_whether_anything_needs_a_manual_step(tmp_path, capsys):
+    home = str(tmp_path)
+    assert cli.main(["uninstall", "codex", "--home", home]) == 0      # nothing installed
+    install("codex", home=home)
+    with open(_codex_cfg(home), "a", encoding="utf-8") as fh:
+        fh.write('env = { A = "1" }\n')                                # now customised
+    assert cli.main(["uninstall", "codex", "--home", home]) == 1
+    assert "kept" in capsys.readouterr().out
 
 
 def test_cli_uninstall_rejects_an_unknown_host():

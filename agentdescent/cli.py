@@ -1041,9 +1041,12 @@ def cmd_install(a: argparse.Namespace) -> int:
 def cmd_uninstall(a: argparse.Namespace) -> int:
     from .integrations import uninstall
 
-    for line in uninstall(a.host, dry_run=a.dry_run, home=a.home):
+    lines = uninstall(a.host, dry_run=a.dry_run, home=a.home)
+    for line in lines:
         print(line)
-    return 0
+    # 1 when something was kept and so is still wired: a script or an agent can
+    # tell "fully removed" from "needs a manual step". Nothing installed is 0.
+    return 1 if any(line.startswith("kept ") for line in lines) else 0
 
 
 def cmd_serve(a: argparse.Namespace) -> int:
