@@ -50,6 +50,7 @@ import shlex
 from dataclasses import dataclass, field, asdict, replace
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
+from . import algorithms as _algorithms
 from .agents import Completion, Usage, WorkspaceAgent
 from .aggregator import AggregatorConfig
 from .evolution import EvolutionResult, SingleSlot, Task, evolve, reflector, tasks_from
@@ -225,6 +226,12 @@ class EvolveSpec:
     #: note that ``enabled`` defaults to **false**: the audit collects without
     #: changing what commits until you say otherwise.
     audit: Optional[Dict[str, Any]] = None
+    #: A named algorithm from the registry (``agentdescent algorithms list``):
+    #: ``"rrsi"`` or ``{"name": "rrsi", "params": {"b_max": 3}}``. What it
+    #: contributes (``Policies`` slots, ``evolve()`` knobs, ``agg_config``) are
+    #: defaults: an explicit ``policies`` slot, ``agg_config`` field or ``evolve``
+    #: knob in this spec wins. See :mod:`agentdescent.algorithms`.
+    algorithm: Optional[Union[str, Dict[str, Any]]] = None
     #: One ref per slot; ``"staleness"`` may be a policy name. ``reflective_merge``
     #: fills ``conflict`` and ``fusion`` together.
     policies: Dict[str, Any] = field(default_factory=dict)
@@ -548,7 +555,8 @@ def build_audit(spec: EvolveSpec, *, reward: Callable, run: Optional[Callable],
         raise SpecError(f"audit: {e}") from None
 
 
-def build_policies(spec: EvolveSpec, *, merger: Optional[Any] = None) -> Optional[Policies]:
+def build_policies(spec: EvolveSpec, *, merger: Optional[Any] = None,
+                   base: Optional[Mapping[str, Any]] = None) -> Optional[Policies]:
     """The ``Policies`` bundle a spec asks for, or the default merge pair.
 
     Every merge-side rule is installed by the aggregator through
@@ -556,7 +564,12 @@ def build_policies(spec: EvolveSpec, *, merger: Optional[Any] = None) -> Optiona
     ``reflective_merge`` is the one name that fills two slots, and it can only
     be asked for as the pair -- the half-installed version the policy guide
     warns about cannot be written.
+
+    ``base`` is the slots an algorithm already built
+    (:class:`~agentdescent.algorithms.Overrides`); each is a default that a slot
+    named in ``spec.policies`` replaces.
     """
+    base = dict(base or {})
     asked = dict(spec.policies)
     # The merge pair is the default, not an opt-in. Without it a run whose
     # artifact is one key -- every `kind: "text"` target -- has its worker
@@ -570,14 +583,17 @@ def build_policies(spec: EvolveSpec, *, merger: Optional[Any] = None) -> Optiona
     # merging, and silently dropping the pair there would make the default
     # depend on a field that has nothing to do with it.
     default_merge = (merger is not None
-                     and not {"reflective_merge", "conflict", "fusion"} & set(asked))
+                     and not {"reflective_merge", "conflict", "fusion"} & set(asked)
+                     and not {"conflict", "fusion"} & set(base))
     if not asked:
+        if base:
+            return Policies(**{**base, **(reflective_merge(merger) if default_merge else {})})
         return Policies(**reflective_merge(merger)) if default_merge else None
     unknown = sorted(set(asked) - set(_POLICY_SLOTS) - {"reflective_merge"})
     if unknown:
         raise SpecError(f"policies: unknown slot(s) {unknown}; slots are {_POLICY_SLOTS} "
                         "plus 'reflective_merge'")
-    fields: Dict[str, Any] = {}
+    fields: Dict[str, Any] = dict(base)
     if "reflective_merge" in asked:
         if "conflict" in asked or "fusion" in asked:
             raise SpecError("policies: 'reflective_merge' fills conflict and fusion; "
@@ -635,6 +651,10 @@ class Composition:
     #: ``kwargs["run"]`` are already its wrapped versions; this is the handle for
     #: reading what it measured.
     audit: Optional[Any] = None
+    #: The algorithm the spec named, as ``plan`` shows it: its card with the
+    #: parameters resolved to what will run, and which of its defaults the spec
+    #: itself overrides. ``None`` when the spec names none.
+    algorithm: Optional[Dict[str, Any]] = None
 
     def run(self) -> EvolutionResult:
         return evolve(self.tasks, self.reward, **self.kwargs)
@@ -822,6 +842,74 @@ def _compose_policy_slot(spec: EvolveSpec, *, usage: Optional[Usage] = None,
     return Composition(tasks=tasks, reward=reward, kwargs=kwargs, notes=notes)
 
 
+def _parse_algorithm(spec: EvolveSpec) -> Optional[Tuple[Any, Dict[str, Any]]]:
+    """``spec.algorithm`` -> ``(Algorithm, resolved params)``, or ``None``.
+
+    Every mistake is a :class:`SpecError` naming ``algorithm`` and what would have
+    been valid, so ``plan`` fails before a rollout does.
+    """
+    raw = spec.algorithm
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        name, params = raw, {}
+    elif isinstance(raw, Mapping):
+        extra = sorted(set(raw) - {"name", "params"})
+        if extra or "name" not in raw:
+            raise SpecError("algorithm: expected a name or {'name': ..., 'params': {...}}"
+                            + (f"; unexpected key(s) {extra}" if extra else ""))
+        name, params = raw["name"], raw.get("params")
+        if params is None:
+            params = {}
+        if not isinstance(params, Mapping):
+            raise SpecError(f"algorithm.params: expected an object, got {params!r}")
+    else:
+        raise SpecError("algorithm: expected a name or {'name': ..., 'params': {...}}, "
+                        f"got {raw!r}")
+    try:
+        alg = _algorithms.get(name)
+        if spec.kind not in alg.kinds:
+            usable = [a.name for a in _algorithms.listing(spec.kind)]
+            raise _algorithms.AlgorithmError(
+                f"algorithm: {alg.name!r} applies to kind {list(alg.kinds)}, not "
+                f"{spec.kind!r}; for kind {spec.kind!r}: {usable or 'none registered'}")
+        return alg, _algorithms.resolve_params(alg, params)
+    except _algorithms.AlgorithmError as e:
+        raise SpecError(str(e)) from None
+
+
+def _build_algorithm(chosen: Tuple[Any, Dict[str, Any]], spec: EvolveSpec,
+                     reflect: Any, notes: List[str]) -> Any:
+    """Run the algorithm's ``build`` and check what it hands back is placeable."""
+    alg, params = chosen
+    try:
+        ov = alg.build(_algorithms.BuildContext(spec=spec, reflect=reflect), params)
+    except _algorithms.AlgorithmError as e:
+        raise SpecError(str(e)) from None
+    bad = sorted(set(ov.policies) - set(Policies.__dataclass_fields__))
+    if bad:
+        raise SpecError(f"algorithm {alg.name!r} built unknown Policies slot(s) {bad}")
+    notes.extend(ov.notes)
+    return ov
+
+
+def _algorithm_echo(chosen: Tuple[Any, Dict[str, Any]], spec: EvolveSpec,
+                    ov: Any) -> Dict[str, Any]:
+    """What ``plan`` shows: the card, the parameters that will run, and which of
+    the algorithm's own defaults this spec replaces."""
+    alg, params = chosen
+    asked = set(spec.policies)
+    if "reflective_merge" in asked:
+        asked |= {"conflict", "fusion"}
+    overridden = sorted(
+        [f"policies.{k}" for k in ov.policies if k in asked]
+        + [f"agg_config.{k}" for k in ov.agg_config if k in spec.agg_config]
+        + [f"evolve.{k}" for k in ov.knobs if k in spec.evolve])
+    return {"name": alg.name, "summary": alg.summary, "fidelity": alg.fidelity,
+            "params": params, "extra_calls": alg.extra_calls, "source": alg.source,
+            "doc": alg.doc, "overridden_by_spec": overridden}
+
+
 #: ``evolve()`` parameters whose annotation is made only of these names take plain
 #: JSON values; everything else takes an object (a strategy, a factory, a callable).
 _JSON_ANNOTATION_NAMES = frozenset({
@@ -926,6 +1014,10 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
     if spec.version != 1:
         raise SpecError(f"unsupported spec version {spec.version}")
     check_evolve_knobs(spec.evolve)
+    if spec.kind == "policy_slot" and spec.algorithm is not None:
+        raise SpecError("algorithm: not available for kind='policy_slot'; that kind "
+                        "evolves one policy slot, not a recipe")
+    chosen = _parse_algorithm(spec)
 
     if spec.kind == "policy_slot":
         return _compose_policy_slot(spec, usage=usage, on_round=on_round, **overrides)
@@ -936,6 +1028,9 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
     agent = _resolve(spec.agent, spec, where="agent")
     reflect = _resolve(spec.reflect, spec, where="reflect") if spec.reflect else agent
     aid = spec.artifact_id()
+    ov = None
+    if chosen is not None:
+        ov = _build_algorithm(chosen, spec, reflect, notes)
 
     kwargs: Dict[str, Any] = {"artifact_id": aid}
     tree: Optional[Dict[str, str]] = None
@@ -986,7 +1081,8 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
         if spec.kind == "plugin":
             tspec = replace(tspec, include=tuple(tspec.include) + (
                 "**/*.js", "**/*.mjs", "**/*.cjs", "**/*.ts", "**/*.jsx", "**/*.tsx"))
-        agg_defaults = {"batch_trigger": 2, "max_wait_rounds": 1}
+        agg_defaults = {"batch_trigger": 2, "max_wait_rounds": 1,
+                        **(ov.agg_config if ov else {})}
         cfg = build_agg_config(spec, **agg_defaults)
         tspec.validate_against(cfg.trust_region_chars)
         tree = load_tree(path, tspec)
@@ -1078,7 +1174,8 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
         default_workers = 4
 
     # -- knobs: kind defaults < spec.evolve < caller overrides ------------------
-    knobs: Dict[str, Any] = {**defaults, **_evolve_pass_through(spec.evolve), **overrides}
+    knobs: Dict[str, Any] = {**defaults, **(ov.knobs if ov else {}),
+                             **_evolve_pass_through(spec.evolve), **overrides}
     # The dedicated field and the pass-through agree; an explicit `spec.evolve`
     # entry wins, exactly as it would for any other knob.
     if spec.extra_artifacts:
@@ -1098,13 +1195,13 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
         notes.append("asynchronous=True needs max_seconds; defaulted to 600.")
     if "agg_config" in knobs and isinstance(knobs["agg_config"], Mapping):
         knobs["agg_config"] = build_agg_config(spec, **knobs["agg_config"])
-    elif spec.kind == "text" and spec.agg_config:
-        knobs["agg_config"] = build_agg_config(spec)
+    elif spec.kind == "text" and (spec.agg_config or (ov and ov.agg_config)):
+        knobs["agg_config"] = build_agg_config(spec, **(ov.agg_config if ov else {}))
     # A CLI agent can reflect, but paying a whole agent session to merge two
     # diffs is not a default anyone would choose; those specs name a cheap model
     # in `reflect`, and that is what merges.
     merger = reflect if not hasattr(reflect, "in_workspace") else None
-    policies = build_policies(spec, merger=merger)
+    policies = build_policies(spec, merger=merger, base=ov.policies if ov else None)
 
     # The audit wraps the reward and the run, so it has to be built after both
     # exist and before the policies bundle is finalised -- its acceptance rule
@@ -1141,7 +1238,8 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
         notes.append(f"only {len(tasks)} tasks: the held-out split will be tiny and the "
                      "acceptance test weak; 8-20 is a workable minimum.")
     return Composition(tasks=tasks, reward=reward, kwargs=kwargs, tree=tree,
-                       notes=notes, audit=audit)
+                       notes=notes, audit=audit,
+                       algorithm=_algorithm_echo(chosen, spec, ov) if chosen else None)
 
 
 def run_spec(spec: EvolveSpec, **hooks: Any) -> EvolutionResult:

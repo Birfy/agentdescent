@@ -19,6 +19,7 @@ commands on a host with no MCP.
     agentdescent doctor                                             what is installed
     agentdescent install <dsh|claude-code|codex|opencode>           wire a host
     agentdescent uninstall <dsh|claude-code|codex|opencode>         undo `install`
+    agentdescent algorithms list [--kind K] | show <name>           named algorithms for a spec
     agentdescent mcp                                                serve over stdio
     agentdescent serve   [--port N]                                 read-only run panel
 
@@ -37,7 +38,7 @@ import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from . import runstore
-from .evolvespec import (EvolveSpec, SpecError, compose, estimate, load_spec,
+from .evolvespec import (KINDS, EvolveSpec, SpecError, compose, estimate, load_spec,
                          _POLICY_SLOTS)
 
 __all__ = ["main", "doctor_report", "starter_spec"]
@@ -698,6 +699,7 @@ def plan_payload(spec: EvolveSpec, *, usd_per_call: Optional[float] = None) -> D
             "evolve_kwargs": {k: (v if isinstance(v, (int, float, str, bool, type(None)))
                                   else type(v).__name__)
                               for k, v in comp.kwargs.items()},
+            **({"algorithm": comp.algorithm} if comp.algorithm else {}),
             "estimate": estimate(comp, usd_per_call=usd_per_call), "notes": comp.notes}
     if hard_errors:
         payload["error"] = "; ".join(hard_errors)
@@ -1029,6 +1031,53 @@ def cmd_doctor(a: argparse.Namespace) -> int:
     return 0 if not rep["problems"] else 1
 
 
+def _algorithm_card_text(card: Dict[str, Any]) -> str:
+    lines = [f"{card['name']}  [{card['fidelity']}]", f"  {card['summary']}",
+             f"  kinds:       {', '.join(card['kinds'])}",
+             f"  extra calls: {card['extra_calls']}"]
+    if card["source"]:
+        lines.append(f"  source:      {card['source']}")
+    if card["doc"]:
+        lines.append(f"  docs:        docs/{card['doc']}")
+    lines.append("  params (spec: \"algorithm\": {\"name\": \"%s\", \"params\": {...}}):"
+                 % card["name"])
+    if not card["params"]:
+        lines.append("    (none)")
+    for p in card["params"]:
+        bounds = (f" choices={p['choices']}" if "choices" in p else "") + (
+            f" min={p['minimum']}" if "minimum" in p else "") + (
+            f" max={p['maximum']}" if "maximum" in p else "")
+        lines.append(f"    {p['name']}: {p['type']} = {json.dumps(p['default'])}{bounds}")
+        if p["help"]:
+            lines.append(f"        {p['help']}")
+    return "\n".join(lines)
+
+
+def cmd_algorithms(a: argparse.Namespace) -> int:
+    from . import algorithms
+
+    as_json = a.json
+    if a.action == "list":
+        if a.kind is not None and a.kind not in KINDS:
+            raise SpecError(f"--kind must be one of {list(KINDS)}, got {a.kind!r}")
+        found = algorithms.listing(a.kind)
+        if as_json:
+            _out([x.describe() for x in found], as_json=True)
+        elif not found:
+            print(f"no algorithms for kind {a.kind!r}")
+        else:
+            width = max(len(x.name) for x in found)
+            for x in found:
+                print(f"{x.name:<{width}}  {x.fidelity:<19}  {','.join(x.kinds):<42}  {x.summary}")
+        return 0
+    try:
+        card = algorithms.get(a.name, where="show").describe()
+    except algorithms.AlgorithmError as e:
+        raise SpecError(str(e)) from None
+    _out(card if as_json else _algorithm_card_text(card), as_json=as_json)
+    return 0
+
+
 def cmd_install(a: argparse.Namespace) -> int:
     from .integrations import install
 
@@ -1175,6 +1224,19 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--dry-run", action="store_true", dest="dry_run")
     s.add_argument("--home", help="the host's home directory (default: the real one)")
     s.set_defaults(fn=cmd_uninstall)
+
+    s = sub.add_parser("algorithms", help="the named algorithms a spec can ask for")
+    algo_sub = s.add_subparsers(dest="action", required=True)
+    s2 = algo_sub.add_parser("list", help="every algorithm, or those that apply to a kind")
+    s2.add_argument("--kind", help="only algorithms for this spec kind")
+    s2.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                    help="machine-readable output")
+    s2.set_defaults(fn=cmd_algorithms)
+    s2 = algo_sub.add_parser("show", help="one algorithm: what it does, its parameters")
+    s2.add_argument("name")
+    s2.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                    help="machine-readable output")
+    s2.set_defaults(fn=cmd_algorithms)
 
     s = sub.add_parser("serve", help="serve a read-only run panel on loopback, for a host UI")
     s.add_argument("--host", default=runstore.DEFAULT_HTTP_HOST)
