@@ -34,7 +34,9 @@ def _rrsi_params():
         out.append(Param(f.name, "int" if isinstance(f.default, int)
                          and not isinstance(f.default, bool) else "float", f.default,
                          _RRSI_HELP.get(f.name, ""),
-                         minimum=1 if f.name in ("b_min", "b_max") else 0))
+                         minimum=1 if f.name in ("b_min", "b_max") else 0,
+                         # selection rejects a noise delta outside [0, 1]
+                         maximum=1 if f.name == "noise_band" else None))
     out.append(Param("protected", "list[str]", [],
                      "strings that must not leak into the artifact: task ids, gold "
                      "answers, names from the evolve set (never the final holdout). "

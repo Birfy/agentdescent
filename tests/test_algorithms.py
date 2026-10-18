@@ -65,6 +65,8 @@ def test_duplicate_registration_is_refused():
     ({"b_max": True}, r"expected int"),
     ({"b_max": 2.5}, r"expected int"),
     ({"b_max": 0}, r"must be >= 1"),
+    ({"noise_band": 2}, r"noise_band: must be <= 1"),
+    ({"noise_band": -0.1}, r"noise_band: must be >= 0"),
     ({"protected": "t3"}, r"protected: expected list\[str\]"),
     ({"protected": [1]}, r"expected list\[str\]"),
 ])
@@ -125,11 +127,23 @@ def test_the_spec_round_trips_an_algorithm():
     (dict(algorithm={"params": {}}), r"algorithm: expected a name or"),
     (dict(algorithm={"name": "rrsi", "param": {}}), r"unexpected key\(s\) \['param'\]"),
     (dict(algorithm={"name": "rrsi", "params": [1]}), r"algorithm\.params: expected an object"),
+    (dict(algorithm={"name": "rrsi", "params": []}), r"algorithm\.params: expected an object"),
+    (dict(algorithm={"name": "rrsi", "params": ""}), r"algorithm\.params: expected an object"),
+    (dict(algorithm={"name": "rrsi", "params": 0}), r"algorithm\.params: expected an object"),
+    (dict(algorithm={"name": "rrsi", "params": False}), r"algorithm\.params: expected an object"),
     (dict(algorithm=3), r"algorithm: expected a name or"),
 ])
 def test_a_bad_algorithm_fails_in_compose_naming_the_field(spec_kw, message):
     with pytest.raises(SpecError, match=message):
         compose(_spec(**spec_kw))
+
+
+def test_null_algorithm_params_means_defaults():
+    compose(_spec(algorithm={"name": "rrsi", "params": None}))
+
+
+def test_noise_band_at_the_bound_is_accepted():
+    assert resolve_params(algorithms.get("rrsi"), {"noise_band": 1})["noise_band"] == 1.0
 
 
 def test_an_algorithm_that_does_not_apply_to_the_kind_names_the_ones_that_do(tmp_path):

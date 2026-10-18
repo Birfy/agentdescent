@@ -852,7 +852,9 @@ def _parse_algorithm(spec: EvolveSpec) -> Optional[Tuple[Any, Dict[str, Any]]]:
         if extra or "name" not in raw:
             raise SpecError("algorithm: expected a name or {'name': ..., 'params': {...}}"
                             + (f"; unexpected key(s) {extra}" if extra else ""))
-        name, params = raw["name"], raw.get("params") or {}
+        name, params = raw["name"], raw.get("params")
+        if params is None:
+            params = {}
         if not isinstance(params, Mapping):
             raise SpecError(f"algorithm.params: expected an object, got {params!r}")
     else:

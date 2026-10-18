@@ -142,6 +142,8 @@ the loop conditioned on.
 * **`noise_band` is a configured parameter** (default `0.0`, the conservative
   floor `score >= S*`). The paper estimates it by repeatedly evaluating the
   unchanged base harness; set `RRsiConfig.noise_band` from that measurement.
+  It is a score delta in `[0, 1]`; `spec.algorithm` params outside that range
+  fail in `plan`.
 * **Cost is `EvidenceCard.cost_tokens`, averaged per rollout** (the proposing
   rollout's usage, when the caller shares a `Usage` with its adapters), **not a
   batch sum** -- summing across a merge's cards would make the cost rule depend
