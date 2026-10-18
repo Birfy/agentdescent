@@ -158,6 +158,17 @@ agentdescent install codex
 codex mcp list                    # agentdescent ... enabled
 ```
 
+!!! warning "Codex scrubs the environment of MCP servers"
+    Codex starts a stdio server with only `HOME LOGNAME PATH SHELL USER LANG
+    LC_ALL TERM TMPDIR TZ` plus the names in the server's `env_vars`. Both routes
+    declare them (`DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`,
+    `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `ARK_API_KEY`,
+    `AGENTDESCENT_HOME`), so check that `codex mcp list` shows them in the `Env`
+    column for either route (values are masked; a name that is not exported in
+    the shell that launched Codex is simply not forwarded). Verified with
+    codex-cli 0.163.0. A spec whose `api_key_env` names another variable needs
+    that name added to `env_vars` by hand.
+
 `codex doctor` reports "no MCP servers configured" even when a plugin-provided
 server is live — it counts only `mcp_servers` in `config.toml`. Trust
 `codex mcp list`.

@@ -313,7 +313,8 @@ small script so they cannot drift.
 skills/agentdescent/SKILL.md    the shared skill
 commands/evolve.md              /agentdescent:evolve <path> — a slash-command shortcut that
                                 invokes the skill with the argument prefilled
-.mcp.json                       {"mcpServers": {"agentdescent": {"command": "agentdescent", "args": ["mcp"]}}}
+.mcp.json                       {"mcpServers": {"agentdescent": {"command": "agentdescent", "args": ["mcp"],
+                                "env_vars": [...]}}}   (env_vars: what Codex forwards; see plugins.md)
 hooks/hooks.json                SessionStart: `agentdescent status --brief` so an in-progress run
                                 is surfaced when the user comes back
 agents/evolution-reviewer.md    optional subagent that reads `show --diff` output and writes
