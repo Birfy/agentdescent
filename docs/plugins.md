@@ -68,6 +68,37 @@ leaves no files here, so it reads `missing` and the hint names that route too.
 Only presence is checked: a launcher pinned to an interpreter that has since
 been deleted still reads `ok`.
 
+### Uninstall
+
+`agentdescent uninstall <host>` (`--dry-run` to preview, `--home` as for
+`install`) takes back what the table above says `install` wrote: the skill
+files, the Claude Code plugin directory, the `cordis.patch.yml` block, the
+`[mcp_servers.agentdescent]` table in `config.toml`, the `mcp.agentdescent`
+entry in `opencode.jsonc`. Everything around them is left as it was, and so is
+the run store in `~/.agentdescent`.
+
+What counts as "ours" differs by file:
+
+* **dsh**: the block between the two marker lines is owned by the markers and
+  removed whole, including any edit made inside it. A block from before the end
+  marker existed ends at its hooks row (`configPath: .../agentdescent/hooks.json`);
+  rows you added after it stay. If that row is not found, the block is kept and
+  reported.
+* **Codex**: the table is removed wherever it now sits, so tables Codex added
+  after it (`[projects."..."]`) are fine, but only if it is still byte for byte
+  what `install` wrote. A key you added under it, or a table you wrote
+  yourself, is kept.
+* **OpenCode**: only the pinned launcher `install` writes. The bare
+  `["agentdescent", "mcp"]` entry (what `opencode mcp add` writes) is treated
+  as yours. A `$schema` key that `install` added to `opencode.jsonc` is left
+  behind (it is harmless and cannot be told from one you wrote), and so is an
+  empty `mcp` object you had. A file with comments is never rewritten.
+
+Anything kept is printed as `kept ... (...)` and makes the command exit 1, so a
+script can tell "fully removed" from "one step is yours"; nothing to remove
+exits 0 and prints `nothing to remove`. An install made through the host's own
+marketplace is removed with that host's plugin command, not with this one.
+
 ### Codex: the same plugin as Claude Code
 
 Codex reads the Claude Code plugin format, marketplace and all, so the package
