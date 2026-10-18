@@ -1157,7 +1157,10 @@ def cmd_algorithms(a: argparse.Namespace) -> int:
 def cmd_install(a: argparse.Namespace) -> int:
     from .integrations import install
 
-    written = install(a.host, dry_run=a.dry_run, home=a.home)
+    try:
+        written = install(a.host, dry_run=a.dry_run, home=a.home)
+    except ValueError as e:        # e.g. an empty --home (#412)
+        raise SpecError(f"install: {e}") from None
     for line in written:
         print(line)
     return 0
@@ -1166,7 +1169,10 @@ def cmd_install(a: argparse.Namespace) -> int:
 def cmd_uninstall(a: argparse.Namespace) -> int:
     from .integrations import uninstall
 
-    lines = uninstall(a.host, dry_run=a.dry_run, home=a.home)
+    try:
+        lines = uninstall(a.host, dry_run=a.dry_run, home=a.home)
+    except ValueError as e:        # e.g. an empty --home (#412)
+        raise SpecError(f"uninstall: {e}") from None
     for line in lines:
         print(line)
     # 1 when something was kept and so is still wired: a script or an agent can
