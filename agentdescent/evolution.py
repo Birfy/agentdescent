@@ -2197,6 +2197,59 @@ def _contract_dependents(primary_id: str, primary_contract: Any,
             out.setdefault(dep, []).append(aid)
     return out
 
+#: The smallest held-out set whose numbers mean anything: every gate in a run
+#: (the Beta acceptance test, ``target_reward``, ``patience``, ``final_reward``)
+#: is measured on it. ``evolve()`` warns below this, and ``plan`` / ``compose``
+#: note the same condition from the same helpers, so the two cannot drift (#414).
+MIN_HELD_OUT = 4
+
+
+class SmallHeldOutWarning(RuntimeWarning):
+    """``evolve()``'s held-out set is smaller than :data:`MIN_HELD_OUT`.
+
+    A ``RuntimeWarning`` subclass so existing filters keep working; the CLI keys
+    on the class to print it as one plain line instead of a source-line trace.
+    """
+
+
+def held_out_size(n_tasks: int, held_out_frac: float) -> int:
+    """How many of ``n_tasks`` ``evolve()`` holds out at ``held_out_frac``.
+
+    The one definition of the split: the train side is
+    ``max(1, round(n * (1 - frac)))`` and the rest is held out, never fewer than
+    one. ``evolve()`` slices with it and ``plan`` reports it, so the number a
+    user is warned about is the number the run uses.
+    """
+    n = int(n_tasks)
+    if n <= 0:
+        return 0
+    cut = max(1, round(n * (1 - held_out_frac)))
+    return max(1, n - cut)
+
+
+def min_tasks_for_held_out(held_out_frac: float, *, limit: int = 10_000) -> Optional[int]:
+    """The fewest tasks that give :data:`MIN_HELD_OUT` held out at ``held_out_frac``.
+
+    ``None`` when no count up to ``limit`` does (a fraction near 0).
+    """
+    for n in range(MIN_HELD_OUT, limit + 1):
+        if held_out_size(n, held_out_frac) >= MIN_HELD_OUT:
+            return n
+    return None
+
+
+def small_held_out_message(n_held_out: int, n_tasks: int, held_out_frac: float) -> str:
+    """The sentence ``evolve()`` warns with and ``plan`` notes, built once (#414)."""
+    msg = (f"the held-out set has only {n_held_out} task(s) "
+           f"({n_tasks} tasks x held_out_frac={held_out_frac}), so every "
+           "acceptance decision and the reported final_reward rest on that many "
+           "rollouts. Pass more tasks or raise held_out_frac.")
+    need = min_tasks_for_held_out(held_out_frac) if 0.0 < held_out_frac < 1.0 else None
+    if need is not None and need > n_tasks:
+        msg += (f" At held_out_frac={held_out_frac} that takes at least {need} "
+                f"tasks to hold out {MIN_HELD_OUT}.")
+    return msg
+
 
 def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state,
                   blast_radius, artifact_id, held_out_frac, repo_path, agg_config,
@@ -2295,22 +2348,18 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     # round, not truncate: Dataset.val_frac promises "the engine's held-out split
     # is exactly this Dataset's val", and float truncation (13.9999 -> 13) quietly
     # pushed one train item into held-out for many dataset sizes.
-    cut = max(1, round(len(tasks) * (1 - held_out_frac)))
+    cut = len(tasks) - held_out_size(len(tasks), held_out_frac)
     train, held_out = tasks[:cut], tasks[cut:]
-    if not held_out:
-        train, held_out = tasks[:-1], tasks[-1:]
     # Every gate in the run -- the Beta acceptance test, target_reward, patience,
     # final_reward -- is measured on this set. At 3 items a single binary rollout
     # moves the reported reward by 0.33, and at 1 it is 0.0 or 1.0 and nothing
     # else. The engine already refuses fewer than 4 tasks; this is the same
     # argument one level down, where it decides whether the numbers mean anything.
-    if len(held_out) < 4:
+    # `plan` / `compose` report the same condition from the same helpers (#414).
+    if len(held_out) < MIN_HELD_OUT:
         warnings.warn(
-            f"the held-out set has only {len(held_out)} task(s) "
-            f"({len(tasks)} tasks x held_out_frac={held_out_frac}), so every "
-            "acceptance decision and the reported final_reward rest on that many "
-            "rollouts. Pass more tasks or raise held_out_frac.",
-            RuntimeWarning, stacklevel=3)
+            small_held_out_message(len(held_out), len(tasks), held_out_frac),
+            SmallHeldOutWarning, stacklevel=3)
 
     # Wrap the actors before anything else can capture them: `run` is closed over
     # by the runtime, by every worker and by the verifier's `eval_fn`, so a later
