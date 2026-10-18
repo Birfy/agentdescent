@@ -442,12 +442,40 @@ def _stock_codex_block(current: str) -> Optional[str]:
     return previous if previous.rstrip() in (b.rstrip() for b in stock) else None
 
 
+def _add_env_vars_in_place(path: str, w: "_Writer") -> bool:
+    """Give an untouched pre-#404 block its ``env_vars`` line wherever it sits.
+
+    Codex appends ``[projects."..."]`` after our table as soon as a folder is
+    trusted, so the old block is usually *not* the last thing in the file and
+    ``append_unless``'s end-of-file repair never fires -- the keys would stay
+    scrubbed and ``doctor`` stale for good. ``_codex_block_to_remove`` has
+    already shown the block is byte for byte ours and that what follows starts a
+    new table, so only that line is added; the launcher and everything after the
+    block stay as they are. A block at the end of the file is left to
+    ``append_unless``, which also refreshes a stale launcher. Returns whether it
+    handled the file.
+    """
+    current = _read(path)
+    if current is None:
+        return False
+    block = _codex_block_to_remove(current)
+    if block is None or "\nenv_vars = " in block:
+        return False
+    if not current.split(block, 1)[1].strip():
+        return False
+    repaired = block + f"env_vars = {json.dumps(list(FORWARDED_ENV))}\n"
+    w.write(path, current.replace(block, repaired, 1))
+    return True
+
+
 def install_codex(home: str, w: _Writer) -> None:
     codex_home = os.environ.get("CODEX_HOME") or os.path.join(home, ".codex")
     w.write(os.path.join(codex_home, "skills", "agentdescent", "SKILL.md"), skill_text())
-    w.append_unless(os.path.join(codex_home, "config.toml"), "[mcp_servers.agentdescent]",
-                    codex_config_block(w.launcher), what="mcp_servers entry",
-                    previous=_stock_codex_block)
+    cfg_path = os.path.join(codex_home, "config.toml")
+    if not _add_env_vars_in_place(cfg_path, w):
+        w.append_unless(cfg_path, "[mcp_servers.agentdescent]",
+                        codex_config_block(w.launcher), what="mcp_servers entry",
+                        previous=_stock_codex_block)
     w.note(f"forwarded into the MCP server env (Codex scrubs the rest): "
            f"{', '.join(FORWARDED_ENV)}")
     w.note("verify: codex mcp list   (the Env column names them)")

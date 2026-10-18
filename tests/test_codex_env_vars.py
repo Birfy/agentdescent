@@ -122,3 +122,47 @@ def test_plugin_mcp_manifest_forwards_the_same_variables(tmp_path):
     render_claude_plugin(str(dest))
     rendered = json.loads((dest / ".mcp.json").read_text())["mcpServers"]["agentdescent"]
     assert rendered["env_vars"] == checked_in["mcpServers"]["agentdescent"]["env_vars"]
+
+
+PROJECTS = '\n[projects."/home/u/proj"]\ntrust_level = "trusted"\n'
+
+
+@pytest.mark.parametrize("launcher", [None, ["/old/python", "-P", "-m", "agentdescent.cli"]])
+def test_legacy_block_followed_by_a_codex_table_is_repaired_in_place(tmp_path, launcher):
+    """Codex appends `[projects."..."]` once a folder is trusted -- the usual state
+    of anyone who used the old install. The block is not last, but it is ours."""
+    home = str(tmp_path)
+    legacy = _legacy_codex_block(launcher)
+    before = 'model = "x"\n' + legacy + PROJECTS
+    _cfg(tmp_path).parent.mkdir()
+    _cfg(tmp_path).write_text(before)
+    assert host_status("codex", home=home)["state"] == "stale"
+
+    lines = install("codex", home=home)
+    after = _cfg(tmp_path).read_text()
+    assert after == ('model = "x"\n' + legacy + f"env_vars = {json.dumps(list(FORWARDED_ENV))}\n"
+                     + PROJECTS), after
+    assert not any(l.startswith("kept ") for l in lines), lines
+    assert host_status("codex", home=home)["state"] == "ok"
+    # idempotent, and uninstall still removes the repaired block from the middle
+    again = install("codex", home=home)
+    assert _cfg(tmp_path).read_text() == after and any(l.startswith("kept ") for l in again)
+    uninstall("codex", home=home)
+    assert _cfg(tmp_path).read_text() == 'model = "x"\n' + PROJECTS
+
+
+def test_dry_run_reports_the_in_place_repair_and_writes_nothing(tmp_path):
+    _cfg(tmp_path).parent.mkdir()
+    text = _legacy_codex_block() + PROJECTS
+    _cfg(tmp_path).write_text(text)
+    lines = install("codex", dry_run=True, home=str(tmp_path))
+    assert any(l.startswith("would write") and "config.toml" in l for l in lines), lines
+    assert _cfg(tmp_path).read_text() == text
+
+
+def test_a_hand_edited_legacy_block_before_a_table_is_left_alone(tmp_path):
+    _cfg(tmp_path).parent.mkdir()
+    text = _legacy_codex_block() + 'startup_timeout_sec = 90\n' + PROJECTS
+    _cfg(tmp_path).write_text(text)
+    install("codex", home=str(tmp_path))
+    assert _cfg(tmp_path).read_text() == text
