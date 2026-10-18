@@ -289,7 +289,7 @@ class ScreenPolicy(Protocol):
     detail and the outcome is ``critic-rejected``.
 
     The seam exists for the RRSI pre-evaluation critic (leakage and edit-budget
-    screening, see ``examples/rrsi/``), and it is deliberately a *card* gate:
+    screening, see ``agentdescent/algorithms/rrsi/``), and it is deliberately a *card* gate:
     screening after a candidate is built is too late, and screening the whole
     batch loses which card failed and why.
     """

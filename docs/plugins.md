@@ -396,6 +396,20 @@ back to the CLI route rather than failing.
     it, so route 1 works today and warns. Route 2 does not depend on it, and
     neither do `extra_args` and `isolate`.
 
+* **`algorithm`**: a named recipe from the registry, `"rrsi"` or
+  `{"name": "rrsi", "params": {"b_max": 3}}`. It supplies defaults for
+  `policies` slots, `agg_config` and `evolve` knobs, so anything you set
+  explicitly wins and `plan` lists what you overrode. `agentdescent algorithms
+  list [--kind K]` and `agentdescent algorithms show <name>` (both take
+  `--json`) print what is available: the kinds each applies to, its
+  parameters and defaults, its extra cost, and a fidelity label
+  (`benchmark_faithful`, `mechanism_microport`, or `preset` for an engine
+  component under an algorithm's name). The registry lives in the package, so
+  it works from the wheel; today it ships `rrsi` (`text`; screen, proposal and
+  acceptance policies, see [RRSI](algo-rrsi.md)) and `archive_selection` (any
+  kind; DGM-style archive parent sampling). Unknown names, unknown or
+  mistyped parameters and a kind the algorithm does not apply to fail in
+  `plan`, naming the field and the valid choices.
 * **`policies`**: one reference per slot (`selection`, `task_sampler`,
   `acceptance`, `conflict`, `fusion`, `promotion`, `proposal`, `staleness`),
   built from JSON scalars alone because the aggregator installs them through
