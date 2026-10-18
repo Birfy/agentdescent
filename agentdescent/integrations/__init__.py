@@ -22,7 +22,7 @@ import re
 import shlex
 import sys
 import sysconfig
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 __all__ = ["HOSTS", "host_status", "install", "uninstall", "render_claude_plugin", "render_dsh_plugin",
            "skill_text", "hooks_text"]
@@ -922,6 +922,27 @@ def _claude_mcp_state(path: str) -> str:
     return "ok" if isinstance(servers, dict) and servers.get("agentdescent") else "missing"
 
 
+def _resolve_home(home: Optional[str]) -> Tuple[str, bool]:
+    """``(home directory, honour the host's home variables)`` for ``home=``.
+
+    ``None`` is the real home, where ``DSH_HOME`` / ``CODEX_HOME`` /
+    ``XDG_CONFIG_HOME`` still apply. Anything else is the host's whole world
+    (#410). An explicit empty string is refused rather than read as "no
+    ``--home``": it is what ``--home "$UNSET_VAR"`` produces, and falling back
+    to the real home there would edit the very configuration a probe was meant
+    to keep away from (#412).
+    """
+    if home is None:
+        return os.path.expanduser("~"), True
+    if isinstance(home, os.PathLike):
+        home = os.fspath(home)
+    if not isinstance(home, str) or not home.strip():
+        raise ValueError(
+            f"home={home!r} is empty; pass a directory, or omit it for the real home "
+            "(an unset shell variable in `--home \"$VAR\"` expands to nothing)")
+    return os.path.expanduser(home), False
+
+
 def host_status(host: str, *, home: Optional[str] = None) -> Dict[str, str]:
     """What ``install(host)`` left behind, read-only: is the host wired up, and
     is what it holds still what this package would write?
@@ -940,8 +961,7 @@ def host_status(host: str, *, home: Optional[str] = None) -> Dict[str, str]:
     """
     if host not in HOSTS:
         raise ValueError(f"unknown host {host!r}; choose from {sorted(HOSTS)}")
-    honour_env = not home          # an explicit home is the whole world (#410)
-    home = os.path.expanduser(home or "~")
+    home, honour_env = _resolve_home(home)   # explicit home is the whole world (#410)
     if host == "dsh":
         root = _host_root("DSH_HOME", os.path.join(home, ".dsh"), honour_env)
         skill = os.path.join(root, "skills", "agentdescent", "SKILL.md")
@@ -1068,8 +1088,9 @@ def install(host: str, *, dry_run: bool = False, home: Optional[str] = None) -> 
     # venv. Portable render_* templates deliberately keep the bare command.
     # An explicit `home` is the host's whole world: the host's own home
     # variables are only consulted for the real one (#410).
-    w = _Writer(dry_run, mcp_launcher(), honour_env=not home)
-    HOSTS[host](os.path.expanduser(home or "~"), w)
+    home, honour_env = _resolve_home(home)
+    w = _Writer(dry_run, mcp_launcher(), honour_env=honour_env)
+    HOSTS[host](home, w)
     if "-P" not in w.launcher and len(w.launcher) > 1:
         # Python < 3.11 (no `-P`) and no console script for this interpreter: the
         # plain `-m` form is all that is left, and it still honours the host's cwd.
@@ -1335,8 +1356,9 @@ def uninstall(host: str, *, dry_run: bool = False, home: Optional[str] = None) -
     """
     if host not in HOSTS:
         raise ValueError(f"unknown host {host!r}; choose from {sorted(HOSTS)}")
-    e = _Eraser(dry_run, honour_env=not home)
-    _UNINSTALL[host](os.path.expanduser(home or "~"), e)
+    home, honour_env = _resolve_home(home)
+    e = _Eraser(dry_run, honour_env=honour_env)
+    _UNINSTALL[host](home, e)
     if not e.lines:
         e.note(f"nothing to remove: agentdescent is not installed for {host} "
                "(files from the host's own marketplace are removed with its plugin command)")
