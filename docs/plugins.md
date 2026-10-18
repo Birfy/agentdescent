@@ -482,6 +482,22 @@ and a run started from a shell can be picked up by an agent. `cancel` signals
 the process group, so the worker CLIs die with the run; `resume` re-launches the
 spec on the same ledger and the engine continues.
 
+### A run that learned nothing: `propose_errors`
+
+`rounds.jsonl` rows (and `status` / `show`, as `propose_errors=N`) count the
+`reflect` calls that **raised** in a round, with the first exception as
+`propose_error`. Compare it with `considered`: `considered: 0` and
+`propose_errors: 0` is a reflector that had nothing to say; `considered: 0` and
+`propose_errors > 0` is one that was never heard — typically `openai_compatible`
+without `OPENAI_API_KEY`, or a model name the endpoint does not serve. When
+**every** proposal raises in **two consecutive rounds** the run stops as
+`state: failed` with `error: reflector failed on every call in rounds 1-2: <first
+exception>` and `agentdescent evolve` exits non-zero, so the remaining paid
+rollouts are not spent. A reflector that fails only some of the time does not
+fail the run; the counts are recorded and a `RuntimeWarning` names the first
+error. Fix the key or model (`agentdescent doctor`, `plan` warns about the
+missing key) and `resume` the run.
+
 A dollar budget (`--budget` with `--usd-per-call`, or `budget_usd` on `start`)
 uses `evolve(stop_when=)`: the run stops between rounds once
 `calls × price` crosses the line and reports the spend it actually incurred.

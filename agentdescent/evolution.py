@@ -1216,6 +1216,27 @@ class RoundInfo:
     #: survivors are complementary, so counting the ones it built says nothing
     #: about whether combining them beat taking the best single diff.
     fused: int = 0
+    #: ``propose`` calls that raised this round (#395), and the first such
+    #: exception as ``Type: message`` (capped at 300 characters). Before this a
+    #: reflector that failed on every call -- no API key, a wrong model name --
+    #: was swallowed with the rest of a worker's failures after its rollout had
+    #: already counted as a success, so the run finished ``done`` with
+    #: ``considered: 0`` and no trace of why. A round with ``propose_errors == 0``
+    #: and ``considered == 0`` means the reflector had nothing to say; with
+    #: ``propose_errors > 0`` it means it was never heard.
+    propose_errors: int = 0
+    propose_error: Optional[str] = None
+
+
+_ROUND_FIELDS = frozenset(RoundInfo.__dataclass_fields__)
+
+#: How many consecutive rounds in which *every* ``propose`` call raised end the
+#: run as failed (#395). Two rather than one: a single round of 429s from the
+#: reflector's provider is a blip that the next round survives, while a missing
+#: key or a wrong model name fails identically forever, and the second round is
+#: the cheapest proof of which this is. Rounds that made no ``propose`` call
+#: (every task solved) neither count nor reset the streak.
+PROPOSE_FAIL_ROUNDS = 2
 
 
 @dataclass(frozen=True)
@@ -1701,7 +1722,9 @@ class EvolutionResult:
                  "calls": h.calls, "tokens": h.tokens,
                  "considered": h.considered,
                  "discarded_stale": h.discarded_stale,
-                 "conflicts_dropped": h.conflicts_dropped, "fused": h.fused}
+                 "conflicts_dropped": h.conflicts_dropped, "fused": h.fused,
+                 "propose_errors": h.propose_errors,
+                 "propose_error": h.propose_error}
                 for h in self.history
             ],
             "retired_workers": self.retired_workers,
@@ -1831,7 +1854,11 @@ class EvolutionResult:
         return cls(
             state=d["state"], rendered=d["rendered"],
             final_reward=d["final_reward"],
-            history=[RoundInfo(**h) for h in d.get("history", [])],
+            # Only the fields this version knows: a result.json written by a newer
+            # install (the shared run store outlives upgrades and downgrades) must
+            # not make `apply` / `show` raise on a round field it has not heard of.
+            history=[RoundInfo(**{k: v for k, v in h.items() if k in _ROUND_FIELDS})
+                     for h in d.get("history", [])],
             ledger_log=d.get("ledger_log", []), error=d.get("error"),
             retired_workers=d.get("retired_workers", 0),
             forced_refreshes=d.get("forced_refreshes", 0),
@@ -1996,6 +2023,8 @@ class _Engine:
                      on_round: Optional[Callable[["RoundInfo"], None]],
                      extra_reasons: Optional[Dict[str, int]] = None,
                      stop_when: Optional[Callable[["RoundInfo"], bool]] = None,
+                     propose_errors: int = 0,
+                     propose_error: Optional[str] = None,
                      ) -> Tuple["RoundInfo", Optional[str]]:
         """Close out one round: record it, ask whether to stop, tell the caller.
 
@@ -2037,7 +2066,8 @@ class _Engine:
             # complementary, so counting the ones it built says nothing about
             # whether combining them beat taking the best single diff.
             fused=sum(1 for x in reports
-                      if x.fused and x.committed_version is not None))
+                      if x.fused and x.committed_version is not None),
+            propose_errors=propose_errors, propose_error=propose_error)
         history.append(info)
         stop_reason = early.observe(info.held_out_reward)
         notify(on_round, info)
@@ -3407,6 +3437,9 @@ def evolve(
     # having already cost one hand-ported fix.
     health = WorkerHealth(max_errors=max_worker_errors)
     dead_rounds = 0            # consecutive rounds where every worker failed
+    propose_dead_rounds = 0    # consecutive rounds where every propose() raised (#395)
+    propose_errors_total = 0
+    propose_error_first: Optional[str] = None
     deadline = time.time() + max_seconds if max_seconds else None
     stop_reason = "rounds"
     # The cost-aware governor: degrades optional spend (fusion tournaments,
@@ -3528,6 +3561,9 @@ def evolve(
         base_v = snap.version.get(artifact_id, 0)
         assert_mutable(artifact)
         ok_units, failed_units = [0], [0]      # this round's tally
+        # `propose` calls made / raised this round, and the first exception.
+        propose_calls, propose_raised = [0], [0]
+        propose_first: List[Optional[str]] = [None]
 
         def _snapshot_for(worker: int):
             """The artifact this worker proposes against, and the version it read.
@@ -3672,8 +3708,26 @@ def evolve(
             # ``call_budget`` — a plain ``propose`` never sees it.
             if call_budget is not None:
                 call_budget.allocate(score, governor.remaining_fraction())
-            proposal = _checked_proposal(
-                propose(mine.render(), task, output, score), task)
+            # A reflector that raises is counted and reported, not folded into the
+            # worker failures: this worker's rollout already succeeded, so the
+            # round's "no worker ever succeeded" test cannot see it, and the
+            # exception used to vanish into `first_error` (#395).
+            with unit_lock:
+                propose_calls[0] += 1
+            try:
+                raw_proposal = propose(mine.render(), task, output, score)
+            except ContractError:
+                raise
+            except Exception as e:  # noqa: BLE001 - a reflector/backend failure
+                with unit_lock:
+                    propose_raised[0] += 1
+                    if propose_first[0] is None:
+                        propose_first[0] = _describe(e, 300)
+                if verbose:
+                    print(f"round {r:>3}  worker {unit.worker} propose failed: "
+                          f"{type(e).__name__}: {str(e)[:100]}")
+                return
+            proposal = _checked_proposal(raw_proposal, task)
             if not proposal:
                 return
             strat = eng.artifact_strategies.get(aid, strategy)
@@ -3899,12 +3953,33 @@ def evolve(
         info, early_stop = eng.record_round(
             index=r, reward=round_reward, n_items=len(dev.state), reports=reports,
             history=history, early=early, on_round=on_round, extra_reasons=extra,
-            stop_when=stop_when)
+            stop_when=stop_when, propose_errors=propose_raised[0],
+            propose_error=propose_first[0])
         if verbose:
             print(f"round {r:>3}  reward={info.held_out_reward:.3f} on "
                   f"{len(held_out)}  size={info.n_items}  "
                   f"+{info.committed}/-{info.rejected}"
-                  + (f"  tokens={info.tokens:,}" if info.tokens else ""))
+                  + (f"  tokens={info.tokens:,}" if info.tokens else "")
+                  + (f"  propose_errors={info.propose_errors}"
+                     if info.propose_errors else ""))
+        # Every reflector call raising, round after round, is a misconfigured
+        # reflector, not a quiet run: stop spending rollouts on it (#395).
+        if propose_raised[0]:
+            propose_errors_total += propose_raised[0]
+            if propose_error_first is None:
+                propose_error_first = propose_first[0]
+        if propose_calls[0]:
+            propose_dead_rounds = (propose_dead_rounds + 1
+                                   if propose_raised[0] == propose_calls[0] else 0)
+            if propose_dead_rounds >= PROPOSE_FAIL_ROUNDS:
+                where = (f"round {r + 1}" if PROPOSE_FAIL_ROUNDS == 1 else
+                         f"rounds {r + 2 - PROPOSE_FAIL_ROUNDS}-{r + 1}")
+                run_error = (f"reflector failed on every call in {where}: "
+                             f"{propose_error_first}. Nothing was learned; check the "
+                             "reflector's model and credentials (`agentdescent doctor`)")
+                if verbose:
+                    print(f"round {r:>3}  giving up: {run_error}")
+                break
         if early_stop is not None:
             stop_reason = early_stop
             if verbose:
@@ -3948,6 +4023,12 @@ def evolve(
         # result is otherwise indistinguishable from a converged one.
         warnings.warn(f"evolve() stopped early after {len(history)} round(s): "
                       f"{run_error}", RuntimeWarning, stacklevel=2)
+    elif propose_errors_total:
+        # Not fatal (some proposals got through, or the run was too short to tell
+        # a dead reflector from a flaky one), but never silent either (#395).
+        warnings.warn(f"evolve(): propose() raised {propose_errors_total} time(s); "
+                      f"first: {propose_error_first}. Each is recorded in the "
+                      "round's `propose_errors`.", RuntimeWarning, stacklevel=2)
     # Read the log before reclaiming the repo, then hand the scratch directory
     # back rather than holding it for the lifetime of the interpreter.
     result = EvolutionResult(state=dict(final.state), rendered=final.render(),

@@ -74,8 +74,15 @@ def _status_line(st: runstore.RunStatus) -> str:
         pending = f" pending={st.pending_calls}{ph}"
     tail = f" [{st.stop_reason}]" if st.stop_reason else ""
     err = f" error: {st.error}" if st.error else ""
+    # Reflector exceptions, cumulative (#395): a run can finish `done` with only
+    # these to say that it never learned anything.
+    perr = ""
+    if st.propose_errors:
+        perr = f" propose_errors={st.propose_errors}"
+        if st.propose_error and not st.error:
+            perr += f" (first: {st.propose_error})"
     return (f"{st.run_id}  {st.state:<9} round {rounds:<6} "
-            f"calls={st.calls}{pending}{tok}{reward}{usd}"
+            f"calls={st.calls}{pending}{tok}{perr}{reward}{usd}"
             f"  {st.kind or '?'}:{st.target or '?'}{tail}{err}")
 
 
@@ -362,6 +369,17 @@ def cmd_init(a: argparse.Namespace) -> int:
     elif a.agent is None and spec["kind"] not in ("text", "policy_slot"):
         print(f"agent: `{agent}` (the worker CLI found on PATH; "
               "override with `--agent <ref>`)")
+    reflect = spec.get("reflect")
+    if (isinstance(reflect, dict) and reflect.get("ref") == "openai_compatible"
+            and not os.environ.get("OPENAI_API_KEY")):
+        # The starter spec's reflector is a plain OpenAI-compatible call whatever
+        # worker CLI was found, so a machine with only `opencode` / `claude`
+        # gets a reflector it cannot call. Run, it used to finish `done` with
+        # nothing learned (#395); say so here, where it is cheapest to fix.
+        print("warning: `reflect` is `openai_compatible` and OPENAI_API_KEY is not set, "
+              "so every proposal would fail and the run would learn nothing. Export "
+              "OPENAI_API_KEY (and OPENAI_BASE_URL for a non-OpenAI endpoint), or "
+              f"change `reflect` in {out} before `plan`")
     host = spec.get("host") if spec["kind"] == "plugin" else None
     if host in _CLI_BINARIES and not doctor_report()["agent_clis"].get(_CLI_BINARIES[host]):
         # The plugin's format fixes its host; the worker found on PATH does
@@ -606,7 +624,11 @@ def _unusable_refs(spec: EvolveSpec) -> List[str]:
                 out.append(f"{field}: `claude` is the Anthropic SDK completion (the "
                            f"CLI is `claude_code`) and needs {' and '.join(missing)}")
         elif ref == "openai_compatible" and not keys.get("OPENAI_API_KEY"):
-            out.append(f"{field}: `openai_compatible` needs OPENAI_API_KEY")
+            out.append(f"{field}: `openai_compatible` needs OPENAI_API_KEY (and "
+                       "OPENAI_BASE_URL for a non-OpenAI endpoint); without it "
+                       + ("every proposal raises and the run fails after two rounds "
+                          "with nothing learned" if field == "reflect"
+                          else "every call raises"))
         elif ref in _CLI_BINARIES:
             binary = _CLI_BINARIES[ref]
             # Missing binary is a hard error via _missing_cli_messages / plan ok
@@ -814,6 +836,12 @@ def _fmt_reward(value: Any) -> str:
         return str(value)
 
 
+def _round_errors(r: Dict[str, Any]) -> str:
+    """``  propose_errors=N: <first>`` for a ``rounds.jsonl`` row that has any (#395)."""
+    n = r.get("propose_errors") or 0
+    return f"  propose_errors={n}: {r.get('propose_error')}" if n else ""
+
+
 def cmd_status(a: argparse.Namespace) -> int:
     if a.run_id:
         rd = runstore.get(a.run_id, store=a.store)
@@ -825,7 +853,8 @@ def cmd_status(a: argparse.Namespace) -> int:
             if not a.brief:
                 for r in rd.rounds()[-3:]:
                     print(f"  round {r['round']:>3}  reward={_fmt_reward(r.get('held_out_reward'))}  "
-                          f"+{r['committed']}/-{r['rejected']}  {r.get('reasons', {})}")
+                          f"+{r['committed']}/-{r['rejected']}  {r.get('reasons', {})}"
+                          f"{_round_errors(r)}")
                 cp = _checkpoint_summary(rd)
                 if cp:
                     es = cp.get("early_stop") or {}
@@ -862,7 +891,8 @@ def cmd_watch(a: argparse.Namespace) -> int:
         rounds = rd.rounds()
         for r in rounds[seen:]:
             print(f"round {r['round']:>3}  reward={_fmt_reward(r.get('held_out_reward'))}  "
-                  f"+{r['committed']}/-{r['rejected']}  {r.get('reasons', {})}", flush=True)
+                  f"+{r['committed']}/-{r['rejected']}  {r.get('reasons', {})}"
+                  f"{_round_errors(r)}", flush=True)
         seen = len(rounds)
         st = rd.status()
         if st.state != "running":
@@ -883,6 +913,13 @@ def show_payload(run_id: str, *, store: Optional[str] = None, diff: bool = True,
         return payload
     payload.update(final_reward=result.final_reward, outcomes=result.outcomes(),
                    rounds=len(result.history))
+    # Reflector exceptions (#395). Only when there were some, so a healthy run's
+    # payload is unchanged.
+    perr = sum(h.propose_errors for h in result.history)
+    if perr:
+        payload["propose_errors"] = perr
+        payload["propose_error"] = next(
+            (h.propose_error for h in result.history if h.propose_error), None)
     spec = EvolveSpec.from_dict(rd.spec_dict())
     # What `apply` would overwrite, on every kind. Without it the caller can see
     # the evolved artifact and still not know which file it belongs to -- and an
@@ -927,7 +964,8 @@ def cmd_show(a: argparse.Namespace) -> int:
     if a.json:
         _out(payload, as_json=True)
         return 0
-    for k in ("run_id", "state", "stop_reason", "error", "final_reward", "outcomes", "note"):
+    for k in ("run_id", "state", "stop_reason", "error", "final_reward", "outcomes",
+              "propose_errors", "propose_error", "note"):
         if payload.get(k) is not None:
             print(f"{k}: {payload[k]}")
     if "rendered" in payload:
