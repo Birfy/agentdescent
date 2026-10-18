@@ -189,7 +189,11 @@ build yourself:
 {"prompt": "Which section is missing?", "gold": "Appendix B"}
 ```
 
-Ten to thirty cases is enough to start. Without known answers there is no
+Twelve to thirty cases is enough to start: at the default `held_out_frac` of 0.3,
+12 is the smallest set that leaves 4 cases held out, and every acceptance
+decision is measured on those. With fewer, `plan` says how many are held out in
+its `notes` (and `status` repeats it for a started run); raise
+`evolve.held_out_frac` or add cases. Without known answers there is no
 reward, and without a reward there is nothing to descend — so this file, not the
 model, is where the effort goes.
 

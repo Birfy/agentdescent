@@ -791,7 +791,7 @@ def _warn_unusable(spec: EvolveSpec) -> None:
 def cmd_evolve(a: argparse.Namespace) -> int:
     spec = load_spec(a.spec)
     try:
-        compose(spec)                        # fail here, not in the detached child
+        comp = compose(spec)                 # fail here, not in the detached child
     except SpecError as e:
         print(f"spec error: {e}", file=sys.stderr)
         return 2
@@ -803,8 +803,15 @@ def cmd_evolve(a: argparse.Namespace) -> int:
     _warn_unusable(spec)
     rd = runstore.create(spec.to_dict(), store=a.store)
     if a.detach:
+        # The child composes again and rewrites `notes`, but only once it is up;
+        # recording them here means `status` has them from the first poll (#414).
+        rd.update_status(notes=comp.notes)
         st = runstore.launch(rd, budget_usd=a.budget, usd_per_call=a.usd_per_call)
-        _out({"run_id": rd.run_id, "state": st.state, "pid": st.pid, "dir": rd.path}
+        if not a.json:
+            for line in comp.notes:
+                print(f"note: {line}", file=sys.stderr)
+        _out({"run_id": rd.run_id, "state": st.state, "pid": st.pid, "dir": rd.path,
+              "notes": comp.notes}
              if a.json else f"{rd.run_id}  started (pid {st.pid})  {rd.path}", as_json=a.json)
         return 0
     result = runstore.execute(rd, budget_usd=a.budget, usd_per_call=a.usd_per_call)
@@ -891,6 +898,8 @@ def cmd_status(a: argparse.Namespace) -> int:
         else:
             print(_status_line(st))
             if not a.brief:
+                for note in st.notes:
+                    print(f"  note: {note}")
                 for r in rd.rounds()[-3:]:
                     print(f"  round {r['round']:>3}  reward={_fmt_reward(r.get('held_out_reward'))}  "
                           f"+{r['committed']}/-{r['rejected']}  {r.get('reasons', {})}"

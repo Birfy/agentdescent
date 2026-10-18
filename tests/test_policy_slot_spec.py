@@ -77,7 +77,11 @@ def test_it_says_when_the_gate_cannot_decide_anything():
     held-out instances).
     """
     one = compose(_spec(data={"problems": PROBLEMS, "seeds": [0]}))
-    assert any("NO held-out task" in n for n in one.notes)
+    # One task: `evolve()` holds it out and trains on nothing. The note must say
+    # that, not "1 for training and 1 for the gate" from a single task (#414).
+    assert one.notes[0].endswith("1 outer task(s), 0 for training and 1 for the gate")
+    assert any("NO training task" in n for n in one.notes)
+    assert any("only 1 held-out task(s)" in n for n in one.notes)
     few = compose(_spec(data={"problems": PROBLEMS, "seeds": [0, 1, 2]}))
     assert any("held-out task(s)" in n for n in few.notes)
 

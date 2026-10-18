@@ -53,7 +53,8 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from . import algorithms as _algorithms
 from .agents import Completion, Usage, WorkspaceAgent
 from .aggregator import AggregatorConfig
-from .evolution import EvolutionResult, SingleSlot, Task, evolve, reflector, tasks_from
+from .evolution import (MIN_HELD_OUT, EvolutionResult, SingleSlot, Task, evolve,
+                        held_out_size, reflector, small_held_out_message, tasks_from)
 from .filetree import TreeSpec, load_tree
 from .fusion import reflective_merge
 from .governance import HARNESS_BLAST_RADIUS, SKILL_BLAST_RADIUS
@@ -668,7 +669,9 @@ class Composition:
 
 
 def _train_count(n_tasks: int, held_out_frac: float) -> int:
-    return max(1, n_tasks - int(round(n_tasks * held_out_frac)))
+    # Exactly `evolve()`'s slice (it may be empty: one task is all held-out), so a
+    # note built from this never claims more tasks than there are.
+    return max(0, n_tasks - held_out_size(n_tasks, held_out_frac))
 
 
 def _read_text_target(target: str) -> str:
@@ -817,19 +820,26 @@ def _compose_policy_slot(spec: EvolveSpec, *, usage: Optional[Usage] = None,
         kwargs.setdefault("on_round", on_round)
 
     n_train = _train_count(len(tasks), kwargs.get("held_out_frac", 0.4))
-    n_gate = len(tasks) - n_train
+    n_gate = held_out_size(len(tasks), kwargs.get("held_out_frac", 0.4))
     notes = [f"one rollout is a whole inner search on one of {len(problems)} problem(s); "
              f"{len(tasks)} outer task(s), {n_train} for training and {n_gate} for the gate"]
     # The recurring defect in this line of work, at four different levels: a
     # gate too small to resolve the effect it is judging. It has failed closed
     # (nothing commits) and open (a rule that loses on its own family was
     # committed on 9 held-out instances). Say it before the run, not after.
+    if n_train == 0:
+        # One task: `evolve()` holds it out and trains on nothing, so the gate is
+        # the whole set and there is no separate data for the search to learn from.
+        notes.append(
+            "NO training task: the split leaves every task in the held-out gate, so "
+            "nothing is left for the search to train on apart from the data it is "
+            "judged on. Add problems, or lower held_out_frac.")
     if n_gate == 0:
         notes.append(
             "NO held-out task: every acceptance decision would be made on data the search "
             "trained on. Add problems, or raise held_out_frac -- this run cannot tell an "
             "improvement from a fit.")
-    elif n_gate < 4:
+    elif n_gate < MIN_HELD_OUT:
         notes.append(
             f"only {n_gate} held-out task(s): the gate is being asked to resolve a small "
             "effect from very few samples, which has failed both ways here -- silently "
@@ -1241,11 +1251,15 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
         knobs["repo_path"] = repo_path
     kwargs.update(knobs)
 
-    # Soft guidance for small-but-legal sets. Below 4, evolve() hard-fails
+    # Soft guidance for small-but-legal sets. Below 4 tasks, evolve() hard-fails
     # ("need at least 4 tasks…"); plan_payload sets ok=False for that case (#343).
-    if 4 <= len(tasks) < 8:
-        notes.append(f"only {len(tasks)} tasks: the held-out split will be tiny and the "
-                     "acceptance test weak; 8-20 is a workable minimum.")
+    # From 4 tasks up the question is how many land in the held-out set, which
+    # `held_out_frac` decides, not the task count: 8-11 tasks at the default 0.3
+    # hold out 2-3, and evolve() warns about exactly that. Same helpers, same
+    # threshold, so plan says it before the run and status carries it after (#414).
+    n_held = held_out_size(len(tasks), held_out)
+    if len(tasks) >= 4 and 0.0 < held_out < 1.0 and n_held < MIN_HELD_OUT:
+        notes.append(small_held_out_message(n_held, len(tasks), held_out))
     return Composition(tasks=tasks, reward=reward, kwargs=kwargs, tree=tree,
                        notes=notes, audit=audit,
                        algorithm=_algorithm_echo(chosen, spec, ov) if chosen else None)
@@ -1273,7 +1287,7 @@ def estimate(comp: Composition, *, usd_per_call: Optional[float] = None) -> Dict
     rounds = int(k.get("rounds", 15))
     n_workers = int(k.get("n_workers", 4))
     n_tasks = len(comp.tasks)
-    held_out = int(round(n_tasks * float(k.get("held_out_frac", 0.4))))
+    held_out = held_out_size(n_tasks, float(k.get("held_out_frac", 0.4)))
     cheap = k.get("cheap_eval_tasks") or held_out
     self_verify = bool(k.get("self_verify", True))
     per_round_rollouts = n_workers

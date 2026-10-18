@@ -37,8 +37,11 @@ written back until the user says so.
      run asked for 8 rounds and completed 2 in 90 minutes. Read `plan`'s notes
      aloud: they say how many held-out tasks the gate actually gets, and with
      too few it has both committed a worse rule and committed nothing at all.
-   - No data? Offer to draft 8 to 20 cases into `eval/cases.jsonl`
+   - No data? Offer to draft 12 to 20 cases into `eval/cases.jsonl`
      (`{"prompt": ..., "gold": ...}` per line) and have the user check them.
+     Fewer than 12 leaves under 4 held-out cases at the default `held_out_frac`
+     (0.3), which every gate is measured on; `plan` says so in its notes, so
+     read them aloud, or raise `evolve.held_out_frac`.
      Never evolve against data the user has not seen.
    - No obvious score? Prefer `"contains"` or `"exact"`; offer
      `{"cmd": "./grade.sh"}` when the answer is a file, code, or a format check

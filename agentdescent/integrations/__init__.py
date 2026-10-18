@@ -33,19 +33,21 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 MCP_COMMAND = "agentdescent"
 MCP_ARGS = ["mcp"]
 
-#: Provider keys forwarded into the MCP server under dsh, which scrubs any
-#: ambient variable matching KEY|PASSWORD|SECRET|TOKEN before starting one.
-DSH_FORWARDED_KEYS = ("DEEPSEEK_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "ANTHROPIC_API_KEY")
-
-#: What Codex forwards into the MCP server. Codex starts a stdio server with a
-#: scrubbed environment (``HOME LOGNAME PATH SHELL USER LANG LC_ALL TERM TMPDIR
-#: TZ``) plus whatever ``env_vars`` names (#404). Names only, no globs: the
-#: provider keys the reflectors read, ``ARK_API_KEY`` (the key the docs' Ark
-#: examples set via ``api_key_env``), and ``AGENTDESCENT_HOME`` so a run started
-#: from Codex lands in the same run store the CLI reads. A variable that is not
-#: set in the launching shell is simply not forwarded. A spec whose
-#: ``api_key_env`` names some other variable needs that name added by hand.
-FORWARDED_ENV = DSH_FORWARDED_KEYS + (
+#: What every host forwards into the MCP server -- the one list. Codex starts a
+#: stdio server with a scrubbed environment (``HOME LOGNAME PATH SHELL USER LANG
+#: LC_ALL TERM TMPDIR TZ``) plus whatever ``env_vars`` names (#404); DeepSeek
+#: Harness removes every ambient variable matching ``KEY|PASSWORD|SECRET|TOKEN``
+#: before starting one, so a key it does not declare never arrives (#415). Names
+#: only, no globs: the provider keys the reflectors read, ``ARK_API_KEY`` (the key
+#: the docs' Ark examples set via ``api_key_env``), and ``AGENTDESCENT_HOME`` so a
+#: run started from a host lands in the same run store the CLI reads. A variable
+#: that is not set in the launching shell is simply not forwarded (dsh's ``!!js``
+#: expression drops unset values). A spec whose ``api_key_env`` names some other
+#: variable needs that name added by hand. Nothing is deliberately excluded: the
+#: names dsh would not scrub (``*_BASE_URL``, ``AGENTDESCENT_HOME``) are harmless
+#: to forward, and one list is what keeps the hosts from drifting apart again.
+FORWARDED_ENV = (
+    "DEEPSEEK_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "ANTHROPIC_API_KEY",
     "ANTHROPIC_BASE_URL", "ARK_API_KEY", "AGENTDESCENT_HOME")
 
 
@@ -241,7 +243,7 @@ def _dsh_env_expression() -> str:
 
     Reproduced and fixed against dsh 0.1.2-rc.1 with no provider keys set.
     """
-    pairs = ", ".join(f"{k}: process.env.{k}" for k in DSH_FORWARDED_KEYS)
+    pairs = ", ".join(f"{k}: process.env.{k}" for k in FORWARDED_ENV)
     return ("!!js 'Object.fromEntries(Object.entries({" + pairs +
             "}).filter(([, v]) => v != null))'")
 
@@ -303,7 +305,8 @@ def install_dsh(home: str, w: _Writer) -> None:
     w.sync_block(os.path.join(dsh_home, "cordis.patch.yml"),
                  DSH_BLOCK_START, DSH_BLOCK_END, dsh_patch_block(w.launcher),
                  what="mcp-client + hooks entries")
-    w.note(f"forwarded into the MCP server env: {', '.join(DSH_FORWARDED_KEYS)}")
+    w.note(f"forwarded into the MCP server env (dsh scrubs the rest): "
+           f"{', '.join(FORWARDED_ENV)}")
     w.note("verify: dsh --profile web --dump-config | grep -n agentdescent")
 
 
@@ -968,6 +971,9 @@ def host_status(host: str, *, home: Optional[str] = None) -> Dict[str, str]:
         patch = _read(os.path.join(root, "cordis.patch.yml")) or ""
         # Both markers: an interrupted write can leave only the start.
         mcp = "ok" if DSH_BLOCK_START in patch and DSH_BLOCK_END in patch else "missing"
+        # Our block from before #415 forwards four names, so dsh scrubs
+        # `ARK_API_KEY`. Re-running `install` rewrites the block.
+        stale_env = mcp == "ok" and _dsh_block_env_is_stale(patch)
     elif host == "claude-code":
         root = os.path.join(home, ".agentdescent", "plugins", "claude-code")
         skill = os.path.join(root, "skills", "agentdescent", "SKILL.md")
@@ -992,13 +998,30 @@ def host_status(host: str, *, home: Optional[str] = None) -> Dict[str, str]:
         # Nothing of ours is there. `unknown` only says a config this user wrote
         # could not be read, which is no evidence that we were ever installed.
         state = "missing"
-    elif skill_state == "stale" or (host == "codex" and legacy_block):
+    elif skill_state == "stale" or (host == "codex" and legacy_block) or (
+            host == "dsh" and stale_env):
         state = "stale"
     elif skill_state == "ok" and mcp in ("ok", "unknown"):
         state = "ok"
     else:
         state = "partial"
     return {"state": state, "skill": skill_state, "mcp": mcp, "path": skill}
+
+
+def _dsh_block_env_is_stale(patch: str) -> bool:
+    """Whether our block in ``cordis.patch.yml`` lacks a name of :data:`FORWARDED_ENV`
+    (an install from before #415 forwarded four).
+
+    A subset test, not byte equality: the documented way to forward a spec's
+    custom ``api_key_env`` is to add that name to the expression by hand, and
+    that must not read as stale -- ``install`` would rewrite the block and drop
+    the name again.
+    """
+    start = patch.index(DSH_BLOCK_START)
+    end = patch.find(DSH_BLOCK_END, start)
+    block = patch[start:end if end != -1 else len(patch)]
+    forwarded = set(re.findall(r"(\w+): process\.env\.\1\b", block))
+    return not set(FORWARDED_ENV) <= forwarded
 
 
 def mcp_sdk_missing() -> bool:

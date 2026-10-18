@@ -239,7 +239,7 @@ class Tools:
               usd_per_call: Optional[float] = None) -> Dict[str, Any]:
         try:
             es = EvolveSpec.from_dict(spec).absolutise()
-            compose(es)                       # fail here, with the field, not in the child
+            comp = compose(es)                # fail here, with the field, not in the child
             # Before create: same rule as CLI -- budget without price must not
             # return ok/started and then fail only in log.txt (#342).
             runstore.require_budget_pair(budget_usd, usd_per_call)
@@ -265,6 +265,10 @@ class Tools:
         except SpecError as e:
             return {"ok": False, "error": str(e)}
         rd = runstore.create(es.to_dict(), store=self.store)
+        # Recorded before the child is up, so the reply below and the first
+        # `status` poll carry what `plan` said -- a too-small held-out set among
+        # it -- instead of an empty list until the child has composed (#414).
+        rd.update_status(notes=comp.notes)
         try:
             # The run is a detached process, so a `host_model` reference in the
             # spec resolves there, not here -- it needs the bridge's address in
