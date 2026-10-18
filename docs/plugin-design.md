@@ -279,8 +279,9 @@ description: Evolve a skill, agent definition, prompt or small codebase against
 ---
 1. Run doctor. Report anything missing; stop if no worker agent.
 2. Establish the four things a spec needs: target, data, score, agent.
-   - No data? Offer to draft 8-20 cases into eval/cases.jsonl and have the user
-     check them. Never evolve against data the user has not seen.
+   - No data? Offer to draft 12-20 cases into eval/cases.jsonl and have the user
+     check them (fewer than 12 leaves under 4 held out at the default
+     held_out_frac; plan notes it). Never evolve against data the user has not seen.
    - No obvious score? Prefer `contains`/`exact`; offer a `cmd:` grader when
      the answer is a file, code, or a format check.
    - Leave `policies` empty unless the user asks for a mechanism by name; the

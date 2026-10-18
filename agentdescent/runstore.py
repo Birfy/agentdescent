@@ -33,6 +33,7 @@ run. Nothing is serialised beyond what the engine already persists.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import os
@@ -43,8 +44,9 @@ import sys
 import threading
 import time
 import uuid
+import warnings
 from dataclasses import dataclass, field, asdict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 from .evolution import EvolutionResult, RoundInfo
 
@@ -622,6 +624,33 @@ def _signal(pid: int, pgid: Optional[int], sig: int) -> None:
 # ---------------------------------------------------------------------------
 
 
+@contextlib.contextmanager
+def _plain_held_out_warning() -> Iterator[None]:
+    """Print ``evolve()``'s small-held-out warning as one plain line (#414).
+
+    The default format is ``<file>:<line>: SmallHeldOutWarning: <text>`` plus the
+    source line that raised it (``return evolve(self.tasks, ...)``), which means
+    nothing to a user. ``compose`` has already put the same sentence in the run's
+    ``notes``, where ``status`` shows it; this is only what the foreground
+    terminal and ``log.txt`` get. Every other warning keeps its normal format.
+    """
+    from .evolution import SmallHeldOutWarning
+
+    previous = warnings.formatwarning
+
+    def fmt(message, category, filename, lineno, line=None):  # type: ignore[no-untyped-def]
+        if isinstance(message, SmallHeldOutWarning) or (
+                isinstance(category, type) and issubclass(category, SmallHeldOutWarning)):
+            return f"warning: {message}\n"
+        return previous(message, category, filename, lineno, line)
+
+    warnings.formatwarning = fmt
+    try:
+        yield
+    finally:
+        warnings.formatwarning = previous
+
+
 def execute(rd: RunDir, *, budget_usd: Optional[float] = None,
             usd_per_call: Optional[float] = None) -> EvolutionResult:
     """Run the spec in ``rd`` **in this process**, keeping the directory current.
@@ -715,7 +744,8 @@ def execute(rd: RunDir, *, budget_usd: Optional[float] = None,
                        **overrides)
         rd.update_status(rounds=comp.kwargs.get("rounds"), notes=comp.notes,
                          usd=None if usd_per_call is None else 0.0)
-        result = comp.run()
+        with _plain_held_out_warning():
+            result = comp.run()
     except BaseException as e:  # noqa: BLE001 - the child must report before dying
         rd.update_status(state="failed", finished=time.time(),
                          pending_calls=0, phase=None,

@@ -436,7 +436,7 @@ def test_plan_rejects_fewer_than_four_tasks(tmp_path):
     assert json.loads(out)["ok"] is False
 
 
-def test_plan_ok_at_four_tasks_with_soft_note_below_eight(tmp_path):
+def test_plan_ok_at_four_tasks_with_a_held_out_note(tmp_path):
     from agentdescent.cli import plan_payload
     from agentdescent.evolvespec import EvolveSpec, compose
 
@@ -453,7 +453,8 @@ def test_plan_ok_at_four_tasks_with_soft_note_below_eight(tmp_path):
     })
     payload = plan_payload(spec)
     assert payload["ok"] is True and payload["tasks"] == 4
-    assert any("8-20 is a workable minimum" in n for n in payload["notes"])
+    # keyed on the held-out size, not the task count (#414): 4 tasks hold out 1
+    assert any("the held-out set has only 1 task(s)" in n for n in payload["notes"])
     # compose itself no longer soft-notes below 4 (that is a hard plan error)
     few = EvolveSpec.from_dict({
         "kind": "text", "target": str(prompt),
@@ -462,7 +463,7 @@ def test_plan_ok_at_four_tasks_with_soft_note_below_eight(tmp_path):
         "evolve": {"rounds": 1},
     })
     notes = compose(few).notes
-    assert not any("8-20 is a workable minimum" in n for n in notes)
+    assert not any("the held-out set has only" in n for n in notes)
 
 
 def test_evolve_status_show_apply_round_trip(store, tmp_path):
