@@ -10,7 +10,7 @@ import pytest
 
 from agentdescent import cli
 from agentdescent.integrations import (
-    DSH_FORWARDED_KEYS, HOSTS, _console_script, install, marketplace_manifest, mcp_launcher,
+    FORWARDED_ENV, HOSTS, _console_script, install, marketplace_manifest, mcp_launcher,
     render_claude_plugin, skill_text,
 )
 
@@ -63,7 +63,7 @@ def test_install_dsh_writes_skill_hooks_and_patch(tmp_path, monkeypatch):
     assert "name: '@deepseek-ai/dsh-mcp-client'" in patch
     assert "serverName: agentdescent" in patch
     assert f"args: {json.dumps(mcp_launcher()[1:] + ['mcp'])}" in patch
-    for key in DSH_FORWARDED_KEYS:
+    for key in FORWARDED_ENV:
         # Each key is forwarded past dsh's scrubbing -- but as part of one
         # filtered !!js expression, never as its own entry: unset, it would be
         # `undefined`, and dsh refuses the whole plugin tree over it.
@@ -293,7 +293,7 @@ def test_dsh_plugin_patch_inserts_itself_and_the_mcp_row(tmp_path):
     patch = _read(tmp_path / "cordis.patch.yml")
     assert patch.lstrip().startswith("#") and "- insert:" in patch
     assert "id: dsh-agentdescent" in patch and "id: mcp-agentdescent" in patch
-    for key in DSH_FORWARDED_KEYS:
+    for key in FORWARDED_ENV:
         # In the shared filtered expression, not one entry per key -- an
         # unset key would be `undefined` and dsh would refuse the tree.
         assert f"{key}: process.env.{key}" in patch

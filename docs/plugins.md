@@ -177,11 +177,16 @@ codex-cli 0.153.4, opencode 1.18.29).
 
 !!! warning "DeepSeek Harness scrubs provider keys"
     Before starting an MCP server, dsh removes every ambient variable matching
-    `KEY|PASSWORD|SECRET|TOKEN`. The patch entry `install dsh` writes forwards
-    `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `OPENAI_BASE_URL` and
-    `ANTHROPIC_API_KEY` explicitly (`!!js process.env.X`). Without that block
-    the server starts with no credentials and `doctor` reports every reflector
-    as unavailable, with nothing else to explain why.
+    `KEY|PASSWORD|SECRET|TOKEN`. The patch entry `install dsh` writes (and the
+    native plugin's `cordis.patch.yml`) forwards the same list as Codex,
+    explicitly (`!!js process.env.X`): `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`,
+    `OPENAI_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `ARK_API_KEY`
+    and `AGENTDESCENT_HOME`. Without that block the server starts with no
+    credentials and `doctor` reports every reflector as unavailable, with
+    nothing else to explain why. A spec whose `api_key_env` names another
+    variable needs that name added to the `env` expression by hand. Re-running
+    `install dsh` rewrites an older four-name block (`doctor` reads it as
+    `stale`).
 
 !!! warning "Codex scrubs the environment of MCP servers"
     Codex starts an MCP server with `HOME LOGNAME PATH SHELL USER LANG LC_ALL TERM
