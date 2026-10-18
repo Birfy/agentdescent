@@ -68,3 +68,15 @@ def test_the_docs_tell_a_host_to_compare_the_two():
     assert "`version`" in skill_text() and "`executable`" in skill_text()
     with open(os.path.join(ROOT, "docs", "testing-the-plugins.md"), encoding="utf-8") as fh:
         assert "`version` and `executable`" in fh.read()
+
+
+def test_version_does_not_traceback_from_a_cwd_that_shadows_the_package(tmp_path):
+    """A bare `agentdescent/` directory in the cwd makes the package a namespace
+    package with no `__version__` (the #394 case); `cli` must still import and
+    answer, so `mcp`'s one-line diagnosis is not preempted by an ImportError."""
+    cwd = tmp_path / "host-cwd"
+    (cwd / "agentdescent").mkdir(parents=True)
+    env = {**os.environ, "PYTHONPATH": ""}
+    proc = subprocess.run([sys.executable, "-m", "agentdescent.cli", "--version"],
+                          cwd=cwd, capture_output=True, text=True, env=env)
+    assert "Traceback" not in proc.stderr, proc.stderr

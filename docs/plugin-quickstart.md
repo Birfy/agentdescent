@@ -44,8 +44,9 @@ agentdescent doctor
 
 It prints which agent CLIs it can see, which provider keys are set, and where
 runs will be stored, plus the AgentDescent `version` and the Python
-`executable` it is running (`agentdescent --version` prints just the version). Every line it marks as a problem is something that will
-make a real run fail — but none of them stop step 2.
+`executable` it is running (`agentdescent --version` prints just the version).
+Every line it marks as a problem is something that will make a real run fail —
+but none of them stop step 2.
 
 !!! warning "`command not found: agentdescent`"
     pip installed it somewhere not on your `PATH`. `python -m agentdescent.cli

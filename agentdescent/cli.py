@@ -38,11 +38,30 @@ import sys
 import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from . import __version__, runstore
+from . import runstore
 from .evolvespec import (KINDS, EvolveSpec, SpecError, compose, estimate, load_spec,
                          _POLICY_SLOTS)
 
 __all__ = ["main", "doctor_report", "starter_spec"]
+
+
+def _version() -> str:
+    """``agentdescent.__version__``, resolved lazily.
+
+    Not a module-level import: with an ``agentdescent/`` directory in the cwd
+    shadowing the package (the case #394 diagnoses) the name resolves to a
+    namespace package that never ran ``__init__``, and an import-time failure
+    here would be a raw traceback ahead of ``cmd_mcp``'s one-line explanation.
+    """
+    try:
+        from . import __version__
+        return __version__
+    except ImportError:          # shadowed / namespace-package import
+        try:
+            from importlib.metadata import version
+            return version("agentdescent")
+        except Exception:  # noqa: BLE001 - reporting a version must never raise
+            return "unknown"
 
 #: Set in every worker's environment by the plugin runner and the MCP server so a
 #: host that is itself being evolved cannot start a nested run. See docs/plugins.md.
@@ -247,7 +266,7 @@ def doctor_report() -> Dict[str, Any]:
         # pinned, #394), which can be a different install from the one in the user's
         # shell; with these two fields a host-side `doctor` and a shell-side `doctor`
         # compare directly (#416).
-        "version": __version__,
+        "version": _version(),
         "executable": sys.executable,
         "python": sys.version.split()[0],
         "agent_clis": clis, "provider_keys_present": keys,
@@ -1261,7 +1280,7 @@ def build_parser() -> argparse.ArgumentParser:
                                 description="Evolve skills, agents, prompts, code and plugins "
                                             "with a parallel, merge-based optimiser.")
     p.add_argument("-V", "--version", action="version",
-                   version=f"%(prog)s {__version__}",
+                   version=f"%(prog)s {_version()}",
                    help="print the AgentDescent version and exit")
     p.add_argument("--store", help="run store directory (default ~/.agentdescent/runs "
                                     "or $AGENTDESCENT_HOME/runs)")

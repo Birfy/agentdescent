@@ -4,5 +4,5 @@ Added
 reports `version` (`agentdescent.__version__`) and `executable`
 (`sys.executable`), so a host-side `doctor` and a shell-side `doctor` can be
 compared directly to tell whether the host's MCP server runs the same install.
-The SKILL's `doctor` step and `docs/testing-the-plugins.md` say to compare them
-when results differ (#416).
+The SKILL's `doctor` step, `docs/plugin-quickstart.md` and
+`docs/testing-the-plugins.md` say to compare them when results differ (#416).
