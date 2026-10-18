@@ -136,3 +136,16 @@ def test_doctor_reports_the_stale_dsh_block(tmp_path, monkeypatch):
     rep = cli.doctor_report()
     assert rep["hosts"]["dsh"]["state"] == "stale"
     assert any(p.startswith("dsh: the installed integration is stale") for p in rep["problems"])
+
+
+def test_a_hand_added_custom_key_is_not_stale(tmp_path):
+    """The documented fix for a custom `api_key_env` must not trip `doctor`."""
+    install("dsh", home=str(tmp_path))
+    path = tmp_path / ".dsh" / "cordis.patch.yml"
+    text = path.read_text()
+    assert "ARK_API_KEY: process.env.ARK_API_KEY, " in text
+    path.write_text(text.replace("ARK_API_KEY: process.env.ARK_API_KEY, ",
+                                 "ARK_API_KEY: process.env.ARK_API_KEY, "
+                                 "MY_PROVIDER_KEY: process.env.MY_PROVIDER_KEY, "))
+    assert "MY_PROVIDER_KEY" in path.read_text()
+    assert host_status("dsh", home=str(tmp_path))["state"] == "ok"

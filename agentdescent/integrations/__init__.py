@@ -1009,12 +1009,19 @@ def host_status(host: str, *, home: Optional[str] = None) -> Dict[str, str]:
 
 
 def _dsh_block_env_is_stale(patch: str) -> bool:
-    """Whether our block in ``cordis.patch.yml`` forwards a different list than
-    :data:`FORWARDED_ENV` (an install from before #415 forwarded four names)."""
+    """Whether our block in ``cordis.patch.yml`` lacks a name of :data:`FORWARDED_ENV`
+    (an install from before #415 forwarded four).
+
+    A subset test, not byte equality: the documented way to forward a spec's
+    custom ``api_key_env`` is to add that name to the expression by hand, and
+    that must not read as stale -- ``install`` would rewrite the block and drop
+    the name again.
+    """
     start = patch.index(DSH_BLOCK_START)
     end = patch.find(DSH_BLOCK_END, start)
     block = patch[start:end if end != -1 else len(patch)]
-    return _dsh_env_expression() not in block
+    forwarded = set(re.findall(r"(\w+): process\.env\.\1\b", block))
+    return not set(FORWARDED_ENV) <= forwarded
 
 
 def mcp_sdk_missing() -> bool:

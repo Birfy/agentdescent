@@ -184,9 +184,10 @@ codex-cli 0.153.4, opencode 1.18.29).
     and `AGENTDESCENT_HOME`. Without that block the server starts with no
     credentials and `doctor` reports every reflector as unavailable, with
     nothing else to explain why. A spec whose `api_key_env` names another
-    variable needs that name added to the `env` expression by hand. Re-running
-    `install dsh` rewrites an older four-name block (`doctor` reads it as
-    `stale`).
+    variable needs that name added to the `env` expression by hand (`doctor`
+    still reads the block as `ok`; re-running `install dsh` rewrites the whole
+    block, so add the name again afterwards). An older four-name block reads as
+    `stale`, and `install dsh` repairs it.
 
 !!! warning "Codex scrubs the environment of MCP servers"
     Codex starts an MCP server with `HOME LOGNAME PATH SHELL USER LANG LC_ALL TERM
