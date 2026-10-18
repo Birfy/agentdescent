@@ -495,3 +495,47 @@ def test_load_spec_absolutises_by_default(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     assert os.path.isabs(load_spec("spec.json").data["path"])
     assert not os.path.isabs(load_spec("spec.json", absolutise=False).data["path"])
+
+
+# -- spec.evolve knobs that evolve() cannot take as JSON (#384) ----------------
+
+
+def _text_spec(**evolve):
+    return EvolveSpec(
+        kind="text", target="Be helpful.",
+        data={"inline": [{"prompt": f"q{i}", "gold": "a"} for i in range(8)]},
+        agent="echo", evolve=evolve)
+
+
+@pytest.mark.parametrize("key", ["strategy", "aggregator_factory", "run", "propose",
+                                 "policies", "staleness_policy"])
+def test_object_valued_evolve_knobs_fail_closed(key, tmp_path, capsys):
+    """A string cannot stand in for a strategy / factory / callable: ``plan`` used
+    to say ok and ``evolve`` then died with "'str' object has no attribute
+    'initial'" (#384)."""
+    import json as _json
+
+    from agentdescent import cli
+
+    ref = "examples.ace.ace_context_evolution:ACEPlaybook"
+    with pytest.raises(SpecError, match=rf"evolve\.{key}: .*takes an object"):
+        compose(_text_spec(**{key: ref}))
+    path = tmp_path / "spec.json"
+    path.write_text(_json.dumps({**_text_spec(**{key: ref}).to_dict(),
+                                 "allow": ["examples"]}))
+    assert cli.main(["--json", "plan", str(path)]) == 2
+    out = _json.loads(capsys.readouterr().out)
+    assert out["ok"] is False
+    assert f"evolve.{key}" in out["error"]
+
+
+def test_unknown_evolve_knob_names_the_valid_ones():
+    with pytest.raises(SpecError, match=r"evolve\.roudns: .*no such parameter.*rounds"):
+        compose(_text_spec(roudns=3))
+
+
+def test_plain_evolve_knobs_and_handled_mappings_still_compose():
+    comp = compose(_text_spec(rounds=2, n_workers=2, seed=7,
+                              agg_config={"batch_trigger": 3}))
+    assert comp.kwargs["rounds"] == 2
+    assert comp.kwargs["agg_config"].batch_trigger == 3
