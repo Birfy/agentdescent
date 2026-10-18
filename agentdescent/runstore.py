@@ -99,8 +99,24 @@ def root() -> str:
 
     Outside the repository on purpose: an installed package may be read-only, and
     a run store inside a checkout would be committed by accident."""
-    home = os.environ.get(_ENV_ROOT) or os.path.expanduser("~/.agentdescent")
-    return os.path.join(home, "runs")
+    home = os.environ.get(_ENV_ROOT) or "~/.agentdescent"
+    # Expanded and absolute (#402): a host config's `env` is not shell-expanded,
+    # so `AGENTDESCENT_HOME=~/x` arrives with a literal `~`.
+    return os.path.join(_normalise(home), "runs")
+
+
+def _normalise(path: str) -> str:
+    return os.path.abspath(os.path.expanduser(path))
+
+
+def store_path(store: Optional[str] = None) -> str:
+    """The run store a call with ``store=`` actually uses: ``~`` expanded, absolute.
+
+    A literal ``~`` reaches us whenever no shell expands it (an MCP host config's
+    ``args``/``env``, a quoted ``--store '~/st'``). Normalising only in
+    :class:`RunDir` made ``create`` write under ``$HOME`` while ``list_runs``
+    looked in ``./~`` and found nothing (#402)."""
+    return _normalise(store) if store else root()
 
 
 # ---------------------------------------------------------------------------
@@ -434,7 +450,7 @@ def _new_id() -> str:
 def create(spec_dict: Dict[str, Any], *, run_id: Optional[str] = None,
            store: Optional[str] = None) -> RunDir:
     """Make a run directory and write the spec and an initial status. Runs nothing."""
-    base = store or root()
+    base = store_path(store)
     os.makedirs(base, exist_ok=True)
     rid = run_id or _new_id()
     rd = RunDir(os.path.join(base, rid))
@@ -449,15 +465,16 @@ def create(spec_dict: Dict[str, Any], *, run_id: Optional[str] = None,
 
 
 def get(run_id: str, *, store: Optional[str] = None) -> RunDir:
-    rd = RunDir(os.path.join(store or root(), run_id))
+    base = store_path(store)
+    rd = RunDir(os.path.join(base, run_id))
     if not os.path.isdir(rd.path):
-        raise RunStoreError(f"no run {run_id!r} under {store or root()}")
+        raise RunStoreError(f"no run {run_id!r} under {base}")
     return rd
 
 
 def list_runs(*, store: Optional[str] = None) -> List[RunStatus]:
     """Every run's status, newest first."""
-    base = store or root()
+    base = store_path(store)
     if not os.path.isdir(base):
         return []
     out: List[RunStatus] = []
