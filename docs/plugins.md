@@ -433,7 +433,12 @@ back to the CLI route rather than failing.
   `bind` / `configure` ([the policy guide](policy-guide.md)). `reflective_merge`
   fills `conflict` and `fusion` together. Thresholds go in **`agg_config`**;
   decisions go here.
-* **`evolve`**: anything `evolve()` takes, overriding the kind's defaults.
+* **`evolve`**: the JSON-valued knobs `evolve()` takes (`rounds`, `n_workers`,
+  `seed`, `held_out_frac`, `asynchronous`, …), overriding the kind's defaults.
+  A parameter that takes an *object* (`strategy`, `aggregator_factory`, `run`,
+  `propose`, …) cannot be written as a string, so `plan` refuses it, and an
+  unknown key, naming the field; use `policies` for rules and `agent` /
+  `reflect` for models.
 * **`allow`**: extra import prefixes for your own code. The package's own
   modules are always allowed and nothing else is; a spec is saved beside its
   run and shown to the user, so it never carries code or secrets.
