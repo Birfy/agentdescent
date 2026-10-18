@@ -169,7 +169,9 @@ not a profile layer"* and the plugin is inert; and rows go under `- insert:`,
 because a patch file otherwise **overrides** rows by id.
 
 It is idempotent (`--dry-run` shows what it would do) and honours `DSH_HOME`,
-`CODEX_HOME` and `XDG_CONFIG_HOME`. Every manifest here was verified by writing
+`CODEX_HOME` and `XDG_CONFIG_HOME`, unless you pass `--home <dir>`: an explicit
+`--home` is the host's whole world, so those variables are ignored and nothing
+outside `<dir>` is read or written (also for `uninstall`). Every manifest here was verified by writing
 it and having the host read it back (dsh 0.1.2-rc.1, Claude Code 2.1.261,
 codex-cli 0.153.4, opencode 1.18.29).
 

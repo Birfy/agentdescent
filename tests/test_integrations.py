@@ -86,7 +86,8 @@ def test_install_dsh_writes_skill_hooks_and_patch(tmp_path, monkeypatch):
 
 def test_install_dsh_honours_dsh_home(tmp_path, monkeypatch):
     monkeypatch.setenv("DSH_HOME", str(tmp_path / "custom"))
-    install("dsh", home=str(tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path))      # the host variable applies to the real home
+    install("dsh")
     assert (tmp_path / "custom" / "skills" / "agentdescent" / "SKILL.md").exists()
 
 
@@ -119,7 +120,8 @@ def test_install_claude_code_renders_a_loadable_plugin_dir(tmp_path):
 def test_install_opencode_writes_the_shape_opencode_itself_writes(tmp_path, monkeypatch):
     """`opencode mcp add` writes {type: local, command: [...]} into opencode.jsonc."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
-    install("opencode", home=str(tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path))      # the host variable applies to the real home
+    install("opencode")
     root = tmp_path / "cfg" / "opencode"
     assert (root / "skill" / "agentdescent" / "SKILL.md").exists()
     cfg = json.loads(_read(root / "opencode.jsonc"))
@@ -130,7 +132,7 @@ def test_install_opencode_writes_the_shape_opencode_itself_writes(tmp_path, monk
     cfg["model"] = "anthropic/claude"
     cfg["mcp"]["other"] = {"type": "local", "command": ["x"]}
     (root / "opencode.jsonc").write_text(json.dumps(cfg))
-    install("opencode", home=str(tmp_path))
+    install("opencode")
     again = json.loads(_read(root / "opencode.jsonc"))
     assert again["model"] == "anthropic/claude" and "other" in again["mcp"]
 
@@ -138,11 +140,12 @@ def test_install_opencode_writes_the_shape_opencode_itself_writes(tmp_path, monk
 def test_install_opencode_does_not_corrupt_a_commented_config(tmp_path, monkeypatch):
     """opencode.jsonc may hold comments, which json cannot parse: say what to add."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    monkeypatch.setenv("HOME", str(tmp_path))      # the host variable applies to the real home
     root = tmp_path / "cfg" / "opencode"
     root.mkdir(parents=True)
     original = '{\n  // my notes\n  "model": "x"\n}\n'
     (root / "opencode.jsonc").write_text(original)
-    lines = install("opencode", home=str(tmp_path))
+    lines = install("opencode")
     assert _read(root / "opencode.jsonc") == original      # untouched
     assert any(l.startswith("NOTE:") and "mcp" in l for l in lines), lines
 
@@ -531,6 +534,7 @@ def test_install_dsh_repairs_a_block_it_wrote_before(tmp_path, monkeypatch):
     from agentdescent.integrations import DSH_BLOCK_START
 
     monkeypatch.setenv("DSH_HOME", str(tmp_path / "dsh"))
+    monkeypatch.setenv("HOME", str(tmp_path))      # the host variable applies to the real home
     patch = tmp_path / "dsh" / "cordis.patch.yml"
     patch.parent.mkdir(parents=True)
     patch.write_text(
@@ -540,7 +544,7 @@ def test_install_dsh_repairs_a_block_it_wrote_before(tmp_path, monkeypatch):
         "          DEEPSEEK_API_KEY: !!js process.env.DEEPSEEK_API_KEY\n",
         encoding="utf-8")
 
-    lines = install("dsh", home=str(tmp_path))
+    lines = install("dsh")
     text = patch.read_text(encoding="utf-8")
     assert any("rewrote" in l and "out of date" in l for l in lines), lines
     assert "filter(" in text                       # the fixed expression
@@ -548,7 +552,7 @@ def test_install_dsh_repairs_a_block_it_wrote_before(tmp_path, monkeypatch):
     assert text.count(DSH_BLOCK_START) == 1        # not stacked
 
     # ...and a second run changes nothing.
-    again = install("dsh", home=str(tmp_path))
+    again = install("dsh")
     assert any("already up to date" in l for l in again), again
     assert patch.read_text(encoding="utf-8") == text
 
