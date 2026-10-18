@@ -64,8 +64,15 @@ def _build_rrsi(ctx: BuildContext, p: Dict[str, Any]) -> Overrides:
     bundle, _state = build_rrsi_bundle(
         ctx.reflect, protected=tuple(p["protected"]), config=config,
         base_score=p["base_score"])
+    notes = []
+    if not p["protected"]:
+        notes.append(
+            "algorithm rrsi: `protected` is empty, so the leakage screen has nothing to "
+            "check and will never reject a candidate. Put the evolve set's distinctive "
+            "strings (gold answers, task ids) there -- never the final holdout -- or the "
+            "committed artifact can be a list of answers.")
     return Overrides(policies={"screen": bundle.screen, "proposal": bundle.proposal,
-                               "acceptance": bundle.acceptance})
+                               "acceptance": bundle.acceptance}, notes=notes)
 
 
 register(Algorithm(
@@ -111,7 +118,8 @@ register(Algorithm(
               "uniform: the ablation",
               choices=("sigmoid_novelty", "novelty", "performance", "uniform", "best")),
         Param("temperature", "float", 1.0,
-              "softmax temperature for performance / novelty; must be > 0", minimum=0),
+              "softmax temperature for performance / novelty; must be > 0",
+              minimum=1e-6),
         Param("seed", "int", 0, "seed of the parent draw"),
     ),
     build=_build_archive,

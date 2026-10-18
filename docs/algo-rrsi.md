@@ -104,6 +104,16 @@ whose modules are now aliases of it), so this works from the wheel. A spec run
 builds the bundle for you, so its `RRsiState` is not returned; call
 `build_rrsi_bundle` from Python when you need to read `S*` afterwards.
 
+**Set `protected`.** It is the list of strings the leakage screen refuses to see
+in a candidate (gold answers, task ids from the evolve set). Empty means the
+screen cannot reject anything -- `plan` says so in its notes -- and a run can
+commit a card that is just a list of answers. Never put the final holdout there.
+
+**Licensing.** `components`, `history`, `schedule` and `selection` are adapted
+from google-research/rrsi and remain Apache-2.0 (file headers kept; see `NOTICE`
+and `LICENSES/Apache-2.0.txt`, both shipped in the wheel's `.dist-info`); the rest
+of AgentDescent is MIT.
+
 `build_rrsi_bundle(complete, protected=..., reviewer=..., config=...,
 base_score=..., history_path=...)` assembles the three slots into one
 `Policies` bundle and returns `(bundle, state)`. The three share one

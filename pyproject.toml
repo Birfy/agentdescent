@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,12 +8,14 @@ dynamic = ["version"]
 description = "Gradient descent, but the parameters are agents — a parallel, asynchronous framework for self-evolving agents (skills, prompts, harnesses)"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+# PEP 639. AgentDescent is MIT; `agentdescent/algorithms/rrsi/` includes files
+# adapted from google-research/rrsi, which are Apache-2.0 (see NOTICE).
+license = "MIT AND Apache-2.0"
+license-files = ["LICENSE", "NOTICE", "LICENSES/*"]
 authors = [{ name = "AgentDescent" }]
 keywords = ["rsi", "self-evolving-agents", "parallel", "aggregation", "staleness"]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
     "Intended Audience :: Science/Research",
 ]
 # `agentdescent.audit.ppi` -- the prediction-powered estimator behind the
