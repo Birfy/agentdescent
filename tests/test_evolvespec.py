@@ -606,3 +606,31 @@ def test_evolve_parallel_null_means_engine_default(tmp_path, capsys):
     # null must not clear compose-built objects (strategy stays)
     cleared = compose(_text_spec(rounds=1, n_workers=1, strategy=None))
     assert cleared.kwargs.get("strategy") is not None
+
+
+def test_evolve_agg_config_null_keeps_compose_built_config(tmp_path):
+    """``evolve.agg_config: null`` must not clear the AggregatorConfig compose
+    built from kind defaults + top-level ``agg_config`` (#392 review)."""
+    from agentdescent.aggregator import AggregatorConfig
+
+    # tree kind: compose builds cfg before knobs merge; null must not overwrite
+    omit = compose(_dir_spec(str(tmp_path / "omit"),
+                             agg_config={"batch_trigger": 7}))
+    null = compose(_dir_spec(str(tmp_path / "null"),
+                             agg_config={"batch_trigger": 7},
+                             evolve={"rounds": 1, "n_workers": 1, "seed": 0,
+                                     "agg_config": None}))
+    assert isinstance(omit.kwargs["agg_config"], AggregatorConfig)
+    assert isinstance(null.kwargs["agg_config"], AggregatorConfig)
+    assert null.kwargs["agg_config"].batch_trigger == 7
+    assert null.kwargs["agg_config"].max_wait_rounds == 1
+    assert omit.kwargs["agg_config"].batch_trigger == 7
+    assert omit.kwargs["agg_config"].max_wait_rounds == 1
+
+    # policy_slot: null must not make setdefault a no-op on top-level agg_config
+    from tests.test_policy_slot_spec import _spec
+    ps = compose(_spec(agg_config={"batch_trigger": 5},
+                       evolve={"rounds": 1, "n_workers": 1, "held_out_frac": 0.4,
+                               "agg_config": None}))
+    assert isinstance(ps.kwargs["agg_config"], AggregatorConfig)
+    assert ps.kwargs["agg_config"].batch_trigger == 5

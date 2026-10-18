@@ -879,16 +879,17 @@ def check_evolve_knobs(evolve_knobs: Mapping[str, Any]) -> None:
 def _evolve_pass_through(evolve_knobs: Mapping[str, Any]) -> Dict[str, Any]:
     """``spec.evolve`` entries to hand to ``evolve()`` kwargs.
 
-    ``null`` on an object-typed knob means "use the engine default" and is
-    dropped, so it cannot clear ``strategy`` / ``run`` / ``propose`` /
-    ``policies`` that ``compose`` just built. JSON knobs and the handled
-    ``agg_config`` mapping keep ``null`` (they already mean the engine
-    default). See #392.
+    ``null`` on an object-typed knob (including the handled ``agg_config``
+    mapping) means "use the engine / compose default" and is dropped, so it
+    cannot clear ``strategy`` / ``run`` / ``propose`` / ``policies`` /
+    ``agg_config`` that ``compose`` just built. Optional JSON knobs may keep
+    ``null`` (their evolve() default is ``None``); non-Optional ones like
+    ``rounds`` are a separate plan/run gap. See #392.
     """
     import inspect
 
     params = inspect.signature(evolve).parameters
-    keep_null = set(_json_knobs(params)) | _EVOLVE_OBJECT_KNOBS_HANDLED
+    keep_null = set(_json_knobs(params))
     return {k: v for k, v in evolve_knobs.items()
             if v is not None or k in keep_null}
 
