@@ -1145,3 +1145,22 @@ def test_cmd_mcp_names_the_directory_that_shadows_the_package(monkeypatch, capsy
     assert len(err.strip().splitlines()) == 1 and "Traceback" not in err
     assert str(tmp_path / "agentdescent") in err and "shadows" in err
     assert "agentdescent install" in err
+
+
+def test_the_old_launcher_in_a_shadowed_cwd_fails_with_one_line_not_a_traceback(tmp_path):
+    """The pre-#394 command, run for real where an `agentdescent/` directory shadows it.
+
+    Whether the shadow wins depends on how the package was installed (an
+    editable install's finder loses to a bare directory; a regular install does
+    not), so the assertion is the part that holds either way: no traceback, and
+    at most the one diagnostic line.
+    """
+    cwd = tmp_path / "ws"
+    (cwd / "agentdescent").mkdir(parents=True)
+    proc = subprocess.run([os.path.abspath(sys.executable), "-m", "agentdescent.cli", "mcp"],
+                          cwd=cwd, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                          timeout=120)
+    assert "Traceback" not in proc.stderr, proc.stderr
+    assert len(proc.stderr.strip().splitlines()) <= 1
+    if proc.returncode == 3 and "resolved to" in proc.stderr:
+        assert str(cwd / "agentdescent") in proc.stderr and "shadows" in proc.stderr
