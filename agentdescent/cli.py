@@ -948,14 +948,15 @@ def _text_plan(dest: str, rendered: str) -> Dict[str, Any]:
     backup is made.
     """
     try:
-        with open(dest, encoding="utf-8") as fh:
+        with open(dest, encoding="utf-8", newline="") as fh:     # verbatim, CRLF included
             same = fh.read() == rendered
     except (OSError, UnicodeDecodeError):
         same = False
     if same:
-        return {"would_write": None, "unchanged": [dest], "chars": len(rendered),
-                "noop": True}
-    return {"would_write": dest, "unchanged": [], "chars": len(rendered), "noop": False}
+        return {"would_write": None, "written": [], "unchanged": [dest],
+                "chars": len(rendered), "noop": True}
+    return {"would_write": dest, "written": [dest], "unchanged": [],
+            "chars": len(rendered), "noop": False}
 
 
 def apply_payload(run_id: str, *, to: Optional[str] = None, store: Optional[str] = None,
@@ -991,7 +992,7 @@ def apply_payload(run_id: str, *, to: Optional[str] = None, store: Optional[str]
                 n += 1
             shutil.copy2(dest, f"{dest}.bak-{n}")
             saved = [f"{dest}.bak-{n}"]
-        with open(dest, "w", encoding="utf-8") as fh:
+        with open(dest, "w", encoding="utf-8", newline="") as fh:
             fh.write(result.rendered)
         return {"written": [dest], "unchanged": [], "backup": saved, "noop": False,
                 "dest": dest}

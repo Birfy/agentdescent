@@ -168,3 +168,57 @@ def test_text_target_that_differs_is_written_with_a_backup(store, tmp_path):
     assert plan["noop"] is False and plan["written"] == [str(target)]
     assert plan["backup"] == [str(target) + ".bak-0"]
     assert open(plan["backup"][0]).read() == "edited since the run\n"
+
+
+def test_crlf_files_compare_verbatim(tmp_path):
+    """`load_tree` keeps CRLF, so a run over a CRLF directory has CRLF state; the
+    comparison must not read the target in universal-newline mode."""
+    files = {"SKILL.md": "a\r\nb\r\n", "rules.md": "x\ny\n"}
+    dest = str(tmp_path / "crlf")
+    os.makedirs(dest)
+    for rel, text in files.items():
+        with open(os.path.join(dest, rel), "w", encoding="utf-8", newline="") as fh:
+            fh.write(text)
+    assert load_tree(dest) == files
+    for dry in (True, False):
+        plan = _result(files).write_to(dest, dry_run=dry)
+        assert plan["noop"] is True and plan["written"] == [] and plan["backup"] == []
+    assert _baks(dest) == []
+    # a real change to one CRLF file is still detected, and written verbatim
+    changed = {**files, "SKILL.md": "a\r\nc\r\n"}
+    plan = _result(changed).write_to(dest)
+    assert plan["written"] == ["SKILL.md"] and len(plan["backup"]) == 1
+    assert load_tree(dest) == changed
+
+
+def test_text_target_with_crlf_is_compared_verbatim(store, tmp_path):
+    rid, target = _text_run(store, tmp_path, "line one\r\nline two\r\n")
+    rendered = cli.show_payload(rid, store=store)["rendered"]
+    with open(target, "w", encoding="utf-8", newline="") as fh:
+        fh.write(rendered)
+    assert cli.apply_payload(rid, store=store)["noop"] is True
+    assert _baks(str(target)) == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX exec bits")
+def test_a_script_with_only_user_exec_is_not_what_apply_leaves(tmp_path):
+    dest = _tree(tmp_path, {"scripts/run.sh": "echo hi\n"})
+    os.chmod(os.path.join(dest, "scripts/run.sh"), 0o744)          # u+x, not g+x
+    plan = _result({"scripts/run.sh": "echo hi\n"}).write_to(dest)
+    assert plan["written"] == ["scripts/run.sh"] and plan["noop"] is False
+    assert _result({"scripts/run.sh": "echo hi\n"}).write_to(dest)["noop"] is True
+
+
+def test_an_empty_artifact_is_a_noop_and_creates_nothing(tmp_path):
+    dest = str(tmp_path / "missing")
+    plan = _result({}).write_to(dest)
+    assert plan["noop"] is True and plan["written"] == [] and not os.path.exists(dest)
+
+
+def test_text_dry_run_plan_has_a_written_field(store, tmp_path):
+    rid, target = _text_run(store, tmp_path, "original\n")
+    same = cli.apply_payload(rid, store=store, dry_run=True)
+    assert same["written"] == [] and same["noop"] is True
+    target.write_text("edited since the run\n", encoding="utf-8")
+    diff = cli.apply_payload(rid, store=store, dry_run=True)
+    assert diff["written"] == [str(target)] and diff["would_write"] == str(target)

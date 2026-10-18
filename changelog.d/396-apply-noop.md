@@ -12,3 +12,6 @@ gets the same treatment. `show`'s `apply would:` and `apply --dry-run` use the
 same judgement (`EvolutionResult.write_to` now returns `unchanged` and `noop`
 too, and only rewrites the files that changed). The SKILL.md step and the MCP
 `apply` description say what `noop` means.
+Files are compared and written verbatim (CRLF included), a script counts as
+unchanged only with both user and group exec bits, the `text` dry-run result also
+carries `written`, and an artifact with no files is a no-op that creates nothing.

@@ -1754,7 +1754,8 @@ class EvolutionResult:
         that lost its bit); files already byte-identical to the artifact are
         ``unchanged`` and are not rewritten. When nothing would be written or
         deleted the plan has ``noop: true``, no backup is made and the target is
-        not touched (#396).
+        not touched (#396). An artifact with no files has nothing to write, so it
+        is a no-op and does not create a missing target directory.
 
         Deliberately conservative, because this is the one call in the whole
         package that writes into a directory the user cares about:
@@ -1807,11 +1808,15 @@ class EvolutionResult:
             try:
                 if not os.path.isfile(full):
                     return False
-                with open(full, encoding="utf-8") as fh:
+                # newline="": compare the bytes on disk, as `load_tree` reads them.
+                # Universal-newline mode turned every CRLF file into a difference.
+                with open(full, encoding="utf-8", newline="") as fh:
                     if fh.read() != self.state[rel]:
                         return False
+                # `materialize` sets user and group exec on these; a file with only
+                # one of them is not what apply would leave.
                 return (not match_any(rel, _EXEC_PATTERNS)
-                        or bool(os.stat(full).st_mode & 0o100))
+                        or (os.stat(full).st_mode & 0o110) == 0o110)
             except (OSError, UnicodeDecodeError):
                 return False
 
