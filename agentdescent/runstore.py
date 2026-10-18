@@ -258,6 +258,13 @@ class RunDir:
 
     path: str
 
+    def __post_init__(self) -> None:
+        # Absolute, always (#400). The detached launcher runs with this directory
+        # as its cwd and is handed `log_path` / `--run-dir` as arguments, so a
+        # relative `--store` made `./store/<id>/log.txt` resolve under the run
+        # directory and `resume` died before the run started.
+        self.path = os.path.abspath(os.path.expanduser(self.path))
+
     @property
     def run_id(self) -> str:
         return os.path.basename(self.path.rstrip(os.sep))

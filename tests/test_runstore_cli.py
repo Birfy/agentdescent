@@ -330,6 +330,36 @@ def test_resume_continues_on_the_same_ledger(store, tmp_path):
     assert os.path.isdir(rd.ledger_path)
 
 
+def test_a_relative_store_works_for_create_resume_and_launch(tmp_path, monkeypatch):
+    """The launcher's cwd is the run directory, so a relative path to `log.txt`
+    used to resolve there and fail ("could not start the run", #400)."""
+    monkeypatch.setenv("AGENTDESCENT_HOME", str(tmp_path / "home"))
+    _, spec = _spec_file(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    rd = runstore.create(spec.to_dict(), store="./store")
+    assert os.path.isabs(rd.path) and os.path.isabs(rd.log_path)
+    runstore.execute(rd)
+    n_before = len(rd.rounds())
+    st = runstore.resume(rd.run_id, store="./store")          # relative, as typed
+    assert st.state == "running"
+    assert _wait(rd).state == "done", rd.log_tail()
+    assert len(rd.rounds()) > n_before
+    assert runstore.get(rd.run_id, store="store").run_id == rd.run_id
+    assert [s.run_id for s in runstore.list_runs(store="./store")] == [rd.run_id]
+
+
+def test_cli_resume_with_a_relative_store(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTDESCENT_HOME", str(tmp_path / "home"))
+    path, _ = _spec_file(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    code, out = _cli("--store", "./store", "--json", "evolve", path)
+    assert code == 0, out
+    rid = json.loads(out)["run_id"]
+    code, out = _cli("--store", "./store", "resume", rid)
+    assert code == 0 and rid in out
+    assert _wait(runstore.get(rid, store="./store")).state == "done"
+
+
 # ---------------------------------------------------------------------------
 # the CLI
 # ---------------------------------------------------------------------------
