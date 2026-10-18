@@ -795,7 +795,8 @@ def test_install_repairs_only_stock_path_dependent_entry(tmp_path, monkeypatch, 
     assert path.read_text() == original
     install(host, home=str(tmp_path))
     repaired = path.read_text()
-    assert "agentdescent.cli" in repaired and "keep" in repaired
+    assert "keep" in repaired and repaired != original
+    assert json.dumps(mcp_launcher()[0]) in repaired        # whichever shape this Python writes
     install(host, home=str(tmp_path))
     assert path.read_text() == repaired
 
@@ -1061,7 +1062,7 @@ def test_console_script_is_found_beside_the_interpreter(monkeypatch, tmp_path):
     name = "agentdescent.exe" if os.name == "nt" else "agentdescent"
     script = tmp_path / "bin" / name
     script.parent.mkdir()
-    script.write_text("#!/bin/sh\n")
+    script.write_text(f"#!{script.parent / 'python'}\n")
     script.chmod(0o755)
     monkeypatch.setattr(sys, "executable", str(script.parent / "python"))
     assert integrations._console_script() == str(script)
@@ -1164,3 +1165,31 @@ def test_the_old_launcher_in_a_shadowed_cwd_fails_with_one_line_not_a_traceback(
     assert len(proc.stderr.strip().splitlines()) <= 1
     if proc.returncode == 3 and "resolved to" in proc.stderr:
         assert str(cwd / "agentdescent") in proc.stderr and "shadows" in proc.stderr
+
+
+def test_console_script_of_another_interpreter_is_not_pinned(monkeypatch, tmp_path):
+    from agentdescent import integrations
+
+    name = "agentdescent.exe" if os.name == "nt" else "agentdescent"
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    script = bindir / name
+    script.write_text("#!/usr/bin/some-other-python\n")
+    script.chmod(0o755)
+    monkeypatch.setattr(sys, "executable", str(bindir / "python"))
+    monkeypatch.setattr(integrations.sysconfig, "get_path", lambda *a, **k: str(bindir))
+    assert integrations._console_script() is None
+    script.write_text(f"#!{bindir / 'python'}\n")
+    assert integrations._console_script() == str(script)
+
+
+def test_install_warns_when_only_the_cwd_dependent_launcher_is_possible(tmp_path, monkeypatch):
+    from agentdescent import integrations
+
+    monkeypatch.setattr(integrations.sys, "version_info", (3, 10, 0, "final", 0))
+    monkeypatch.setattr(integrations, "_console_script", lambda: None)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    lines = install("opencode", home=str(tmp_path))
+    assert any("WARNING" in l and "#394" in l for l in lines)
+    monkeypatch.setattr(integrations, "_console_script", lambda: str(tmp_path / "agentdescent"))
+    assert not any("#394" in l for l in install("opencode", home=str(tmp_path)))

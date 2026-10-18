@@ -917,21 +917,52 @@ def mcp_sdk_missing() -> bool:
         return True
 
 
+def _runs_this_interpreter(script: str) -> bool:
+    """Whether the console script at ``script`` launches ``sys.executable``.
+
+    ``~/.local/bin`` or ``/usr/local/bin`` can hold the script of a *different*
+    interpreter's install; pinning it would start the wrong environment. A pip
+    script names its interpreter in the shebang (or in the ``exec`` line of the
+    ``/bin/sh`` trampoline pip writes for long paths); a Windows launcher embeds
+    the path in the executable. Look for the interpreter path, as given or with
+    symlinks resolved, in the file.
+    """
+    try:
+        with open(script, "rb") as fh:
+            blob = fh.read(1 << 20)
+    except OSError:
+        return False
+    exe = os.path.abspath(sys.executable)
+    return any(p.encode("utf-8", "surrogateescape") in blob
+               for p in {exe, os.path.realpath(exe)})
+
+
 def _console_script() -> Optional[str]:
     """Absolute path of the ``agentdescent`` console script of *this* interpreter.
 
     Looked up beside ``sys.executable`` first (a venv's ``bin``/``Scripts``), then
-    in the interpreter's default and per-user script directories.
+    in the interpreter's default and per-user script directories (including
+    macOS framework builds' own user scheme), and accepted only if the script
+    runs ``sys.executable`` (see :func:`_runs_this_interpreter`).
     """
     dirs = [os.path.dirname(os.path.abspath(sys.executable)), sysconfig.get_path("scripts")]
-    try:
-        dirs.append(sysconfig.get_path("scripts", "nt_user" if os.name == "nt" else "posix_user"))
-    except (KeyError, ValueError):
-        pass
+    schemes = ["nt_user" if os.name == "nt" else "posix_user", "osx_framework_user"]
+    preferred = getattr(sysconfig, "get_preferred_scheme", None)
+    if preferred is not None:
+        try:
+            schemes.insert(0, preferred("user"))
+        except (KeyError, ValueError):
+            pass
+    for scheme in schemes:
+        try:
+            dirs.append(sysconfig.get_path("scripts", scheme))
+        except (KeyError, ValueError):
+            pass
     for d in dirs:
         for name in ("agentdescent", "agentdescent.exe"):
             path = os.path.join(d or "", name)
-            if d and os.path.isfile(path) and os.access(path, os.X_OK):
+            if (d and os.path.isfile(path) and os.access(path, os.X_OK)
+                    and _runs_this_interpreter(path)):
                 return os.path.abspath(path)
     return None
 
@@ -964,6 +995,14 @@ def install(host: str, *, dry_run: bool = False, home: Optional[str] = None) -> 
     # venv. Portable render_* templates deliberately keep the bare command.
     w = _Writer(dry_run, mcp_launcher())
     HOSTS[host](os.path.expanduser(home or "~"), w)
+    if "-P" not in w.launcher and len(w.launcher) > 1:
+        # Python < 3.11 (no `-P`) and no console script for this interpreter: the
+        # plain `-m` form is all that is left, and it still honours the host's cwd.
+        w.note("WARNING: this Python has no -P and no `agentdescent` console script was "
+               "found for it, so the launcher written above is `python -m agentdescent.cli` "
+               "and a host started in a directory containing an `agentdescent/` folder "
+               "will fail to connect (#394). Use Python >= 3.11, or install the package "
+               "into an environment that has the `agentdescent` script and re-run install")
     # Imported here, not at module scope: `cli` reaches into this module from
     # `cmd_install`, and the reason for a missing SDK belongs in one place.
     from ..cli import mcp_unavailable
