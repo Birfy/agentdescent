@@ -943,8 +943,7 @@ def show_payload(run_id: str, *, store: Optional[str] = None, diff: bool = True,
         return payload
     if spec.kind == "text":
         payload["rendered"] = result.rendered[:max_chars]
-        payload["apply_plan"] = {"would_write": os.path.expanduser(spec.target),
-                                 "chars": len(result.rendered)}
+        payload["apply_plan"] = _text_plan(os.path.expanduser(spec.target), result.rendered)
         return payload
     payload["files"] = sorted(result.state)
     if diff:
@@ -981,6 +980,25 @@ def cmd_show(a: argparse.Namespace) -> int:
     return 0
 
 
+def _text_plan(dest: str, rendered: str) -> Dict[str, Any]:
+    """What applying a single-file artifact to ``dest`` would do (#396).
+
+    One judgement for ``show``, ``apply --dry-run`` and ``apply``: a file that
+    already holds the evolved text is ``unchanged`` -- nothing is written and no
+    backup is made.
+    """
+    try:
+        with open(dest, encoding="utf-8", newline="") as fh:     # verbatim, CRLF included
+            same = fh.read() == rendered
+    except (OSError, UnicodeDecodeError):
+        same = False
+    if same:
+        return {"would_write": None, "written": [], "unchanged": [dest],
+                "chars": len(rendered), "noop": True}
+    return {"would_write": dest, "written": [dest], "unchanged": [],
+            "chars": len(rendered), "noop": False}
+
+
 def apply_payload(run_id: str, *, to: Optional[str] = None, store: Optional[str] = None,
                   dry_run: bool = False, backup: bool = True) -> Dict[str, Any]:
     rd = runstore.get(run_id, store=store)
@@ -996,8 +1014,12 @@ def apply_payload(run_id: str, *, to: Optional[str] = None, store: Optional[str]
             "pass --to PATH to write the rule, or read it with `show`")
     dest = os.path.expanduser(to or spec.target)
     if spec.kind in ("text", "policy_slot"):
+        plan = _text_plan(dest, result.rendered)
         if dry_run:
-            return {"would_write": dest, "chars": len(result.rendered)}
+            return {**plan, "dest": dest}
+        if plan["noop"]:
+            return {"written": [], "unchanged": [dest], "backup": [], "noop": True,
+                    "dest": dest}
         saved = []
         if backup and os.path.exists(dest):
             # `.bak-N`, never a fixed `.bak`: the directory path a few lines down
@@ -1010,9 +1032,10 @@ def apply_payload(run_id: str, *, to: Optional[str] = None, store: Optional[str]
                 n += 1
             shutil.copy2(dest, f"{dest}.bak-{n}")
             saved = [f"{dest}.bak-{n}"]
-        with open(dest, "w", encoding="utf-8") as fh:
+        with open(dest, "w", encoding="utf-8", newline="") as fh:
             fh.write(result.rendered)
-        return {"written": [dest], "backup": saved}
+        return {"written": [dest], "unchanged": [], "backup": saved, "noop": False,
+                "dest": dest}
     plan = result.write_to(dest, backup=backup, dry_run=dry_run)
     plan["dest"] = dest
     return plan
@@ -1022,6 +1045,10 @@ def cmd_apply(a: argparse.Namespace) -> int:
     payload = apply_payload(a.run_id, to=a.to, store=a.store, dry_run=a.dry_run,
                             backup=not a.no_backup)
     _out(payload, as_json=True)
+    if payload.get("noop"):
+        # After the JSON, on stderr: stdout stays one machine-readable document.
+        print(f"nothing to apply: {payload.get('dest') or '(target)'} already matches "
+              f"run {a.run_id}", file=sys.stderr)
     return 0
 
 

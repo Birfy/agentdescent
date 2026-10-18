@@ -362,7 +362,9 @@ def materialize(state: Mapping[str, str], dest: str, *, prefix: str = "",
                 or real_parent.startswith(os.path.realpath(root) + os.sep)):
             raise TreeError(f"refusing to write {rel!r} outside {dest!r}")
         os.makedirs(os.path.dirname(full), exist_ok=True)
-        with open(full, "w", encoding="utf-8") as fh:
+        # newline="": write the text verbatim. `load_tree` reads bytes, so CRLF
+        # round-trips; translation (on Windows) would make a re-apply look changed.
+        with open(full, "w", encoding="utf-8", newline="") as fh:
             fh.write(content)
         if match_any(rel, exec_patterns):
             os.chmod(full, os.stat(full).st_mode | stat.S_IXUSR | stat.S_IXGRP)

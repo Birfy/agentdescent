@@ -98,8 +98,10 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
     "apply": (
         "DESTRUCTIVE: write the evolved artifact back over the target directory (or `to`). "
         "Backs the original up first unless backup=false. Ask the user explicitly before "
-        "calling this, after they have seen `show`; use dry_run=true to preview. Tell them "
-        "the backup path afterwards."),
+        "calling this, after they have seen `show`; use dry_run=true to preview. Returns "
+        "written / unchanged / backup; `noop: true` means the target already matched the "
+        "run, so nothing was written and no backup exists -- tell the user nothing "
+        "changed. Otherwise tell them the backup path afterwards."),
     "cancel": (
         "Stop a running evolution and every worker agent it started. The run keeps its "
         "ledger and can be resumed."),

@@ -493,16 +493,22 @@ def test_applying_a_text_target_twice_keeps_both_backups(store, tmp_path):
     assert code == 0, out
     rid = json.loads(out)["run_id"]
 
+    # The run committed nothing, so it evolved the text it started from; applying
+    # that over an identical file is a no-op (#396) and makes no backup. Edit the
+    # target after the run so there is something for `apply` to overwrite.
+    target.write_text("original\n", encoding="utf-8")
+    assert json.loads(_cli("--store", store, "apply", rid)[1])["backup"] == []
+    target.write_text("edited since the run\n", encoding="utf-8")
     first = json.loads(_cli("--store", store, "apply", rid)[1])["backup"]
     assert first == [str(target) + ".bak-0"]
-    assert open(first[0]).read() == "original\n"
+    assert open(first[0]).read() == "edited since the run\n"
 
     target.write_text("hand-edited\n", encoding="utf-8")
     second = json.loads(_cli("--store", store, "apply", rid)[1])["backup"]
     assert second == [str(target) + ".bak-1"], second
 
     # the point: the first backup is still the original, untouched
-    assert open(first[0]).read() == "original\n"
+    assert open(first[0]).read() == "edited since the run\n"
     assert open(second[0]).read() == "hand-edited\n"
 
 
