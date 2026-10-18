@@ -105,6 +105,20 @@ def _version() -> str:
     return __version__
 
 
+def _split_home(home: Optional[str]) -> "tuple[str, bool]":
+    """``(expanded home, honour the host's variables)`` for an optional ``home``.
+
+    An empty string is refused, not treated as "not given": ``--home "$UNSET"``
+    expands to it, and silently falling back to the real home *and* the real
+    host variables would turn the safety flag into the opposite (#410)."""
+    if home is None:
+        return os.path.expanduser("~"), True
+    if not home.strip():
+        raise ValueError("home must not be empty (an unset shell variable?); "
+                         "omit it to use the real home")
+    return os.path.expanduser(home), False
+
+
 def _host_root(var: str, default: str, honour_env: bool = True) -> str:
     """Where a host keeps its files: ``$<var>`` if the host honours it, else ``default``.
 
@@ -940,8 +954,7 @@ def host_status(host: str, *, home: Optional[str] = None) -> Dict[str, str]:
     """
     if host not in HOSTS:
         raise ValueError(f"unknown host {host!r}; choose from {sorted(HOSTS)}")
-    honour_env = not home          # an explicit home is the whole world (#410)
-    home = os.path.expanduser(home or "~")
+    home, honour_env = _split_home(home)    # an explicit home is the whole world (#410)
     if host == "dsh":
         root = _host_root("DSH_HOME", os.path.join(home, ".dsh"), honour_env)
         skill = os.path.join(root, "skills", "agentdescent", "SKILL.md")
@@ -1068,8 +1081,9 @@ def install(host: str, *, dry_run: bool = False, home: Optional[str] = None) -> 
     # venv. Portable render_* templates deliberately keep the bare command.
     # An explicit `home` is the host's whole world: the host's own home
     # variables are only consulted for the real one (#410).
-    w = _Writer(dry_run, mcp_launcher(), honour_env=not home)
-    HOSTS[host](os.path.expanduser(home or "~"), w)
+    home_dir, honour_env = _split_home(home)
+    w = _Writer(dry_run, mcp_launcher(), honour_env=honour_env)
+    HOSTS[host](home_dir, w)
     if "-P" not in w.launcher and len(w.launcher) > 1:
         # Python < 3.11 (no `-P`) and no console script for this interpreter: the
         # plain `-m` form is all that is left, and it still honours the host's cwd.
@@ -1335,8 +1349,9 @@ def uninstall(host: str, *, dry_run: bool = False, home: Optional[str] = None) -
     """
     if host not in HOSTS:
         raise ValueError(f"unknown host {host!r}; choose from {sorted(HOSTS)}")
-    e = _Eraser(dry_run, honour_env=not home)
-    _UNINSTALL[host](os.path.expanduser(home or "~"), e)
+    home_dir, honour_env = _split_home(home)
+    e = _Eraser(dry_run, honour_env=honour_env)
+    _UNINSTALL[host](home_dir, e)
     if not e.lines:
         e.note(f"nothing to remove: agentdescent is not installed for {host} "
                "(files from the host's own marketplace are removed with its plugin command)")

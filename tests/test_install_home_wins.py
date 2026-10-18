@@ -91,3 +91,20 @@ def test_the_cli_flag_wins_too(worlds, capsys):
     assert _tree(real) == {}
     assert cli.main(["uninstall", "codex", "--home", str(probe)]) == 0
     assert _tree(probe) == {}
+
+
+@pytest.mark.parametrize("empty", ["", "  "])
+def test_an_empty_home_is_refused_not_read_as_the_real_one(worlds, empty, capsys):
+    real, _ = worlds
+    install("codex")                                  # a real, variable-directed install
+    before = _tree(real)
+    for fn in (install, uninstall):
+        with pytest.raises(ValueError, match="must not be empty"):
+            fn("codex", home=empty)
+    with pytest.raises(ValueError, match="must not be empty"):
+        host_status("codex", home=empty)
+    for cmd in ("install", "uninstall"):
+        with pytest.raises(SystemExit) as e:
+            cli.main([cmd, "codex", "--home", empty])
+        assert e.value.code == 2
+    assert _tree(real) == before

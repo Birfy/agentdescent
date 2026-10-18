@@ -1154,6 +1154,13 @@ def cmd_algorithms(a: argparse.Namespace) -> int:
     return 0
 
 
+def _nonempty_home(value: str) -> str:
+    if not value.strip():
+        raise argparse.ArgumentTypeError(
+            "must not be empty (an unset shell variable?); omit --home for the real home")
+    return value
+
+
 def cmd_install(a: argparse.Namespace) -> int:
     from .integrations import install
 
@@ -1323,13 +1330,17 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("install", help="wire the skill and MCP server into a host")
     s.add_argument("host", choices=("dsh", "claude-code", "codex", "opencode"))
     s.add_argument("--dry-run", action="store_true", dest="dry_run")
-    s.add_argument("--home", help="the host's home directory (default: the real one)")
+    s.add_argument("--home", type=_nonempty_home,
+                   help="the host's home directory (default: the real one); wins over "
+                        "CODEX_HOME / DSH_HOME / XDG_CONFIG_HOME")
     s.set_defaults(fn=cmd_install)
 
     s = sub.add_parser("uninstall", help="undo `install` for a host")
     s.add_argument("host", choices=("dsh", "claude-code", "codex", "opencode"))
     s.add_argument("--dry-run", action="store_true", dest="dry_run")
-    s.add_argument("--home", help="the host's home directory (default: the real one)")
+    s.add_argument("--home", type=_nonempty_home,
+                   help="the host's home directory (default: the real one); wins over "
+                        "CODEX_HOME / DSH_HOME / XDG_CONFIG_HOME")
     s.set_defaults(fn=cmd_uninstall)
 
     s = sub.add_parser("algorithms", help="the named algorithms a spec can ask for")
