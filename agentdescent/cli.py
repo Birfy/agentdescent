@@ -1284,6 +1284,11 @@ def cmd_mcp(a: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
+# Sub-commands that exist for AgentDescent's own use and are kept out of
+# `--help` and the usage line.
+_INTERNAL_COMMANDS = frozenset({"run"})
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="agentdescent",
                                 description="Evolve skills, agents, prompts, code and plugins "
@@ -1323,7 +1328,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--usd-per-call", type=float, dest="usd_per_call")
     s.set_defaults(fn=cmd_evolve)
 
-    s = sub.add_parser("run", help=argparse.SUPPRESS)
+    # The detached worker `evolve --detach` spawns (runstore: `python -m
+    # agentdescent.cli run --run-dir <dir>`); not a user verb.  argparse does
+    # not honour help=SUPPRESS on a sub-parser (it prints "==SUPPRESS==" and
+    # keeps the name in the {...} list), so register it with no help at all
+    # -- no help line -- and leave it out of the metavar below (#420).
+    s = sub.add_parser("run", description="internal: the worker `agentdescent evolve "
+                                          "--detach` starts; use `evolve` instead")
     s.add_argument("--run-dir", required=True, dest="run_dir")
     s.add_argument("--budget", type=float)
     s.add_argument("--usd-per-call", type=float, dest="usd_per_call")
@@ -1397,6 +1408,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("mcp", help="serve the tools over stdio (needs agentdescent[mcp])")
     s.set_defaults(fn=cmd_mcp)
+
+    sub.metavar = "{" + ",".join(n for n in sub.choices if n not in _INTERNAL_COMMANDS) + "}"
     return p
 
 
