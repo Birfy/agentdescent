@@ -23,7 +23,7 @@ import shlex
 import sys
 from typing import Callable, Dict, List, Optional
 
-__all__ = ["HOSTS", "host_status", "install", "render_claude_plugin", "render_dsh_plugin",
+__all__ = ["HOSTS", "host_status", "install", "uninstall", "render_claude_plugin", "render_dsh_plugin",
            "skill_text", "hooks_text"]
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -930,3 +930,242 @@ def install(host: str, *, dry_run: bool = False, home: Optional[str] = None) -> 
         # than being spelled out again here.
         w.note("WARNING: the server this just wired up cannot start -- " + why)
     return w.lines
+
+
+# ---------------------------------------------------------------------------
+# Uninstall
+# ---------------------------------------------------------------------------
+
+
+class _Eraser:
+    """What ``uninstall`` does to disk, with ``--dry-run`` and one report line each.
+
+    It removes only what ``install`` wrote and only when it can tell that it is
+    still ours; anything the user has changed is left in place and said so.
+    """
+
+    def __init__(self, dry_run: bool) -> None:
+        self.dry_run = dry_run
+        self.lines: List[str] = []
+        self.touched = False
+
+    def remove_file(self, path: str) -> None:
+        if not os.path.isfile(path):
+            return
+        self.touched = True
+        if not self.dry_run:
+            os.remove(path)
+        self.lines.append(f"{'would remove' if self.dry_run else 'removed'} {path}")
+
+    def prune_dirs(self, start: str, stop: str) -> None:
+        """Remove ``start`` and its parents while they are empty, never past ``stop``.
+
+        ``stop`` itself is kept: it is the host's own directory (``~/.dsh``,
+        ``~/.codex``), which is not ours to delete. Under ``--dry-run`` nothing
+        is removed, so the loop only reports files that would be left alone."""
+        stop = os.path.abspath(stop)
+        cur = os.path.abspath(start)
+        while cur != stop and cur.startswith(stop + os.sep):
+            try:
+                if self.dry_run or os.listdir(cur):
+                    return
+                os.rmdir(cur)
+            except OSError:
+                return
+            cur = os.path.dirname(cur)
+
+    def rewrite(self, path: str, text: str, what: str) -> None:
+        self.touched = True
+        if not self.dry_run:
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+        self.lines.append(f"{'would update' if self.dry_run else 'updated'} {path} ({what})")
+
+    def kept(self, path: str, why: str) -> None:
+        self.lines.append(f"kept {path} ({why})")
+
+    def note(self, text: str) -> None:
+        self.lines.append(text)
+
+
+def _uninstall_dsh(home: str, e: _Eraser) -> None:
+    root = os.environ.get("DSH_HOME") or os.path.join(home, ".dsh")
+    skill_dir = os.path.join(root, "skills", "agentdescent")
+    for name in ("SKILL.md", "hooks.json"):
+        e.remove_file(os.path.join(skill_dir, name))
+    e.prune_dirs(skill_dir, root)
+    path = os.path.join(root, "cordis.patch.yml")
+    current = _read(path)
+    if current is None or DSH_BLOCK_START not in current:
+        return
+    head = current[:current.index(DSH_BLOCK_START)]
+    rest = current[current.index(DSH_BLOCK_START):]
+    if DSH_BLOCK_END in rest:
+        # The block is owned by its two markers and removed whole, whatever was
+        # edited inside it -- the same ownership `sync_block` applies on install.
+        tail = rest[rest.index(DSH_BLOCK_END) + len(DSH_BLOCK_END):]
+    else:
+        # A block from before the end marker existed. `sync_block` reads it as
+        # running to the end of the file, but that was only true when it was
+        # written: rows the user appended since are theirs. The block's last
+        # line was always the hooks row's `configPath: .../agentdescent/hooks.json`,
+        # so end it there; if that line is not found, say so rather than guess.
+        lines = rest.split("\n")
+        last = next((i for i, line in enumerate(lines)
+                     if line.strip().startswith("configPath:")
+                     and "agentdescent/hooks.json" in line), None)
+        if last is None:
+            e.kept(path, "an old agentdescent block with no end marker whose last row "
+                         "was not recognised; delete it from the marker line yourself")
+            return
+        tail = "\n".join(lines[last + 1:])
+    remaining = head + tail.lstrip("\n")
+    if not remaining.strip():
+        e.remove_file(path)
+    else:
+        e.rewrite(path, remaining, "agentdescent mcp-client + hooks entries removed")
+
+
+def _uninstall_claude_code(home: str, e: _Eraser) -> None:
+    dest = os.path.join(home, ".agentdescent", "plugins", "claude-code")
+    for rel in ((".claude-plugin", "plugin.json"), ("skills", "agentdescent", "SKILL.md"),
+                ("commands", "evolve.md"), (".mcp.json",), ("hooks", "hooks.json")):
+        path = os.path.join(dest, *rel)
+        e.remove_file(path)
+        e.prune_dirs(os.path.dirname(path), os.path.join(home, ".agentdescent"))
+    # `~/.agentdescent` also holds the run store; it is never ours to remove.
+    if os.path.isdir(dest) and not e.dry_run and os.listdir(dest):
+        e.kept(dest, "holds files this install did not write")
+
+
+def _codex_block_to_remove(current: str) -> Optional[str]:
+    """The exact text ``install codex`` appended, wherever it now sits in the file.
+
+    ``_stock_codex_block`` only recognises it as the *last* thing in
+    ``config.toml``, which is what install's repair needs and is wrong here:
+    Codex itself appends tables after it (``[projects."..."]`` when a folder is
+    trusted). So: our marker line, the table header, ``command`` and ``args``
+    byte for byte as ``codex_config_block`` writes them for a stock launcher, and
+    then the end of the file or the next table header (blank lines and comments
+    aside). A further key under our table means the user edited it.
+    """
+    marker = "\n# --- agentdescent (written by `agentdescent install codex`) ---\n"
+    if current.count(marker) != 1 or current.count("[mcp_servers.agentdescent]") != 1:
+        return None
+    start = current.index(marker)
+    lines = current[start:].split("\n")       # "", marker, header, command, args, ...
+    if (len(lines) < 5 or lines[2] != "[mcp_servers.agentdescent]"
+            or not lines[3].startswith("command = ") or not lines[4].startswith("args = ")):
+        return None
+    try:
+        command = json.loads(lines[3][len("command = "):])
+        args = json.loads(lines[4][len("args = "):])
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(args, list) or not _stock_mcp_argv([command, *args]):
+        return None
+    block = codex_config_block([command, *args[:-len(MCP_ARGS)]])
+    if not current[start:].startswith(block):
+        return None
+    after = current[start + len(block):]
+    for line in after.split("\n"):
+        text = line.strip()
+        if not text or text.startswith("#"):
+            continue
+        if not text.startswith("["):
+            return None                          # another key of our table
+        break
+    return block
+
+
+def _uninstall_codex(home: str, e: _Eraser) -> None:
+    root = os.environ.get("CODEX_HOME") or os.path.join(home, ".codex")
+    skill_dir = os.path.join(root, "skills", "agentdescent")
+    e.remove_file(os.path.join(skill_dir, "SKILL.md"))
+    e.prune_dirs(skill_dir, root)
+    path = os.path.join(root, "config.toml")
+    current = _read(path)
+    if current is None or "[mcp_servers.agentdescent]" not in current:
+        return
+    block = _codex_block_to_remove(current)
+    if block is None:
+        e.kept(path, "its [mcp_servers.agentdescent] table is not the one `install` wrote "
+                     "(edited, or added by hand); remove it yourself if you want it gone")
+        return
+    remaining = current.replace(block, "", 1)
+    if not remaining.strip():
+        e.remove_file(path)
+    else:
+        e.rewrite(path, remaining, "[mcp_servers.agentdescent] removed")
+
+
+def _uninstall_opencode(home: str, e: _Eraser) -> None:
+    config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config")
+    root = os.path.join(config_home, "opencode")
+    skill_dir = os.path.join(root, "skill", "agentdescent")
+    e.remove_file(os.path.join(skill_dir, "SKILL.md"))
+    e.prune_dirs(skill_dir, root)
+    path = os.path.join(root, "opencode.jsonc")
+    raw = _read(path)
+    if raw is None or "agentdescent" not in raw:
+        return
+    try:
+        data = json.loads(raw) if raw.strip() else {}
+    except json.JSONDecodeError:
+        # JSONC allows comments, which json cannot read; editing it blind could
+        # corrupt the file, so say what to remove instead of guessing.
+        e.kept(path, "could not parse it (comments?); remove the \"agentdescent\" "
+                     "entry under \"mcp\" yourself")
+        return
+    servers = data.get("mcp") if isinstance(data, dict) else None
+    existing = servers.get("agentdescent") if isinstance(servers, dict) else None
+    if existing is None:
+        return
+    # Pinned launcher only. The bare `["agentdescent", "mcp"]` shape is also what
+    # `opencode mcp add agentdescent -- agentdescent mcp` writes, and with no
+    # ownership marker it cannot be told from the user's own entry, so it stays.
+    stock = (isinstance(existing, dict) and set(existing) == {"type", "command"}
+             and existing["type"] == "local"
+             and existing["command"] != [MCP_COMMAND, *MCP_ARGS]
+             and _stock_mcp_argv(existing["command"]))
+    if not stock:
+        e.kept(path, "its mcp entry is not the one `install` wrote (edited, or added by "
+                     "hand); remove it yourself if you want it gone")
+        return
+    rest = {k: v for k, v in servers.items() if k != "agentdescent"}
+    out = {k: v for k, v in data.items() if k != "mcp"}
+    if rest:
+        out["mcp"] = rest
+    if out == {"$schema": "https://opencode.ai/config.json"}:
+        e.remove_file(path)        # what `install` creates, with nothing else in it
+    else:
+        e.rewrite(path, json.dumps(out, indent=2) + "\n", "mcp entry removed")
+
+
+_UNINSTALL: Dict[str, Callable[[str, _Eraser], None]] = {
+    "dsh": _uninstall_dsh,
+    "claude-code": _uninstall_claude_code,
+    "codex": _uninstall_codex,
+    "opencode": _uninstall_opencode,
+}
+
+
+def uninstall(host: str, *, dry_run: bool = False, home: Optional[str] = None) -> List[str]:
+    """Undo ``install(host)``. Returns the lines to print: what was removed or kept.
+
+    Removes the files ``install`` wrote and the block or entry it added to the
+    host's config. A config entry that is no longer exactly what ``install``
+    writes -- you edited the launcher, or wrote it yourself -- is kept and
+    reported, and a config file with comments (OpenCode's ``opencode.jsonc``) is
+    never rewritten. The run store under ``~/.agentdescent`` is untouched. An
+    install made through the host's own marketplace is removed with that host's
+    plugin command. ``dry_run`` reports without changing anything.
+    """
+    if host not in HOSTS:
+        raise ValueError(f"unknown host {host!r}; choose from {sorted(HOSTS)}")
+    e = _Eraser(dry_run)
+    _UNINSTALL[host](os.path.expanduser(home or "~"), e)
+    if not e.lines:
+        e.note(f"nothing to remove: agentdescent is not installed for {host} "
+               "(files from the host's own marketplace are removed with its plugin command)")
+    return e.lines

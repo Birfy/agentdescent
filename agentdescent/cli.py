@@ -18,6 +18,7 @@ commands on a host with no MCP.
     agentdescent resume  <run_id>
     agentdescent doctor                                             what is installed
     agentdescent install <dsh|claude-code|codex|opencode>           wire a host
+    agentdescent uninstall <dsh|claude-code|codex|opencode>         undo `install`
     agentdescent algorithms list [--kind K] | show <name>           named algorithms for a spec
     agentdescent mcp                                                serve over stdio
     agentdescent serve   [--port N]                                 read-only run panel
@@ -1086,6 +1087,17 @@ def cmd_install(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_uninstall(a: argparse.Namespace) -> int:
+    from .integrations import uninstall
+
+    lines = uninstall(a.host, dry_run=a.dry_run, home=a.home)
+    for line in lines:
+        print(line)
+    # 1 when something was kept and so is still wired: a script or an agent can
+    # tell "fully removed" from "needs a manual step". Nothing installed is 0.
+    return 1 if any(line.startswith("kept ") for line in lines) else 0
+
+
 def cmd_serve(a: argparse.Namespace) -> int:
     print(f"agentdescent: run panel on http://{a.host}:{a.port}/  (read-only; Ctrl-C to stop)",
           file=sys.stderr)
@@ -1206,6 +1218,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--dry-run", action="store_true", dest="dry_run")
     s.add_argument("--home", help="the host's home directory (default: the real one)")
     s.set_defaults(fn=cmd_install)
+
+    s = sub.add_parser("uninstall", help="undo `install` for a host")
+    s.add_argument("host", choices=("dsh", "claude-code", "codex", "opencode"))
+    s.add_argument("--dry-run", action="store_true", dest="dry_run")
+    s.add_argument("--home", help="the host's home directory (default: the real one)")
+    s.set_defaults(fn=cmd_uninstall)
 
     s = sub.add_parser("algorithms", help="the named algorithms a spec can ask for")
     algo_sub = s.add_subparsers(dest="action", required=True)

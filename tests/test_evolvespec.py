@@ -508,11 +508,13 @@ def _text_spec(**evolve):
 
 
 @pytest.mark.parametrize("key", ["strategy", "aggregator_factory", "run", "propose",
-                                 "policies", "staleness_policy"])
+                                 "policies", "staleness_policy", "allocator",
+                                 "extra_artifacts"])
 def test_object_valued_evolve_knobs_fail_closed(key, tmp_path, capsys):
     """A string cannot stand in for a strategy / factory / callable: ``plan`` used
     to say ok and ``evolve`` then died with "'str' object has no attribute
-    'initial'" (#384)."""
+    'initial'" (#384). ``allocator`` is annotated ``Any`` but is an object (#385
+    review); ``extra_artifacts`` values must be EvolvingArtifact instances."""
     import json as _json
 
     from agentdescent import cli
@@ -539,3 +541,35 @@ def test_plain_evolve_knobs_and_handled_mappings_still_compose():
                               agg_config={"batch_trigger": 3}))
     assert comp.kwargs["rounds"] == 2
     assert comp.kwargs["agg_config"].batch_trigger == 3
+
+
+def test_allocator_is_not_listed_among_the_valid_json_knobs():
+    """``Optional[Any]`` must not make ``allocator`` look like a JSON knob."""
+    with pytest.raises(SpecError, match=r"evolve\.allocator: .*takes an object") as e:
+        compose(_text_spec(allocator="examples.x:Y"))
+    # and the unknown-key hint must not suggest it either
+    with pytest.raises(SpecError, match=r"valid JSON knobs are") as e2:
+        compose(_text_spec(allocater=1))
+    assert "allocator" not in str(e2.value)
+
+
+def test_policy_slot_converts_evolve_agg_config_rather_than_passing_a_dict():
+    """``_compose_policy_slot`` used to copy ``evolve.agg_config`` straight into
+    kwargs; ``plan`` said ok and ``.run()`` then died on
+    ``config.audit_drain_per_step`` (#385 review)."""
+    from tests.test_policy_slot_spec import PROBLEMS, _spec
+
+    with pytest.raises(SpecError, match=r"evolve\.allocator"):
+        # sanity: the guard still runs for this kind
+        compose(_spec(evolve={"rounds": 1, "allocator": "x"}))
+    comp = compose(_spec(evolve={"rounds": 1, "n_workers": 1, "held_out_frac": 0.4,
+                                 "agg_config": {"batch_trigger": 2}}))
+    from agentdescent.aggregator import AggregatorConfig
+    assert isinstance(comp.kwargs["agg_config"], AggregatorConfig)
+    assert comp.kwargs["agg_config"].batch_trigger == 2
+    # top-level field still wins when evolve does not name one, and merge works
+    comp2 = compose(_spec(agg_config={"batch_trigger": 5},
+                          evolve={"rounds": 1, "n_workers": 1, "held_out_frac": 0.4,
+                                  "agg_config": {"max_wait_rounds": 3}}))
+    assert comp2.kwargs["agg_config"].batch_trigger == 5
+    assert comp2.kwargs["agg_config"].max_wait_rounds == 3
