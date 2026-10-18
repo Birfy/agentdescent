@@ -172,6 +172,17 @@ opencode mcp list                 # ✓ agentdescent connected
 `connected` here really did start the server; `Executable not found in $PATH`
 means `agentdescent` is not on the `PATH` OpenCode inherited.
 
+**`MCP error -32000: Connection closed` in some directories only** (any host,
+not just OpenCode): the launcher is an older `<python> -m agentdescent.cli mcp`,
+and the host was started in a directory that contains a folder named
+`agentdescent/` — typically the parent of a source checkout. `python -m` puts the
+current directory first on `sys.path`, so that folder shadows the installed
+package. Run `agentdescent install <host>` again: it rewrites the launcher to
+`<python> -P -m agentdescent.cli mcp` (Python ≥ 3.11) or to the absolute path of
+the `agentdescent` console script (older Pythons), neither of which looks at the
+current directory. Running the old command by hand now prints one line naming the
+shadowing directory instead of a traceback.
+
 ## 5. The MCP server on its own
 
 Independent of any host, using the protocol SDK as a client:

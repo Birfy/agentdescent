@@ -1170,6 +1170,46 @@ def cmd_serve(a: argparse.Namespace) -> int:
     return 0
 
 
+def _shadowing_dirs() -> Optional[List[str]]:
+    """Where ``agentdescent`` resolved to, when that is not the installed package.
+
+    ``python -m`` puts the host's current directory first on ``sys.path``, so a
+    directory called ``agentdescent/`` there (a source checkout's parent, say)
+    can win the import as a namespace package: no ``__file__``, none of our
+    modules. Returns its path entries, or None when the package is the real one.
+    """
+    pkg = sys.modules.get("agentdescent")
+    if pkg is None or getattr(pkg, "__file__", None) is not None:
+        return None
+    return [str(p) for p in getattr(pkg, "__path__", [])] or ["<unknown location>"]
+
+
+def _mcp_import_failure(e: BaseException) -> str:
+    """One line for why ``agentdescent mcp`` could not import its server.
+
+    A host shows the user nothing but "Connection closed" when this subprocess
+    dies, so this must be a single actionable line and must not itself depend on
+    the modules that just failed to import (a shadowed package breaks
+    ``mcp_unavailable``'s own ``from .integrations import ...``).
+    """
+    shadow = _shadowing_dirs()
+    if shadow:
+        return ("`agentdescent` was resolved to %s, not the installed package: a directory "
+                "named agentdescent/ in the current directory (%s) shadows it. Start the "
+                "server from another directory, or re-run `agentdescent install <host>` "
+                "(the launcher it writes ignores the current directory). Underlying "
+                "error: %s" % (", ".join(shadow), os.getcwd(), e))
+    try:
+        why = mcp_unavailable()
+    except Exception:  # noqa: BLE001 - the reason must never become a traceback
+        why = None
+    # The underlying ImportError says "pip install agentdescent[mcp]", which on
+    # 3.9 is the one thing that will not help -- so it is printed only when we
+    # have nothing better, never after a reason that contradicts it.
+    return why or ('pip install "agentdescent[mcp]" (the CLI works without it). '
+                   f'Underlying error: {e}')
+
+
 def cmd_mcp(a: argparse.Namespace) -> int:
     # A host starts this as a subprocess and shows the user nothing but
     # "CONNECTION_CLOSED" when it dies, so the one thing that can go wrong
@@ -1180,16 +1220,7 @@ def cmd_mcp(a: argparse.Namespace) -> int:
 
         serve(store=a.store)
     except ImportError as e:
-        # The instruction is spelled out here rather than taken from the
-        # exception, because which import failed decides what `e` says and the
-        # user needs the same one line either way.
-        why = mcp_unavailable()
-        # The underlying ImportError says "pip install agentdescent[mcp]", which
-        # on 3.9 is the one thing that will not help -- so it is printed only
-        # when we have nothing better, never after a reason that contradicts it.
-        msg = why or ('pip install "agentdescent[mcp]" (the CLI works without '
-                      f'it). Underlying error: {e}')
-        print(f'agentdescent mcp: cannot start the MCP server -- {msg}',
+        print(f"agentdescent mcp: cannot start the MCP server -- {_mcp_import_failure(e)}",
               file=sys.stderr)
         return 3
     return 0

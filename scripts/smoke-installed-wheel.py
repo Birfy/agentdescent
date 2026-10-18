@@ -14,7 +14,8 @@ import sys
 import tempfile
 
 from agentdescent.integrations import (
-    codex_config_block, hooks_text, install, opencode_mcp_entry, skill_text,
+    codex_config_block, hooks_text, install, mcp_launcher, opencode_mcp_entry,
+    skill_text,
 )
 
 
@@ -65,7 +66,9 @@ def main() -> None:
         assert installed_skill.read_text(encoding="utf-8") == skill_text(), (
             "installed wheel did not provide the shared SKILL.md resource"
         )
-        launcher = [os.path.abspath(sys.executable), "-m", "agentdescent.cli"]
+        # The launcher `install` pins (#394): `-P` or the console script, never a bare
+        # `-m` that a host's cwd could shadow.
+        launcher = mcp_launcher()
         assert installed_hooks.read_text(encoding="utf-8") == hooks_text(launcher), (
             "installed wheel did not provide the hooks.json resource"
         )
@@ -126,9 +129,13 @@ def main() -> None:
             }
         for host, manifest in manifests.items():
             assert [manifest["command"], *manifest["args"]] == [*launcher, "mcp"]
+            # From a directory holding an `agentdescent/` folder, as a host started
+            # in a checkout's parent would be (#394).
+            shadow = workdir / "shadow-cwd"
+            (shadow / "agentdescent").mkdir(parents=True, exist_ok=True)
             launched = subprocess.run(
                 [manifest["command"], *manifest["args"][:-1], "--help"],
-                cwd=workdir, env=host_env, text=True, capture_output=True, timeout=30,
+                cwd=shadow, env=host_env, text=True, capture_output=True, timeout=30,
             )
             assert launched.returncode == 0, (host, launched.stdout, launched.stderr)
         if os.name != "nt":

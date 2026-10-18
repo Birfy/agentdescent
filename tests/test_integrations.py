@@ -10,7 +10,8 @@ import pytest
 
 from agentdescent import cli
 from agentdescent.integrations import (
-    DSH_FORWARDED_KEYS, HOSTS, install, marketplace_manifest, render_claude_plugin, skill_text,
+    DSH_FORWARDED_KEYS, HOSTS, _console_script, install, marketplace_manifest, mcp_launcher,
+    render_claude_plugin, skill_text,
 )
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -60,7 +61,8 @@ def test_install_dsh_writes_skill_hooks_and_patch(tmp_path, monkeypatch):
     assert skill.exists() and (skill.parent / "hooks.json").exists()
     patch = _read(tmp_path / ".dsh" / "cordis.patch.yml")
     assert "name: '@deepseek-ai/dsh-mcp-client'" in patch
-    assert "serverName: agentdescent" in patch and 'args: ["-m", "agentdescent.cli", "mcp"]' in patch
+    assert "serverName: agentdescent" in patch
+    assert f"args: {json.dumps(mcp_launcher()[1:] + ['mcp'])}" in patch
     for key in DSH_FORWARDED_KEYS:
         # Each key is forwarded past dsh's scrubbing -- but as part of one
         # filtered !!js expression, never as its own entry: unset, it would be
@@ -106,7 +108,7 @@ def test_install_claude_code_renders_a_loadable_plugin_dir(tmp_path):
     dest = tmp_path / ".agentdescent" / "plugins" / "claude-code"
     manifest = json.loads(_read(dest / ".claude-plugin" / "plugin.json"))
     assert manifest["name"] == "agentdescent" and manifest["version"]
-    assert json.loads(_read(dest / ".mcp.json"))["mcpServers"]["agentdescent"]["args"] == ["-m", "agentdescent.cli", "mcp"]
+    assert json.loads(_read(dest / ".mcp.json"))["mcpServers"]["agentdescent"]["args"] == mcp_launcher()[1:] + ["mcp"]
     hooks = json.loads(_read(dest / "hooks" / "hooks.json"))
     assert "SessionStart" in hooks["hooks"]
     assert (dest / "skills" / "agentdescent" / "SKILL.md").exists()
@@ -122,8 +124,7 @@ def test_install_opencode_writes_the_shape_opencode_itself_writes(tmp_path, monk
     assert (root / "skill" / "agentdescent" / "SKILL.md").exists()
     cfg = json.loads(_read(root / "opencode.jsonc"))
     assert cfg["mcp"]["agentdescent"] == {"type": "local",
-                                          "command": [os.path.abspath(sys.executable),
-                                                      "-m", "agentdescent.cli", "mcp"]}
+                                          "command": [*mcp_launcher(), "mcp"]}
     assert cfg["$schema"].startswith("https://opencode.ai")
     # merging keeps what was already there, and is idempotent
     cfg["model"] = "anthropic/claude"
@@ -794,7 +795,8 @@ def test_install_repairs_only_stock_path_dependent_entry(tmp_path, monkeypatch, 
     assert path.read_text() == original
     install(host, home=str(tmp_path))
     repaired = path.read_text()
-    assert "agentdescent.cli" in repaired and "keep" in repaired
+    assert "keep" in repaired and repaired != original
+    assert json.dumps(mcp_launcher()[0]) in repaired        # whichever shape this Python writes
     install(host, home=str(tmp_path))
     assert path.read_text() == repaired
 
@@ -917,14 +919,14 @@ def test_reinstall_refreshes_stock_pinned_interpreter(tmp_path, monkeypatch, hos
         text = (home / ".dsh/cordis.patch.yml").read_text()
         entry = yaml.safe_load(text.replace("!!js ", ""))[0]["insert"][0]["config"]
         argv = [entry["command"], *entry["args"]]
-    assert argv == [str(new), "-m", "agentdescent.cli", "mcp"]
+    assert argv == [*mcp_launcher(), "mcp"] and argv[0] in (str(new), _console_script())
     # DSH and Claude install session hooks too; these already refresh, and
     # must continue to agree with the MCP interpreter after an environment move.
     for path in home.rglob("hooks.json"):
         data = json.loads(path.read_text())
         hook = data["hooks"]["SessionStart"][0]["hooks"][0]["command"]
         assert shlex.split(hook.removesuffix(" 2>/dev/null || true")) == [
-            str(new), "-m", "agentdescent.cli", "status", "--brief"]
+            *mcp_launcher(), "status", "--brief"]
     repaired = {p: p.read_bytes() for p in home.rglob("*") if p.is_file()}
     install(host, home=str(home))
     assert {p: p.read_bytes() for p in home.rglob("*") if p.is_file()} == repaired
@@ -990,7 +992,6 @@ def test_reinstall_distinguishes_pinned_python_from_custom_launchers(
     if host == "codex":
         path = tmp_path / ".codex/config.toml"
         original = codex_config_block(launcher)
-        expected = codex_config_block(["/new/python", "-m", "agentdescent.cli"])
     else:
         path = tmp_path / ".config/opencode/opencode.jsonc"
         original = json.dumps({"mcp": {"agentdescent": opencode_mcp_entry(launcher)}})
@@ -1001,7 +1002,194 @@ def test_reinstall_distinguishes_pinned_python_from_custom_launchers(
     if not refresh:
         assert path.read_text() == original
     elif host == "codex":
-        assert path.read_text() == expected
+        assert path.read_text() == codex_config_block(mcp_launcher())
     else:
         assert json.loads(path.read_text())["mcp"]["agentdescent"]["command"] == [
-            "/new/python", "-m", "agentdescent.cli", "mcp"]
+            *mcp_launcher(), "mcp"]
+
+
+# ---------------------------------------------------------------------------
+# #394: the pinned launcher must not depend on the host's current directory
+# ---------------------------------------------------------------------------
+
+
+def _shadowed_cwd(tmp_path):
+    """A host cwd holding an `agentdescent/` directory that is NOT the package."""
+    cwd = tmp_path / "host-cwd"
+    shadow = cwd / "agentdescent"
+    shadow.mkdir(parents=True)
+    # A regular package, so it beats any installed copy however that was
+    # installed (an editable install's finder loses to a bare directory too).
+    (shadow / "__init__.py").write_text("raise RuntimeError('shadowed by the host cwd')\n")
+    return cwd
+
+
+def test_the_launcher_install_writes_ignores_a_shadowing_cwd(tmp_path):
+    cwd = _shadowed_cwd(tmp_path)
+    legacy = [os.path.abspath(sys.executable), "-m", "agentdescent.cli", "--help"]
+    old = subprocess.run(legacy, cwd=cwd, capture_output=True, text=True)
+    assert old.returncode != 0 and "shadowed by the host cwd" in old.stderr   # the bug
+    launcher = mcp_launcher()
+    new = subprocess.run([*launcher, "--help"], cwd=cwd, capture_output=True, text=True)
+    assert new.returncode == 0, (launcher, new.stderr)
+    assert "usage: agentdescent" in new.stdout
+
+
+def test_the_launcher_survives_a_bare_agentdescent_directory_too(tmp_path):
+    cwd = tmp_path / "ws"
+    (cwd / "agentdescent").mkdir(parents=True)          # a checkout's parent dir
+    proc = subprocess.run([*mcp_launcher(), "--help"], cwd=cwd, capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_launcher_shape_by_python_version(monkeypatch, tmp_path):
+    from agentdescent import integrations
+
+    py = os.path.abspath(sys.executable)
+    monkeypatch.setattr(integrations.sys, "version_info", (3, 11, 0, "final", 0))
+    assert integrations.mcp_launcher() == [py, "-P", "-m", "agentdescent.cli"]
+    monkeypatch.setattr(integrations.sys, "version_info", (3, 10, 0, "final", 0))
+    script = tmp_path / "agentdescent"
+    monkeypatch.setattr(integrations, "_console_script", lambda: str(script))
+    assert integrations.mcp_launcher() == [str(script)]           # no -P before 3.11
+    monkeypatch.setattr(integrations, "_console_script", lambda: None)
+    assert integrations.mcp_launcher() == [py, "-m", "agentdescent.cli"]
+
+
+def test_console_script_is_found_beside_the_interpreter(monkeypatch, tmp_path):
+    from agentdescent import integrations
+
+    name = "agentdescent.exe" if os.name == "nt" else "agentdescent"
+    script = tmp_path / "bin" / name
+    script.parent.mkdir()
+    script.write_text(f"#!{script.parent / 'python'}\n")
+    script.chmod(0o755)
+    monkeypatch.setattr(sys, "executable", str(script.parent / "python"))
+    assert integrations._console_script() == str(script)
+
+
+@pytest.mark.parametrize("argv,stock", [
+    (["/venv/bin/python3", "-m", "agentdescent.cli", "mcp"], True),           # pre-#394 shape
+    (["/venv/bin/python3", "-P", "-m", "agentdescent.cli", "mcp"], True),
+    (["/venv/bin/agentdescent", "mcp"], True),
+    ([r"C:\venv\Scripts\agentdescent.exe", "mcp"], True),
+    (["agentdescent", "mcp"], True),
+    (["/venv/bin/python3", "-I", "-m", "agentdescent.cli", "mcp"], False),
+    (["/venv/bin/python3", "-P", "-m", "agentdescent.cli", "mcp", "--x"], False),
+    (["/venv/bin/agentdescent", "mcp", "--x"], False),
+    (["relative/agentdescent", "mcp"], False),
+    (["/venv/bin/agentdescent-wrapper", "mcp"], False),
+])
+def test_both_launcher_shapes_are_recognised_as_stock(argv, stock):
+    from agentdescent.integrations import _stock_mcp_argv
+
+    assert _stock_mcp_argv(argv) is stock
+
+
+@pytest.mark.parametrize("host", ["codex", "opencode"])
+@pytest.mark.parametrize("legacy", [
+    ["/old/python", "-m", "agentdescent.cli"],
+    ["/old/python", "-P", "-m", "agentdescent.cli"],
+    ["/old/bin/agentdescent"],
+])
+def test_reinstall_upgrades_every_stock_shape_in_place(tmp_path, monkeypatch, host, legacy):
+    """An install made before #394 is rewritten, once, to the current launcher."""
+    from agentdescent.integrations import codex_config_block, opencode_mcp_entry
+
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    if host == "codex":
+        path = tmp_path / ".codex/config.toml"
+        path.parent.mkdir()
+        path.write_text('model = "x"\n' + codex_config_block(legacy))
+    else:
+        path = tmp_path / ".config/opencode/opencode.jsonc"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({"mcp": {"agentdescent": opencode_mcp_entry(legacy)}}))
+    monkeypatch.setattr(sys, "executable", "/new/python")
+    install(host, home=str(tmp_path))
+    if host == "codex":
+        text = path.read_text()
+        assert text == 'model = "x"\n' + codex_config_block(mcp_launcher())
+        assert text.count("[mcp_servers.agentdescent]") == 1
+    else:
+        assert json.loads(path.read_text())["mcp"]["agentdescent"]["command"] == [
+            *mcp_launcher(), "mcp"]
+    again = path.read_text()
+    install(host, home=str(tmp_path))
+    assert path.read_text() == again
+
+
+def test_cmd_mcp_prints_one_line_when_nothing_imports(monkeypatch, capsys):
+    """The server import fails *and* so does the module `mcp_unavailable` needs."""
+    import argparse
+
+    monkeypatch.setitem(sys.modules, "agentdescent.mcp", None)
+    monkeypatch.setitem(sys.modules, "agentdescent.integrations", None)
+    assert cli.cmd_mcp(argparse.Namespace(store=None)) == 3
+    err = capsys.readouterr().err
+    assert len(err.strip().splitlines()) == 1 and "Traceback" not in err
+    assert "cannot start the MCP server" in err
+
+
+def test_cmd_mcp_names_the_directory_that_shadows_the_package(monkeypatch, capsys, tmp_path):
+    import argparse
+    import types
+
+    fake = types.ModuleType("agentdescent")           # a namespace package: no __file__
+    fake.__path__ = [str(tmp_path / "agentdescent")]
+    monkeypatch.setitem(sys.modules, "agentdescent", fake)
+    monkeypatch.setitem(sys.modules, "agentdescent.mcp", None)
+    monkeypatch.setitem(sys.modules, "agentdescent.integrations", None)
+    assert cli.cmd_mcp(argparse.Namespace(store=None)) == 3
+    err = capsys.readouterr().err
+    assert len(err.strip().splitlines()) == 1 and "Traceback" not in err
+    assert str(tmp_path / "agentdescent") in err and "shadows" in err
+    assert "agentdescent install" in err
+
+
+def test_the_old_launcher_in_a_shadowed_cwd_fails_with_one_line_not_a_traceback(tmp_path):
+    """The pre-#394 command, run for real where an `agentdescent/` directory shadows it.
+
+    Whether the shadow wins depends on how the package was installed (an
+    editable install's finder loses to a bare directory; a regular install does
+    not), so the assertion is the part that holds either way: no traceback, and
+    at most the one diagnostic line.
+    """
+    cwd = tmp_path / "ws"
+    (cwd / "agentdescent").mkdir(parents=True)
+    proc = subprocess.run([os.path.abspath(sys.executable), "-m", "agentdescent.cli", "mcp"],
+                          cwd=cwd, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                          timeout=120)
+    assert "Traceback" not in proc.stderr, proc.stderr
+    assert len(proc.stderr.strip().splitlines()) <= 1
+    if proc.returncode == 3 and "resolved to" in proc.stderr:
+        assert str(cwd / "agentdescent") in proc.stderr and "shadows" in proc.stderr
+
+
+def test_console_script_of_another_interpreter_is_not_pinned(monkeypatch, tmp_path):
+    from agentdescent import integrations
+
+    name = "agentdescent.exe" if os.name == "nt" else "agentdescent"
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    script = bindir / name
+    script.write_text("#!/usr/bin/some-other-python\n")
+    script.chmod(0o755)
+    monkeypatch.setattr(sys, "executable", str(bindir / "python"))
+    monkeypatch.setattr(integrations.sysconfig, "get_path", lambda *a, **k: str(bindir))
+    assert integrations._console_script() is None
+    script.write_text(f"#!{bindir / 'python'}\n")
+    assert integrations._console_script() == str(script)
+
+
+def test_install_warns_when_only_the_cwd_dependent_launcher_is_possible(tmp_path, monkeypatch):
+    from agentdescent import integrations
+
+    monkeypatch.setattr(integrations.sys, "version_info", (3, 10, 0, "final", 0))
+    monkeypatch.setattr(integrations, "_console_script", lambda: None)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    lines = install("opencode", home=str(tmp_path))
+    assert any("WARNING" in l and "#394" in l for l in lines)
+    monkeypatch.setattr(integrations, "_console_script", lambda: str(tmp_path / "agentdescent"))
+    assert not any("#394" in l for l in install("opencode", home=str(tmp_path)))
