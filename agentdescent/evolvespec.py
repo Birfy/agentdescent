@@ -763,7 +763,13 @@ def _compose_policy_slot(spec: EvolveSpec, *, usage: Optional[Usage] = None,
     # *outer* loop, which for this kind is the meta-search; naming
     # `policies.selection` while evolving `selection` is legal and means the two
     # different things it says.
-    if spec.agg_config:
+    # ``spec.evolve`` may carry ``agg_config`` as a JSON mapping; without this it
+    # reaches ``evolve()`` as a dict and dies on ``config.audit_drain_per_step``
+    # (#385 review). Convert it the same way the other kinds do. The top-level
+    # ``spec.agg_config`` still fills in only when evolve did not name one.
+    if "agg_config" in kwargs and isinstance(kwargs["agg_config"], Mapping):
+        kwargs["agg_config"] = build_agg_config(spec, **kwargs["agg_config"])
+    elif spec.agg_config:
         kwargs.setdefault("agg_config", build_agg_config(spec))
     # `merger=None`, so the reflective-merge pair is **opt-in** here where it is
     # the default for every other kind. `build_policies`' reasoning for that
@@ -820,12 +826,17 @@ def _compose_policy_slot(spec: EvolveSpec, *, usage: Optional[Usage] = None,
 #: JSON values; everything else takes an object (a strategy, a factory, a callable).
 _JSON_ANNOTATION_NAMES = frozenset({
     "int", "float", "bool", "str", "Optional", "None", "Sequence", "List", "Dict",
-    "Tuple", "Any", "Union", "Mapping", "Set", "FrozenSet", "Literal"})
+    "Tuple", "Union", "Mapping", "Set", "FrozenSet", "Literal"})
+#: ``Any`` is deliberately out: ``allocator: Optional[Any]`` is an object that
+#: the engine ducks for ``decide`` / ``observe``, and a JSON string would pass
+#: ``plan`` and then either be ignored or fail mid-run (#385 review).
 
-#: Object-typed parameters a spec *does* feed through ``evolve``: a mapping that
-#: ``compose`` turns into the object itself (``agg_config``), or merges with the
-#: ``extra_artifacts`` field.
-_EVOLVE_OBJECT_KNOBS_HANDLED = frozenset({"agg_config", "extra_artifacts"})
+#: Object-typed parameters a spec *does* feed through ``evolve``: a mapping
+#: ``compose`` turns into the object itself. ``extra_artifacts`` is *not* here
+#: -- its values need to be ``EvolvingArtifact`` instances and a JSON object
+#: never is, so it stays refused; the dedicated ``EvolveSpec.extra_artifacts``
+#: field is the place for them.
+_EVOLVE_OBJECT_KNOBS_HANDLED = frozenset({"agg_config"})
 
 
 def check_evolve_knobs(evolve_knobs: Mapping[str, Any]) -> None:

@@ -100,7 +100,7 @@ enough for an LLM to author correctly and complete enough to reproduce a run.
   },
   "agg_config": {"base_delta": 0.5},   // thresholds are config, not policies (policy-guide §7)
 
-  "evolve": {                          // passes straight through to evolve()
+  "evolve": {                          // JSON-valued evolve() knobs only
     "rounds": 6, "n_workers": 4, "asynchronous": true,
     "target_reward": 0.98, "patience": 3, "held_out_frac": 0.3,
     "max_seconds": 3600, "max_calls": 400
