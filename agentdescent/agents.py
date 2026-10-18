@@ -585,8 +585,15 @@ def with_retries(completion: Completion, attempts: int = 3,
 
 def claude(model: str = "claude-opus-4-8", max_tokens: int = 4096,
            client: Optional[object] = None, usage: Optional[Usage] = None,
-           retries: int = 3, timeout: float = 120.0, **create_kwargs) -> Completion:
+           retries: int = 3, timeout: float = 120.0, api_key_env: Optional[str] = None,
+           **create_kwargs) -> Completion:
     """A Claude-backed completion (requires ``pip install anthropic`` + creds).
+
+    ``api_key_env`` names the environment variable holding the key (read at call
+    time, like :func:`openai_compatible`), for a spec that cannot rely on
+    ``ANTHROPIC_API_KEY``. Without it the SDK resolves credentials as usual. It is
+    ignored when ``client`` is given. Before this, the name went into the
+    request body and the first call died with a ``TypeError`` (#406).
 
     Pass ``client`` to reuse an existing ``anthropic.Anthropic`` instance;
     otherwise a default one is constructed lazily (resolving credentials from
@@ -623,7 +630,13 @@ def claude(model: str = "claude-opus-4-8", max_tokens: int = 4096,
             # below). Leaving the SDK's default 2 in place multiplies the two
             # layers -- attempts x (1 + max_retries) x timeout -- and one
             # logical call against a stalled endpoint blocked ~45 minutes.
-            _client = Anthropic(max_retries=0)
+            if api_key_env:
+                key = os.environ.get(api_key_env)
+                if not key:
+                    raise RuntimeError(f"set {api_key_env} in your environment")
+                _client = Anthropic(max_retries=0, api_key=key)
+            else:
+                _client = Anthropic(max_retries=0)
         t0 = time.time()
         try:
             msg = _client.messages.create(
