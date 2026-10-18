@@ -21,6 +21,7 @@ import os
 import re
 import shlex
 import sys
+import sysconfig
 from typing import Callable, Dict, List, Optional
 
 __all__ = ["HOSTS", "host_status", "install", "uninstall", "render_claude_plugin", "render_dsh_plugin",
@@ -364,21 +365,30 @@ def codex_config_block(launcher: Optional[List[str]] = None) -> str:
             f"args = {json.dumps(launcher[1:] + MCP_ARGS)}\n")
 
 
+_PYTHON_NAME = re.compile(r"(?:pythonw?|pypy)(?:[0-9]+(?:\.[0-9]+)*)?(?:\.exe)?", re.IGNORECASE)
+_SCRIPT_NAME = re.compile(r"agentdescent(?:\.exe)?", re.IGNORECASE)
+
+
 def _stock_mcp_argv(command: object) -> bool:
-    """Recognize only the complete argv shape emitted by this installer.
+    """Recognize only the complete argv shapes emitted by this installer.
 
     An absolute conventional Python interpreter with the exact module invocation
-    is a pinned stock launcher, even after its environment disappears. Unknown
-    executable names, extra arguments and relative paths remain user-owned.
+    -- with or without the ``-P`` that keeps the host's cwd off ``sys.path`` (#394)
+    -- or the absolute path of the ``agentdescent`` console script, is a pinned
+    stock launcher, even after its environment disappears. Unknown executable
+    names, extra arguments and relative paths remain user-owned.
     """
     if command == [MCP_COMMAND, *MCP_ARGS]:
         return True
-    return (isinstance(command, list) and len(command) == 4
-            and isinstance(command[0], str)
-            and (os.path.isabs(command[0]) or ntpath.isabs(command[0]))
-            and re.fullmatch(r"(?:pythonw?|pypy)(?:[0-9]+(?:\.[0-9]+)*)?(?:\.exe)?",
-                             ntpath.basename(command[0]), re.IGNORECASE) is not None
-            and command[1:] == ["-m", "agentdescent.cli", *MCP_ARGS])
+    if not (isinstance(command, list) and command and isinstance(command[0], str)
+            and (os.path.isabs(command[0]) or ntpath.isabs(command[0]))):
+        return False
+    name = ntpath.basename(command[0])
+    if _SCRIPT_NAME.fullmatch(name):
+        return command[1:] == MCP_ARGS
+    return (_PYTHON_NAME.fullmatch(name) is not None
+            and command[1:] in (["-m", "agentdescent.cli", *MCP_ARGS],
+                                ["-P", "-m", "agentdescent.cli", *MCP_ARGS]))
 
 
 def _stock_codex_block(current: str) -> Optional[str]:
@@ -907,6 +917,44 @@ def mcp_sdk_missing() -> bool:
         return True
 
 
+def _console_script() -> Optional[str]:
+    """Absolute path of the ``agentdescent`` console script of *this* interpreter.
+
+    Looked up beside ``sys.executable`` first (a venv's ``bin``/``Scripts``), then
+    in the interpreter's default and per-user script directories.
+    """
+    dirs = [os.path.dirname(os.path.abspath(sys.executable)), sysconfig.get_path("scripts")]
+    try:
+        dirs.append(sysconfig.get_path("scripts", "nt_user" if os.name == "nt" else "posix_user"))
+    except (KeyError, ValueError):
+        pass
+    for d in dirs:
+        for name in ("agentdescent", "agentdescent.exe"):
+            path = os.path.join(d or "", name)
+            if d and os.path.isfile(path) and os.access(path, os.X_OK):
+                return os.path.abspath(path)
+    return None
+
+
+def mcp_launcher() -> List[str]:
+    """The machine-local launcher prefix ``install`` pins into every host config.
+
+    ``python -m agentdescent.cli`` puts the *host's* current directory first on
+    ``sys.path``, so a directory called ``agentdescent/`` there (typically the
+    parent of a source checkout) shadows the installed package and the server dies
+    on import (#394). So the launcher must not depend on the cwd: on Python >= 3.11
+    ``-P`` keeps it off ``sys.path`` (``-I`` would also drop the user site, which
+    breaks ``pip install --user``); older interpreters have no ``-P``, so use the
+    console script, whose ``sys.path[0]`` is its own directory, and only if there
+    is none fall back to the plain ``-m`` form.
+    """
+    python = os.path.abspath(sys.executable)
+    if sys.version_info >= (3, 11):
+        return [python, "-P", "-m", "agentdescent.cli"]
+    script = _console_script()
+    return [script] if script else [python, "-m", "agentdescent.cli"]
+
+
 def install(host: str, *, dry_run: bool = False, home: Optional[str] = None) -> List[str]:
     """Wire ``host`` up. Returns the lines to print: what was written or kept."""
     if host not in HOSTS:
@@ -914,7 +962,7 @@ def install(host: str, *, dry_run: bool = False, home: Optional[str] = None) -> 
     # Bind machine-local configuration to this installation, not the host's
     # future PATH. Do not resolve symlinks: a venv's Python must stay in its
     # venv. Portable render_* templates deliberately keep the bare command.
-    w = _Writer(dry_run, [os.path.abspath(sys.executable), "-m", "agentdescent.cli"])
+    w = _Writer(dry_run, mcp_launcher())
     HOSTS[host](os.path.expanduser(home or "~"), w)
     # Imported here, not at module scope: `cli` reaches into this module from
     # `cmd_install`, and the reason for a missing SDK belongs in one place.
