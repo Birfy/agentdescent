@@ -161,6 +161,27 @@ class Usage:
                 self._inflight.pop(finishes, None)
         self._notify()
 
+    def add_tokens(self, prompt_tokens: int = 0, completion_tokens: int = 0) -> None:
+        """Add provider-reported tokens without counting a call or any time.
+
+        For an adapter that reports into a ``Usage`` which another layer already
+        counts calls and seconds on (see :meth:`token_sink`)."""
+        with self._lock:
+            self.prompt_tokens += prompt_tokens
+            self.completion_tokens += completion_tokens
+        self._notify()
+
+    def token_sink(self) -> "TokenSink":
+        """A ``usage=`` for a model adapter that adds only its **tokens** here.
+
+        The engine's meter counts one call (and its seconds) per actor invocation
+        on the run's ``Usage``. An adapter given that same object would count its
+        own provider attempts on top -- every call twice, and retries as extra --
+        which halves ``max_calls`` and doubles ``usd_per_call`` spend. A sink
+        takes the one thing only the adapter can see, the token counts. Used by
+        spec runs (#405); the Python API's ``claude(usage=u)`` is unchanged."""
+        return TokenSink(self)
+
     def estimated_cost(self, per_1m_prompt: float, per_1m_completion: float) -> float:
         """Cost at the given per-million-token prices (both provider-specific)."""
         return (self.prompt_tokens * per_1m_prompt
@@ -172,6 +193,19 @@ class Usage:
                 f"{self.seconds:.1f}s in the model"
                 + (f", {self.failures} failed ({self.failure_seconds:.1f}s lost)"
                    if self.failures else ""))
+
+
+class TokenSink:
+    """What :meth:`Usage.token_sink` returns: ``record`` keeps only the tokens."""
+
+    def __init__(self, target: Usage) -> None:
+        self.target = target
+
+    def record(self, *, prompt_tokens: int = 0, completion_tokens: int = 0,
+               seconds: float = 0.0, failed: bool = False,
+               finishes: Optional[int] = None) -> None:
+        if prompt_tokens or completion_tokens:
+            self.target.add_tokens(prompt_tokens, completion_tokens)
 
 
 def metered(completion: Completion, usage: Usage) -> Completion:
@@ -551,8 +585,15 @@ def with_retries(completion: Completion, attempts: int = 3,
 
 def claude(model: str = "claude-opus-4-8", max_tokens: int = 4096,
            client: Optional[object] = None, usage: Optional[Usage] = None,
-           retries: int = 3, timeout: float = 120.0, **create_kwargs) -> Completion:
+           retries: int = 3, timeout: float = 120.0, api_key_env: Optional[str] = None,
+           **create_kwargs) -> Completion:
     """A Claude-backed completion (requires ``pip install anthropic`` + creds).
+
+    ``api_key_env`` names the environment variable holding the key (read at call
+    time, like :func:`openai_compatible`), for a spec that cannot rely on
+    ``ANTHROPIC_API_KEY``. Without it the SDK resolves credentials as usual. It is
+    ignored when ``client`` is given. Before this, the name went into the
+    request body and the first call died with a ``TypeError`` (#406).
 
     Pass ``client`` to reuse an existing ``anthropic.Anthropic`` instance;
     otherwise a default one is constructed lazily (resolving credentials from
@@ -589,7 +630,13 @@ def claude(model: str = "claude-opus-4-8", max_tokens: int = 4096,
             # below). Leaving the SDK's default 2 in place multiplies the two
             # layers -- attempts x (1 + max_retries) x timeout -- and one
             # logical call against a stalled endpoint blocked ~45 minutes.
-            _client = Anthropic(max_retries=0)
+            if api_key_env:
+                key = os.environ.get(api_key_env)
+                if not key:
+                    raise RuntimeError(f"set {api_key_env} in your environment")
+                _client = Anthropic(max_retries=0, api_key=key)
+            else:
+                _client = Anthropic(max_retries=0)
         t0 = time.time()
         try:
             msg = _client.messages.create(

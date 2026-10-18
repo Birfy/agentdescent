@@ -44,6 +44,7 @@ carries variable *names*, and the values are read on the far side.
 
 from __future__ import annotations
 
+import inspect
 import uuid
 from dataclasses import dataclass, field, replace
 from importlib import import_module
@@ -121,16 +122,47 @@ class Ref:
                 "bare dotted path is ambiguous about where the module ends")
         _check_config(self.config, f"Ref({self.target!r})")
 
-    def resolve(self, allowed: Sequence[str] = DEFAULT_ALLOWED_PREFIXES) -> Callable:
-        """Import and build the callable, on whichever side calls this."""
-        return resolve_ref(self, allowed)
+    def resolve(self, allowed: Sequence[str] = DEFAULT_ALLOWED_PREFIXES, *,
+                usage: Any = None) -> Callable:
+        """Import and build the callable, on whichever side calls this.
+
+        ``usage`` is an :class:`~agentdescent.agents.Usage` handed to every
+        factory in the (nested) reference that reports tokens; see
+        :func:`resolve_ref`."""
+        return resolve_ref(self, allowed, usage=usage)
 
 
-def resolve_ref(ref: Ref, allowed: Sequence[str] = DEFAULT_ALLOWED_PREFIXES) -> Callable:
+def _takes_usage(factory: Callable) -> bool:
+    """Whether ``factory`` is a model adapter that reports tokens into a ``usage=``.
+
+    ``openai_compatible`` and ``claude`` do; so does any factory a spec names
+    whose signature has a ``usage`` parameter. The CLI-agent family is left out
+    on purpose: it records calls and seconds only, so sharing the run's ``Usage``
+    with it would double-count calls (and halve ``max_calls``) for no tokens.
+    """
+    from . import agents
+
+    if factory is agents.cli_agent:
+        return False
+    try:
+        return "usage" in inspect.signature(factory).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def resolve_ref(ref: Ref, allowed: Sequence[str] = DEFAULT_ALLOWED_PREFIXES, *,
+                usage: Any = None) -> Callable:
     """Resolve ``ref``, refusing anything outside ``allowed``.
 
     The refusal happens **before the import**, not after: importing a module to
     discover that it was not allowed has already run its top level.
+
+    ``usage``, when given, reaches (as ``usage=``) every factory in the
+    reference, nested ones included, that takes one and whose config did not set
+    it -- so a run's own ``Usage`` receives the tokens the adapters report, which
+    is the only way the meter can see them (#405). What the factory gets is
+    ``usage.token_sink()``: tokens only, because the meter already counts calls. Spec config is JSON, so a
+    ``Usage`` cannot be written in it; this is where it is supplied.
     """
     module_name, _, attr = ref.target.partition(":")
     if not any(module_name == p.rstrip(".") or module_name.startswith(p)
@@ -160,8 +192,14 @@ def resolve_ref(ref: Ref, allowed: Sequence[str] = DEFAULT_ALLOWED_PREFIXES) -> 
     # normal shape here -- `reflector(claude())`, `LLMAgent(openai_compatible(...))`
     # -- and without it every composed actor would need a bespoke factory whose
     # only job is to flatten the arguments into JSON.
-    config = {k: (resolve_ref(v, allowed) if isinstance(v, Ref) else v)
+    config = {k: (resolve_ref(v, allowed, usage=usage) if isinstance(v, Ref) else v)
               for k, v in ref.config.items()}
+    if usage is not None and "usage" not in config and _takes_usage(obj):
+        # A `Usage` hands out a token-only view: the meter already counts calls
+        # and seconds per actor invocation on it, and an adapter recording its
+        # own attempts there too would count every call twice.
+        sink = getattr(usage, "token_sink", None)
+        config["usage"] = sink() if callable(sink) else usage
     try:
         return obj(**config)
     except TypeError as e:

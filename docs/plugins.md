@@ -86,7 +86,8 @@ What counts as "ours" differs by file:
   reported.
 * **Codex**: the table is removed wherever it now sits, so tables Codex added
   after it (`[projects."..."]`) are fine, but only if it is still byte for byte
-  what `install` wrote. A key you added under it, or a table you wrote
+  what `install` wrote (the current block with its `env_vars` line, or the
+  older one without it). A key you added under it, or a table you wrote
   yourself, is kept.
 * **OpenCode**: only the pinned launcher `install` writes. The bare
   `["agentdescent", "mcp"]` entry (what `opencode mcp add` writes) is treated
@@ -181,6 +182,19 @@ codex-cli 0.153.4, opencode 1.18.29).
     `ANTHROPIC_API_KEY` explicitly (`!!js process.env.X`). Without that block
     the server starts with no credentials and `doctor` reports every reflector
     as unavailable, with nothing else to explain why.
+
+!!! warning "Codex scrubs the environment of MCP servers"
+    Codex starts an MCP server with `HOME LOGNAME PATH SHELL USER LANG LC_ALL TERM
+    TMPDIR TZ` and whatever the server's `env_vars` names. `install codex` writes
+    an `env_vars` line into its `[mcp_servers.agentdescent]` table, and the plugin's
+    `.mcp.json` carries the same key, forwarding `DEEPSEEK_API_KEY`,
+    `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`,
+    `ARK_API_KEY` and `AGENTDESCENT_HOME`. Without it the server sees no keys
+    (`doctor` reports every reflector as unavailable) and, with `AGENTDESCENT_HOME`
+    set, writes its runs somewhere `agentdescent status` in your shell does not
+    look. Re-running `install codex` repairs an older block that lacks the line
+    (`doctor` reads it as `stale`); a spec that sets `api_key_env` to another
+    variable needs that name added to `env_vars` by hand.
 
 ## What the agent does
 

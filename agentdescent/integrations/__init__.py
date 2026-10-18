@@ -37,6 +37,17 @@ MCP_ARGS = ["mcp"]
 #: ambient variable matching KEY|PASSWORD|SECRET|TOKEN before starting one.
 DSH_FORWARDED_KEYS = ("DEEPSEEK_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "ANTHROPIC_API_KEY")
 
+#: What Codex forwards into the MCP server. Codex starts a stdio server with a
+#: scrubbed environment (``HOME LOGNAME PATH SHELL USER LANG LC_ALL TERM TMPDIR
+#: TZ``) plus whatever ``env_vars`` names (#404). Names only, no globs: the
+#: provider keys the reflectors read, ``ARK_API_KEY`` (the key the docs' Ark
+#: examples set via ``api_key_env``), and ``AGENTDESCENT_HOME`` so a run started
+#: from Codex lands in the same run store the CLI reads. A variable that is not
+#: set in the launching shell is simply not forwarded. A spec whose
+#: ``api_key_env`` names some other variable needs that name added by hand.
+FORWARDED_ENV = DSH_FORWARDED_KEYS + (
+    "ANTHROPIC_BASE_URL", "ARK_API_KEY", "AGENTDESCENT_HOME")
+
 
 def skill_text() -> str:
     with open(os.path.join(_HERE, "SKILL.md"), encoding="utf-8") as fh:
@@ -138,7 +149,7 @@ class _Writer:
             tail = current.split(old_block, 1)[1].lstrip()
             # Old installs appended this block last. Only repair that exact
             # shape; extra fields or nested tables may customize the launcher.
-            if not tail:
+            if not tail and old_block.rstrip() != block.rstrip():
                 self.write(path, current.replace(old_block, block, 1))
                 return
         if marker in current:
@@ -330,7 +341,10 @@ def marketplace_manifest(source: str = "./integrations/claude-code") -> Dict[str
 def mcp_manifest(launcher: Optional[List[str]] = None) -> Dict[str, object]:
     launcher = launcher or [MCP_COMMAND]
     return {"mcpServers": {"agentdescent": {
-        "command": launcher[0], "args": launcher[1:] + MCP_ARGS}}}
+        "command": launcher[0], "args": launcher[1:] + MCP_ARGS,
+        # Claude Code already hands the server its whole environment, so this is
+        # a no-op there; the Codex plugin route would otherwise scrub it (#404).
+        "env_vars": list(FORWARDED_ENV)}}}
 
 
 EVOLVE_COMMAND = """---
@@ -371,11 +385,21 @@ def install_claude_code(home: str, w: _Writer) -> None:
 
 
 def codex_config_block(launcher: Optional[List[str]] = None) -> str:
+    return _codex_block(launcher, env_vars=True)
+
+
+def _codex_block(launcher: Optional[List[str]], *, env_vars: bool) -> str:
     launcher = launcher or [MCP_COMMAND]
     return ("\n# --- agentdescent (written by `agentdescent install codex`) ---\n"
             "[mcp_servers.agentdescent]\n"
             f"command = {json.dumps(launcher[0], ensure_ascii=False)}\n"
-            f"args = {json.dumps(launcher[1:] + MCP_ARGS)}\n")
+            f"args = {json.dumps(launcher[1:] + MCP_ARGS)}\n"
+            + (f"env_vars = {json.dumps(list(FORWARDED_ENV))}\n" if env_vars else ""))
+
+
+def _legacy_codex_block(launcher: Optional[List[str]] = None) -> str:
+    """What installs before #404 wrote: no ``env_vars``, so Codex scrubbed the keys."""
+    return _codex_block(launcher, env_vars=False)
 
 
 _PYTHON_NAME = re.compile(r"(?:pythonw?|pypy)(?:[0-9]+(?:\.[0-9]+)*)?(?:\.exe)?", re.IGNORECASE)
@@ -415,7 +439,7 @@ def _stock_codex_block(current: str) -> Optional[str]:
         return None
     previous = current[current.index(marker):]
     lines = previous.rstrip().splitlines()
-    if (len(lines) != 5 or lines[2] != "[mcp_servers.agentdescent]"
+    if (len(lines) not in (5, 6) or lines[2] != "[mcp_servers.agentdescent]"
             or not lines[3].startswith("command = ")
             or not lines[4].startswith("args = ")):
         return None
@@ -427,15 +451,47 @@ def _stock_codex_block(current: str) -> Optional[str]:
     if not isinstance(args, list) or not _stock_mcp_argv([command, *args]):
         return None
     launcher = [command, *args[:-len(MCP_ARGS)]]
-    return previous if previous.rstrip() == codex_config_block(launcher).rstrip() else None
+    stock = (codex_config_block(launcher), _legacy_codex_block(launcher))
+    return previous if previous.rstrip() in (b.rstrip() for b in stock) else None
+
+
+def _add_env_vars_in_place(path: str, w: "_Writer") -> bool:
+    """Give an untouched pre-#404 block its ``env_vars`` line wherever it sits.
+
+    Codex appends ``[projects."..."]`` after our table as soon as a folder is
+    trusted, so the old block is usually *not* the last thing in the file and
+    ``append_unless``'s end-of-file repair never fires -- the keys would stay
+    scrubbed and ``doctor`` stale for good. ``_codex_block_to_remove`` has
+    already shown the block is byte for byte ours and that what follows starts a
+    new table, so only that line is added; the launcher and everything after the
+    block stay as they are. A block at the end of the file is left to
+    ``append_unless``, which also refreshes a stale launcher. Returns whether it
+    handled the file.
+    """
+    current = _read(path)
+    if current is None:
+        return False
+    block = _codex_block_to_remove(current)
+    if block is None or "\nenv_vars = " in block:
+        return False
+    if not current.split(block, 1)[1].strip():
+        return False
+    repaired = block + f"env_vars = {json.dumps(list(FORWARDED_ENV))}\n"
+    w.write(path, current.replace(block, repaired, 1))
+    return True
 
 
 def install_codex(home: str, w: _Writer) -> None:
     codex_home = _host_root("CODEX_HOME", os.path.join(home, ".codex"), w.honour_env)
     w.write(os.path.join(codex_home, "skills", "agentdescent", "SKILL.md"), skill_text())
-    w.append_unless(os.path.join(codex_home, "config.toml"), "[mcp_servers.agentdescent]",
-                    codex_config_block(w.launcher), what="mcp_servers entry",
-                    previous=_stock_codex_block)
+    cfg_path = os.path.join(codex_home, "config.toml")
+    if not _add_env_vars_in_place(cfg_path, w):
+        w.append_unless(cfg_path, "[mcp_servers.agentdescent]",
+                        codex_config_block(w.launcher), what="mcp_servers entry",
+                        previous=_stock_codex_block)
+    w.note(f"forwarded into the MCP server env (Codex scrubs the rest): "
+           f"{', '.join(FORWARDED_ENV)}")
+    w.note("verify: codex mcp list   (the Env column names them)")
     w.note("Codex has no hooks; add `run agentdescent status --brief at the start of a "
            "session` to AGENTS.md if you want in-progress runs surfaced.")
     # Codex reads the same plugin format as Claude Code, and installing the
@@ -903,6 +959,9 @@ def host_status(host: str, *, home: Optional[str] = None) -> Dict[str, str]:
         # A live table header, not a substring: a commented-out one is not wired.
         mcp = ("ok" if re.search(r"^\s*\[mcp_servers\.agentdescent\]", cfg, re.M)
                else "missing")
+        # Our own block from before #404 has no `env_vars`: Codex starts that
+        # server without the provider keys. Re-running `install` repairs it.
+        legacy_block = mcp == "ok" and _is_legacy_codex_block(cfg)
     else:
         root = os.path.join(_host_root("XDG_CONFIG_HOME", os.path.join(home, ".config"),
                                        honour_env), "opencode")
@@ -913,7 +972,7 @@ def host_status(host: str, *, home: Optional[str] = None) -> Dict[str, str]:
         # Nothing of ours is there. `unknown` only says a config this user wrote
         # could not be read, which is no evidence that we were ever installed.
         state = "missing"
-    elif skill_state == "stale":
+    elif skill_state == "stale" or (host == "codex" and legacy_block):
         state = "stale"
     elif skill_state == "ok" and mcp in ("ok", "unknown"):
         state = "ok"
@@ -1168,8 +1227,11 @@ def _codex_block_to_remove(current: str) -> Optional[str]:
         return None
     if not isinstance(args, list) or not _stock_mcp_argv([command, *args]):
         return None
-    block = codex_config_block([command, *args[:-len(MCP_ARGS)]])
-    if not current[start:].startswith(block):
+    launcher = [command, *args[:-len(MCP_ARGS)]]
+    # Current form first, then the one written before #404 (no `env_vars`).
+    block = next((b for b in (codex_config_block(launcher), _legacy_codex_block(launcher))
+                  if current[start:].startswith(b)), None)
+    if block is None:
         return None
     after = current[start + len(block):]
     for line in after.split("\n"):
@@ -1180,6 +1242,12 @@ def _codex_block_to_remove(current: str) -> Optional[str]:
             return None                          # another key of our table
         break
     return block
+
+
+def _is_legacy_codex_block(current: str) -> bool:
+    """Whether ``config.toml`` holds the untouched pre-#404 block (no ``env_vars``)."""
+    block = _codex_block_to_remove(current)
+    return block is not None and "\nenv_vars = " not in block
 
 
 def _uninstall_codex(home: str, e: _Eraser) -> None:

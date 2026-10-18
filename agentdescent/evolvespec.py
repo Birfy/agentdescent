@@ -390,9 +390,14 @@ def to_ref(value: Any, *, where: str) -> Ref:
         raise SpecError(f"{where}: {e}") from None
 
 
-def _resolve(value: Any, spec: EvolveSpec, *, where: str) -> Any:
+def _resolve(value: Any, spec: EvolveSpec, *, where: str,
+             usage: Optional[Usage] = None) -> Any:
+    """Resolve a ref. ``usage`` (the run's) is handed to every model adapter in it
+    that reports tokens, unless the spec set one -- otherwise a spec-built
+    ``openai_compatible`` bills a private ``Usage`` and the meter sees no tokens
+    (#405)."""
     try:
-        return to_ref(value, where=where).resolve(spec.allowed_prefixes())
+        return to_ref(value, where=where).resolve(spec.allowed_prefixes(), usage=usage)
     except RefError as e:
         raise SpecError(f"{where}: {e}") from None
 
@@ -556,7 +561,8 @@ def build_audit(spec: EvolveSpec, *, reward: Callable, run: Optional[Callable],
 
 
 def build_policies(spec: EvolveSpec, *, merger: Optional[Any] = None,
-                   base: Optional[Mapping[str, Any]] = None) -> Optional[Policies]:
+                   base: Optional[Mapping[str, Any]] = None,
+                   usage: Optional[Usage] = None) -> Optional[Policies]:
     """The ``Policies`` bundle a spec asks for, or the default merge pair.
 
     Every merge-side rule is installed by the aggregator through
@@ -598,7 +604,8 @@ def build_policies(spec: EvolveSpec, *, merger: Optional[Any] = None,
         if "conflict" in asked or "fusion" in asked:
             raise SpecError("policies: 'reflective_merge' fills conflict and fusion; "
                             "do not also set them")
-        pair = _resolve(asked.pop("reflective_merge"), spec, where="policies.reflective_merge")
+        pair = _resolve(asked.pop("reflective_merge"), spec, where="policies.reflective_merge",
+                        usage=usage)
         if not isinstance(pair, Mapping) or set(pair) != {"fusion", "conflict"}:
             raise SpecError("policies.reflective_merge must resolve to the pair "
                             "reflective_merge() returns")
@@ -611,7 +618,7 @@ def build_policies(spec: EvolveSpec, *, merger: Optional[Any] = None,
             except ValueError as e:
                 raise SpecError(f"policies.staleness: {e}") from None
             continue
-        fields[slot] = _resolve(value, spec, where=f"policies.{slot}")
+        fields[slot] = _resolve(value, spec, where=f"policies.{slot}", usage=usage)
     if default_merge:
         fields.update(reflective_merge(merger))
     return Policies(**fields)
@@ -765,7 +772,7 @@ def _compose_policy_slot(spec: EvolveSpec, *, usage: Optional[Usage] = None,
             score = {**score, "ref": named[0]}
     meta_reward = _resolve(score, spec, where="score")
 
-    model = _resolve(spec.reflect or spec.agent, spec, where="reflect")
+    model = _resolve(spec.reflect or spec.agent, spec, where="reflect", usage=usage)
     tasks, reward, kwargs = meta_parts(
         problems, slot=slot, spec=slot_spec,
         propose=slot_reflector(model, slot_spec), meta_reward=meta_reward,
@@ -801,7 +808,7 @@ def _compose_policy_slot(spec: EvolveSpec, *, usage: Optional[Usage] = None,
     # the artifact stayed at the seed. A spec asking for `reflective_merge` gets
     # it; the CLI silently diverging from the library and from the published run
     # is the worse default.
-    policies = build_policies(spec, merger=None)
+    policies = build_policies(spec, merger=None, usage=usage)
     if policies is not None:
         kwargs.setdefault("policies", policies)
     if usage is not None:
@@ -1025,8 +1032,9 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
     tasks = build_tasks(spec)
     reward = build_reward(spec)
     notes: List[str] = []
-    agent = _resolve(spec.agent, spec, where="agent")
-    reflect = _resolve(spec.reflect, spec, where="reflect") if spec.reflect else agent
+    agent = _resolve(spec.agent, spec, where="agent", usage=usage)
+    reflect = (_resolve(spec.reflect, spec, where="reflect", usage=usage)
+               if spec.reflect else agent)
     aid = spec.artifact_id()
     ov = None
     if chosen is not None:
@@ -1201,7 +1209,8 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
     # diffs is not a default anyone would choose; those specs name a cheap model
     # in `reflect`, and that is what merges.
     merger = reflect if not hasattr(reflect, "in_workspace") else None
-    policies = build_policies(spec, merger=merger, base=ov.policies if ov else None)
+    policies = build_policies(spec, merger=merger, base=ov.policies if ov else None,
+                              usage=usage)
 
     # The audit wraps the reward and the run, so it has to be built after both
     # exist and before the policies bundle is finalised -- its acceptance rule
