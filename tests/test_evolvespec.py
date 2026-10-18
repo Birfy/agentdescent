@@ -573,3 +573,64 @@ def test_policy_slot_converts_evolve_agg_config_rather_than_passing_a_dict():
                                   "agg_config": {"max_wait_rounds": 3}}))
     assert comp2.kwargs["agg_config"].batch_trigger == 5
     assert comp2.kwargs["agg_config"].max_wait_rounds == 3
+
+
+def test_evolve_parallel_null_means_engine_default(tmp_path, capsys):
+    """``evolve.parallel: null`` is the supported default (DataParallel); after
+    #385 the key/annotation-only guard rejected it regardless of value (#392)."""
+    import json as _json
+
+    from agentdescent import cli
+
+    # omit and explicit null compose the same (no parallel key forced in)
+    omit = compose(_text_spec(rounds=1, n_workers=1))
+    null = compose(_text_spec(rounds=1, n_workers=1, parallel=None))
+    assert "parallel" not in omit.kwargs
+    assert "parallel" not in null.kwargs
+
+    # serialized JSON plan succeeds
+    path = tmp_path / "spec.json"
+    path.write_text(_json.dumps({
+        **_text_spec(rounds=1, n_workers=1, parallel=None).to_dict(),
+        "allow": ["examples"],
+    }))
+    assert cli.main(["--json", "plan", str(path)]) == 0
+    out = _json.loads(capsys.readouterr().out)
+    assert out["ok"] is True
+
+    # string/dict still fail closed; unknown keys still name the field
+    with pytest.raises(SpecError, match=r"evolve\.parallel: .*takes an object"):
+        compose(_text_spec(parallel="agentdescent.parallel:DataParallel"))
+    with pytest.raises(SpecError, match=r"evolve\.parallel: .*takes an object"):
+        compose(_text_spec(parallel={"name": "DP"}))
+    # null must not clear compose-built objects (strategy stays)
+    cleared = compose(_text_spec(rounds=1, n_workers=1, strategy=None))
+    assert cleared.kwargs.get("strategy") is not None
+
+
+def test_evolve_agg_config_null_keeps_compose_built_config(tmp_path):
+    """``evolve.agg_config: null`` must not clear the AggregatorConfig compose
+    built from kind defaults + top-level ``agg_config`` (#392 review)."""
+    from agentdescent.aggregator import AggregatorConfig
+
+    # tree kind: compose builds cfg before knobs merge; null must not overwrite
+    omit = compose(_dir_spec(str(tmp_path / "omit"),
+                             agg_config={"batch_trigger": 7}))
+    null = compose(_dir_spec(str(tmp_path / "null"),
+                             agg_config={"batch_trigger": 7},
+                             evolve={"rounds": 1, "n_workers": 1, "seed": 0,
+                                     "agg_config": None}))
+    assert isinstance(omit.kwargs["agg_config"], AggregatorConfig)
+    assert isinstance(null.kwargs["agg_config"], AggregatorConfig)
+    assert null.kwargs["agg_config"].batch_trigger == 7
+    assert null.kwargs["agg_config"].max_wait_rounds == 1
+    assert omit.kwargs["agg_config"].batch_trigger == 7
+    assert omit.kwargs["agg_config"].max_wait_rounds == 1
+
+    # policy_slot: null must not make setdefault a no-op on top-level agg_config
+    from tests.test_policy_slot_spec import _spec
+    ps = compose(_spec(agg_config={"batch_trigger": 5},
+                       evolve={"rounds": 1, "n_workers": 1, "held_out_frac": 0.4,
+                               "agg_config": None}))
+    assert isinstance(ps.kwargs["agg_config"], AggregatorConfig)
+    assert ps.kwargs["agg_config"].batch_trigger == 5
