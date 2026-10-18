@@ -879,7 +879,7 @@ def cmd_status(a: argparse.Namespace) -> int:
     if a.json:
         _out([s.to_dict() for s in runs], as_json=True)
     elif not runs:
-        print(f"no runs under {a.store or runstore.root()}")
+        print(f"no runs under {runstore.store_path(a.store)}")
     else:
         for s in runs:
             print(_status_line(s))

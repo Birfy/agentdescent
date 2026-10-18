@@ -223,7 +223,7 @@ class Tools:
         # back nothing at all and could not tell that from a call that failed.
         # The CLI prints "no runs under <dir>"; this is the same sentence in the
         # shape a tool returns, and it names the store either way.
-        return {"store": self.store or runstore.root(), "runs": payload}
+        return {"store": runstore.store_path(self.store), "runs": payload}
 
     def show(self, run_id: str, diff: bool = True) -> Dict[str, Any]:
         try:
