@@ -14,6 +14,10 @@ written back until the user says so.
 
 1. **`doctor` first.** Report what is missing (worker agent CLI, provider key,
    container engine). Stop if there is no worker agent for a directory kind.
+   It also reports the AgentDescent `version` and the interpreter
+   (`executable`) this server runs. When results differ from the user's shell
+   (a verb missing, a different key set), compare it with `agentdescent doctor`
+   there: your host may have started a different install.
 2. **Establish the four things a spec needs**: `target`, `data`, `score`, `agent`.
    Write every path **absolute**. A relative one is resolved against whatever
    directory read the spec -- the host started its MCP server somewhere you

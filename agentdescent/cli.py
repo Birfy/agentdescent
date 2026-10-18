@@ -17,6 +17,7 @@ commands on a host with no MCP.
     agentdescent cancel  <run_id>
     agentdescent resume  <run_id>
     agentdescent doctor                                             what is installed
+    agentdescent --version                                          which AgentDescent this is
     agentdescent install <dsh|claude-code|codex|opencode>           wire a host
     agentdescent uninstall <dsh|claude-code|codex|opencode>         undo `install`
     agentdescent algorithms list [--kind K] | show <name>           named algorithms for a spec
@@ -37,7 +38,7 @@ import sys
 import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from . import runstore
+from . import __version__, runstore
 from .evolvespec import (KINDS, EvolveSpec, SpecError, compose, estimate, load_spec,
                          _POLICY_SLOTS)
 
@@ -241,6 +242,13 @@ def doctor_report() -> Dict[str, Any]:
                 f"{name}: the installed integration is {info['state']} "
                 f"(skill {info['skill']}, mcp {info['mcp']}); run `agentdescent install {name}`")
     return {
+        # Which install answered: the version and the interpreter running it. A host
+        # starts its own `agentdescent mcp` (often through the interpreter `install`
+        # pinned, #394), which can be a different install from the one in the user's
+        # shell; with these two fields a host-side `doctor` and a shell-side `doctor`
+        # compare directly (#416).
+        "version": __version__,
+        "executable": sys.executable,
         "python": sys.version.split()[0],
         "agent_clis": clis, "provider_keys_present": keys,
         "openai_base_url": base_url,
@@ -1252,6 +1260,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="agentdescent",
                                 description="Evolve skills, agents, prompts, code and plugins "
                                             "with a parallel, merge-based optimiser.")
+    p.add_argument("-V", "--version", action="version",
+                   version=f"%(prog)s {__version__}",
+                   help="print the AgentDescent version and exit")
     p.add_argument("--store", help="run store directory (default ~/.agentdescent/runs "
                                     "or $AGENTDESCENT_HOME/runs)")
     p.add_argument("--json", action="store_true", help="machine-readable output")

@@ -68,7 +68,9 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
     "doctor": (
         "Check what this machine can run: which worker agent CLIs (claude, codex, dsh) "
         "are on PATH, which provider keys are set, whether a container engine and the "
-        "git ledger are available. Call this FIRST, before planning a run, and tell the "
+        "git ledger are available, and which AgentDescent version and Python interpreter "
+        "this server runs (compare with the shell's `agentdescent doctor` when results "
+        "differ). Call this FIRST, before planning a run, and tell the "
         "user what is missing instead of starting a run that fails on round one."),
     "plan": (
         "Validate an EvolveSpec and estimate its cost WITHOUT running anything. Resolves "
