@@ -818,7 +818,7 @@ def _compose_policy_slot(spec: EvolveSpec, *, usage: Optional[Usage] = None,
         kwargs.setdefault("on_round", on_round)
 
     n_train = _train_count(len(tasks), kwargs.get("held_out_frac", 0.4))
-    n_gate = held_out_size(len(tasks), kwargs.get("held_out_frac", 0.4))
+    n_gate = len(tasks) - n_train
     notes = [f"one rollout is a whole inner search on one of {len(problems)} problem(s); "
              f"{len(tasks)} outer task(s), {n_train} for training and {n_gate} for the gate"]
     # The recurring defect in this line of work, at four different levels: a
