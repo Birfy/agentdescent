@@ -175,14 +175,18 @@ files, so it raises rather than quietly scoring the model's prior knowledge.
 
 ```python
 plan = result.write_to("~/.claude/skills/pdf-audit", dry_run=True)
-# {"written": [...], "extra": ["notes.md"], "deleted": [], "backup": []}
+# {"written": [...], "unchanged": [...], "extra": ["notes.md"], "deleted": [],
+#  "backup": [], "noop": False}
 ```
 
 This is the only call in the package that writes into a directory you care about,
 so it is conservative: `backup=True` (default) copies the directory to
 `<path>.bak-N` first; files present in the target but not in the artifact are
 reported as `extra` and **left alone** unless `prune=True`; `dry_run=True` returns
-the plan without touching anything. The run itself never writes to your directory.
+the plan without touching anything. Only files whose content would change are
+`written`; files already identical to the artifact are `unchanged`, and when
+nothing would change the plan is `noop: true`: nothing is written and no backup
+is made. The run itself never writes to your directory.
 
 ## The three workloads
 

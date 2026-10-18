@@ -1742,19 +1742,25 @@ class EvolutionResult:
             json.dump(payload, fh, indent=2, ensure_ascii=False)
 
     def write_to(self, path: str, *, backup: bool = True, prune: bool = False,
-                 dry_run: bool = False) -> Dict[str, List[str]]:
+                 dry_run: bool = False) -> Dict[str, Any]:
         """Install a file-tree artifact back into a real directory.
 
         Only meaningful when the artifact was evolved as a
         :class:`~agentdescent.treestrategy.FileTree` -- every state key must be a
-        relative path. Returns the plan: ``{"written": [...], "extra": [...],
-        "deleted": [...], "backup": [...]}``.
+        relative path. Returns the plan:
+        ``{"written": [...], "unchanged": [...], "extra": [...], "deleted": [...],
+        "backup": [...], "noop": bool}``. ``written`` lists only
+        the files whose content would change (new, different, or an executable
+        that lost its bit); files already byte-identical to the artifact are
+        ``unchanged`` and are not rewritten. When nothing would be written or
+        deleted the plan has ``noop: true``, no backup is made and the target is
+        not touched (#396).
 
         Deliberately conservative, because this is the one call in the whole
         package that writes into a directory the user cares about:
 
         * ``backup=True`` (default) copies the existing directory to
-          ``<path>.bak-N`` first;
+          ``<path>.bak-N`` first -- but only when something is about to change;
         * files present in the target but **not** in the artifact are reported as
           ``extra`` and left alone unless ``prune=True`` -- the run only ever knew
           about the files its ``TreeSpec`` selected, so deleting by omission would
@@ -1764,7 +1770,8 @@ class EvolutionResult:
         import os
         import shutil
 
-        from .filetree import TreeError, materialize, parse_tree, safe_relpath
+        from .filetree import (TreeError, _EXEC_PATTERNS, match_any, materialize,
+                               parse_tree, safe_relpath)
 
         # `rendered` is the strategy's own serialisation, so it is the one
         # reliable signal that this artifact really is a tree. Without the check,
@@ -1793,6 +1800,23 @@ class EvolutionResult:
 
         dest = os.path.abspath(os.path.expanduser(path))
         planned = sorted(self.state)
+
+        def _same(rel: str) -> bool:
+            """Whether ``dest/rel`` already is what ``materialize`` would leave."""
+            full = os.path.join(dest, rel.replace("/", os.sep))
+            try:
+                if not os.path.isfile(full):
+                    return False
+                with open(full, encoding="utf-8") as fh:
+                    if fh.read() != self.state[rel]:
+                        return False
+                return (not match_any(rel, _EXEC_PATTERNS)
+                        or bool(os.stat(full).st_mode & 0o100))
+            except (OSError, UnicodeDecodeError):
+                return False
+
+        unchanged = [rel for rel in planned if _same(rel)]
+        changed = [rel for rel in planned if rel not in set(unchanged)]
         existing: List[str] = []
         walker = os.walk(dest) if os.path.isdir(dest) else ()
         for dirpath, dirnames, filenames in walker:
@@ -1801,9 +1825,11 @@ class EvolutionResult:
                 rel = os.path.relpath(os.path.join(dirpath, fname), dest)
                 existing.append(rel.replace(os.sep, "/"))
         extra = sorted(set(existing) - set(planned))
-        plan = {"written": planned, "extra": [] if prune else extra,
-                "deleted": extra if prune else [], "backup": []}
-        if dry_run:
+        plan = {"written": changed, "unchanged": unchanged,
+                "extra": [] if prune else extra,
+                "deleted": extra if prune else [], "backup": [],
+                "noop": not changed and not (prune and extra)}
+        if dry_run or plan["noop"]:
             return plan
         if backup and os.path.isdir(dest):
             n = 0
@@ -1811,7 +1837,7 @@ class EvolutionResult:
                 n += 1
             shutil.copytree(dest, f"{dest}.bak-{n}", symlinks=True)
             plan["backup"] = [f"{dest}.bak-{n}"]
-        materialize(self.state, dest)
+        materialize({rel: self.state[rel] for rel in changed}, dest)
         if prune:
             for rel in extra:
                 try:
