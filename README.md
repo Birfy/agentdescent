@@ -69,14 +69,14 @@ cannot drift from what the paper shows.
 
 ## Install and run the offline demo
 
-These instructions target **0.6.0**. Once that version is published:
+Install **0.6.0** from PyPI:
 
 ```bash
 pip install "agentdescent>=0.6.0"
 agentdescent demo
 ```
 
-Before publication, or when developing from source, install your checkout:
+Or, when developing from source, install your checkout:
 
 ```bash
 git clone https://github.com/Birfy/agentdescent && cd agentdescent

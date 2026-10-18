@@ -10,14 +10,13 @@ until step 3.
 
 ## 1. Install
 
-These commands target **0.6.0**. Once published, install the package with its
-MCP extra:
+Install **0.6.0** from PyPI with its MCP extra:
 
 ```bash
 pip install "agentdescent[mcp]>=0.6.0"
 ```
 
-Before publication, or if you already have a source checkout:
+Or, from a source checkout:
 
 ```bash
 pip install -e ".[mcp]"
