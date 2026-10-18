@@ -11,7 +11,7 @@ The design record — why it is shaped this way and what was considered — is
 
 ## Install
 
-For 0.6.0, once published:
+Install **0.6.0** from PyPI:
 
 ```bash
 pip install "agentdescent[mcp]>=0.6.0"                 # the MCP server needs this extra (and Python >= 3.10)
@@ -20,8 +20,8 @@ agentdescent doctor                    # which agent CLIs, keys and optional pie
 agentdescent install dsh               # or: claude-code, codex, opencode
 ```
 
-Before publication, clone the repository as described in
-[install and first run](install.md), then install the MCP extra from that checkout:
+Or clone the repository as described in [install and first run](install.md) and
+install the MCP extra from that checkout:
 
 ```bash
 pip install -e ".[mcp]"
