@@ -190,7 +190,9 @@ RoundInfo(
     considered: int = 0,
     discarded_stale: int = 0,
     conflicts_dropped: int = 0,
-    fused: int = 0
+    fused: int = 0,
+    propose_errors: int = 0,
+    propose_error: Optional[str] = None
 ) -> None
 ```
 

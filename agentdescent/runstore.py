@@ -119,6 +119,12 @@ class RunStatus:
     best_reward: Optional[float] = None
     last_reward: Optional[float] = None
     committed: int = 0
+    #: ``propose`` calls that raised, summed over the rounds so far (#395), and
+    #: the first such exception as ``Type: message``. Non-zero with
+    #: ``committed == 0`` is a reflector that was never heard, not a run whose
+    #: proposals the gate declined.
+    propose_errors: int = 0
+    propose_error: Optional[str] = None
     calls: int = 0
     #: Work started but not yet finished: actor invocations, and the merge step
     #: (``phase="merge"``). Non-zero means work is in flight even when ``calls``
@@ -660,6 +666,10 @@ def execute(rd: RunDir, *, budget_usd: Optional[float] = None,
         # 630x631 -- the triangular number, growing quadratically with rounds.
         # A number in `status` is read by a person deciding whether to cancel.
         changes["committed"] = st.committed + info.committed
+        if info.propose_errors:
+            changes["propose_errors"] = st.propose_errors + info.propose_errors
+            if st.propose_error is None:
+                changes["propose_error"] = info.propose_error
         changes["rollouts"] = info.rollouts
         # RoundInfo.tokens is the same running-total shape as rollouts; the
         # meter sums prompt + completion, so this is the spend so far.

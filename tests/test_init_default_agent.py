@@ -28,6 +28,9 @@ def _path_has(monkeypatch, *present):
 
 
 def _run_init(tmp_path, monkeypatch, capsys, *extra):
+    # Hermetic: the starter reflector needs a key, and `init` warns (#395) when
+    # it is missing -- these tests are about the *CLI* warnings, not that one.
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.chdir(tmp_path)
     skill = tmp_path / "my-skill"
     skill.mkdir(exist_ok=True)
@@ -81,6 +84,7 @@ def test_explicit_agent_overrides_path_detection(tmp_path, monkeypatch, capsys):
 
 
 def test_text_kind_never_warns_about_cli(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     _path_has(monkeypatch)
     monkeypatch.chdir(tmp_path)
     prompt = tmp_path / "p.md"
