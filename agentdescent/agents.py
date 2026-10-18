@@ -161,6 +161,27 @@ class Usage:
                 self._inflight.pop(finishes, None)
         self._notify()
 
+    def add_tokens(self, prompt_tokens: int = 0, completion_tokens: int = 0) -> None:
+        """Add provider-reported tokens without counting a call or any time.
+
+        For an adapter that reports into a ``Usage`` which another layer already
+        counts calls and seconds on (see :meth:`token_sink`)."""
+        with self._lock:
+            self.prompt_tokens += prompt_tokens
+            self.completion_tokens += completion_tokens
+        self._notify()
+
+    def token_sink(self) -> "TokenSink":
+        """A ``usage=`` for a model adapter that adds only its **tokens** here.
+
+        The engine's meter counts one call (and its seconds) per actor invocation
+        on the run's ``Usage``. An adapter given that same object would count its
+        own provider attempts on top -- every call twice, and retries as extra --
+        which halves ``max_calls`` and doubles ``usd_per_call`` spend. A sink
+        takes the one thing only the adapter can see, the token counts. Used by
+        spec runs (#405); the Python API's ``claude(usage=u)`` is unchanged."""
+        return TokenSink(self)
+
     def estimated_cost(self, per_1m_prompt: float, per_1m_completion: float) -> float:
         """Cost at the given per-million-token prices (both provider-specific)."""
         return (self.prompt_tokens * per_1m_prompt
@@ -172,6 +193,19 @@ class Usage:
                 f"{self.seconds:.1f}s in the model"
                 + (f", {self.failures} failed ({self.failure_seconds:.1f}s lost)"
                    if self.failures else ""))
+
+
+class TokenSink:
+    """What :meth:`Usage.token_sink` returns: ``record`` keeps only the tokens."""
+
+    def __init__(self, target: Usage) -> None:
+        self.target = target
+
+    def record(self, *, prompt_tokens: int = 0, completion_tokens: int = 0,
+               seconds: float = 0.0, failed: bool = False,
+               finishes: Optional[int] = None) -> None:
+        if prompt_tokens or completion_tokens:
+            self.target.add_tokens(prompt_tokens, completion_tokens)
 
 
 def metered(completion: Completion, usage: Usage) -> Completion:

@@ -646,10 +646,12 @@ Usage(
 
 | method | what it does |
 |---|---|
+| `add_tokens(prompt_tokens: int = 0, completion_tokens: int = 0) -> None` | Add provider-reported tokens without counting a call or any time. |
 | `begin(phase: Optional[str] = None) -> int` | Mark an actor invocation as started; returns its token. |
 | `end(token: int) -> None` | Finish the invocation `begin` returned `token` for. |
 | `estimated_cost(per_1m_prompt: float, per_1m_completion: float) -> float` | Cost at the given per-million-token prices (both provider-specific). |
 | `record(...)` | Account one finished call. `finishes` is the `begin` token of the invocation this record completes; without it, in-flight state is left alone (an unpaired provider attempt is not the actor call). |
+| `token_sink() -> 'TokenSink'` | A `usage=` for a model adapter that adds only its **tokens** here. |
 
 ### `WorkspaceAgent`
 
