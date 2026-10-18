@@ -49,7 +49,9 @@ agentdescent doctor
 
 Lists which agent CLIs are on `PATH`, which provider keys are set, whether a
 container engine and the `mcp` package are present, and where the run store is.
-Every "problem" line it prints is something that will make a real run fail.
+Every "problem" line it prints is something that will make a real run fail. It
+also prints the AgentDescent `version` (also `agentdescent --version`) and the
+interpreter `executable` it runs on.
 
 ## 3. The offline end-to-end run
 
@@ -115,7 +117,11 @@ echo "Call the agentdescent doctor tool and print its run_store field." | \
     --allowedTools mcp__plugin_agentdescent_agentdescent__doctor
 ```
 
-Expected: the run-store path. If it says the server failed to connect, the
+Expected: the run-store path. Ask for the `version` and `executable` fields
+too and compare them with `agentdescent doctor` in your shell: the host starts
+its own `agentdescent mcp`, often through the interpreter `install` pinned, and
+when a plugin run behaves differently from a shell run, a different install is
+the first thing to rule out. If it says the server failed to connect, the
 usual cause is `agentdescent` not being on `PATH` for the process that started
 Claude Code, or the `[mcp]` extra missing — `agentdescent mcp` then exits 3 and
 says so. Claude Code caches a failed connection for ~15 minutes; a different
