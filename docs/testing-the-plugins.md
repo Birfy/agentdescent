@@ -88,7 +88,9 @@ public and inside the ref allowlist.
 ## 4. Each host
 
 `install` is idempotent and `--dry-run` prints what it would write, so it is
-safe to inspect first. Use `--home` to keep a probe out of your real setup.
+safe to inspect first. Use `--home` to keep a probe out of your real setup:
+it wins over an exported `CODEX_HOME`, `DSH_HOME` or `XDG_CONFIG_HOME`, so
+nothing outside it is read or written.
 
 ```bash
 agentdescent install dsh --dry-run --home /tmp/probe

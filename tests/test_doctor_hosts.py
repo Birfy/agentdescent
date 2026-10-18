@@ -105,9 +105,10 @@ def test_status_follows_the_directories_install_honours(home, monkeypatch, tmp_p
     monkeypatch.setenv("CODEX_HOME", str(elsewhere / "codex"))
     monkeypatch.setenv("DSH_HOME", str(elsewhere / "dsh"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(elsewhere / "xdg"))
+    monkeypatch.setenv("HOME", str(home))           # no explicit home: the variables apply
     for host in ("codex", "dsh", "opencode"):
-        install(host, home=str(home))
-        info = host_status(host, home=str(home))
+        install(host)
+        info = host_status(host)
         assert info["state"] == "ok" and str(elsewhere) in info["path"], info
 
 

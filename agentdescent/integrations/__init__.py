@@ -94,15 +94,28 @@ def _version() -> str:
     return __version__
 
 
+def _host_root(var: str, default: str, honour_env: bool = True) -> str:
+    """Where a host keeps its files: ``$<var>`` if the host honours it, else ``default``.
+
+    ``honour_env`` is False when the caller named a ``--home``: that directory is
+    then the whole of the host's world, and an ambient ``CODEX_HOME`` /
+    ``DSH_HOME`` / ``XDG_CONFIG_HOME`` must not send the write to the user's real
+    configuration instead (#410)."""
+    return (os.environ.get(var) if honour_env else None) or default
+
+
 # ---------------------------------------------------------------------------
 # file writing, with dry-run and "append if absent"
 # ---------------------------------------------------------------------------
 
 
 class _Writer:
-    def __init__(self, dry_run: bool, launcher: Optional[List[str]] = None) -> None:
+    def __init__(self, dry_run: bool, launcher: Optional[List[str]] = None,
+                 honour_env: bool = True) -> None:
         self.dry_run = dry_run
         self.launcher = launcher or [MCP_COMMAND]
+        #: Whether the host's own home variables (``CODEX_HOME`` ...) apply.
+        self.honour_env = honour_env
         self.lines: List[str] = []
 
     def write(self, path: str, text: str) -> None:
@@ -272,7 +285,7 @@ def dsh_patch_block(launcher: Optional[List[str]] = None) -> str:
 
 
 def install_dsh(home: str, w: _Writer) -> None:
-    dsh_home = os.environ.get("DSH_HOME") or os.path.join(home, ".dsh")
+    dsh_home = _host_root("DSH_HOME", os.path.join(home, ".dsh"), w.honour_env)
     skill_dir = os.path.join(dsh_home, "skills", "agentdescent")
     w.write(os.path.join(skill_dir, "SKILL.md"), skill_text())
     w.write(os.path.join(skill_dir, "hooks.json"), hooks_text(w.launcher))
@@ -418,7 +431,7 @@ def _stock_codex_block(current: str) -> Optional[str]:
 
 
 def install_codex(home: str, w: _Writer) -> None:
-    codex_home = os.environ.get("CODEX_HOME") or os.path.join(home, ".codex")
+    codex_home = _host_root("CODEX_HOME", os.path.join(home, ".codex"), w.honour_env)
     w.write(os.path.join(codex_home, "skills", "agentdescent", "SKILL.md"), skill_text())
     w.append_unless(os.path.join(codex_home, "config.toml"), "[mcp_servers.agentdescent]",
                     codex_config_block(w.launcher), what="mcp_servers entry",
@@ -449,7 +462,7 @@ def opencode_mcp_entry(launcher: Optional[List[str]] = None) -> Dict[str, object
 
 
 def install_opencode(home: str, w: _Writer) -> None:
-    config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config")
+    config_home = _host_root("XDG_CONFIG_HOME", os.path.join(home, ".config"), w.honour_env)
     root = os.path.join(config_home, "opencode")
     # `{skill,skills}/**/SKILL.md` -- both spellings are accepted; `skill` is
     # what the sibling `agent` / `command` directories are named.
@@ -871,9 +884,10 @@ def host_status(host: str, *, home: Optional[str] = None) -> Dict[str, str]:
     """
     if host not in HOSTS:
         raise ValueError(f"unknown host {host!r}; choose from {sorted(HOSTS)}")
+    honour_env = not home          # an explicit home is the whole world (#410)
     home = os.path.expanduser(home or "~")
     if host == "dsh":
-        root = os.environ.get("DSH_HOME") or os.path.join(home, ".dsh")
+        root = _host_root("DSH_HOME", os.path.join(home, ".dsh"), honour_env)
         skill = os.path.join(root, "skills", "agentdescent", "SKILL.md")
         patch = _read(os.path.join(root, "cordis.patch.yml")) or ""
         # Both markers: an interrupted write can leave only the start.
@@ -883,15 +897,15 @@ def host_status(host: str, *, home: Optional[str] = None) -> Dict[str, str]:
         skill = os.path.join(root, "skills", "agentdescent", "SKILL.md")
         mcp = _claude_mcp_state(os.path.join(root, ".mcp.json"))
     elif host == "codex":
-        root = os.environ.get("CODEX_HOME") or os.path.join(home, ".codex")
+        root = _host_root("CODEX_HOME", os.path.join(home, ".codex"), honour_env)
         skill = os.path.join(root, "skills", "agentdescent", "SKILL.md")
         cfg = _read(os.path.join(root, "config.toml")) or ""
         # A live table header, not a substring: a commented-out one is not wired.
         mcp = ("ok" if re.search(r"^\s*\[mcp_servers\.agentdescent\]", cfg, re.M)
                else "missing")
     else:
-        root = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config"),
-                            "opencode")
+        root = os.path.join(_host_root("XDG_CONFIG_HOME", os.path.join(home, ".config"),
+                                       honour_env), "opencode")
         skill = os.path.join(root, "skill", "agentdescent", "SKILL.md")
         mcp = _opencode_mcp_state(root)
     skill_state = _skill_state(skill)
@@ -993,7 +1007,9 @@ def install(host: str, *, dry_run: bool = False, home: Optional[str] = None) -> 
     # Bind machine-local configuration to this installation, not the host's
     # future PATH. Do not resolve symlinks: a venv's Python must stay in its
     # venv. Portable render_* templates deliberately keep the bare command.
-    w = _Writer(dry_run, mcp_launcher())
+    # An explicit `home` is the host's whole world: the host's own home
+    # variables are only consulted for the real one (#410).
+    w = _Writer(dry_run, mcp_launcher(), honour_env=not home)
     HOSTS[host](os.path.expanduser(home or "~"), w)
     if "-P" not in w.launcher and len(w.launcher) > 1:
         # Python < 3.11 (no `-P`) and no console script for this interpreter: the
@@ -1031,8 +1047,9 @@ class _Eraser:
     still ours; anything the user has changed is left in place and said so.
     """
 
-    def __init__(self, dry_run: bool) -> None:
+    def __init__(self, dry_run: bool, honour_env: bool = True) -> None:
         self.dry_run = dry_run
+        self.honour_env = honour_env
         self.lines: List[str] = []
         self.touched = False
 
@@ -1076,7 +1093,7 @@ class _Eraser:
 
 
 def _uninstall_dsh(home: str, e: _Eraser) -> None:
-    root = os.environ.get("DSH_HOME") or os.path.join(home, ".dsh")
+    root = _host_root("DSH_HOME", os.path.join(home, ".dsh"), e.honour_env)
     skill_dir = os.path.join(root, "skills", "agentdescent")
     for name in ("SKILL.md", "hooks.json"):
         e.remove_file(os.path.join(skill_dir, name))
@@ -1166,7 +1183,7 @@ def _codex_block_to_remove(current: str) -> Optional[str]:
 
 
 def _uninstall_codex(home: str, e: _Eraser) -> None:
-    root = os.environ.get("CODEX_HOME") or os.path.join(home, ".codex")
+    root = _host_root("CODEX_HOME", os.path.join(home, ".codex"), e.honour_env)
     skill_dir = os.path.join(root, "skills", "agentdescent")
     e.remove_file(os.path.join(skill_dir, "SKILL.md"))
     e.prune_dirs(skill_dir, root)
@@ -1187,7 +1204,7 @@ def _uninstall_codex(home: str, e: _Eraser) -> None:
 
 
 def _uninstall_opencode(home: str, e: _Eraser) -> None:
-    config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config")
+    config_home = _host_root("XDG_CONFIG_HOME", os.path.join(home, ".config"), e.honour_env)
     root = os.path.join(config_home, "opencode")
     skill_dir = os.path.join(root, "skill", "agentdescent")
     e.remove_file(os.path.join(skill_dir, "SKILL.md"))
@@ -1250,7 +1267,7 @@ def uninstall(host: str, *, dry_run: bool = False, home: Optional[str] = None) -
     """
     if host not in HOSTS:
         raise ValueError(f"unknown host {host!r}; choose from {sorted(HOSTS)}")
-    e = _Eraser(dry_run)
+    e = _Eraser(dry_run, honour_env=not home)
     _UNINSTALL[host](os.path.expanduser(home or "~"), e)
     if not e.lines:
         e.note(f"nothing to remove: agentdescent is not installed for {host} "
