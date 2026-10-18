@@ -23,3 +23,7 @@ site/
 # writes a real file now, and a run that has a ledger still gets it beside
 # that. This is the fallback landing in whatever directory the caller was in.
 /audit.jsonl
+
+# Dependencies installed by `npm`/`pnpm` anywhere in the tree (the dsh plugin once
+# committed 210 files of its peer dependency by accident). Never tracked.
+node_modules/
