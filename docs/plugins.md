@@ -68,6 +68,24 @@ leaves no files here, so it reads `missing` and the hint names that route too.
 Only presence is checked: a launcher pinned to an interpreter that has since
 been deleted still reads `ok`.
 
+### Uninstall
+
+`agentdescent uninstall <host>` (`--dry-run` to preview, `--home` as for
+`install`) takes back exactly what the table above says `install` wrote: the
+skill files, the Claude Code plugin directory, the `cordis.patch.yml` block
+between its two marker lines (an older block with no end marker runs to the end
+of the file, as `install` treats it), the `[mcp_servers.agentdescent]` table in
+`config.toml`, the `mcp.agentdescent` entry in `opencode.jsonc`. Everything
+around them is left as it was, and so is the run store in `~/.agentdescent`.
+
+It only removes a config entry that is still **exactly what `install` writes**
+(the same check `install` uses to decide it may repair an entry). A launcher you
+edited, an `env` you added, or an entry you wrote yourself is kept and reported
+as `kept ... (not the one install wrote)`; an `opencode.jsonc` with comments is
+never rewritten (it says which entry to delete). Running it again prints
+`nothing to remove`. An install made through the host's own marketplace is
+removed with that host's plugin command, not with this one.
+
 ### Codex: the same plugin as Claude Code
 
 Codex reads the Claude Code plugin format, marketplace and all, so the package
