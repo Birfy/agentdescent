@@ -16,7 +16,7 @@ benchmark results; the reported numbers are upstream's, not measured here.
 
 ## What is preserved so far
 
-### Round selection (`examples/rrsi/selection.py`)
+### Round selection (`agentdescent/algorithms/rrsi/selection.py`)
 
 A pure function layer for a round whose screened candidates were all measured
 from the same incumbent. It applies the upstream historical-best floor
@@ -32,7 +32,7 @@ measurement is also attached, and rejected or unevaluated candidates receive no
 invented measurement in their decision record. These are defensive validation
 choices around the upstream rule, not upstream parity claims.
 
-### Edit-budget schedule (`examples/rrsi/schedule.py`)
+### Edit-budget schedule (`agentdescent/algorithms/rrsi/schedule.py`)
 
 The paper's cosine anneal on the L0 edit budget:
 
@@ -47,7 +47,7 @@ clamping of `t` into `[0, T]`. Defensive validation rejects non-positive or
 inverted `b_min`/`b_max` and non-integer inputs; that is an AgentDescent
 boundary, not an upstream claim.
 
-### Component vocabulary (`examples/rrsi/components.py`)
+### Component vocabulary (`agentdescent/algorithms/rrsi/components.py`)
 
 `K` is the fixed set of harness components an edit can be tagged with, and
 `K_STR` (`client_tool`, `skill`, `memory`, `subagent`) the structural subset
@@ -59,7 +59,7 @@ edit whatever its words say. `novelty` counts structural components the
 incumbent has never accepted an edit on; `selection.py` now takes its
 structural set from here instead of a copy.
 
-### Per-edit history (`examples/rrsi/history.py`)
+### Per-edit history (`agentdescent/algorithms/rrsi/history.py`)
 
 The JSONL ledger \(L_t\): one record per *edit*, with a bundle's single
 measurement copied to each of its edits. Unmeasured candidates (critic reject,
@@ -94,7 +94,25 @@ out of the tried set \(T_t\) and the yield \(g_t\). From it:
 | Text-only diff (string literals / comments) declared structural, prose mentions a signal word | Declared tag kept | Recorded as `prompt` |
 
 
-## Wired into `evolve()` (`examples/rrsi/rrsi_policies.py`)
+## Wired into `evolve()` (`agentdescent/algorithms/rrsi/rrsi_policies.py`)
+
+From a spec: `"algorithm": "rrsi"` (kind `text`), or
+`{"name": "rrsi", "params": {"b_max": 3, "protected": ["t3"]}}`; the parameters are
+`RRsiConfig`'s fields plus `protected` and `base_score` (`agentdescent algorithms
+show rrsi`). The code lives in the package (it moved from `examples/rrsi/`,
+whose modules are now aliases of it), so this works from the wheel. A spec run
+builds the bundle for you, so its `RRsiState` is not returned; call
+`build_rrsi_bundle` from Python when you need to read `S*` afterwards.
+
+**Set `protected`.** It is the list of strings the leakage screen refuses to see
+in a candidate (gold answers, task ids from the evolve set). Empty means the
+screen cannot reject anything -- `plan` says so in its notes -- and a run can
+commit a card that is just a list of answers. Never put the final holdout there.
+
+**Licensing.** `components`, `history`, `schedule` and `selection` are adapted
+from google-research/rrsi and remain Apache-2.0 (file headers kept; see `NOTICE`
+and `LICENSES/Apache-2.0.txt`, both shipped in the wheel's `.dist-info`); the rest
+of AgentDescent is MIT.
 
 `build_rrsi_bundle(complete, protected=..., reviewer=..., config=...,
 base_score=..., history_path=...)` assembles the three slots into one
@@ -104,10 +122,10 @@ bookkeeping and the annealed round counter — which is what makes them one
 algorithm rather than three knobs.
 
 **Fidelity.** The wiring consumes the pinned fixtures, not approximations:
-component attribution goes through :mod:`~examples.rrsi.components` (the
+component attribution goes through :mod:`~agentdescent.algorithms.rrsi.components` (the
 upstream `K` / `K_STR` / `normalize` evidence rules — `skills/x/SKILL.md` is a
 `skill` edit, `ToolRegistry(...)` is `client_tool`, pure prose is `prompt`),
-and the per-edit ledger is :class:`~examples.rrsi.history.History` (the pinned
+and the per-edit ledger is :class:`~agentdescent.algorithms.rrsi.history.History` (the pinned
 durable JSONL) when `history_path` is given, with an in-memory twin for scratch
 runs pinned to the same summaries by a parity test. The search state (round,
 `S*`, incumbent cost, progress) rides the aggregator checkpoint; the per-edit
@@ -134,6 +152,8 @@ the loop conditioned on.
 * **`noise_band` is a configured parameter** (default `0.0`, the conservative
   floor `score >= S*`). The paper estimates it by repeatedly evaluating the
   unchanged base harness; set `RRsiConfig.noise_band` from that measurement.
+  It is a score delta in `[0, 1]`; `spec.algorithm` params outside that range
+  fail in `plan`.
 * **Cost is `EvidenceCard.cost_tokens`, averaged per rollout** (the proposing
   rollout's usage, when the caller shares a `Usage` with its adapters), **not a
   batch sum** -- summing across a merge's cards would make the cost rule depend

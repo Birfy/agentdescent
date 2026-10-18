@@ -1,0 +1,339 @@
+"""The algorithm registry and ``EvolveSpec.algorithm`` (#384)."""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+import warnings
+
+import pytest
+
+from agentdescent import algorithms, cli
+from agentdescent.algorithms import (Algorithm, AlgorithmError, Overrides, Param,
+                                     resolve_params)
+from agentdescent.algorithms.rrsi.rrsi_policies import (RRsiAcceptance, RRsiCritic,
+                                                         RRsiProposalPolicy)
+from agentdescent.evolvespec import EvolveSpec, SpecError, compose
+from agentdescent.selection import Archive
+
+ROWS = [{"prompt": f"what is {i}", "gold": f"zzz{i}"} for i in range(8)]
+
+
+def _spec(**kw):
+    base = dict(kind="text", target="Be helpful.", data={"inline": ROWS}, agent="echo",
+                evolve={"rounds": 2, "n_workers": 2, "seed": 0})
+    base.update(kw)
+    return EvolveSpec(**base)
+
+
+def _write(tmp_path, spec):
+    path = tmp_path / "spec.json"
+    path.write_text(json.dumps(spec.to_dict()))
+    return str(path)
+
+
+# -- the registry ----------------------------------------------------------------
+
+
+def test_builtin_algorithms_are_registered_with_declared_fidelity():
+    assert algorithms.names() == ["archive_selection", "rrsi"]
+    for alg in algorithms.listing():
+        assert alg.fidelity in algorithms.FIDELITY
+        assert alg.summary and alg.kinds
+
+
+def test_listing_filters_by_kind():
+    assert [a.name for a in algorithms.listing("text")] == ["archive_selection", "rrsi"]
+    assert [a.name for a in algorithms.listing("skill_dir")] == ["archive_selection"]
+    assert algorithms.listing("policy_slot") == []
+
+
+def test_get_unknown_names_the_available_ones():
+    with pytest.raises(AlgorithmError, match=r"unknown algorithm 'gepa'.*rrsi"):
+        algorithms.get("gepa")
+
+
+def test_duplicate_registration_is_refused():
+    with pytest.raises(ValueError, match="already registered"):
+        algorithms.register(algorithms.get("rrsi"))
+
+
+@pytest.mark.parametrize("params, message", [
+    ({"nope": 1}, r"no parameter\(s\) \['nope'\].*b_max"),
+    ({"b_max": "3"}, r"algorithm\.params\.b_max: expected int, got '3'"),
+    ({"b_max": True}, r"expected int"),
+    ({"b_max": 2.5}, r"expected int"),
+    ({"b_max": 0}, r"must be >= 1"),
+    ({"noise_band": 2}, r"noise_band: must be <= 1"),
+    ({"noise_band": -0.1}, r"noise_band: must be >= 0"),
+    ({"protected": "t3"}, r"protected: expected list\[str\]"),
+    ({"protected": [1]}, r"expected list\[str\]"),
+])
+def test_resolve_params_rejects_what_it_cannot_honour(params, message):
+    with pytest.raises(AlgorithmError, match=message):
+        resolve_params(algorithms.get("rrsi"), params)
+
+
+def test_resolve_params_fills_defaults_and_widens_int_to_float():
+    out = resolve_params(algorithms.get("rrsi"), {"w_s": 2, "b_max": 3})
+    assert out["w_s"] == 2.0 and isinstance(out["w_s"], float)
+    assert out["b_max"] == 3 and out["T"] == 20 and out["protected"] == []
+
+
+def test_a_zero_temperature_is_refused_by_the_schema_not_deep_in_build():
+    with pytest.raises(AlgorithmError, match=r"temperature: must be >="):
+        resolve_params(algorithms.get("archive_selection"), {"temperature": 0})
+
+
+def test_rrsi_with_no_protected_strings_warns_that_the_screen_is_vacuous():
+    note = " ".join(compose(_spec(algorithm="rrsi")).notes)
+    assert "`protected` is empty" in note and "never reject" in note
+    quiet = compose(_spec(algorithm={"name": "rrsi", "params": {"protected": ["zzz1"]}}))
+    assert "protected` is empty" not in " ".join(quiet.notes)
+
+
+def test_a_failed_builtin_load_keeps_its_original_error(monkeypatch):
+    monkeypatch.setattr(algorithms, "_loaded", False)
+    monkeypatch.setattr(algorithms, "_load_error", None)
+    monkeypatch.delattr(algorithms, "builtin", raising=False)
+    monkeypatch.setitem(sys.modules, "agentdescent.algorithms.builtin", None)
+    with pytest.raises(ImportError) as first:
+        algorithms.names()
+    with pytest.raises(ImportError) as second:
+        algorithms.names()
+    assert second.value is first.value          # not "already registered"
+
+
+def test_choices_are_enforced():
+    with pytest.raises(AlgorithmError, match=r"sampling: must be one of \[.*'best'"):
+        resolve_params(algorithms.get("archive_selection"), {"sampling": "greedy"})
+
+
+def test_the_registry_works_from_a_wheel_without_examples():
+    """``examples/`` is not shipped; list and show must not need it."""
+    code = ("import sys; sys.modules['examples'] = None\n"
+            "from agentdescent.cli import main\n"
+            "assert main(['algorithms', 'list']) == 0\n"
+            "assert main(['algorithms', 'show', 'rrsi']) == 0\n")
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+    assert "rrsi" in done.stdout and "archive_selection" in done.stdout
+
+
+def test_the_examples_rrsi_modules_are_aliases_of_the_packaged_ones():
+    import agentdescent.algorithms.rrsi.rrsi_policies as moved
+    import examples.rrsi.rrsi_policies as alias
+    from examples.rrsi import selection as alias_selection
+    from agentdescent.algorithms.rrsi import selection
+
+    assert alias is moved and alias_selection is selection
+
+
+# -- EvolveSpec.algorithm --------------------------------------------------------
+
+
+def test_the_spec_round_trips_an_algorithm():
+    spec = _spec(algorithm={"name": "rrsi", "params": {"b_max": 3}})
+    again = EvolveSpec.from_dict(json.loads(json.dumps(spec.to_dict())))
+    assert again.algorithm == {"name": "rrsi", "params": {"b_max": 3}}
+    assert EvolveSpec.from_dict(_spec(algorithm="rrsi").to_dict()).algorithm == "rrsi"
+
+
+@pytest.mark.parametrize("spec_kw, message", [
+    (dict(algorithm="gepa"), r"algorithm: unknown algorithm 'gepa'; available: \['archive_selection', 'rrsi'\]"),
+    (dict(algorithm={"name": "rrsi", "params": {"nope": 1}}),
+     r"algorithm\.params: 'rrsi' has no parameter\(s\) \['nope'\]"),
+    (dict(algorithm={"name": "rrsi", "params": {"b_max": "x"}}),
+     r"algorithm\.params\.b_max: expected int"),
+    (dict(algorithm={"name": "rrsi", "params": {"b_min": 4, "b_max": 2}}),
+     r"b_min \(4\) must not exceed b_max \(2\)"),
+    (dict(algorithm={"params": {}}), r"algorithm: expected a name or"),
+    (dict(algorithm={"name": "rrsi", "param": {}}), r"unexpected key\(s\) \['param'\]"),
+    (dict(algorithm={"name": "rrsi", "params": [1]}), r"algorithm\.params: expected an object"),
+    (dict(algorithm={"name": "rrsi", "params": []}), r"algorithm\.params: expected an object"),
+    (dict(algorithm={"name": "rrsi", "params": ""}), r"algorithm\.params: expected an object"),
+    (dict(algorithm={"name": "rrsi", "params": 0}), r"algorithm\.params: expected an object"),
+    (dict(algorithm={"name": "rrsi", "params": False}), r"algorithm\.params: expected an object"),
+    (dict(algorithm=3), r"algorithm: expected a name or"),
+])
+def test_a_bad_algorithm_fails_in_compose_naming_the_field(spec_kw, message):
+    with pytest.raises(SpecError, match=message):
+        compose(_spec(**spec_kw))
+
+
+def test_null_algorithm_params_means_defaults():
+    compose(_spec(algorithm={"name": "rrsi", "params": None}))
+
+
+def test_noise_band_at_the_bound_is_accepted():
+    assert resolve_params(algorithms.get("rrsi"), {"noise_band": 1})["noise_band"] == 1.0
+
+
+def test_an_algorithm_that_does_not_apply_to_the_kind_names_the_ones_that_do(tmp_path):
+    (tmp_path / "SKILL.md").write_text("---\nname: s\ndescription: d\n---\nbody\n")
+    spec = _spec(kind="skill_dir", target=str(tmp_path), agent="opencode",
+                 algorithm="rrsi")
+    with pytest.raises(SpecError,
+                       match=r"'rrsi' applies to kind \['text'\], not 'skill_dir'; "
+                             r"for kind 'skill_dir': \['archive_selection'\]"):
+        compose(spec)
+
+
+def test_policy_slot_refuses_an_algorithm():
+    spec = EvolveSpec(kind="policy_slot", target="selection", data={}, agent="echo",
+                      algorithm="rrsi")
+    with pytest.raises(SpecError, match=r"algorithm: not available for kind='policy_slot'"):
+        compose(spec)
+
+
+def test_rrsi_composes_into_the_three_policies_and_keeps_the_default_merge():
+    comp = compose(_spec(algorithm={"name": "rrsi", "params": {"protected": ["zzz3"]}}))
+    pol = comp.kwargs["policies"]
+    assert isinstance(pol.screen, RRsiCritic)
+    assert isinstance(pol.proposal, RRsiProposalPolicy)
+    assert isinstance(pol.acceptance, RRsiAcceptance)
+    assert pol.conflict is not None and pol.fusion is not None
+    assert comp.algorithm["name"] == "rrsi" and comp.algorithm["params"]["b_max"] == 5
+
+
+def test_the_specs_own_policy_overrides_the_algorithms_and_plan_says_so():
+    spec = _spec(algorithm="archive_selection", policies={"selection": "Beam"})
+    comp = compose(spec)
+    assert type(comp.kwargs["policies"].selection).__name__ == "Beam"
+    assert comp.algorithm["overridden_by_spec"] == ["policies.selection"]
+    assert compose(_spec(algorithm="archive_selection")).algorithm["overridden_by_spec"] == []
+
+
+def test_an_algorithms_defaults_sit_between_the_kind_and_the_spec():
+    calls = []
+
+    def build(ctx, p):
+        calls.append(p)
+        return Overrides(knobs={"rounds": 9, "patience": 7},
+                         agg_config={"batch_trigger": 5, "max_wait_rounds": 4},
+                         notes=["hello"])
+
+    algorithms.register(Algorithm(
+        name="_probe", summary="s", kinds=("text",), fidelity="preset", params=(
+            Param("x", "int", 1),), build=build), replace=True)
+    try:
+        comp = compose(_spec(algorithm={"name": "_probe", "params": {"x": 2}},
+                             evolve={"rounds": 3, "n_workers": 2, "seed": 0},
+                             agg_config={"max_wait_rounds": 1}))
+    finally:
+        algorithms._REGISTRY.pop("_probe")
+    k = comp.kwargs
+    assert calls == [{"x": 2}]
+    assert k["rounds"] == 3          # spec.evolve beats the algorithm
+    assert k["patience"] == 7        # the algorithm beats the kind's default (3)
+    assert k["agg_config"].batch_trigger == 5      # the algorithm
+    assert k["agg_config"].max_wait_rounds == 1    # the spec beats it
+    assert "hello" in comp.notes
+    assert comp.algorithm["overridden_by_spec"] == ["agg_config.max_wait_rounds",
+                                                    "evolve.rounds"]
+
+
+def test_a_directory_kind_composes_with_a_selection_algorithm(tmp_path):
+    (tmp_path / "SKILL.md").write_text("---\nname: s\ndescription: d\n---\nbody\n")
+    spec = EvolveSpec(kind="skill_dir", target=str(tmp_path), agent="opencode",
+                      data={"inline": ROWS}, algorithm="archive_selection")
+    assert isinstance(compose(spec).kwargs["policies"].selection, Archive)
+
+
+def test_no_algorithm_changes_nothing():
+    comp = compose(_spec())
+    assert comp.algorithm is None
+    assert comp.kwargs["policies"].screen is None
+
+
+# -- plan ------------------------------------------------------------------------
+
+
+def test_plan_echoes_the_resolved_algorithm(tmp_path, capsys):
+    path = _write(tmp_path, _spec(algorithm={"name": "rrsi", "params": {"b_max": 3}}))
+    assert cli.main(["--json", "plan", path]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["ok"] is True
+    alg = out["algorithm"]
+    assert alg["name"] == "rrsi" and alg["fidelity"] == "mechanism_microport"
+    assert alg["params"]["b_max"] == 3 and alg["params"]["T"] == 20
+    assert "extra_calls" in alg and alg["overridden_by_spec"] == []
+
+
+def test_plan_without_an_algorithm_has_no_algorithm_key(tmp_path, capsys):
+    assert cli.main(["--json", "plan", _write(tmp_path, _spec())]) == 0
+    assert "algorithm" not in json.loads(capsys.readouterr().out)
+
+
+def test_plan_fails_closed_for_a_bad_algorithm(tmp_path, capsys):
+    path = _write(tmp_path, _spec(algorithm={"name": "rrsi", "params": {"b_max": "x"}}))
+    assert cli.main(["--json", "plan", path]) == 2
+    out = json.loads(capsys.readouterr().out)
+    assert out["ok"] is False and "algorithm.params.b_max" in out["error"]
+
+
+# -- running ---------------------------------------------------------------------
+
+
+def _run(spec, tmp_path):
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = compose(spec, repo_path=str(tmp_path / "repo")).run()
+    stopped = [str(w.message) for w in caught if "stopped early" in str(w.message)]
+    assert not stopped, stopped
+    return result
+
+
+def test_rrsi_runs_an_offline_evolve_round(tmp_path):
+    """The screen and the acceptance floor are live in the loop, not just composed."""
+    result = _run(_spec(algorithm="rrsi"), tmp_path)
+    assert result.critic_checked >= 1
+    assert sum(result.outcomes().values()) >= 1
+
+
+def test_rrsi_screens_a_leaking_candidate_before_measurement(tmp_path):
+    """``protected`` reaches the screen: the echo reflector reproduces the task
+    prompt, which carries the protected string, so it is refused unmeasured."""
+    spec = _spec(algorithm={"name": "rrsi", "params": {"protected": ["what is"]}})
+    result = _run(spec, tmp_path)
+    assert result.critic_rejected >= 1
+    assert result.outcomes().get("critic-rejected", 0) >= 1
+
+
+def test_archive_selection_runs_an_offline_evolve_round(tmp_path):
+    spec = _spec(algorithm={"name": "archive_selection", "params": {"seed": 1}},
+                 evolve={"rounds": 3, "n_workers": 2, "seed": 0})
+    result = _run(spec, tmp_path)
+    assert result.outcomes().get("population-select", 0) >= 1
+
+
+# -- the CLI ---------------------------------------------------------------------
+
+
+def test_cli_list_text_and_json(capsys):
+    assert cli.main(["algorithms", "list"]) == 0
+    text = capsys.readouterr().out
+    assert "rrsi" in text and "mechanism_microport" in text and "archive_selection" in text
+    for argv in (["--json", "algorithms", "list"], ["algorithms", "list", "--json"]):
+        assert cli.main(argv) == 0
+        rows = json.loads(capsys.readouterr().out)
+        assert [r["name"] for r in rows] == ["archive_selection", "rrsi"]
+        assert {p["name"] for p in rows[1]["params"]} >= {"b_max", "protected"}
+
+
+def test_cli_list_filters_by_kind_and_rejects_an_unknown_one(capsys):
+    assert cli.main(["algorithms", "list", "--kind", "plugin", "--json"]) == 0
+    assert [r["name"] for r in json.loads(capsys.readouterr().out)] == ["archive_selection"]
+    assert cli.main(["algorithms", "list", "--kind", "bogus"]) == 2
+    assert "--kind must be one of" in capsys.readouterr().err
+
+
+def test_cli_show_prints_the_card_and_fails_for_an_unknown_name(capsys):
+    assert cli.main(["algorithms", "show", "rrsi"]) == 0
+    text = capsys.readouterr().out
+    assert "mechanism_microport" in text and "b_max: int = 5" in text and "docs/algo-rrsi.md" in text
+    assert cli.main(["algorithms", "show", "rrsi", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["name"] == "rrsi"
+    assert cli.main(["algorithms", "show", "nope"]) == 2
+    assert "unknown algorithm 'nope'" in capsys.readouterr().err

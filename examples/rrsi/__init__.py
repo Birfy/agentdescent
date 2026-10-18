@@ -1,11 +1,7 @@
-"""Offline, mechanism-level building blocks for the Google RRSI port.
+"""The RRSI mechanisms now live in :mod:`agentdescent.algorithms.rrsi`.
 
-Currently ships:
-
-* ``selection`` — Algorithm 2 round-selection rule
-* ``schedule`` — cosine-annealed L0 edit budget
-* ``components`` — the component vocabulary K / K_str and evidence-checked tags
-* ``history`` — the per-edit history L_t: yield, prune set, stall exploration
-* ``rrsi_policies`` — the same mechanisms wired into ``evolve()`` through the
-  engine's ``Policies`` seams (screen / proposal / acceptance)
+They moved into the package so the algorithm registry (``agentdescent algorithms
+list``) can ship them in the wheel, which does not carry ``examples/`` (#384).
+The modules here are aliases of the moved ones, so existing
+``examples.rrsi.<module>`` imports keep working and resolve to the same objects.
 """
