@@ -4,6 +4,15 @@
       "command": "agentdescent",
       "args": [
         "mcp"
+      ],
+      "env_vars": [
+        "DEEPSEEK_API_KEY",
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "ARK_API_KEY",
+        "AGENTDESCENT_HOME"
       ]
     }
   }
