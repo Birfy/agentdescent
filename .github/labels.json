@@ -1,0 +1,33 @@
+[
+  {"group": "type", "name": "bug", "color": "d73a4a", "description": "Something isn't working"},
+  {"group": "type", "name": "enhancement", "color": "a2eeef", "description": "New feature or request"},
+  {"group": "type", "name": "documentation", "color": "0075ca", "description": "Improvements or additions to documentation"},
+  {"group": "type", "name": "chore", "color": "ededed", "description": "CI, tooling, process or release work; no change to what the package does"},
+
+  {"group": "area", "name": "area:evolve", "color": "1d76db", "description": "The evolve loop: evolution, async_evolve, aggregator, population, policies, strategies"},
+  {"group": "area", "name": "area:meta", "color": "5319e7", "description": "Meta-evolution stack: meta*, meta_population, portfolio, consolidation, curriculum"},
+  {"group": "area", "name": "area:runstore", "color": "0e8a16", "description": "Run store, ledger, checkpoint, resume and replay"},
+  {"group": "area", "name": "area:audit", "color": "b60205", "description": "agentdescent/audit, meta_audit, chain_audit, verifier and oracle calibration"},
+  {"group": "area", "name": "area:agents", "color": "c5def5", "description": "Model adapters and providers (agents.py, backends, API keys via env)"},
+  {"group": "area", "name": "area:plugins", "color": "fbca04", "description": "Host plugins and installers: Claude Code, Codex, DSH, OpenCode, MCP server"},
+  {"group": "area", "name": "area:cli", "color": "d4c5f9", "description": "The agentdescent command line (cli.py, doctor, plan/evolve/status/apply)"},
+  {"group": "area", "name": "area:ports", "color": "f9d0c4", "description": "Faithful algorithm ports: examples/<algorithm>/ and agentdescent/algorithms"},
+  {"group": "area", "name": "area:bench", "color": "bfdadc", "description": "Benchmarks, A/B runs and reports (bench/, reports/)"},
+  {"group": "area", "name": "area:docs", "color": "0075ca", "description": "Documentation site (docs/, mkdocs.yml) and README"},
+  {"group": "area", "name": "area:ci", "color": "000000", "description": "CI workflows, release, packaging and the repo process (.github/, AGENTS.md)"},
+
+  {"group": "source", "name": "self-test", "color": "C5DEF5", "description": "Filed by the product self-test routine (issues only)"},
+
+  {"group": "state", "name": "needs-info", "color": "D4C5F9", "description": "Waiting for the reporter or a maintainer decision"},
+  {"group": "state", "name": "needs-human", "color": "B60205", "description": "The agent loop stopped; a person must decide (reason in the last comment)"},
+  {"group": "state", "name": "agent-ready", "color": "0E8A16", "description": "Triaged spec: an agent may take it. Set by a maintainer or the maintenance routine only"},
+  {"group": "state", "name": "agent-working", "color": "1D76DB", "description": "An agent has claimed this issue (the claim comment names the branch)"},
+  {"group": "state", "name": "agent-pr", "color": "5319E7", "description": "Pull request opened by an agent"},
+  {"group": "state", "name": "awaiting-approval", "color": "FBCA04", "description": "Green T2/T3 PR: waits for a PASS at its tip and Danyang's merge click"},
+  {"group": "state", "name": "hold", "color": "000000", "description": "A person froze this issue or PR; agents and automation leave it alone"},
+
+  {"group": "risk", "name": "risk:T0", "color": "C2E0C6", "description": "Risk tier T0 (docs only), set by the controller from the diff; never by hand"},
+  {"group": "risk", "name": "risk:T1", "color": "BFD4F2", "description": "Risk tier T1 (tests, examples, changelog.d), set by the controller from the diff"},
+  {"group": "risk", "name": "risk:T2", "color": "FBCA04", "description": "Risk tier T2 (package code or an unnamed path), set by the controller from the diff"},
+  {"group": "risk", "name": "risk:T3", "color": "D93F0B", "description": "Risk tier T3 (core loop, release, process; needs Danyang's click), set by the controller"}
+]
