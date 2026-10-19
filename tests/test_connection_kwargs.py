@@ -213,3 +213,16 @@ def test_no_warning_for_an_openai_key(tmp_path, monkeypatch):
 def test_an_unset_key_keeps_only_its_own_warning(tmp_path):
     [warning] = _unusable_refs(_spec(tmp_path, api_key_env="ARK_API_KEY"))
     assert "needs ARK_API_KEY" in warning and "would send" not in warning
+
+
+@pytest.mark.parametrize("ref", [OPENAI, "agentdescent.agents:openai_compatible"])
+def test_the_short_and_the_qualified_ref_are_checked_alike(tmp_path, monkeypatch, ref):
+    """The same adapter, spelled two ways: the qualified one used to skip the preflight."""
+    monkeypatch.setenv("ARK_API_KEY", "k")
+    spec = EvolveSpec.from_dict(_spec_dict(tmp_path, reflect={
+        "ref": ref, "model": "m", "api_key_env": "ARK_API_KEY"}))
+    [warning] = _unusable_refs(spec)
+    assert "would send ARK_API_KEY" in warning and "api.openai.com" in warning
+    monkeypatch.delenv("ARK_API_KEY")
+    [warning] = _unusable_refs(spec)
+    assert "needs ARK_API_KEY" in warning

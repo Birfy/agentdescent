@@ -694,7 +694,9 @@ def _unusable_refs(spec: EvolveSpec) -> List[str]:
             if missing:
                 out.append(f"{field}: `claude` is the Anthropic SDK completion (the "
                            f"CLI is `claude_code`) and needs {' and '.join(missing)}")
-        elif ref == "openai_compatible":
+        elif ref in ("openai_compatible", "agentdescent.agents:openai_compatible"):
+            # The short name and the qualified one resolve to the same adapter, so
+            # both get the preflight (a qualified ref used to skip it).
             key_env = _key_env(block, "OPENAI_API_KEY")
             url_env = _key_env(block, "OPENAI_BASE_URL", field="base_url_env")
             if not os.environ.get(key_env):
