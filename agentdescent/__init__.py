@@ -179,6 +179,11 @@ from .meta_audit import (
     audited_meta_validate,
     meta_run_audited,
 )
+from .meta_population import (
+    MetaPopulationReport,
+    PopulationIsland,
+    meta_population_run,
+)
 from .filetree import (
     TreeError,
     TreeSpec,
@@ -469,6 +474,9 @@ __all__ = [
     "MetaAuditStore",
     "audited_meta_validate",
     "meta_run_audited",
+    "MetaPopulationReport",
+    "PopulationIsland",
+    "meta_population_run",
     "compile_priority",
     "priority_selection",
     "SLOT_PROTOCOLS",

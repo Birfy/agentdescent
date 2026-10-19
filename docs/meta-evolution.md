@@ -399,3 +399,56 @@ The measured case in the tests: a meta reward that reads an `auc` of `+0.65`
 where truth reads `+0.0` — `gain_bias` reports the `+0.65`, the verdict is
 still computed (and recorded) on the verifier, and the store holds the pairs
 with both readings.
+=======
+
+## Meta-population: the archive seeds a population, the population promotes
+
+`continuous_meta_run` seeds one session from the archive's best rule;
+`meta_population_run` is the parallel version — the archive's top rules each
+seed an island, every island searches from its own starting rule, and the best
+adopt island's rule is promoted back:
+
+```python
+from agentdescent import ConsolidationStore, meta_population_run
+
+report, _ = meta_population_run(
+    store, slot="task_sampler", spec=slot(), propose=offline_propose,
+    tasks_for=lambda rec: tasks_for_config(rec.config),
+    run=run, reward=reward, inner_propose=propose, inner_strategy=SingleSlot("cap:0"),
+    config=CONFIG, islands=3, train_runs=3,
+    problems={"ta": helpful, "tb": helpful}, val_problems={"va": helpful_val},
+    rounds=3, n_workers=1)
+for island in report.islands:          # one row per starting rule
+    print(island.index, island.seeded_from, island.mean_gain, island.verdict)
+print(report.promoted_from, report.reason)
+```
+
+The loop, in the same shape as the rest of the meta surface:
+
+1. **Islands are sessions.** The archive's rule records for the slot/spec/config
+   are ranked as `continuous_meta_run` ranks them; the top `islands` distinct
+   rules each seed a `meta_evolve` via `initial_state`. Every island trains on
+   the same problems and validates the same `val_problems` at `val_seeds`
+   disjoint from training, so the islands differ only in *where they started*.
+2. **Each island runs in its own fresh repo.** A shared `repo_path` would make
+   the engine resume the ledger and silently ignore the islands' distinct
+   `initial_state` — a population of clones. `repo_dir=` names the base
+   directory for the per-island repos.
+3. **Promotion is evidence-based and fail-closed.** Only an island whose
+   verdict is `adopt` (positive mean gain on unseen problems, non-negative
+   transfer) can be promoted; the best such island — highest mean gain, then
+   best transfer — is written back via `archive_rule`. An island that errored
+   is reported and never promoted, without stopping the others.
+4. **The report is per-seed.** `MetaPopulationReport.islands` is one
+   `PopulationIsland` per starting rule (seeded_from, value, mean_gain,
+   transfer, verdict, reason); `promoted_from` / `promoted_run_id` /
+   `archive_count` say what the population changed.
+
+An empty archive is refused with a pointer to run `continuous_meta_run` once
+first — a population needs something to diversify from. Offline demo (two
+sessions seed the archive, a population of two islands promotes the one that
+gained):
+
+```bash
+python -m examples.meta.population_meta_demo
+```
