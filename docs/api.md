@@ -571,7 +571,7 @@ continuous_meta_run(
 | `val_seeds` | `Sequence[int]` | `(1, 2)` | As `model`. |
 | `min_gain` | `float` | `0.0` | As `model`. |
 | `transfer_floor` | `float` | `0.0` | As `model`. |
-| `run_id` | `Optional[str]` | `None` | The archived `run_id` for the adopted rule; a timestamp id when omitted (pass one explicitly when you need to find it again). |
+| `run_id` | `Optional[str]` | `None` | The archived `run_id` for the adopted rule; a unique `meta-<slot>-<unix time>-<random>` id when omitted (pass one explicitly when you need to find it again). |
 | `**evolve_kwargs` | `Any` |  | Everything else `meta_evolve` takes, except `initial_state` (this function sets it from the archive) and `strategy`/`run`/ `reward` (the inner domain's, passed above). Returns `(report, result)`; `report.value` is the evolved value and `report.verdict` the adopt/reject decision. |
 
 ### `evolve_problem(...)`
