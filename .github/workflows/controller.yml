@@ -1,0 +1,71 @@
+name: controller
+
+# A deterministic, label-only controller (AGENTS.md › Controller): no LLM, no
+# secrets, only the built-in GITHUB_TOKEN. It never merges, approves, comments
+# on or closes anything and never checks out or runs a PR or issue: their text
+# is data for a regex, the changed files are read through the API. Script and
+# rules come from the default branch.
+#
+# Switches (repository variables):
+#   CONTROLLER_LIVE  exactly `true` -> the `apply` job writes labels; anything
+#                    else -> dry run, the plan goes to the job summary.
+#   AGENT_PAUSE      `true` -> kill switch: nothing is read, proposed or changed.
+# To turn it off entirely, disable this workflow in the Actions tab.
+on:
+  schedule:
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: controller
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  plan:
+    name: plan (read only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      live: ${{ steps.plan.outputs.live }}
+      plan: ${{ steps.plan.outputs.plan }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CONTROLLER_LIVE: ${{ vars.CONTROLLER_LIVE }}
+          AGENT_PAUSE: ${{ vars.AGENT_PAUSE }}
+        run: python3 .github/scripts/controller.py plan
+
+  apply:
+    name: apply labels (live only)
+    needs: plan
+    if: needs.plan.outputs.live == 'true' && vars.CONTROLLER_LIVE == 'true' && vars.AGENT_PAUSE != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CONTROLLER_LIVE: ${{ vars.CONTROLLER_LIVE }}
+          AGENT_PAUSE: ${{ vars.AGENT_PAUSE }}
+          PLAN: ${{ needs.plan.outputs.plan }}
+        run: python3 .github/scripts/controller.py apply

@@ -1,0 +1,52 @@
+name: risk tier
+
+# Computes the risk tier (T0-T3) of a pull request and writes it to the job
+# summary. REPORT ONLY: it is not a required check, never blocks, labels,
+# comments or merges (the controller sets the risk:T* label). Keep it out of the
+# ruleset's required checks.
+#
+# Safety: `pull_request` (never pull_request_target), read-only token, no
+# secrets. The script and its rules come from the BASE commit and read the PR
+# only through the API; PR code is never run. The one exception is the pull
+# request that introduces the script: the base has no copy yet, so that single
+# run falls back to the copy in the PR (still read-only, no secrets).
+on:
+  pull_request:
+
+concurrency:
+  group: risk-tier-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  report:
+    name: risk tier (report only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        if: hashFiles('base/.github/scripts/risk_gate.py') == ''
+        with:
+          path: pr
+          persist-credentials: false
+      - name: Compute the tier
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          dir="base"
+          if [ ! -f base/.github/scripts/risk_gate.py ]; then
+            echo "::notice::The base commit has no risk gate yet; using the copy in this pull request."
+            dir="pr"
+          fi
+          python3 "$dir/.github/scripts/risk_gate.py"
