@@ -184,6 +184,11 @@ from .meta_population import (
     PopulationIsland,
     meta_population_run,
 )
+from .meta_curriculum import (
+    MetaChallengerConfig,
+    MetaProblemChallenger,
+    curriculum_meta_run,
+)
 from .filetree import (
     TreeError,
     TreeSpec,
@@ -477,6 +482,9 @@ __all__ = [
     "MetaPopulationReport",
     "PopulationIsland",
     "meta_population_run",
+    "MetaChallengerConfig",
+    "MetaProblemChallenger",
+    "curriculum_meta_run",
     "compile_priority",
     "priority_selection",
     "SLOT_PROTOCOLS",
