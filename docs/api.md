@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-354 public names across 58 modules.
+359 public names across 58 modules.
 
 ---
 
@@ -361,6 +361,30 @@ tasks_from(
 
 Evolve a decision slot of `evolve()` itself, and validate it elsewhere. &nbsp;·&nbsp; `agentdescent.meta` &nbsp;·&nbsp; [guide](meta-evolution.md)
 
+### `ContinuousMetaReport(...)`
+
+What one `continuous_meta_run` session did, and why.
+
+```python
+ContinuousMetaReport(
+    slot: str,
+    seed_value: str,
+    value: str,
+    validation: Dict[str, Dict[str, float]],
+    mean_gain: float,
+    transfer: Optional[float],
+    verdict: str,
+    reason: str,
+    seeded_from: Optional[str],
+    fresh_seed_value: str,
+    fresh_gain: float,
+    fresh_transfer: Optional[float],
+    archived: bool,
+    archived_run_id: Optional[str],
+    archive_count: int
+) -> None
+```
+
 ### `MetaOutcome(...)`
 
 What one inner run did under a candidate slot value.
@@ -446,6 +470,26 @@ SourceSlot(
 |---|---|
 | `accepts(proposal: str) -> Tuple[bool, str]` | Would `to_diff` take this proposal? `(accepted, reason)`. |
 
+### `archive_rule(...)`
+
+Write an adopted slot rule back to the archive.
+
+```python
+archive_rule(
+    store: ConsolidationStore,
+    report: MetaRunReport,
+    result: EvolutionResult,
+    *,
+    run_id: str,
+    slot: str,
+    spec: SlotSpec,
+    config: Optional[Dict[str, Any]] = None,
+    problem: Optional[Dict[str, Any]] = None,
+    artifact_id: str = 'meta-rule',
+    trajectory_store: Optional[str] = None
+) -> ConsolidationRecord
+```
+
 ### `auc(outcome: MetaOutcome) -> float`
 
 Mean best-so-far held-out reward over the inner run: how *fast* it rose.
@@ -468,6 +512,67 @@ compile_policy_source(
 ### `compile_priority(source: str) -> Callable[..., float]`
 
 AST-gate `source` and return its `priority` function.
+
+### `continuous_meta_run(...)`
+
+One session of continuous meta-learning: evolve, judge, archive.
+
+```python
+continuous_meta_run(
+    store: ConsolidationStore,
+    slot: str,
+    spec: SlotSpec,
+    propose: Optional[Callable[[str, Task, str, float], Optional[str]]] = None,
+    *,
+    tasks_for: Callable[[ConsolidationRecord], Sequence[Task]],
+    run: Callable[[str, Task], str],
+    reward: Callable[[Task, str], float],
+    inner_propose: Callable[[str, Task, str, float], Optional[str]],
+    inner_strategy: Any,
+    config: Optional[Dict[str, Any]] = None,
+    problems: Optional[Union[Sequence[Problem], Mapping[str, Problem]]] = None,
+    val_problems: Optional[Union[Sequence[Problem], Mapping[str, Problem]]] = None,
+    artifact_id: str = 'meta-rule',
+    train_runs: int = 2,
+    val_runs: int = 1,
+    inner: Optional[Dict[str, Any]] = None,
+    model: Optional[Completion] = None,
+    meta_reward: Optional[MetaReward] = None,
+    seeds: Sequence[int] = (0,),
+    val_seeds: Sequence[int] = (1, 2),
+    min_gain: float = 0.0,
+    transfer_floor: float = 0.0,
+    run_id: Optional[str] = None,
+    **evolve_kwargs: Any
+) -> Tuple[ContinuousMetaReport, EvolutionResult]
+```
+
+| parameter | type | default | what it is |
+|---|---|---|---|
+| `store` | `ConsolidationStore` | *required* | The `ConsolidationStore` that makes the loop continuous: rules it already holds seed this session, and an adopted rule is written back to it. |
+| `slot` | `str` | *required* | As `meta_run` -- which `Policies` field evolves, how a value is represented/gated/compiled, and the reflector (pass `propose` directly or `model` to get `slot_reflector`). |
+| `spec` | `SlotSpec` | *required* | As `slot`. |
+| `propose` | `Optional[Callable[[str, Task, str, float], Optional[str]]]` | `None` | As `slot`. |
+| `tasks_for` | `Callable[[ConsolidationRecord], Sequence[Task]]` | *required* | Maps an archived `ConsolidationRecord` to the inner tasks of its problem -- the caller's data, read through the archive's configuration. |
+| `run` | `Callable[[str, Task], str]` | *required* | The inner `evolve()` domain functions, passed through to `problem_from_archive` for every rebuilt problem. |
+| `reward` | `Callable[[Task, str], float]` | *required* | As `run`. |
+| `inner_propose` | `Callable[[str, Task, str, float], Optional[str]]` | *required* | As `run`. |
+| `inner_strategy` | `Any` | *required* | As `run`. |
+| `config` | `Optional[Dict[str, Any]]` | `None` | This session's configuration (dataset/scorer/model/params), used to rank archived rules and written back with the adopted rule. |
+| `problems` | `Optional[Union[Sequence[Problem], Mapping[str, Problem]]]` | `None` | The fallback inner problems, used when the archive cannot fill a set (an empty archive is an ordinary `meta_run`). `inner` must describe how these were built for the archived descriptor to be faithful. |
+| `val_problems` | `Optional[Union[Sequence[Problem], Mapping[str, Problem]]]` | `None` | As `problems`. |
+| `artifact_id` | `str` | `'meta-rule'` | The archive `artifact_id` of rule records. |
+| `train_runs` | `int` | `2` | How many archived rules supply the train and validation problems. |
+| `val_runs` | `int` | `1` | As `train_runs`. |
+| `inner` | `Optional[Dict[str, Any]]` | `None` | The JSON-safe inner `evolve()` settings (`rounds`, `n_workers`, `target_reward` ...): defaults for rebuilt problems and the descriptor archived with an adopted rule. |
+| `model` | `Optional[Completion]` | `None` | As `meta_run`. |
+| `meta_reward` | `Optional[MetaReward]` | `None` | As `model`. |
+| `seeds` | `Sequence[int]` | `(0,)` | As `model`. |
+| `val_seeds` | `Sequence[int]` | `(1, 2)` | As `model`. |
+| `min_gain` | `float` | `0.0` | As `model`. |
+| `transfer_floor` | `float` | `0.0` | As `model`. |
+| `run_id` | `Optional[str]` | `None` | The archived `run_id` for the adopted rule; a unique `meta-<slot>-<unix time>-<random>` id when omitted (pass one explicitly when you need to find it again). |
+| `**evolve_kwargs` | `Any` |  | Everything else `meta_evolve` takes, except `initial_state` (this function sets it from the archive) and `strategy`/`run`/ `reward` (the inner domain's, passed above). Returns `(report, result)`; `report.value` is the evolved value and `report.verdict` the adopt/reject decision. |
 
 ### `evolve_problem(...)`
 
@@ -583,6 +688,41 @@ priority_selection(
     seed: str = 'def priority(rank, visits, total, prior, depth, n_nodes):\n    # Flat PUCT (ERA, futs.py): exploit by rank, explore by visit count.\n    c = 1.0\n    return rank + c * (1.0 / n_nodes) * math.sqrt(total) / (1 + visits)\n'
 ) -> SourceSlot
 ```
+
+### `problem_descriptor(slot: str, **inner: Any) -> Dict[str, Any]`
+
+The serializable shape of one inner `Problem`, for an archive.
+
+### `problem_from_archive(...)`
+
+Rebuild an inner `Problem` from an archived rule's descriptor.
+
+```python
+problem_from_archive(
+    store: ConsolidationStore,
+    run_id: str,
+    *,
+    tasks_for: Callable[[ConsolidationRecord], Sequence[Task]],
+    spec: SlotSpec,
+    run: Callable[[str, Task], str],
+    reward: Callable[[Task, str], float],
+    propose: Callable[[str, Task, str, float], Optional[str]],
+    strategy: Any,
+    **defaults: Any
+) -> Problem
+```
+
+| parameter | type | default | what it is |
+|---|---|---|---|
+| `store` | `ConsolidationStore` | *required* | The archive holding the record. |
+| `run_id` | `str` | *required* | Which archived run to rebuild from. `KeyError` when it is not archived or carries no problem descriptor. |
+| `tasks_for` | `Callable[[ConsolidationRecord], Sequence[Task]]` | *required* | Maps an archived `ConsolidationRecord` to the inner tasks its problem ran on. The caller owns the data; the archive owns the semantics and the configuration. |
+| `spec` | `SlotSpec` | *required* | The outer `SlotSpec` -- used as a guard, not as an input to the inner run: the record's `strategy` must be this spec's class name, the same "adopt through the strategy that wrote the state" rule `seed_from_archive` enforces. A record archived by a different spec is refused, never silently misread. |
+| `run` | `Callable[[str, Task], str]` | *required* | The inner problem's own `evolve()` parts -- the domain functions. |
+| `reward` | `Callable[[Task, str], float]` | *required* | As `run`. |
+| `propose` | `Callable[[str, Task, str, float], Optional[str]]` | *required* | As `run`. |
+| `strategy` | `Any` | *required* | As `run`. |
+| `**defaults` | `Any` |  | Inner `evolve()` settings. Each overrides the archived value: the descriptor says how the problem was run *then*; the caller may want it run differently *now*. |
 
 ### `rollouts_to(target: float) -> MetaReward`
 
@@ -2961,6 +3101,7 @@ ConsolidationRecord(
     final_reward: float,
     rounds: int,
     trajectory_store: Optional[str] = None,
+    problem: Optional[Dict[str, Any]] = None,
     created_at: float = <factory>
 ) -> None
 ```
