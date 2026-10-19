@@ -172,6 +172,12 @@ from .meta import (
     meta_validate, policy_source, priority_selection, rollouts_to, seed_source,
     slot_reflector, transfer_ratio,
 )
+from .meta_audit import (
+    MetaAuditRecord,
+    MetaAuditStore,
+    audited_meta_validate,
+    meta_run_audited,
+)
 from .filetree import (
     TreeError,
     TreeSpec,
@@ -453,6 +459,10 @@ __all__ = [
     "rollouts_to",
     "slot_reflector",
     "transfer_ratio",
+    "MetaAuditRecord",
+    "MetaAuditStore",
+    "audited_meta_validate",
+    "meta_run_audited",
     "compile_priority",
     "priority_selection",
     "SLOT_PROTOCOLS",
