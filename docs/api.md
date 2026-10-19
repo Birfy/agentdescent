@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-369 public names across 61 modules.
+378 public names across 62 modules.
 
 ---
 
@@ -4137,6 +4137,18 @@ How complementary diffs become one candidate.
 
 One tournament: what the fused candidate scored against the best single.
 
+### `Harness`
+
+One algorithm port, named and runnable.
+
+### `HarnessReport`
+
+What a `compose_run` did, and why.
+
+### `HarnessRun`
+
+One harness's measured outcome in a `compose_run`.
+
 ### `KeyedRules`
 
 One entry per *category*: competing proposals contradict and are resolved.
@@ -4349,6 +4361,10 @@ The control every efficiency number in this repository is missing.
 
 Wrap a `max_tokens -> Completion` factory into an adaptive Completion.
 
+### `compose_run`
+
+Run the harness(es) for a domain, record the outcomes, pick a winner.
+
 ### `curriculum_meta_run`
 
 Evolve a decision slot against a problem distribution the meta loop generates.
@@ -4356,6 +4372,18 @@ Evolve a decision slot against a problem distribution the meta loop generates.
 ### `dataloader`
 
 Dependency-free dataset loading -- the *data layer* for examples/experiments.
+
+### `harness`
+
+The least a harness can be: a name and a `(tasks, repo) -> result` callable.
+
+### `harness_leaderboard`
+
+`harness_name -> {rewards, best}` over the archive's recorded outcomes.
+
+### `harness_score`
+
+The best measured reward this harness has recorded for the domain.
 
 ### `meta_population_run`
 
@@ -4365,6 +4393,14 @@ Run a population of meta sessions from the archive's best rules, promote the win
 
 `meta_run` with an audited validation: sample, oracle, persist, decide.
 
+### `record_harness`
+
+Record one harness outcome for a domain. Idempotent by `run_id`.
+
 ### `rule_id`
 
 Content-address a proposal so identical proposals dedupe automatically.
+
+### `select_harness`
+
+Route a domain to the harness the archive's evidence says wins there.

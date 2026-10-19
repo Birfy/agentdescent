@@ -152,6 +152,17 @@ from .consolidation import (
     config_fingerprint,
     seed_from_archive,
 )
+from .harness import (
+    Harness,
+    HarnessReport,
+    HarnessRun,
+    compose_run,
+    harness,
+    harness_leaderboard,
+    harness_score,
+    record_harness,
+    select_harness,
+)
 from .allocator import (
     AllocatorContext,
     AllocatorPolicy,
@@ -346,6 +357,15 @@ __all__ = [
     "SeedReport",
     "config_fingerprint",
     "seed_from_archive",
+    "Harness",
+    "HarnessReport",
+    "HarnessRun",
+    "compose_run",
+    "harness",
+    "harness_leaderboard",
+    "harness_score",
+    "record_harness",
+    "select_harness",
     # solver-challenger self-play (#329 / #341)
     "Challenger",
     "ChallengerConfig",
