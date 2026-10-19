@@ -50,6 +50,23 @@ FORWARDED_ENV = (
     "DEEPSEEK_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "ANTHROPIC_API_KEY",
     "ANTHROPIC_BASE_URL", "ARK_API_KEY", "AGENTDESCENT_HOME")
 
+#: Names in :data:`FORWARDED_ENV` that are not secrets a model reads: endpoint
+#: variables and the run-store location. Everything else in the tuple is a provider
+#: key, which is what ``doctor`` reports as present (#423).
+_NOT_KEYS = ("AGENTDESCENT_HOME",)
+
+
+def provider_key_names() -> Tuple[str, ...]:
+    """The provider-key variables of :data:`FORWARDED_ENV`, in its order.
+
+    ``doctor`` used to decide "is there a provider key?" from three hard-coded
+    names, so ``ARK_API_KEY`` -- forwarded by every installer and used by the
+    docs' own Ark example -- read as no key at all. Deriving the list from the
+    one forwarded tuple means a name added there is a key to ``doctor`` too
+    (``*_BASE_URL`` and ``AGENTDESCENT_HOME`` excluded)."""
+    return tuple(n for n in FORWARDED_ENV
+                 if not n.endswith("_BASE_URL") and n not in _NOT_KEYS)
+
 
 def skill_text() -> str:
     with open(os.path.join(_HERE, "SKILL.md"), encoding="utf-8") as fh:

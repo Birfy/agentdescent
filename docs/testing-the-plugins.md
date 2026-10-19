@@ -47,7 +47,11 @@ AGENTDESCENT_NODE_PROBE=/tmp/react-probe pytest tests/test_integrations.py -k cl
 agentdescent doctor
 ```
 
-Lists which agent CLIs are on `PATH`, which provider keys are set, whether a
+Lists which agent CLIs are on `PATH`, which provider keys are set (every key
+variable the installers forward -- `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+`DEEPSEEK_API_KEY`, `ARK_API_KEY` -- in `provider_keys_present`; one is enough, and
+a key that is not OpenAI's or Anthropic's comes with a hint on using it through
+`openai_compatible` with `api_key_env` and `default_base_url`), whether a
 container engine and the `mcp` package are present, and where the run store is.
 Every "problem" line it prints is something that will make a real run fail. It
 also prints the AgentDescent `version` (also `agentdescent --version`) and the
