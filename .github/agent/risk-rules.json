@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "note": "Read by .github/scripts/risk_gate.py (risk-tier workflow, report only) and by the controller, which sets risk:T0..T3 from it. The tier is the highest of every changed path (and a rename's old path), content hits in added lines of code files, and the size cap. Merge policy per tier: AGENTS.md › Merge policy. Editing this file is itself T3.",
+  "tiers": {
+    "T3": {
+      "meaning": "high risk (core loop, adapters, installers, release, CI, process): a PASS at the tip (self-PASS counts) and Danyang's explicit merge click; never auto-merged, never admin-merged",
+      "paths": [
+        ".github/**", ".claude/**", ".claude-plugin/**",
+        "AGENTS.md", "LESSONS.md", "CONTRIBUTING.md", "CODE_STANDARDS.md",
+        "LICENSE", "LICENSES/**", "NOTICE", "CITATION.cff",
+        "pyproject.toml", "CHANGELOG.md",
+        "scripts/install.sh", "scripts/setup-hosts.sh", "scripts/smoke-wheel.sh", "scripts/smoke-installed-wheel.py",
+        "agentdescent/evolution*.py", "agentdescent/async_evolve.py",
+        "agentdescent/runstore.py", "agentdescent/agents.py",
+        "agentdescent/sandbox*.py",
+        "agentdescent/integrations/**", "integrations/**",
+        "**/package.json", "**/package-lock.json", "**/pnpm-lock.yaml"
+      ],
+      "codeExt": "\\.(py|pyi|sh|js|mjs|cjs|ts|yml|yaml|json|toml|cfg)$",
+      "diffPatterns": [
+        "\\bshell\\s*=\\s*True\\b", "(?<![\\w.])eval\\(", "(?<![\\w.])exec\\(", "\\bpickle\\.loads?\\(",
+        "@pytest\\.mark\\.(skip|xfail)\\b",
+        "\\b(sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})"
+      ],
+      "diffPatternsNotInTests": [
+        "\\bsubprocess\\b|\\bchild_process\\b|\\bos\\.(system|popen|exec[lv]p?e?)\\(",
+        "os\\.environ[^\\n]{0,40}(KEY|TOKEN|SECRET)",
+        "\\burllib\\.request\\b|\\brequests\\.(get|post|put|delete|request|Session)\\b|\\bhttpx\\b|\\bsocket\\.socket\\(",
+        "^\\+\\s*__version__\\s*="
+      ],
+      "testPaths": ["tests/**", "**/test_*.py", "**/*_test.py", "**/*.test.{js,cjs,mjs,ts}"],
+      "topics": []
+    },
+    "T2": {
+      "meaning": "medium risk (package code, bench, tools, site config, and any path no rule names): a PASS at the tip (self-PASS counts) and Danyang's explicit merge click",
+      "paths": ["agentdescent/**", "bench/**", "tools/**", "scripts/**", "mkdocs.yml", "site_overrides/**"]
+    },
+    "T1": {
+      "meaning": "low risk (tests, examples, changelog fragments, site assets, generated API page): auto-merge on green CI after a self-review PASS at the tip",
+      "paths": ["tests/**", "examples/**", "changelog.d/**", "reports/**", "docs/assets/**", "docs/api.md"]
+    },
+    "T0": {
+      "meaning": "lowest risk (documentation): auto-merge on green CI after a self-review PASS at the tip",
+      "paths": ["docs/**", "README.md"]
+    }
+  },
+  "unknownPathTier": "T2",
+  "generatedPaths": ["docs/api.md"],
+  "limits": {"T0": {"lines": 300, "files": 15}, "T1": {"lines": 400, "files": 20}, "T2": {"lines": 250, "files": 12}}
+}

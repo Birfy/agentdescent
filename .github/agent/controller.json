@@ -1,0 +1,9 @@
+{
+  "note": "Read by .github/scripts/controller.py from the default branch. Editing this file is T3. Maintainers listed here are the only people whose agent-ready label (and whose later edits) keep an issue agent-ready.",
+  "maintainers": ["Birfy"],
+  "agentBranchPrefixes": ["agent/"],
+  "agentAuthors": [],
+  "claimTtlHours": 6,
+  "maxPrsPerRun": 50,
+  "maxIssuesPerRun": 50
+}
