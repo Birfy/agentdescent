@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-366 public names across 60 modules.
+369 public names across 61 modules.
 
 ---
 
@@ -4189,9 +4189,17 @@ One sampled `(problem, seed)` before/after pair, awaiting truth.
 
 Durable JSONL of sampled meta pairs and verdicts, indexed in memory.
 
+### `MetaChallengerConfig`
+
+The problem-challenger's dials: how much of the problem budget goes to the frontier, what counts as learned or stuck, and how long a generator may keep trying. The same numbers `curriculum_evolve` uses, one level up.
+
 ### `MetaPopulationReport`
 
 What a `meta_population_run` did, and why.
+
+### `MetaProblemChallenger`
+
+The problem-generation artifact for the meta loop.
 
 ### `PLUGIN_FROZEN`
 
@@ -4340,6 +4348,10 @@ The control every efficiency number in this repository is missing.
 ### `budgeted_completion`
 
 Wrap a `max_tokens -> Completion` factory into an adaptive Completion.
+
+### `curriculum_meta_run`
+
+Evolve a decision slot against a problem distribution the meta loop generates.
 
 ### `dataloader`
 

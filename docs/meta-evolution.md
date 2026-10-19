@@ -399,7 +399,6 @@ The measured case in the tests: a meta reward that reads an `auc` of `+0.65`
 where truth reads `+0.0` — `gain_bias` reports the `+0.65`, the verdict is
 still computed (and recorded) on the verifier, and the store holds the pairs
 with both readings.
-=======
 
 ## Meta-population: the archive seeds a population, the population promotes
 
@@ -451,4 +450,61 @@ gained):
 
 ```bash
 python -m examples.meta.population_meta_demo
+```
+
+## Meta-curriculum: the meta loop generates the problems it is judged on
+
+`continuous_meta_run` trains on the archive's problems and validates on the
+caller's. The problem distribution is the least-examined part of the design —
+the same gap `curriculum_evolve` closed one level down for tasks.
+`curriculum_meta_run` closes it for problems: a challenger generates frontier
+*problems*, the rule climbs toward them, and the validation set never moves:
+
+```python
+from agentdescent import ConsolidationStore, MetaProblemChallenger, curriculum_meta_run
+
+challenger = MetaProblemChallenger(
+    generate=lambda spec, seed: parse(spec),        # a candidate problem config
+    validate=build_problem,                          # config -> Problem; raises on invalid
+    propose=advance_difficulty,                      # (descriptor, report) -> next descriptor
+    spec="d:0.5")
+
+report, result = curriculum_meta_run(
+    store, slot="task_sampler", spec=slot(), challenger=challenger,
+    propose=offline_propose,
+    problems={"ta": problem_a, "tb": problem_b},    # the fixed curriculum
+    val_problems={"va": problem_z},                 # never touched by the challenger
+    rounds=6, n_workers=1)
+print(report["frontier"])   # generated_total, invalid_total, learned, stuck, r0_mean
+```
+
+The loop:
+
+1. **The challenger is the distribution's own solver-challenger.** Between outer
+   rounds it draws a candidate problem configuration, runs it through a
+   mandatory validity gate (`validate` must build a runnable `Problem`; a
+   payload that cannot is counted, never crashed over), and installs the
+   validated problems into a `FrontierSampler` that mixes them with the seed
+   problems.
+2. **Learnability is two-phase and measured online.** `record` sees the meta
+   reward; a generated problem the rule already solves is dropped on its first
+   attempt, one it never learns is dropped as stuck, one it learns is counted —
+   the frontier keeps turning toward the rule's current edge, and
+   `propose(descriptor, report)` pushes the generation spec outward on the
+   measured `learned` count.
+3. **The challenger never touches the final evaluation.** The validation set is
+   fixed from `val_problems` and the held-out split is computed from the seed
+   tasks alone — what the run reports is always measured on problems the
+   challenger never generated.
+4. **Continuity is the archive's.** The search starts from the best archived
+   rule for the slot/spec/config (in a fresh ledger repo, so the seed is
+   honoured), and on `adopt` the rule is written back with its problem
+   descriptor — the next session starts where this one was validated, with a
+   problem distribution the meta loop itself has been pushing outward.
+
+Offline demo (a challenger pushes the difficulty outward while the rule climbs):
+
+```bash
+python -m examples.meta.curriculum_meta_demo
+```
 ```
