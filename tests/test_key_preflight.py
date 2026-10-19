@@ -44,6 +44,10 @@ def _spec(tmp_path, reflect=None, agent=None):
 @pytest.mark.parametrize("field", ["reflect", "agent"])
 def test_the_named_key_is_the_one_checked(tmp_path, monkeypatch, ref, default, other, field):
     block = {"ref": ref, "model": "m", "api_key_env": "X_KEY"}
+    if ref == "openai_compatible":
+        # an endpoint of its own: a non-OpenAI key with none configured is the
+        # separate "would send X_KEY to api.openai.com" warning (#422)
+        block["default_base_url"] = "https://x.example/v1"
     spec = (_spec(tmp_path, reflect=block) if field == "reflect"
             else _spec(tmp_path, agent=block))
 
@@ -93,7 +97,8 @@ def test_claude_default_key_is_unchanged(tmp_path, monkeypatch):
 
 def test_plan_reports_the_named_key(tmp_path, monkeypatch, capsys):
     spec = _spec(tmp_path, reflect={"ref": "openai_compatible", "model": "m",
-                                    "api_key_env": "X_KEY"})
+                                    "api_key_env": "X_KEY",
+                                    "default_base_url": "https://x.example/v1"})
     path = tmp_path / "spec.json"
     path.write_text(json.dumps(spec.to_dict()))
     monkeypatch.setenv("OPENAI_API_KEY", "unrelated")

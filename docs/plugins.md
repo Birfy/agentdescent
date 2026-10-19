@@ -291,6 +291,26 @@ The other fields:
   callable rather than a factory. A cheap `reflect` behind an expensive `agent`
   is the usual trade.
 
+  `openai_compatible` and `anthropic_compatible` have **three connection
+  parameters**, and no others: `api_key_env` (the *name* of the variable holding
+  the key), `base_url_env` (the *name* of a variable holding the endpoint) and
+  `default_base_url` (the endpoint itself, used when that variable is unset).
+  Defaults are `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `https://api.openai.com/v1`
+  (`ANTHROPIC_*` / `https://api.anthropic.com` for the Anthropic twin), so a key
+  that is not OpenAI's needs an endpoint too, or it is sent to `api.openai.com`:
+
+  ```json
+  "reflect": {"ref": "openai_compatible", "model": "deepseek-v4-flash",
+              "api_key_env": "ARK_API_KEY",
+              "default_base_url": "https://ark.cn-beijing.volces.com/api/coding/v3"}
+  ```
+
+  Every other keyword (`temperature`, `thinking`, ...) goes into the request body.
+  A spec that writes `base_url`, `api_key` or a similar guess is **refused** by
+  `plan`, `evolve` and MCP `start` with the spelling to use; `plan` also warns when
+  a non-OpenAI `api_key_env` has no endpoint configured. A key is never written in
+  a spec.
+
 ### Which model a run uses
 
 A worker agent *is* the host CLI as a subprocess (`claude -p …`, `codex exec …`,
