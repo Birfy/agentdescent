@@ -82,13 +82,58 @@ mkdocs build --strict   # must pass with no warnings (CI enforces this)
 
 ## Pull requests
 
-1. Branch from `main`.
-2. `pytest -q` and `mkdocs build --strict` both pass.
-3. Add a changelog fragment: one new file `changelog.d/<number>-<slug>.md`
-   whose first line is the category (`Added`, `Changed`, `Deprecated`,
-   `Removed`, `Fixed`, `Security`) and whose remaining lines are the entry text.
-   Do **not** edit `CHANGELOG.md` in a PR: a shared edit point makes every open
-   PR conflict whenever one merges. Maintainers fold fragments into
-   `CHANGELOG.md` at release time. See [`changelog.d/README.md`](changelog.d/README.md);
-   `pytest -q` validates your fragment.
-4. Open the PR with a clear description of *what* changed and *why*.
+1. Branch from `main` (agents: a fresh clone per task; nobody pushes to `main`
+   or force-pushes).
+2. `pytest -q` and, for docs changes, `mkdocs build --strict` both pass. A bug
+   fix comes with a test that fails on `main`.
+3. A user-visible change adds a changelog fragment: one new file
+   `changelog.d/<number>-<slug>.md` whose first line is the category (`Added`,
+   `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`) and whose remaining
+   lines are the entry text. Do **not** edit `CHANGELOG.md` in a PR: a shared
+   edit point makes every open PR conflict whenever one merges. Maintainers fold
+   fragments into `CHANGELOG.md` at release time. See
+   [`changelog.d/README.md`](changelog.d/README.md); `pytest -q` validates your
+   fragment.
+4. A public API change regenerates the reference: `python -m tools.gen_api_docs`.
+5. Open the PR with the template: `Fixes #N`, what changed and why, and the
+   `Tip SHA:` / `Ran:` / `Not run:` lines. Merges are **squash only**, and the
+   squash commit is the PR title and body, so keep the body short.
+
+## Maintainer / agent loop
+
+The full contract is in [AGENTS.md](AGENTS.md); in short:
+
+1. Read [LESSONS.md](LESSONS.md) and [CODE_STANDARDS.md](CODE_STANDARDS.md) first.
+2. Issues carry exactly one type label and one or more `area:*` labels
+   ([`.github/labels.json`](.github/labels.json)). Agents work only on
+   `agent-ready` issues, which only the maintainer (or the maintenance routine
+   acting as `Birfy`) sets.
+3. Every PR gets a risk tier from its diff
+   (`python3 .github/scripts/risk_gate.py --pr <n>`; the controller labels it
+   `risk:T0`..`risk:T3`). T0/T1 auto-merge on green CI after a self-review PASS
+   at the tip; T2/T3 wait, labeled `awaiting-approval`, for the maintainer's
+   merge click. Nobody admin-merges.
+4. A review is a PR comment in the Verifier format
+   ([review-pr](.claude/skills/review-pr/SKILL.md)); the `reviewed tip` check
+   (`python3 .github/scripts/review_gate.py --pr <n>`) says whether the head has
+   a PASS that counts. A new commit voids it.
+5. `AGENT_PAUSE=true` (repository variable) stops the controller and the agents.
+
+### Verifier checklist (every status report)
+
+- [ ] Tip SHA named
+- [ ] Commands **run** at that tip, with pass/fail
+- [ ] Material checks **not run** listed (docs build, wheel smoke, Ark real model, Docker)
+- [ ] The new test fails on `main` and passes with the change
+- [ ] The fix covers the class, not one sample
+- [ ] T2/T3: a PASS at the same tip, then the maintainer's click
+
+## Agent docs map
+
+| Doc | Role |
+| --- | --- |
+| [AGENTS.md](AGENTS.md) | Pipeline contract, merge policy, labels, controller, hard rules |
+| [LESSONS.md](LESSONS.md) | Dated lessons (`Seen N×`); promoted after ≥3 days |
+| [CODE_STANDARDS.md](CODE_STANDARDS.md) | Acceptance rules: Verifier honesty, tests that fail on `main`, merge gate |
+| [`.claude/skills/fix-issue`](.claude/skills/fix-issue/SKILL.md) | One issue end to end |
+| [`.claude/skills/review-pr`](.claude/skills/review-pr/SKILL.md) | The PASS / FAIL / INC report |
