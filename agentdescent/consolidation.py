@@ -84,6 +84,14 @@ class ConsolidationRecord:
     #: Durable trajectory ledger path, linked not copied (the evidence lives
     #: where the run left it; the archive only points at it).
     trajectory_store: Optional[str] = None
+    #: How to rebuild the inner problem(s) this product was produced or judged
+    #: on. ``None`` for a plain artifact record; a rule record (written by
+    #: ``agentdescent.meta.archive_rule``) carries the problem descriptor so a
+    #: later session can rebuild the same inner problems via
+    #: ``agentdescent.meta.problem_from_archive``. Optional and backwards
+    #: compatible: an archive written before this field existed reads back as
+    #: ``None`` and stays seedable.
+    problem: Optional[Dict[str, Any]] = None
     created_at: float = field(default_factory=time.time)
 
     @property
@@ -102,6 +110,7 @@ class ConsolidationRecord:
             "final_reward": self.final_reward,
             "rounds": self.rounds,
             "trajectory_store": self.trajectory_store,
+            "problem": self.problem,
             "created_at": self.created_at,
         }
 
@@ -116,6 +125,7 @@ class ConsolidationRecord:
             final_reward=float(d.get("final_reward", 0.0)),
             rounds=int(d.get("rounds", 0)),
             trajectory_store=d.get("trajectory_store"),
+            problem=dict(d["problem"]) if d.get("problem") else None,
             created_at=float(d.get("created_at", 0.0)),
         )
 
@@ -183,6 +193,7 @@ class ConsolidationStore:
         strategy: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
         trajectory_store: Optional[str] = None,
+        problem: Optional[Dict[str, Any]] = None,
     ) -> ConsolidationRecord:
         """Archive one run's product. Idempotent by ``run_id`` (atomic rewrite).
 
@@ -190,7 +201,11 @@ class ConsolidationStore:
         later run adopts the state only through the same strategy. ``config``
         names the dataset/scorer/model/params so retrieval keeps domains
         apart. ``trajectory_store`` links the run's durable evidence without
-        copying it."""
+        copying it. ``problem`` is an optional descriptor of how to rebuild the
+        inner problem(s) this product was produced or judged on (written by
+        ``meta.archive_rule`` for an adopted slot rule); it is read back by
+        ``meta.problem_from_archive`` and is ``None`` for an ordinary artifact
+        record."""
         reward = float(result.final_reward)
         if not math.isfinite(reward) or not 0.0 <= reward <= 1.0:
             raise ValueError(
@@ -205,6 +220,7 @@ class ConsolidationStore:
             final_reward=reward,
             rounds=len(result.history),
             trajectory_store=trajectory_store or result.trajectories_path,
+            problem=dict(problem) if problem else None,
         )
         with self._lock:
             path = self._path(run_id)
