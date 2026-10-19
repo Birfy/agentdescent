@@ -287,6 +287,75 @@ never measured on the problems that shaped the value. The measured matrix
 and modest. `meta_run` does not dress that up: a rule that does not transfer is
 reported as `reject`, which is a result, not an error.
 
+## Continuous meta-learning: the archive drives the next session
+
+`meta_run` decides and the run dies with the process; `continuous_meta_run`
+makes the decision durable. It is `meta_run` wired to the
+[consolidation archive](consolidation.md), so the next session starts where the
+last one was validated rather than from the seed:
+
+```python
+from agentdescent import ConsolidationStore, continuous_meta_run
+
+store = ConsolidationStore("~/.agentdescent/archive")
+
+# session 1: the empty archive is an ordinary meta_run
+report, _ = continuous_meta_run(
+    store, slot="task_sampler", spec=slot(), propose=offline_propose,
+    tasks_for=lambda rec: tasks_for_config(rec.config),   # caller's data, read through the archive
+    run=run, reward=reward, inner_propose=propose, inner_strategy=SingleSlot("cap:0"),
+    config=CONFIG, run_id="run-1",
+    problems={"a": problem_a, "b": problem_b},            # first session: caller's problems
+    val_problems={"z": problem_z},
+    inner={"rounds": 5, "n_workers": 1}, rounds=3, n_workers=1)
+
+# session 2: the archive seeds the search and supplies the problems
+report, _ = continuous_meta_run(
+    store, slot="task_sampler", spec=slot(), propose=offline_propose,
+    tasks_for=lambda rec: tasks_for_config(rec.config),
+    run=run, reward=reward, inner_propose=propose, inner_strategy=SingleSlot("cap:0"),
+    config=CONFIG, run_id="run-2", problems=None, val_problems={"z": problem_z})
+```
+
+The loop per session:
+
+1. **Problems come from the archive.** The top `train_runs` archived rules'
+   problem descriptors become the train set, the next `val_runs` the validation
+   set — rebuilt by `problem_from_archive` from each record's descriptor plus
+   `tasks_for` and the inner domain functions, so the outer loop never validates
+   on a problem it trained on. An archive too thin to fill a set falls back to
+   `problems` / `val_problems` — the first session is an ordinary `meta_run`.
+2. **The search starts where the archive left off.** The best archived rule for
+   the slot, spec and configuration becomes the session's `initial_state` (same
+   configuration first, then measured reward), so the evolution *refines* last
+   session's rule rather than rediscovering it. Use a fresh `repo_path` per
+   session: the engine ignores `initial_state` when it is resuming a repo that
+   already has state.
+3. **The gain is measured twice.** `mean_gain` is the evolved value against the
+   prior this session had to beat; `fresh_gain` is it against the fresh seed —
+   the honest cross-session number, the rule you have now against the rule you
+   had before the first session ever ran.
+4. **Adoption is archived.** On `adopt`, `archive_rule` writes the new value
+   back with a `problem` descriptor (the slot and the JSON-safe inner settings;
+   the tasks stay with the caller — the "link, don't copy" rule applied to a
+   problem instead of a trajectory). The next session starts from a better rule,
+   and the report's `seeded_from` / `archive_count` say so.
+
+`archive_rule(store, report, result, *, run_id, slot, spec, config, problem)`
+writes an adopted rule to the archive; `problem_from_archive(store, run_id, *,
+tasks_for, spec, run, reward, propose, strategy)` rebuilds a runnable
+`Problem` from a record's descriptor, refusing a record archived by a different
+spec (its state would be misread, exactly the guard `seed_from_archive` runs).
+`ConsolidationRecord.problem` is a new optional field — an archive written
+before it existed reads back as `None` and stays seedable.
+
+Offline demo (two sessions, the second seeded by the first, each archiving a
+strictly better rule):
+
+```bash
+python -m examples.meta.continuous_meta_demo
+```
+
 ## Meta-audit: the trust layer for the rule-about-rules
 
 The audit package verifies the *inner* reward — `AuditedReward` pairs a cheap

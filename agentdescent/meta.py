@@ -57,7 +57,9 @@ import re
 import statistics
 import tempfile
 import threading
+import time
 import types
+import uuid
 from dataclasses import dataclass, field
 from types import FunctionType
 from typing import (
@@ -66,6 +68,7 @@ from typing import (
 )
 
 from .agents import Completion
+from .consolidation import ConsolidationRecord, ConsolidationStore, config_fingerprint
 from .evolution import EvolutionResult, Task, evolve
 from .evolvable import Diff, EvidenceCard
 from .policies import (AcceptancePolicy, AcceptDecision, ConflictPolicy, FusionPolicy,
@@ -103,6 +106,11 @@ __all__ = [
     "transfer_ratio",
     "meta_run",
     "MetaRunReport",
+    "problem_descriptor",
+    "problem_from_archive",
+    "archive_rule",
+    "ContinuousMetaReport",
+    "continuous_meta_run",
 ]
 
 
@@ -1723,4 +1731,448 @@ def _report_dict(report: MetaRunReport) -> Dict[str, Any]:
         "transfer": report.transfer,
         "verdict": report.verdict,
         "reason": report.reason,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Continuous meta-learning: the archive drives the next session
+# ---------------------------------------------------------------------------
+
+
+def problem_descriptor(slot: str, **inner: Any) -> Dict[str, Any]:
+    """The serializable shape of one inner :class:`Problem`, for an archive.
+
+    ``{"slot": <slot>, "inner": {**inner}}``: ``slot`` names the decision
+    field the inner run installed the candidate value into, and ``inner`` is
+    everything else ``evolve_problem()`` was called with that is JSON-safe --
+    ``rounds``, ``n_workers``, ``target_reward`` ... The parts an archive
+    cannot hold (the tasks, and the domain's ``run``/``reward``/``propose``/
+    ``strategy``) are not described; :func:`problem_from_archive` gets them
+    from the caller, which is the "link, don't copy" rule of
+    :class:`~agentdescent.consolidation.ConsolidationStore` applied to a
+    problem instead of a trajectory."""
+    return {"slot": slot, "inner": dict(inner)}
+
+
+def problem_from_archive(
+    store: ConsolidationStore,
+    run_id: str,
+    *,
+    tasks_for: Callable[[ConsolidationRecord], Sequence[Task]],
+    spec: SlotSpec,
+    run: Callable[[str, Task], str],
+    reward: Callable[[Task, str], float],
+    propose: Callable[[str, Task, str, float], Optional[str]],
+    strategy: Any,
+    **defaults: Any,
+) -> Problem:
+    """Rebuild an inner :class:`Problem` from an archived rule's descriptor.
+
+    :func:`archive_rule` writes a ``ConsolidationRecord.problem`` describing
+    how the rule's inner problem was run -- the slot and the JSON-safe
+    ``evolve()`` settings. This reads it back and returns the same
+    :class:`Problem`, ``(value, seed) -> MetaOutcome``, with the caller
+    supplying what an archive cannot hold: the tasks, via ``tasks_for(record)``
+    (the archived configuration maps to task instances), and the domain's
+    ``run``/``reward``/``propose``/``strategy``.
+
+    Parameters
+    ----------
+    store:
+        The archive holding the record.
+    run_id:
+        Which archived run to rebuild from. ``KeyError`` when it is not
+        archived or carries no problem descriptor.
+    tasks_for:
+        Maps an archived :class:`~agentdescent.consolidation.ConsolidationRecord`
+        to the inner tasks its problem ran on. The caller owns the data; the
+        archive owns the semantics and the configuration.
+    spec:
+        The outer :class:`SlotSpec` -- used as a guard, not as an input to the
+        inner run: the record's ``strategy`` must be this spec's class name,
+        the same "adopt through the strategy that wrote the state" rule
+        :func:`~agentdescent.consolidation.seed_from_archive` enforces. A
+        record archived by a different spec is refused, never silently misread.
+    run, reward, propose, strategy:
+        The inner problem's own ``evolve()`` parts -- the domain functions.
+    **defaults:
+        Inner ``evolve()`` settings. Each overrides the archived value: the
+        descriptor says how the problem was run *then*; the caller may want it
+        run differently *now*.
+    """
+    record = store.find(run_id)
+    if record is None or not record.problem:
+        raise KeyError(f"no archived problem for run {run_id!r}")
+    if record.strategy and record.strategy != type(spec).__name__:
+        raise ValueError(
+            f"record {run_id} was archived by {record.strategy!r}, not by "
+            f"{type(spec).__name__}; refusing to misread its state")
+    desc = record.problem
+    slot = desc.get("slot")
+    if slot not in SLOTS:
+        raise ValueError(f"archived problem names unknown slot {slot!r}")
+    inner = {**dict(desc.get("inner", {})), **defaults}
+    return evolve_problem(
+        list(tasks_for(record)), reward, slot=slot, run=run, propose=propose,
+        strategy=strategy, **inner)
+
+
+def archive_rule(
+    store: ConsolidationStore,
+    report: MetaRunReport,
+    result: EvolutionResult,
+    *,
+    run_id: str,
+    slot: str,
+    spec: SlotSpec,
+    config: Optional[Dict[str, Any]] = None,
+    problem: Optional[Dict[str, Any]] = None,
+    artifact_id: str = "meta-rule",
+    trajectory_store: Optional[str] = None,
+) -> ConsolidationRecord:
+    """Write an adopted slot rule back to the archive.
+
+    After :func:`meta_run` (or :func:`continuous_meta_run`) says ``adopt``,
+    this is what makes the adoption durable: the evolved value (as the
+    artifact state a later session seeds from), the measured reward, the
+    configuration, and the problem descriptor that lets a later session
+    rebuild the problems the rule was judged on. The next call on the same
+    store then starts from a better rule and a known problem -- the loop that
+    makes evolution *continue* instead of restart.
+
+    ``report`` is the run's :class:`MetaRunReport` (its ``value``/``slot`` are
+    the adopted rule), ``result`` the underlying ``EvolutionResult`` (its
+    ``state``/``rendered`` are the evolved value). ``problem`` defaults to
+    :func:`problem_descriptor` and should carry the inner settings --
+    ``problem_descriptor(slot, rounds=..., n_workers=...)`` -- so
+    :func:`problem_from_archive` can rebuild the problem exactly.
+    """
+    record = store.archive(
+        result, run_id=run_id, artifact_id=artifact_id,
+        strategy=type(spec).__name__, config=config,
+        problem=problem or problem_descriptor(slot),
+        trajectory_store=trajectory_store)
+    return record
+
+
+@dataclass(frozen=True)
+class ContinuousMetaReport:
+    """What one :func:`continuous_meta_run` session did, and why.
+
+    Everything :class:`MetaRunReport` says -- the value, the validation against
+    the value this session started from, the verdict -- plus the session facts:
+    which archived rule seeded the run (``seeded_from``), and what the evolved
+    value gained against the **fresh seed** (``fresh_gain``) -- the honest
+    cross-session number, the rule you have now against the rule you had before
+    the first session ever ran.
+    """
+
+    slot: str
+    seed_value: str
+    value: str
+    validation: Dict[str, Dict[str, float]]
+    mean_gain: float
+    transfer: Optional[float]
+    verdict: str
+    reason: str
+    seeded_from: Optional[str]
+    fresh_seed_value: str
+    fresh_gain: float
+    fresh_transfer: Optional[float]
+    archived: bool
+    archived_run_id: Optional[str]
+    archive_count: int
+
+
+def _archived_rules(
+    store: ConsolidationStore,
+    *,
+    slot: str,
+    spec: SlotSpec,
+    config: Optional[Dict[str, Any]],
+    artifact_id: str,
+) -> List[ConsolidationRecord]:
+    """The archive's rule records for this slot and spec, best first.
+
+    A "rule record" is one that carries a problem descriptor naming ``slot``.
+    Same configuration fingerprint first, then measured reward -- the same
+    ranking :func:`~agentdescent.consolidation.seed_from_archive` uses, so a
+    rule evolved on a different domain is a *weaker* candidate rather than a
+    disqualified one (its problem is still a valid unseen problem to train or
+    validate against).
+    """
+    want = config_fingerprint(config)
+    name = type(spec).__name__
+    rules = []
+    for rec in store.iter_archive():
+        if rec.artifact_id != artifact_id:
+            continue
+        if rec.strategy and rec.strategy != name:
+            continue
+        if not rec.problem or rec.problem.get("slot") != slot:
+            continue
+        rules.append(rec)
+    rules.sort(key=lambda r: (r.config_hash == want, r.final_reward), reverse=True)
+    return rules
+
+
+def _session_problems(
+    store: ConsolidationStore,
+    rules: Sequence[ConsolidationRecord],
+    *,
+    tasks_for: Callable[[ConsolidationRecord], Sequence[Task]],
+    spec: SlotSpec,
+    run: Callable[[str, Task], str],
+    reward: Callable[[Task, str], float],
+    propose: Callable[[str, Task, str, float], Optional[str]],
+    strategy: Any,
+    problems: Optional[Union[Sequence[Problem], Mapping[str, Problem]]],
+    val_problems: Optional[Union[Sequence[Problem], Mapping[str, Problem]]],
+    train_runs: int,
+    val_runs: int,
+    inner: Dict[str, Any],
+) -> Tuple[Dict[str, Problem], Dict[str, Problem]]:
+    """The session's train/val problems: archive-derived, caller-filled.
+
+    The top ``train_runs`` rules supply the train problems and the next
+    ``val_runs`` the validation ones -- disjoint records, so the outer loop
+    never validates on a problem it trained on. When the archive cannot fill a
+    set (fewer than ``train_runs`` records for the train set, or fewer than
+    ``train_runs + val_runs`` for the validation one), the caller's
+    ``problems`` / ``val_problems`` stand in -- an empty archive is an ordinary
+    :func:`meta_run`.
+    """
+    named = (lambda ps: dict(ps) if isinstance(ps, Mapping)
+             else {f"p{i}": p for i, p in enumerate(ps or [])})
+
+    def build(rec: ConsolidationRecord) -> Problem:
+        return problem_from_archive(
+            store, rec.run_id, tasks_for=tasks_for, spec=spec, run=run,
+            reward=reward, propose=propose, strategy=strategy, **inner)
+
+    train: Dict[str, Problem] = (
+        {f"arch:{rec.run_id}": build(rec) for rec in rules[:train_runs]}
+        if len(rules) >= train_runs else {})
+    val: Dict[str, Problem] = (
+        {f"arch:{rec.run_id}": build(rec)
+         for rec in rules[train_runs:train_runs + val_runs]}
+        if len(rules) >= train_runs + val_runs else {})
+    if not train:
+        train = named(problems)
+    if not val:
+        val = named(val_problems)
+    if not train:
+        raise ValueError(
+            "continuous_meta_run() got no train problems -- the archive has "
+            "fewer than train_runs records and problems= was not given")
+    if not val:
+        raise ValueError(
+            "continuous_meta_run() needs val_problems to judge the transfer "
+            "-- the archive has too few records to fill val_runs")
+    return train, val
+
+
+def continuous_meta_run(
+    store: ConsolidationStore,
+    slot: str,
+    spec: SlotSpec,
+    propose: Optional[Callable[[str, Task, str, float], Optional[str]]] = None,
+    *,
+    tasks_for: Callable[[ConsolidationRecord], Sequence[Task]],
+    run: Callable[[str, Task], str],
+    reward: Callable[[Task, str], float],
+    inner_propose: Callable[[str, Task, str, float], Optional[str]],
+    inner_strategy: Any,
+    config: Optional[Dict[str, Any]] = None,
+    problems: Optional[Union[Sequence[Problem], Mapping[str, Problem]]] = None,
+    val_problems: Optional[Union[Sequence[Problem], Mapping[str, Problem]]] = None,
+    artifact_id: str = "meta-rule",
+    train_runs: int = 2,
+    val_runs: int = 1,
+    inner: Optional[Dict[str, Any]] = None,
+    model: Optional[Completion] = None,
+    meta_reward: Optional[MetaReward] = None,
+    seeds: Sequence[int] = (0,),
+    val_seeds: Sequence[int] = (1, 2),
+    min_gain: float = 0.0,
+    transfer_floor: float = 0.0,
+    run_id: Optional[str] = None,
+    **evolve_kwargs: Any,
+) -> Tuple[ContinuousMetaReport, EvolutionResult]:
+    """One session of continuous meta-learning: evolve, judge, archive.
+
+    ``meta_run`` evolves a slot value and decides; the archive makes that
+    decision durable, and this call closes the loop between sessions:
+
+    1. **Problems come from the archive.** The top ``train_runs`` archived
+       rules' problems are the train set and the next ``val_runs`` the
+       validation set -- rebuilt by :func:`problem_from_archive` from each
+       record's descriptor plus ``tasks_for`` and the inner domain functions,
+       so the outer loop never validates on a problem it trained on. An empty
+       archive (or one too thin to fill a set) falls back to ``problems`` /
+       ``val_problems`` -- the first session is an ordinary :func:`meta_run`.
+    2. **The search starts where the archive left off.** The best archived rule
+       for this slot, spec and configuration becomes the session's
+       ``initial_state``, so the evolution *refines* last session's rule rather
+       than rediscovering it; ``report.seed_value`` is that prior.
+    3. **The gain is measured twice.** ``mean_gain`` is the evolved value
+       against the prior (what this session had to beat); ``fresh_gain`` is it
+       against the fresh seed ``spec.initial()`` (what the system had before
+       the first session) -- the honest cross-session number.
+    4. **Adoption is archived.** On ``adopt`` the new rule is written back via
+       :func:`archive_rule` with its problem descriptor, so the next session
+       starts from a better rule. ``report.archived`` says whether it was.
+
+    Parameters
+    ----------
+    store:
+        The :class:`~agentdescent.consolidation.ConsolidationStore` that makes
+        the loop continuous: rules it already holds seed this session, and an
+        adopted rule is written back to it.
+    slot, spec, propose, model:
+        As :func:`meta_run` -- which :class:`Policies` field evolves, how a
+        value is represented/gated/compiled, and the reflector (pass ``propose``
+        directly or ``model`` to get :func:`slot_reflector`).
+    tasks_for:
+        Maps an archived :class:`~agentdescent.consolidation.ConsolidationRecord`
+        to the inner tasks of its problem -- the caller's data, read through
+        the archive's configuration.
+    run, reward, inner_propose, inner_strategy:
+        The inner ``evolve()`` domain functions, passed through to
+        :func:`problem_from_archive` for every rebuilt problem.
+    config:
+        This session's configuration (dataset/scorer/model/params), used to
+        rank archived rules and written back with the adopted rule.
+    problems, val_problems:
+        The fallback inner problems, used when the archive cannot fill a set
+        (an empty archive is an ordinary ``meta_run``). ``inner`` must describe
+        how these were built for the archived descriptor to be faithful.
+    artifact_id:
+        The archive ``artifact_id`` of rule records.
+    train_runs, val_runs:
+        How many archived rules supply the train and validation problems.
+    inner:
+        The JSON-safe inner ``evolve()`` settings (``rounds``, ``n_workers``,
+        ``target_reward`` ...): defaults for rebuilt problems and the
+        descriptor archived with an adopted rule.
+    model, meta_reward, seeds, val_seeds, min_gain, transfer_floor:
+        As :func:`meta_run`.
+    run_id:
+        The archived ``run_id`` for the adopted rule; a unique
+        ``meta-<slot>-<unix time>-<random>`` id when omitted (pass one
+        explicitly when you need to find it again).
+    **evolve_kwargs:
+        Everything else :func:`meta_evolve` takes, except ``initial_state``
+        (this function sets it from the archive) and ``strategy``/``run``/
+        ``reward`` (the inner domain's, passed above).
+
+    Returns ``(report, result)``; ``report.value`` is the evolved value and
+    ``report.verdict`` the adopt/reject decision.
+    """
+    for taken in ("strategy", "run", "reward", "agent", "initial_state"):
+        if taken in evolve_kwargs:
+            raise TypeError(f"continuous_meta_run() sets {taken}= itself")
+    if propose is None and model is None:
+        raise ValueError("continuous_meta_run() needs propose= or model=")
+    inner = dict(inner or {})
+    rules = _archived_rules(store, slot=slot, spec=spec, config=config,
+                            artifact_id=artifact_id)
+    train, val = _session_problems(
+        store, rules, tasks_for=tasks_for, spec=spec, run=run, reward=reward,
+        propose=inner_propose, strategy=inner_strategy,
+        problems=problems, val_problems=val_problems,
+        train_runs=train_runs, val_runs=val_runs, inner=inner)
+    _require_disjoint(train, val, seeds, val_seeds)
+
+    prior = rules[0] if rules else None
+    prior_state = dict(prior.state) if prior is not None else None
+    prior_value = (spec.render(prior_state) if prior_state
+                   else spec.render(spec.initial()))
+    fresh_value = spec.render(spec.initial())
+    result = meta_evolve(
+        train, slot=slot, spec=spec, propose=propose, model=model,
+        meta_reward=meta_reward, seeds=seeds,
+        initial_state=prior_state if prior_state is not None else spec.initial(),
+        **evolve_kwargs)
+    value = result.rendered or prior_value
+
+    # gain vs the prior, and vs the fresh seed, on both the train and the
+    # validation problems -- so the transfer is a real ratio, not a restated
+    # val gain.
+    validation = meta_validate(spec, prior_value, value, val,
+                               seeds=val_seeds, meta_reward=meta_reward)
+    fresh_validation = meta_validate(spec, fresh_value, value, val,
+                                     seeds=val_seeds, meta_reward=meta_reward)
+    train_validation = meta_validate(spec, prior_value, value, train,
+                                     seeds=seeds, meta_reward=meta_reward)
+    fresh_train_validation = meta_validate(spec, fresh_value, value, train,
+                                           seeds=seeds, meta_reward=meta_reward)
+    mean_gain = _mean_gain(validation)
+    train_gain = _mean_gain(train_validation)
+    transfer = _transfer_from(train_gain, mean_gain)
+    fresh_gain = _mean_gain(fresh_validation)
+    fresh_train_gain = _mean_gain(fresh_train_validation)
+    fresh_transfer = _transfer_from(fresh_train_gain, fresh_gain)
+
+    if mean_gain <= min_gain:
+        verdict, reason = "reject", (
+            f"evolved value gained {mean_gain:+.3f} on unseen problems "
+            f"over the prior, not above min_gain {min_gain:+.3f}")
+    elif transfer is not None and transfer < transfer_floor:
+        verdict, reason = "reject", (
+            f"transfer ratio {transfer:.3f} is below transfer_floor "
+            f"{transfer_floor:.3f} (train gain {train_gain:+.3f}, "
+            f"val gain {mean_gain:+.3f})")
+    else:
+        verdict, reason = "adopt", (
+            f"mean gain {mean_gain:+.3f} on unseen problems over the prior, "
+            f"transfer {transfer if transfer is None else round(transfer, 3)}")
+
+    archived, archived_run_id = False, None
+    if verdict == "adopt":
+        # second-resolution time alone collides when two sessions adopt in the
+        # same second, and the archive is idempotent by run_id -- the second
+        # rule would silently overwrite the first. A random suffix keeps the
+        # default id unique and still sortable by time.
+        rid = run_id or f"meta-{slot}-{int(time.time())}-{uuid.uuid4().hex[:8]}"
+        report = MetaRunReport(
+            slot=slot, seed_value=prior_value, value=value,
+            validation=validation, mean_gain=mean_gain, transfer=transfer,
+            verdict=verdict, reason=reason)
+        archive_rule(store, report, result, run_id=rid, slot=slot, spec=spec,
+                     config=config, problem=problem_descriptor(slot, **inner),
+                     artifact_id=artifact_id)
+        archived, archived_run_id = True, rid
+
+    report = ContinuousMetaReport(
+        slot=slot, seed_value=prior_value, value=value, validation=validation,
+        mean_gain=mean_gain, transfer=transfer, verdict=verdict, reason=reason,
+        seeded_from=prior.run_id if prior is not None else None,
+        fresh_seed_value=fresh_value, fresh_gain=fresh_gain,
+        fresh_transfer=fresh_transfer, archived=archived,
+        archived_run_id=archived_run_id, archive_count=store.count())
+    try:
+        result.meta = _continuous_report_dict(report)
+    except AttributeError:
+        pass
+    return report, result
+
+
+def _continuous_report_dict(report: ContinuousMetaReport) -> Dict[str, Any]:
+    return {
+        "slot": report.slot,
+        "seed_value": report.seed_value,
+        "value": report.value,
+        "validation": report.validation,
+        "mean_gain": report.mean_gain,
+        "transfer": report.transfer,
+        "verdict": report.verdict,
+        "reason": report.reason,
+        "seeded_from": report.seeded_from,
+        "fresh_seed_value": report.fresh_seed_value,
+        "fresh_gain": report.fresh_gain,
+        "fresh_transfer": report.fresh_transfer,
+        "archived": report.archived,
+        "archived_run_id": report.archived_run_id,
+        "archive_count": report.archive_count,
     }

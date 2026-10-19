@@ -37,6 +37,7 @@ import shutil
 import sys
 import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+from urllib.parse import urlparse
 
 from . import runstore
 from .evolvespec import (KINDS, EvolveSpec, SpecError, compose, estimate, load_spec,
@@ -217,8 +218,16 @@ def doctor_report() -> Dict[str, Any]:
     """What this machine can run: agent CLIs, provider keys, optional pieces."""
     clis = {name: shutil.which(name)
             for name in ("claude", "codex", "dsh", "opencode", "git", "node", "pnpm")}
+    from .integrations import provider_key_names
+
+    # The four names this dict has always had come first, so the output keeps its
+    # order; every other key `FORWARDED_ENV` carries (``ARK_API_KEY``, ...) follows.
+    # One list, not two: it used to be a hard-coded three, and a key every
+    # installer forwards read as "no provider key" (#423).
+    key_names = provider_key_names()
     keys = {name: bool(os.environ.get(name)) for name in (
-        "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "DEEPSEEK_API_KEY")}
+        "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "DEEPSEEK_API_KEY",
+        *key_names)}
     # The *value* of the base URL, not just its presence: it is a URL and not a
     # secret, and without it a caller writing a spec cannot tell that
     # `OPENAI_API_KEY` points at some other provider entirely. Measured: an
@@ -248,13 +257,23 @@ def doctor_report() -> Dict[str, Any]:
             f"OPENAI_BASE_URL is {base_url} -- an OpenAI-compatible endpoint that "
             "is not OpenAI, so its model names are its own; ask the user which "
             "model to name in a spec rather than assuming an OpenAI one")
-    if not (keys["ANTHROPIC_API_KEY"] or keys["OPENAI_API_KEY"] or keys["DEEPSEEK_API_KEY"]):
+    present_keys = [n for n in key_names if keys[n]]
+    if not present_keys:
         problems.append("no provider key in the environment; a reflector needs one "
                         "(under dsh, forward keys in the mcp-client env block)")
     why = mcp_unavailable()
     if why:
         problems.append(why)
     hosts, hints = _host_integrations(clis)
+    other = [n for n in present_keys if n not in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY")]
+    if other and len(other) == len(present_keys):
+        # `openai_compatible` reads OPENAI_API_KEY and talks to api.openai.com unless
+        # told otherwise, so a key like ARK_API_KEY works only when the spec says so.
+        hints.append(
+            f"only {', '.join(other)} is set: use it with `openai_compatible` and "
+            f'`"api_key_env": "{other[0]}"` plus `default_base_url` (or `base_url_env`) '
+            "for its endpoint; the endpoint and the model name come from the user, "
+            "never guess them")
     for name, info in hosts.items():
         if info["state"] in ("stale", "partial"):
             problems.append(
@@ -614,6 +633,39 @@ def _key_env(block: Any, default: str, *, field: str = "api_key_env") -> str:
     return name if isinstance(name, str) and name else default
 
 
+_OPENAI_HOST = "api.openai.com"
+
+
+def _key_sent_to_openai(block: Any, key_env: str, url_env: str) -> Optional[str]:
+    """Say so when ``openai_compatible`` would send a non-OpenAI key to OpenAI (#422).
+
+    The adapter's base URL is ``$base_url_env`` when that variable is set, else the
+    block's ``default_base_url``, else ``https://api.openai.com/v1``; the key is
+    sent as ``Authorization: Bearer`` to whatever that resolves to. A key variable
+    that is not OpenAI's (``ARK_API_KEY``) with no endpoint configured therefore
+    ships a third-party secret to OpenAI, and the run fails with a 401 from a host
+    the user never named. This is the part of "will run here" that a shape check
+    cannot see. Only a key that is *set* is warned about -- an unset one has its
+    own warning -- and a name containing ``OPENAI`` (``MY_OPENAI_KEY``) is taken
+    to be an OpenAI key."""
+    if key_env == "OPENAI_API_KEY" or "OPENAI" in key_env.upper():
+        return None
+    default = block.get("default_base_url") if isinstance(block, dict) else None
+    if not (isinstance(default, str) and default):
+        default = f"https://{_OPENAI_HOST}/v1"
+    base = os.environ.get(url_env, default)
+    try:
+        host = urlparse(base).hostname
+    except ValueError:
+        return None
+    if host != _OPENAI_HOST:
+        return None
+    return (f"`openai_compatible` would send {key_env} to {base} ({_OPENAI_HOST}): no "
+            f"other endpoint is configured ({url_env} is unset and `default_base_url` "
+            f"does not name another host), and {key_env} is not an OpenAI key. Set "
+            f"`default_base_url` (the endpoint URL) or export {url_env}")
+
+
 def _unusable_refs(spec: EvolveSpec) -> List[str]:
     """Warnings for agents this machine cannot actually run.
 
@@ -660,14 +712,21 @@ def _unusable_refs(spec: EvolveSpec) -> List[str]:
             if missing:
                 out.append(f"{field}: `claude` is the Anthropic SDK completion (the "
                            f"CLI is `claude_code`) and needs {' and '.join(missing)}")
-        elif ref == "openai_compatible" and not os.environ.get(
-                key_env := _key_env(block, "OPENAI_API_KEY")):
+        elif ref in ("openai_compatible", "agentdescent.agents:openai_compatible"):
+            # The short name and the qualified one resolve to the same adapter, so
+            # both get the preflight (a qualified ref used to skip it).
+            key_env = _key_env(block, "OPENAI_API_KEY")
             url_env = _key_env(block, "OPENAI_BASE_URL", field="base_url_env")
-            out.append(f"{field}: `openai_compatible` needs {key_env} (and "
-                       f"{url_env} for a non-OpenAI endpoint); without it "
-                       + ("every proposal raises and the run fails after two rounds "
-                          "with nothing learned" if field == "reflect"
-                          else "every call raises"))
+            if not os.environ.get(key_env):
+                out.append(f"{field}: `openai_compatible` needs {key_env} (and "
+                           f"{url_env} for a non-OpenAI endpoint); without it "
+                           + ("every proposal raises and the run fails after two rounds "
+                              "with nothing learned" if field == "reflect"
+                              else "every call raises"))
+            else:
+                leak = _key_sent_to_openai(block, key_env, url_env)
+                if leak:
+                    out.append(f"{field}: {leak}")
         elif ref in _CLI_BINARIES:
             binary = _CLI_BINARIES[ref]
             # Missing binary is a hard error via _missing_cli_messages / plan ok

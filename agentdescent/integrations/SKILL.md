@@ -129,11 +129,32 @@ rounds already committed are kept).
 
 Agents by short name. The CLI agents, which edit files: `claude_code` (the
 `claude` binary), `codex`, `dsh`, `opencode`. The plain models: `host_model`
-(this host's, no key), `openai_compatible` (needs `model` and `OPENAI_API_KEY`),
+(this host's, no key), `openai_compatible` (needs `model` and a key --
+`OPENAI_API_KEY` unless the spec says otherwise, see *Other providers*),
 and `claude` -- which is the **Anthropic SDK**, not the Claude CLI, and needs
 the `anthropic` package plus `ANTHROPIC_API_KEY`. `plan` warns when a spec names
 something this machine cannot run; read its `warnings` before quoting a cost.
 A cheap `reflect` model behind an expensive `agent` is the usual trade. For `kind: plugin`, set `host` to `dsh`, `claude_code`, `codex` or `opencode`.
+
+**Other providers.** `openai_compatible` is not OpenAI-only: it works with any
+OpenAI-format endpoint (Volcengine Ark, DeepSeek, a gateway, a local server).
+Three fields on the block, and no others, say where it goes and with what:
+`api_key_env` (the *name* of the variable holding the key, e.g. `ARK_API_KEY`),
+`default_base_url` (the endpoint URL) and `base_url_env` (the name of a variable
+that overrides it). `doctor` lists every key it can see in `provider_keys_present`,
+so a key it shows as set that is not `OPENAI_API_KEY` is usable this way:
+
+```json
+"reflect": {"ref": "openai_compatible", "model": "<the user's model>",
+            "api_key_env": "ARK_API_KEY",
+            "default_base_url": "https://ark.cn-beijing.volces.com/api/coding/v3"}
+```
+
+**Ask the user for the endpoint and the model; never guess either.** Without an
+endpoint the call goes to `api.openai.com` carrying that key, and `plan` warns
+about it. Never write a key into the spec: `base_url` and `api_key` are refused,
+and only the names above exist. Other keys in the block (`temperature`,
+`thinking`) go into the request body.
 
 **Which model runs.** A worker is the host CLI as a subprocess, started with its
 config directory redirected into the rollout workspace -- so it inherits
@@ -153,8 +174,9 @@ fields change that, and the user should be told which one you used:
   model, their login, their plugins. Say so when you use it, and do not use it
   for `kind: plugin` -- the run would load the plugin it is rewriting.
 
-If `doctor` reports no provider key, that is not a dead end. Two routes, neither
-needing one:
+If `doctor` reports no provider key (it checks `OPENAI_API_KEY`,
+`ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY` and `ARK_API_KEY`), that is not a dead
+end. Two routes, neither needing one:
 
 - `"reflect": {"ref": "host_model"}` reflects on **this host's model** -- the
   live session's over MCP sampling where the host supports it, otherwise the
