@@ -59,6 +59,7 @@ import tempfile
 import threading
 import time
 import types
+import uuid
 from dataclasses import dataclass, field
 from types import FunctionType
 from typing import (
@@ -2057,8 +2058,9 @@ def continuous_meta_run(
     model, meta_reward, seeds, val_seeds, min_gain, transfer_floor:
         As :func:`meta_run`.
     run_id:
-        The archived ``run_id`` for the adopted rule; a timestamp id when
-        omitted (pass one explicitly when you need to find it again).
+        The archived ``run_id`` for the adopted rule; a unique
+        ``meta-<slot>-<unix time>-<random>`` id when omitted (pass one
+        explicitly when you need to find it again).
     **evolve_kwargs:
         Everything else :func:`meta_evolve` takes, except ``initial_state``
         (this function sets it from the archive) and ``strategy``/``run``/
@@ -2128,7 +2130,11 @@ def continuous_meta_run(
 
     archived, archived_run_id = False, None
     if verdict == "adopt":
-        rid = run_id or f"meta-{slot}-{int(time.time())}"
+        # second-resolution time alone collides when two sessions adopt in the
+        # same second, and the archive is idempotent by run_id -- the second
+        # rule would silently overwrite the first. A random suffix keeps the
+        # default id unique and still sortable by time.
+        rid = run_id or f"meta-{slot}-{int(time.time())}-{uuid.uuid4().hex[:8]}"
         report = MetaRunReport(
             slot=slot, seed_value=prior_value, value=value,
             validation=validation, mean_gain=mean_gain, transfer=transfer,

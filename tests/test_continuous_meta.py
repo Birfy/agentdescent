@@ -335,3 +335,36 @@ def test_train_and_validation_problems_stay_disjoint(tmp_path):
     # validation problems are the caller's, disjoint from it by construction
     assert "run-1" in calls
     assert set(report.validation) == {"va", "vb"}
+
+
+
+def _climbing(value, seed):
+    # reward keeps rising with c, so every session can beat its prior
+    r = min(1.0, 0.3 + 0.5 * getattr(value, "c", 0.2))
+    return MetaOutcome(curve=[r, min(1.0, r + 0.05)], final=r)
+
+
+def _climbing_val(value, seed):
+    return _climbing(value, seed)
+
+
+def test_default_run_ids_do_not_collide_within_one_second(tmp_path):
+    # two adopting sessions on one store, back to back, no explicit run_id:
+    # each adopted rule must land as its own record, not overwrite the last
+    # (a second-resolution timestamp id collided and the archive is
+    # idempotent by run_id).
+    common, _ = _session_common(tmp_path, repo="r1")
+    common["rounds"] = 3
+    store = common["store"]
+    ids = []
+    for repo in ("r1", "r2"):
+        common["repo_path"] = str(tmp_path / repo)
+        report, _ = continuous_meta_run(
+            **common, train_runs=5,
+            problems={"ta": _climbing, "tb": _climbing},
+            val_problems={"va": _climbing_val})
+        assert report.verdict == "adopt", report.reason
+        ids.append(report.archived_run_id)
+    assert ids[0] != ids[1]
+    assert store.count() == 2
+    assert all(store.find(i) is not None for i in ids)
