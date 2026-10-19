@@ -355,3 +355,47 @@ strictly better rule):
 ```bash
 python -m examples.meta.continuous_meta_demo
 ```
+
+## Meta-audit: the trust layer for the rule-about-rules
+
+The audit package verifies the *inner* reward — `AuditedReward` pairs a cheap
+verifier against ground truth on a probability sample. Nothing verified the
+**meta reward**: `meta_run` decides adopt/reject on an `auc` scored over inner
+outcomes, and that number was the one unverified number in the loop. `meta_audit`
+is `AuditedReward` applied one level up:
+
+```python
+from agentdescent import MetaAuditStore, meta_run_audited, final_reward
+
+store = MetaAuditStore("~/.agentdescent/audit.jsonl")
+report, result = meta_run_audited(
+    {"train-a": problem_a, "train-b": problem_b},
+    {"val-z": problem_z}, slot="task_sampler", spec=slot(),
+    propose=offline_propose, oracle=final_reward, store=store,
+    audit_rate=0.1, rounds=3, n_workers=1)
+# result.meta: {"verdict": ..., "audited_n": 12, "oracle_gain": 0.04, "gain_bias": 0.3, ...}
+```
+
+The contract is the audit layer's own:
+
+* **A probability sample.** Every `(problem, seed)` pair recorded carries its
+  `inclusion_prob` — without it nothing estimates anything, and it cannot be
+  reconstructed later.
+* **The decision path never sees the oracle.** `meta_reward` scores every
+  verdict; the oracle is called only on sampled pairs and only lands in the
+  store. Auditing can be turned on mid-fleet without changing which rules are
+  adopted. An oracle that cannot answer yet returns `None`: the pair is stored
+  pending and `MetaAuditStore.resolve()` attaches truth later.
+* **The verdict is durable.** Sampled evidence and the decision it served are
+  both in the JSONL store, append-only, reconciled by last occurrence, so
+  "why was this rule adopted" is answerable after the run is gone.
+* **The bias is estimable.** Over the resolved sample, `verifier_gain -
+  oracle_gain` is the residual, and `MetaAuditStore.gain_bias()` is its Hajek
+  estimate. If the meta reward is systematically optimistic, that shows up as a
+  number instead of adopting rules in silence. `rectified_gain()` is the honest
+  gain estimate over the same sample.
+
+The measured case in the tests: a meta reward that reads an `auc` of `+0.65`
+where truth reads `+0.0` — `gain_bias` reports the `+0.65`, the verdict is
+still computed (and recorded) on the verifier, and the store holds the pairs
+with both readings.
