@@ -43,7 +43,9 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
+from typing import (
+    Any, Callable, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple, Union,
+)
 
 from .audit import new_record_id, verifier_fingerprint
 from .evolution import EvolutionResult, Task
@@ -351,9 +353,9 @@ class MetaAuditStore:
                 verifier_before=rec.verifier_before,
                 verifier_after=rec.verifier_after,
                 verifier_gain=rec.verifier_gain,
-                oracle_before=None,
-                oracle_after=None,
-                oracle_gain=oracle_gain,
+                oracle_before=oracle_before,
+                oracle_after=oracle_after,
+                oracle_gain=float(oracle_gain),
                 verdict=rec.verdict,
                 dispatched_at=rec.dispatched_at,
                 resolved_at=time.time() if at is None else at,
@@ -477,6 +479,17 @@ def _digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
+def _oracle_score(oracle: MetaReward, outcome: MetaOutcome) -> Optional[float]:
+    """``oracle(outcome)`` as a finite float, or ``None`` for "not yet"."""
+    value = oracle(outcome)
+    if value is None:
+        return None
+    value = float(value)
+    if not math.isfinite(value):
+        raise ValueError(f"oracle returned a non-finite score {value!r}")
+    return value
+
+
 def audited_meta_validate(
     spec: SlotSpec,
     before: str,
@@ -501,6 +514,12 @@ def audited_meta_validate(
     the before/after record is persisted to ``store`` with its ``inclusion_prob``,
     so the difference the verifier reported and the difference truth reported
     are both on disk, tied to the same ``(problem, seed, value)`` unit.
+
+    ``oracle`` is called only for sampled pairs, on the same two outcomes the
+    verifier scored. When it returns a number for both, the record is written
+    already resolved (``oracle_gain = oracle(after) - oracle(before)``); when it
+    returns ``None`` for either (truth is not available yet), the record is
+    written pending, for :meth:`MetaAuditStore.resolve` to attach later.
     """
     if not 0.0 < sample_rate <= 1.0:
         raise ValueError(f"sample_rate must be in (0, 1], got {sample_rate!r}")
@@ -521,11 +540,18 @@ def audited_meta_validate(
             cand.append(vc)
             deltas.append(vc - vb)
             if rng.random() < sample_rate:
+                # the oracle only ever lands in the store: ``base``/``cand``
+                # above are already final, so the verdict cannot see it.
+                ob, oa = _oracle_score(oracle, out_before), _oracle_score(oracle, out_after)
+                resolved = ob is not None and oa is not None
                 store.record(MetaAuditRecord(
                     record_id=new_record_id(), run_id=run_id, slot=slot,
                     problem=name, seed=s, value_digest=digest,
                     verifier_version=version, inclusion_prob=sample_rate,
                     verifier_before=vb, verifier_after=vc, verifier_gain=vc - vb,
+                    oracle_before=ob, oracle_after=oa,
+                    oracle_gain=(oa - ob) if resolved else None,
+                    resolved_at=time.time() if resolved else None,
                     sampler_seed=seed))
         report[name] = {
             "n": len(seeds),
@@ -572,7 +598,8 @@ def meta_run_audited(
     "this decision rests on N pairs the oracle checked" without recomputing it.
 
     ``oracle`` is a :class:`MetaReward` -- a ``MetaOutcome -> float`` that
-    scores an inner run with truth. ``meta_reward`` defaults to ``auc`` as in
+    scores an inner run with truth, called only on sampled pairs; return
+    ``None`` to leave a pair pending for a later :meth:`MetaAuditStore.resolve`. ``meta_reward`` defaults to ``auc`` as in
     ``meta_run``. Governance is the same ``_require_disjoint`` isolation.
     """
     if not val_problems:
@@ -584,7 +611,9 @@ def meta_run_audited(
         meta_reward=score, seeds=seeds, **evolve_kwargs)
     seed_value = spec.render(spec.initial())
     value = result.rendered or seed_value
-    rid = run_id or f"meta-audited-{slot}-{int(time.time())}"
+    # a random suffix: two runs in the same second must not share a run_id,
+    # or their sampled pairs and verdicts would be pooled under one run.
+    rid = run_id or f"meta-audited-{slot}-{int(time.time())}-{uuid.uuid4().hex[:8]}"
 
     train_validation = meta_validate(
         spec, seed_value, value, problems, seeds=seeds, meta_reward=score)

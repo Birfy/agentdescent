@@ -138,6 +138,18 @@ def test_store_round_trips_and_reconciles_by_last_occurrence(tmp_path):
     assert store.get("a").oracle_gain == 0.9
 
 
+def test_resolve_keeps_the_oracle_before_and_after(tmp_path):
+    store = MetaAuditStore(str(tmp_path / "audit.jsonl"))
+    store.record(MetaAuditRecord(
+        record_id="a", run_id="r", slot="task_sampler", problem="p", seed=0,
+        value_digest="d", verifier_version="vv", inclusion_prob=1.0,
+        verifier_before=0.2, verifier_after=1.0, verifier_gain=0.8))
+    assert store.resolve("a", 0.3, oracle_before=0.4, oracle_after=0.7) is True
+    for rec in (store.get("a"),
+                MetaAuditStore(str(tmp_path / "audit.jsonl")).get("a")):
+        assert (rec.oracle_before, rec.oracle_after, rec.oracle_gain) == (0.4, 0.7, 0.3)
+
+
 def test_resolve_is_finite_guarded():
     store = MetaAuditStore()
     rec = MetaAuditRecord(record_id="b", run_id="r", slot="s", problem="p",
@@ -208,8 +220,12 @@ def test_the_decision_path_never_sees_the_oracle(tmp_path):
     # the oracle never entered the table: no row shows 0.999
     assert validation["v"]["before"] < 0.999
     assert validation["v"]["after"] < 0.999
-    # but the sample is on disk awaiting truth
-    assert len(list(store.iter_records())) == 5
+    # but the oracle's own reading of the same pairs is on disk: 0.999 before
+    # and after, so truth says the gain is zero
+    records = list(store.iter_records())
+    assert len(records) == 5
+    assert all(r.resolved and r.oracle_gain == pytest.approx(0.0) for r in records)
+    assert all(r.oracle_before == r.oracle_after == 0.999 for r in records)
 
 
 # -- the estimator -------------------------------------------------------------
@@ -241,16 +257,45 @@ def test_a_biased_meta_reward_optimism_is_exposed(tmp_path):
         slot, before, after, {"v": _overstating, "w": _overstating},
         seeds=(0, 1, 2), meta_reward=auc, oracle=final_reward, store=store,
         slot="task_sampler", run_id="r", sample_rate=1.0, seed=0)
-    # verifier says +0.65 (auc 1.0 vs 0.35); truth says 0.0 (final 0.5 vs 0.5)
+    # verifier says +0.65 (auc 1.0 vs 0.35); truth says 0.0 (final 0.5 vs 0.5),
+    # and the oracle was asked on every sampled pair, so the bias is exposed
+    # without any manual resolution
     summary = store.summarise(run_id="r")
     assert summary["mean_verifier_gain"] == pytest.approx(0.65)
     assert summary["n_records"] == 6
-    assert summary["n_resolved"] == 0
-    # resolve every record with its oracle gain (0.0)
+    assert summary["n_resolved"] == 6
+    assert store.pending(run_id="r") == []
+    assert store.gain_bias(run_id="r") == pytest.approx(0.65)
+    assert store.rectified_gain(run_id="r") == pytest.approx(0.0)
+
+
+def test_a_deferred_oracle_leaves_pairs_pending_until_resolved(tmp_path):
+    # an oracle that cannot answer yet returns None: the pairs are recorded
+    # pending and truth is attached later through resolve()
+    store = MetaAuditStore(str(tmp_path / "d.jsonl"))
+    slot = _sampler_slot()
+    before = slot.render(slot.initial())
+    after = "# Policy parameters\nc: 0.4"
+    audited_meta_validate(
+        slot, before, after, {"v": _overstating, "w": _overstating},
+        seeds=(0, 1, 2), meta_reward=auc, oracle=lambda o: None, store=store,
+        slot="task_sampler", run_id="r", sample_rate=1.0, seed=0)
+    assert store.summarise(run_id="r")["n_resolved"] == 0
+    assert store.gain_bias(run_id="r") is None
     for rec in store.pending(run_id="r"):
         assert store.resolve(rec.record_id, 0.0) is True
     assert store.gain_bias(run_id="r") == pytest.approx(0.65)
     assert store.rectified_gain(run_id="r") == pytest.approx(0.0)
+
+
+def test_a_non_finite_oracle_score_is_refused(tmp_path):
+    slot = _sampler_slot()
+    with pytest.raises(ValueError):
+        audited_meta_validate(
+            slot, slot.render(slot.initial()), "# Policy parameters\nc: 0.4",
+            {"v": _helping}, seeds=(0,), meta_reward=auc,
+            oracle=lambda o: float("nan"), store=MetaAuditStore(),
+            slot="task_sampler", run_id="r", sample_rate=1.0, seed=0)
 
 
 # -- the product surface -------------------------------------------------------
@@ -266,14 +311,18 @@ def test_meta_run_audited_runs_and_leaves_the_verdict(tmp_path):
         audit_rate=1.0, seeds=(0, 1), val_seeds=(5, 6),
         rounds=1, n_workers=1, repo_path=str(tmp_path / "repo"))
     assert report.verdict in ("adopt", "reject")
-    # every val pair was sampled and the verdict was recorded durably
-    assert len(list(store.iter_records(run_id=report.slot or "x"))) >= 0
+    # every val pair (1 problem x 2 seeds) was sampled and the verdict was
+    # recorded durably
     verdicts = store.verdicts()
     assert verdicts and verdicts[-1]["verdict"] == report.verdict
+    rid = verdicts[-1]["run_id"]
+    assert len(list(store.iter_records(run_id=rid))) == 2
     assert result.meta["verdict"] == report.verdict
-    assert "audited_n" in result.meta
-    # unresolved until an oracle resolves the sample (None, never zero)
-    assert store.rectified_gain() is None
+    assert result.meta["audited_n"] == 2
+    # the oracle (final_reward) scored the sample, so the honest numbers exist
+    assert result.meta["oracle_gain"] is not None
+    assert result.meta["oracle_gain"] == pytest.approx(store.rectified_gain(run_id=rid))
+    assert result.meta["gain_bias"] == pytest.approx(store.gain_bias(run_id=rid))
     # the store survived a reload
     reloaded = MetaAuditStore(str(tmp_path / "c.jsonl"))
     assert len(reloaded) > 0
@@ -304,3 +353,16 @@ def _propose_for_meta():
             return f"c: {min(1.0, c + 0.1):.2f}"
         return f"c: {c:.2f}"
     return propose
+
+
+def test_meta_run_audited_default_run_ids_are_unique(tmp_path):
+    store = MetaAuditStore()
+    for repo in ("r1", "r2"):
+        meta_run_audited(
+            {"a": _helping, "b": _helping}, {"v": _helping_val},
+            slot="task_sampler", spec=_sampler_slot(),
+            propose=_propose_for_meta(), oracle=final_reward, store=store,
+            audit_rate=1.0, seeds=(0, 1), val_seeds=(5, 6),
+            rounds=1, n_workers=1, repo_path=str(tmp_path / repo))
+    run_ids = [v["run_id"] for v in store.verdicts()]
+    assert len(run_ids) == 2 and run_ids[0] != run_ids[1]

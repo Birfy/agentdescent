@@ -304,7 +304,7 @@ report, result = meta_run_audited(
     {"val-z": problem_z}, slot="task_sampler", spec=slot(),
     propose=offline_propose, oracle=final_reward, store=store,
     audit_rate=0.1, rounds=3, n_workers=1)
-# result.meta: {"verdict": ..., "audited_n": 12, "oracle_gain": None, ...}
+# result.meta: {"verdict": ..., "audited_n": 12, "oracle_gain": 0.04, "gain_bias": 0.3, ...}
 ```
 
 The contract is the audit layer's own:
@@ -313,8 +313,10 @@ The contract is the audit layer's own:
   `inclusion_prob` — without it nothing estimates anything, and it cannot be
   reconstructed later.
 * **The decision path never sees the oracle.** `meta_reward` scores every
-  verdict; the oracle only lands in the store. Auditing can be turned on
-  mid-fleet without changing which rules are adopted.
+  verdict; the oracle is called only on sampled pairs and only lands in the
+  store. Auditing can be turned on mid-fleet without changing which rules are
+  adopted. An oracle that cannot answer yet returns `None`: the pair is stored
+  pending and `MetaAuditStore.resolve()` attaches truth later.
 * **The verdict is durable.** Sampled evidence and the decision it served are
   both in the JSONL store, append-only, reconciled by last occurrence, so
   "why was this rule adopted" is answerable after the run is gone.
@@ -327,4 +329,4 @@ The contract is the audit layer's own:
 The measured case in the tests: a meta reward that reads an `auc` of `+0.65`
 where truth reads `+0.0` — `gain_bias` reports the `+0.65`, the verdict is
 still computed (and recorded) on the verifier, and the store holds the pairs
-until an oracle resolves them.
+with both readings.
