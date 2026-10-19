@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "note": "Who may record a PASS that counts, read by .github/scripts/review_gate.py (review-gate workflow, report only). A login here is not a merge right. T0/T1: green CI + a self-review PASS at the tip, then the agent may enable auto-merge. T2/T3: a PASS at the tip AND Danyang's explicit merge click (AGENTS.md › Merge policy). A PR's own author counts only when listed in selfReview: Danyang's agents act as Birfy and may PASS their own PRs. Editing this file is itself T3.",
+  "reviewers": ["Birfy"],
+  "selfReview": ["Birfy"]
+}
