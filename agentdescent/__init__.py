@@ -200,6 +200,11 @@ from .meta_curriculum import (
     MetaProblemChallenger,
     curriculum_meta_run,
 )
+from .trajectory_curriculum import (
+    failed_rollouts,
+    problem_from_tasks,
+    trajectory_challenger,
+)
 from .filetree import (
     TreeError,
     TreeSpec,
@@ -505,6 +510,9 @@ __all__ = [
     "MetaChallengerConfig",
     "MetaProblemChallenger",
     "curriculum_meta_run",
+    "failed_rollouts",
+    "problem_from_tasks",
+    "trajectory_challenger",
     "compile_priority",
     "priority_selection",
     "SLOT_PROTOCOLS",

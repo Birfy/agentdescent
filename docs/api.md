@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-378 public names across 62 modules.
+381 public names across 63 modules.
 
 ---
 
@@ -4373,6 +4373,10 @@ Evolve a decision slot against a problem distribution the meta loop generates.
 
 Dependency-free dataset loading -- the *data layer* for examples/experiments.
 
+### `failed_rollouts`
+
+The recorded rollouts that failed, up to `max_failures`.
+
 ### `harness`
 
 The least a harness can be: a name and a `(tasks, repo) -> result` callable.
@@ -4393,6 +4397,10 @@ Run a population of meta sessions from the archive's best rules, promote the win
 
 `meta_run` with an audited validation: sample, oracle, persist, decide.
 
+### `problem_from_tasks`
+
+A runnable inner `Problem` over exactly these tasks.
+
 ### `record_harness`
 
 Record one harness outcome for a domain. Idempotent by `run_id`.
@@ -4404,3 +4412,7 @@ Content-address a proposal so identical proposals dedupe automatically.
 ### `select_harness`
 
 Route a domain to the harness the archive's evidence says wins there.
+
+### `trajectory_challenger`
+
+A `MetaProblemChallenger` that mines the archive's recorded failures.
