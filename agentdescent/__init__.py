@@ -184,6 +184,14 @@ from .meta import (
     policy_source, priority_selection, problem_descriptor, problem_from_archive,
     rollouts_to, seed_source, slot_reflector, transfer_ratio,
 )
+from .learn_to_think import (
+    LearnToThinkReport,
+    ROUTE_SEED,
+    learn_to_think,
+    quality_per_cost,
+    think_policy_spec,
+    think_problem,
+)
 from .meta_audit import (
     MetaAuditRecord,
     MetaAuditStore,
@@ -495,6 +503,12 @@ __all__ = [
     "rollouts_to",
     "slot_reflector",
     "transfer_ratio",
+    "LearnToThinkReport",
+    "ROUTE_SEED",
+    "learn_to_think",
+    "quality_per_cost",
+    "think_policy_spec",
+    "think_problem",
     "MetaAuditRecord",
     "MetaAuditStore",
     "audited_meta_validate",
