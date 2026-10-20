@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-378 public names across 62 modules.
+379 public names across 62 modules.
 
 ---
 
@@ -4344,6 +4344,10 @@ Four methods, from `grep 'self\.verifier\.' agentdescent/aggregator.py`.
 ### `WorkspaceProvider`
 
 Provisions `LocalWorkspaceSandbox` -- `mkdtemp`, plus a lease file.
+
+### `async_meta_population_run`
+
+`meta_population_run` with the islands run concurrently.
 
 ### `audited_meta_validate`
 
