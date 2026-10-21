@@ -975,3 +975,44 @@ decision and the report are identical to the sequential call's, only faster to
 reach. An errored island is reported and never promoted, exactly as sequential;
 an empty archive is refused with the same pointer to run `continuous_meta_run`
 first.
+
+## Trajectory-driven curriculum: the problems come from the run's own failures
+
+`curriculum_meta_run` (#429) gives the meta loop a challenger that generates
+frontier problems; where those problems come from is the challenger's
+hardest question. `trajectory_challenger` answers it with the run's own
+memory — every archived rule links its evidence through
+`ConsolidationRecord.trajectory_store` (#334), and the trajectory ledger (#248)
+records every rollout, including the ones that failed:
+
+```python
+from agentdescent import ConsolidationStore, trajectory_challenger, problem_from_tasks, curriculum_meta_run
+
+challenger = trajectory_challenger(
+    store,
+    tasks_for=lambda ids: tasks_by_id(ids),            # task_id -> Task
+    build_problem=lambda tasks: problem_from_tasks(    # tasks -> Problem
+        tasks, slot="task_sampler", run=run, reward=reward,
+        propose=propose, strategy=SingleSlot("cap:0"), rounds=5, n_workers=1),
+    slot="task_sampler", failure_threshold=0.5)
+
+report, result = curriculum_meta_run(
+    store, slot="task_sampler", spec=slot(), challenger=challenger,
+    propose=offline_propose,
+    problems={"ta": problem_a, "tb": problem_b}, val_problems={"va": problem_z},
+    rounds=6, n_workers=1)
+```
+
+The challenger's generation spec is an **archived run_id**: `generate` reads
+that rule's trajectory store, takes the rollouts whose reward fell below
+`failure_threshold` (a corrupt record is skipped; a rule with no trajectories —
+or no failures to mine — is counted invalid, never crashed over), and `propose`
+advances across the archive's rules that recorded trajectories, so the frontier
+turns across the framework's failures instead of one rule's. `problem_from_tasks`
+is the natural problem builder: an `evolve_problem` over exactly the failed
+tasks.
+
+The #429 guarantee is inherited unchanged: the validation set stays fixed and
+the held-out split is computed from the seed tasks alone, so a problem mined
+from a failure can only ever appear in the training frontier. Memory becomes
+the exam — what the meta loop got wrong is what it is asked next.

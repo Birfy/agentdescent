@@ -280,6 +280,11 @@ from .meta_curriculum import (
     MetaProblemChallenger,
     curriculum_meta_run,
 )
+from .trajectory_curriculum import (
+    failed_rollouts,
+    problem_from_tasks,
+    trajectory_challenger,
+)
 from .meta_exam import (
     ExaminedRule,
     MetaExamReport,
@@ -646,6 +651,9 @@ __all__ = [
     "MetaProblemChallenger",
     "curriculum_meta_run",
     "async_meta_population_run",
+    "failed_rollouts",
+    "problem_from_tasks",
+    "trajectory_challenger",
     "ExaminedRule",
     "MetaExamReport",
     "exam_archive",
