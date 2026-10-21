@@ -547,6 +547,37 @@ This is the audit rung made *actionable*: `meta_run_audited` records the
 probability-sampled evidence, and `exam_archive` turns resolved oracle truth
 into a seeding decision.
 
+## Verifiable-reward policy improvement: the framework trains on truth it can check
+
+DeepSeek-R1 and RAGEN improve a policy with RL over trajectories where the
+reward is **verifiable** — exact match, a checker, a held-out fact — not a
+learned proxy. The meta stack defaults to `auc` (a proxy); `verifiable_rl.py`
+makes the verifiable reward first-class:
+
+```python
+from agentdescent import verifiable_problem, verifiable_reward, policy_improve
+
+problems = {"a": verifiable_problem(problem_fn, gold, task_for=task_for)}
+report, result = policy_improve(problems, val, slot="task_sampler",
+                                spec=slot(), propose=offline_propose)
+print(report.reward_curve)      # per-round verifiable reward, RL's signal
+print(report.seed_reward, report.improved_reward)
+```
+
+The loop:
+
+1. **`verifiable_problem(problem_fn, gold, task_for)`** — wraps a
+   `(value, task) -> output` problem so its outcome carries the output and the
+   gold in `detail`.
+2. **`verifiable_reward()`** — exact match (1.0 / 0.0); a rule that cannot be
+   checked is not rewarded — the DeepSeek-R1 verifiability contract.
+3. **`policy_improve(...)`** — `meta_evolve` with that reward, reporting the
+   per-round verifiable reward curve (the trajectory-level signal RL trains on)
+   and the before/after on held-out verifiable facts.
+
+The measured claim is the R1 one: only verifiable progress counts, and the
+report shows the reward curve the policy actually earned.
+
 ## Self red-teaming: the framework attacks its own value to find the OOD gap
 
 Red-teaming / adversarial search finds the inputs where a system fails; a
