@@ -205,6 +205,11 @@ from .trajectory_curriculum import (
     problem_from_tasks,
     trajectory_challenger,
 )
+from .meta_exam import (
+    ExaminedRule,
+    MetaExamReport,
+    exam_archive,
+)
 from .filetree import (
     TreeError,
     TreeSpec,
@@ -513,6 +518,9 @@ __all__ = [
     "failed_rollouts",
     "problem_from_tasks",
     "trajectory_challenger",
+    "ExaminedRule",
+    "MetaExamReport",
+    "exam_archive",
     "compile_priority",
     "priority_selection",
     "SLOT_PROTOCOLS",

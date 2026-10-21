@@ -92,6 +92,17 @@ class ConsolidationRecord:
     #: compatible: an archive written before this field existed reads back as
     #: ``None`` and stays seedable.
     problem: Optional[Dict[str, Any]] = None
+    #: Self-exam status, stamped by ``agentdescent.meta_exam.exam_archive``.
+    #: ``None`` until the rule is examined, then ``"passed"`` / ``"flagged"`` /
+    #: ``"demoted"``. A demoted rule is excluded from future seeding by
+    #: ``meta._archived_rules``. Optional and backwards compatible: an archive
+    #: written before this field existed reads back as ``None`` and stays
+    #: seedable until examined.
+    exam: Optional[str] = None
+    #: Consecutive failed exams, counted toward demotion.
+    exam_flags: int = 0
+    #: The last exam's reason, so a human can read why a rule was demoted.
+    exam_note: str = ""
     created_at: float = field(default_factory=time.time)
 
     @property
@@ -111,6 +122,9 @@ class ConsolidationRecord:
             "rounds": self.rounds,
             "trajectory_store": self.trajectory_store,
             "problem": self.problem,
+            "exam": self.exam,
+            "exam_flags": self.exam_flags,
+            "exam_note": self.exam_note,
             "created_at": self.created_at,
         }
 
@@ -126,6 +140,9 @@ class ConsolidationRecord:
             rounds=int(d.get("rounds", 0)),
             trajectory_store=d.get("trajectory_store"),
             problem=dict(d["problem"]) if d.get("problem") else None,
+            exam=d.get("exam"),
+            exam_flags=int(d.get("exam_flags", 0)),
+            exam_note=d.get("exam_note", ""),
             created_at=float(d.get("created_at", 0.0)),
         )
 
@@ -287,6 +304,39 @@ class ConsolidationStore:
                        if n.endswith(".json"))
         except OSError:
             return 0
+
+    def mark_exam(self, run_id: str, *, exam: Optional[str],
+                  flags: int = 0, note: str = "") -> ConsolidationRecord:
+        """Stamp a rule's self-exam status. Idempotent by ``run_id``.
+
+        Reads the current record, updates ``exam`` / ``exam_flags`` /
+        ``exam_note``, and rewrites it atomically (tmp + rename, the same
+        pattern as :meth:`archive`), so an exam result never tears a record and
+        a concurrent write cannot interleave into a half-stamped file. ``None``
+        ``exam`` clears the stamp."""
+        rec = self.find(run_id)
+        if rec is None:
+            raise KeyError(f"no archived run {run_id!r} to mark")
+        payload = rec.to_dict()
+        payload["exam"] = exam
+        payload["exam_flags"] = int(flags)
+        payload["exam_note"] = note
+        with self._lock:
+            path = self._path(run_id)
+            tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+            try:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(tmp, "w", encoding="utf-8") as fh:
+                    json.dump(payload, fh, sort_keys=True, default=str,
+                              allow_nan=False)
+                os.replace(tmp, path)
+            finally:
+                try:
+                    if os.path.exists(tmp):
+                        os.remove(tmp)
+                except OSError:
+                    pass
+        return self.find(run_id)  # type: ignore[return-value]
 
 
 @dataclass(frozen=True)
