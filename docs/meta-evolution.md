@@ -547,6 +547,142 @@ This is the audit rung made *actionable*: `meta_run_audited` records the
 probability-sampled evidence, and `exam_archive` turns resolved oracle truth
 into a seeding decision.
 
+## Verifiable-reward policy improvement: the framework trains on truth it can check
+
+DeepSeek-R1 and RAGEN improve a policy with RL over trajectories where the
+reward is **verifiable** — exact match, a checker, a held-out fact — not a
+learned proxy. The meta stack defaults to `auc` (a proxy); `verifiable_rl.py`
+makes the verifiable reward first-class:
+
+```python
+from agentdescent import verifiable_problem, verifiable_reward, policy_improve
+
+problems = {"a": verifiable_problem(problem_fn, gold, task_for=task_for)}
+report, result = policy_improve(problems, val, slot="task_sampler",
+                                spec=slot(), propose=offline_propose)
+print(report.reward_curve)      # per-round verifiable reward, RL's signal
+print(report.seed_reward, report.improved_reward)
+```
+
+The loop:
+
+1. **`verifiable_problem(problem_fn, gold, task_for)`** — wraps a
+   `(value, task) -> output` problem so its outcome carries the output and the
+   gold in `detail`.
+2. **`verifiable_reward()`** — exact match (1.0 / 0.0); a rule that cannot be
+   checked is not rewarded — the DeepSeek-R1 verifiability contract.
+3. **`policy_improve(...)`** — `meta_evolve` with that reward, reporting the
+   per-round verifiable reward curve (the trajectory-level signal RL trains on)
+   and the before/after on held-out verifiable facts.
+
+The measured claim is the R1 one: only verifiable progress counts, and the
+report shows the reward curve the policy actually earned.
+
+## Self red-teaming: the framework attacks its own value to find the OOD gap
+
+Red-teaming / adversarial search finds the inputs where a system fails; a
+self-improving framework should do this to *itself* before anyone else does:
+
+```python
+from agentdescent import red_team_evolve
+
+report, result = red_team_evolve(
+    problems, run=run, reward=reward, propose=offline_propose,
+    mutate=push_difficulty, strategy=skill, attack_budget=40)
+print(report.failures_found)               # the OOD gap the attack found
+print(report.coverage_before, report.coverage_after)
+```
+
+The loop:
+
+1. **`red_team(value, score, mutate, seed_tasks, budget)`** — mutates the
+   training tasks outward and scores the value on each mutation, collecting the
+   failures: the OOD region where the value does not generalise. Deterministic
+   and reproducible.
+2. **`red_team_evolve(...)`** — evolves on the problems, attacks its own
+   result, then retrains on the union of the problems and the failures it
+   found, closing the OOD gap.
+3. **`RedTeamReport`** — the failures found and the coverage (fraction of the
+   attack's mutations solved) before and after the retraining.
+
+The measured claim: the framework finds its own blind spot and fixes it — and
+the report shows the gap closing.
+
+## Trajectory tree search: the evolution loop becomes a learned MCTS over states
+
+LATS / AlphaCodium run MCTS over agent trajectories; the parallel engine here
+explores rollouts in *batches*, with no learned preference for which branch of
+the state tree deserves the next rollout. `trajectory_search.py` is the
+tree-search dimension:
+
+```python
+from agentdescent import search_evolve
+
+best, report = search_evolve(
+    problem, spec, seed_value="c: 0.2", branch=branch_fn,
+    budget=40, ucb_c=1.4)
+print(report.value_estimate, report.verified_value)   # search's belief vs fresh truth
+print(report.nodes, report.depth)
+```
+
+The loop:
+
+1. **`SearchTree`** — a state tree over rendered values: `expand(rendered,
+   children)` adds branches (a self-loop is refused, so select cannot spin),
+   `update(rendered, value)` back-propagates, and `select()` walks from the root
+   choosing the child with the highest UCB score (mean value plus an
+   exploration bonus) — the same bandit the tree policies in `selection` run,
+   applied one level up.
+2. **`search_evolve`** — each iteration selects a leaf by UCB, branches it into
+   child renderings via a callable, scores each child with a critic (`auc`, or
+   an oracle / the self-rewarding judge) over seeds, and back-propagates.
+3. **The report is inspectable** — `SearchReport` carries the budget, the node
+   count, the search's own `value_estimate`, and a **freshly verified** score
+   of the best state side by side, so the search's reasoning is measured
+   against final truth, not assumed.
+
+On a monotone landscape the tree climbs to the optimum; on a landscape with a
+trap band, UCB spends its budget past it — the search's own preference is what
+makes the tree better than a flat batch.
+
+## Agent society: the framework evolves a cooperating topology, not just one artifact
+
+Everything else in this project evolves one artifact against one task set.
+`agent_society.py` adds the topology dimension (Anthropic's multi-agent
+research system; AgentEvolve): a society is a graph of agent nodes — each a
+name, an instruction, a budget — with delegation edges, and the whole graph is
+one evolvable artifact:
+
+```python
+from agentdescent import society_evolve, society_problem
+
+report, result = society_evolve(
+    {"t": society_problem(train_tasks, gold=gold)},
+    {"v": society_problem(val_tasks, gold=gold)},    # held-out inputs
+    propose=offline_propose, rounds=6, n_workers=2)
+print(report.gain)            # positive: the delegation won on the held-out set
+print(report.value)           # the evolved graph source
+```
+
+The loop:
+
+1. **`AgentNode` + `SocietyGraph`** — the container: nodes (instruction,
+   budget) and delegation edges; `solve(input)` routes the input through the
+   graph and returns the output and the cost (nodes used).
+2. **`society_spec`** — the evolvable artifact: a gated `society()` source
+   compiled into a `SocietyGraph`, with `SOCIETY_SEED` the single-agent
+   baseline. The gate is the same AST walk every other self-edit runs.
+3. **`society_problem`** — a multi-step task routed through the graph, rewarded
+   as correctness minus delegation cost: a topology that solves the task with
+   the least hand-off wins.
+4. **`society_evolve`** — the ordinary `evolve()` over those tasks, so the
+   search finds the topology (which nodes exist, who hands to whom, each
+   node's instruction) that wins. `SocietyReport` compares the evolved graph
+   with the seed on validation tasks.
+
+A single-node society is the old one-agent loop; a society that delegates to a
+specialist the single node lacked is the dimension up — measured, not assumed.
+
 ## World model: the framework learns an internal simulator and dreams before it acts
 
 Dreamer / world-model RL train a simulator from experience and use it for cheap
