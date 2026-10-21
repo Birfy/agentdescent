@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-390 public names across 66 modules.
+394 public names across 67 modules.
 
 ---
 
@@ -4165,6 +4165,10 @@ One entry per *category*: competing proposals contradict and are resolved.
 
 Where a runner writes the evolving tree inside a workspace (`claude_skill`, `skill_library`, `claude_agent`, `dsh_skill`, `agents_skill`, `root`).
 
+### `LayerBudget`
+
+One spending line of the framework: a limit, what it spent, what it bought.
+
 ### `LearningValueModel`
 
 A tiny online logistic model over the candidate features.
@@ -4244,6 +4248,10 @@ Every replaceable piece, in one argument.
 ### `PopulationIsland`
 
 One island of a `meta_population_run`: a rule's search, and how it went.
+
+### `PortfolioReport`
+
+What a `portfolio_report` pass saw, and decided.
 
 ### `ProcessExecutor`
 
@@ -4413,6 +4421,10 @@ The least a harness can be: a name and a `(tasks, repo) -> result` callable.
 
 The best measured reward this harness has recorded for the domain.
 
+### `layers_from_archive`
+
+One layer per decision slot, aggregated from the archive's rule records.
+
 ### `meta_population_run`
 
 Run a population of meta sessions from the archive's best rules, promote the winner.
@@ -4424,6 +4436,10 @@ Run a population of meta sessions from the archive's best rules, promote the win
 ### `policy_improve`
 
 Evolve a decision slot on verifiable reward and report the curve.
+
+### `portfolio_report`
+
+Score the layers by return-per-cost and reallocate the next window.
 
 ### `record_harness`
 

@@ -115,6 +115,7 @@ nav:
     - Molecule search — porous crystals: porous-molecules.md
     - Cross-run consolidation: consolidation.md
     - Harness composition: harness-composition.md
+    - Portfolio governance: portfolio.md
     - Solver-challenger self-play: selfplay.md
   - Self-evolution algorithms:
     - Overview: self-evolution-examples.md
