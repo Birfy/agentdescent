@@ -55,7 +55,15 @@ _AGENT_SRC = (
     "print(sum(int(r[col]) for r in rows) if rows and col in rows[0] else 'unknown')"
 )
 
-_SKILL_MD = f"""# {DEMO_SKILL}
+#: A valid Agent Skill: hosts (Claude Code, Codex, OpenCode) only load a skill
+#: whose SKILL.md carries ``name`` + ``description`` frontmatter, and a run on a
+#: tree without it turns the SKILL.md structural gate off (#453).
+_SKILL_MD = f"""---
+name: {DEMO_SKILL}
+description: Use when asked to total a column of data.csv; reads references/rules.md to learn which column to sum.
+---
+
+# {DEMO_SKILL}
 
 Total one column of `data.csv`, which is in the working directory.
 
