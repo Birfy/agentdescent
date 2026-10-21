@@ -184,6 +184,14 @@ from .meta import (
     policy_source, priority_selection, problem_descriptor, problem_from_archive,
     rollouts_to, seed_source, slot_reflector, transfer_ratio,
 )
+from .self_modify import (
+    SelfModifyReport,
+    apply_patch,
+    evaluate_source,
+    gate_source,
+    improve_source,
+    patch_source,
+)
 from .verifiable_rl import (
     VerifiableReport,
     policy_improve,
@@ -516,6 +524,12 @@ __all__ = [
     "rollouts_to",
     "slot_reflector",
     "transfer_ratio",
+    "SelfModifyReport",
+    "apply_patch",
+    "evaluate_source",
+    "gate_source",
+    "improve_source",
+    "patch_source",
     "VerifiableReport",
     "policy_improve",
     "verifiable_problem",

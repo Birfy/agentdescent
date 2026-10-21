@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-390 public names across 66 modules.
+396 public names across 67 modules.
 
 ---
 
@@ -4329,6 +4329,10 @@ What environment one rollout needs. Must survive JSON: it crosses processes.
 
 A state tree over rendered artifact values, searched by UCB.
 
+### `SelfModifyReport`
+
+What `improve_source` accepted: the patch, its tests, its gain.
+
 ### `SharedSandboxPool`
 
 A pool whose ceiling is the machine's, not this process's.
@@ -4369,6 +4373,10 @@ Four methods, from `grep 'self\.verifier\.' agentdescent/aggregator.py`.
 
 Provisions `LocalWorkspaceSandbox` -- `mkdtemp`, plus a lease file.
 
+### `apply_patch`
+
+Apply a `patch_source` diff back to a source. `ValueError` when the patch does not apply cleanly -- a patch whose context does not match `source` is refused, never half-applied. Untouched lines outside a hunk's context are preserved, so a middle-of-file edit keeps the rest of the file.
+
 ### `audited_meta_validate`
 
 `meta_validate`, with a probability sample of pairs sent to the oracle.
@@ -4397,9 +4405,17 @@ Evolve a decision slot against a problem distribution the meta loop generates.
 
 Dependency-free dataset loading -- the *data layer* for examples/experiments.
 
+### `evaluate_source`
+
+Run the candidate against the tests and the benchmark.
+
 ### `exam_archive`
 
 Re-validate the archive's adopted rules against an independent oracle.
+
+### `gate_source`
+
+The candidate's gate: exactly one function of no arguments other than what its signature declares, built only from safe syntax. Imports, dunder access and the calls that reach the interpreter are refused -- the same walk `compile_policy_source` runs over every self-edit.
 
 ### `harness`
 
@@ -4413,6 +4429,10 @@ The least a harness can be: a name and a `(tasks, repo) -> result` callable.
 
 The best measured reward this harness has recorded for the domain.
 
+### `improve_source`
+
+Evolve the source of one function under its own tests and benchmark.
+
 ### `meta_population_run`
 
 Run a population of meta sessions from the archive's best rules, promote the winner.
@@ -4420,6 +4440,10 @@ Run a population of meta sessions from the archive's best rules, promote the win
 ### `meta_run_audited`
 
 `meta_run` with an audited validation: sample, oracle, persist, decide.
+
+### `patch_source`
+
+A unified diff between two sources -- the patch a human or a reviewer sees, and what an apply can reverse.
 
 ### `policy_improve`
 
