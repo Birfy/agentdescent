@@ -190,6 +190,11 @@ from .verifiable_rl import (
     verifiable_problem,
     verifiable_reward,
 )
+from .red_team import (
+    RedTeamReport,
+    red_team,
+    red_team_evolve,
+)
 from .meta_audit import (
     MetaAuditRecord,
     MetaAuditStore,
@@ -510,6 +515,9 @@ __all__ = [
     "policy_improve",
     "verifiable_problem",
     "verifiable_reward",
+    "RedTeamReport",
+    "red_team",
+    "red_team_evolve",
     "MetaAuditRecord",
     "MetaAuditStore",
     "audited_meta_validate",

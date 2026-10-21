@@ -577,3 +577,33 @@ The loop:
 
 The measured claim is the R1 one: only verifiable progress counts, and the
 report shows the reward curve the policy actually earned.
+
+## Self red-teaming: the framework attacks its own value to find the OOD gap
+
+Red-teaming / adversarial search finds the inputs where a system fails; a
+self-improving framework should do this to *itself* before anyone else does:
+
+```python
+from agentdescent import red_team_evolve
+
+report, result = red_team_evolve(
+    problems, run=run, reward=reward, propose=offline_propose,
+    mutate=push_difficulty, strategy=skill, attack_budget=40)
+print(report.failures_found)               # the OOD gap the attack found
+print(report.coverage_before, report.coverage_after)
+```
+
+The loop:
+
+1. **`red_team(value, score, mutate, seed_tasks, budget)`** — mutates the
+   training tasks outward and scores the value on each mutation, collecting the
+   failures: the OOD region where the value does not generalise. Deterministic
+   and reproducible.
+2. **`red_team_evolve(...)`** — evolves on the problems, attacks its own
+   result, then retrains on the union of the problems and the failures it
+   found, closing the OOD gap.
+3. **`RedTeamReport`** — the failures found and the coverage (fraction of the
+   attack's mutations solved) before and after the retraining.
+
+The measured claim: the framework finds its own blind spot and fixes it — and
+the report shows the gap closing.
