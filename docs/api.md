@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-381 public names across 63 modules.
+385 public names across 64 modules.
 
 ---
 
@@ -4345,6 +4345,10 @@ The default: a bounded pool of threads in this process.
 
 Learn which candidates are worth the expensive evaluation.
 
+### `VerifiableReport`
+
+What `policy_improve` did: the per-round held-out verifiable reward curve (the trajectory-level signal RL trains on) and the before/after on held-out verifiable facts.
+
 ### `VerifierProtocol`
 
 Four methods, from `grep 'self\.verifier\.' agentdescent/aggregator.py`.
@@ -4409,6 +4413,10 @@ Run a population of meta sessions from the archive's best rules, promote the win
 
 `meta_run` with an audited validation: sample, oracle, persist, decide.
 
+### `policy_improve`
+
+Evolve a decision slot on verifiable reward and report the curve.
+
 ### `record_harness`
 
 Record one harness outcome for a domain. Idempotent by `run_id`.
@@ -4420,3 +4428,11 @@ Content-address a proposal so identical proposals dedupe automatically.
 ### `select_harness`
 
 Route a domain to the harness the archive's evidence says wins there.
+
+### `verifiable_problem`
+
+Wrap a `(value, task) -> output` problem so the outcome's reward is verifiable: `1.0` on exact match with `gold`, `0.0` otherwise, with the output and gold carried in `detail` for `verifiable_reward`.
+
+### `verifiable_reward`
+
+The RL signal: `1.0` when the outcome's output exactly matches its `gold`, `0.0` otherwise. A rule that cannot be checked is not rewarded -- the DeepSeek-R1 verifiability contract.
