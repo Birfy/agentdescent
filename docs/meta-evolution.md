@@ -546,4 +546,3 @@ and what fails the check stops steering the search.
 This is the audit rung made *actionable*: `meta_run_audited` records the
 probability-sampled evidence, and `exam_archive` turns resolved oracle truth
 into a seeding decision.
-
