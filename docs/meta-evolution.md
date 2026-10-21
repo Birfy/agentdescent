@@ -723,6 +723,43 @@ The measured claim is the Dreamer one made concrete: pay the real cost where it
 pays, dream where it is cheap — and the report says how much the dream was
 worth.
 
+## Self-rewarding meta-evolution: the judge improves as the run goes
+
+Self-Rewarding Language Models (Meta, 2024) train a model to reward its own
+outputs, and improve *both* the outputs and the judge in alternation. The meta
+level here already pairs a fixed `meta_reward` with an oracle that samples the
+truth (#426); the missing rung was that the reward itself never improves.
+`self_rewarding_meta_run` closes it:
+
+```python
+from agentdescent import self_rewarding_meta_run, final_reward
+
+report, result = self_rewarding_meta_run(
+    {"ta": problem_a, "tb": problem_b}, {"va": problem_z},
+    slot="task_sampler", spec=slot(), oracle=final_reward,
+    propose=offline_propose, self_reward_rounds=2, rounds=4, n_workers=2)
+print(report.judge_agreement)   # judge vs oracle on outcomes it never trained on
+print(report.judge_labels, report.oracle_gain)
+```
+
+The loop:
+
+1. **`outcome_features(outcome)`** — the curve-shape features a judge learns
+   quality from: mean best-so-far, final, sweeps, rollouts. Deliberately never
+   the oracle's exact quantity — the judge must learn quality from the shape.
+2. **`LearnableMetaJudge`** — a small pure-Python linear regressor from those
+   features to oracle quality, fit by least squares (deterministic, no numpy),
+   trained **only on labels the oracle actually produced**, never its own
+   guesses.
+3. **`self_rewarding_meta_run`** — evolve with the plain `auc`, score
+   `judge_sample` outcomes with the oracle and fit the judge, then re-evolve
+   with the judge as the meta reward and refit on the newly oracle-labelled
+   outcomes — each round the search moves against a closer approximation of
+   truth.
+4. **The report is measured, not claimed.** `judge_agreement` is the judge vs
+   the oracle on validation outcomes it never trained on — the same
+   final-evaluation isolation every other development set gets — plus the
+   label count and the oracle gain of the evolved value over the seed.
 ## Self-modifying framework: the framework evolves patches to its own code
 
 Everything else in this project evolves artifacts — skills, prompts, decision
