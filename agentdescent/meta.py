@@ -1899,7 +1899,9 @@ def _archived_rules(
     ranking :func:`~agentdescent.consolidation.seed_from_archive` uses, so a
     rule evolved on a different domain is a *weaker* candidate rather than a
     disqualified one (its problem is still a valid unseen problem to train or
-    validate against).
+    validate against). A rule whose self-exam stamped it ``demoted`` is
+    excluded outright: ``exam_archive`` has already shown, with oracle
+    evidence, that it does not transfer, so it must not keep seeding the search.
     """
     want = config_fingerprint(config)
     name = type(spec).__name__
@@ -1910,6 +1912,8 @@ def _archived_rules(
         if rec.strategy and rec.strategy != name:
             continue
         if not rec.problem or rec.problem.get("slot") != slot:
+            continue
+        if rec.exam == "demoted":
             continue
         rules.append(rec)
     rules.sort(key=lambda r: (r.config_hash == want, r.final_reward), reverse=True)
