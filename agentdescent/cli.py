@@ -132,10 +132,14 @@ def default_agent_ref() -> Tuple[str, bool]:
 
 
 def starter_spec(path: str, *, kind: Optional[str] = None, data: Optional[str] = None,
-                 agent: Optional[str] = None) -> Dict[str, Any]:
+                 agent: Optional[str] = None,
+                 agent_explicit: bool = False) -> Dict[str, Any]:
     """A spec to edit, with ``kind`` guessed from what ``path`` is.
 
     ``agent=None`` picks the worker from the CLIs on PATH (:func:`default_agent_ref`).
+    ``agent_explicit`` says the user named ``agent`` (``init --agent``): it is
+    then kept for every kind instead of being replaced by the kind's default
+    model (#456).
     """
     if agent is None:
         agent = default_agent_ref()[0]
@@ -161,7 +165,8 @@ def starter_spec(path: str, *, kind: Optional[str] = None, data: Optional[str] =
         "evolve": {"rounds": 6, "n_workers": 4},
     }
     if kind == "text":
-        spec["agent"] = {"ref": "openai_compatible", "model": "deepseek-v4-flash"}
+        if not agent_explicit or agent == "openai_compatible":
+            spec["agent"] = {"ref": "openai_compatible", "model": "deepseek-v4-flash"}
         spec["evolve"] = {"rounds": 8, "n_workers": 8}
     if kind == "skill_dir":
         spec["reflect"] = {"ref": "openai_compatible", "model": "deepseek-v4-flash"}
@@ -181,7 +186,8 @@ def starter_spec(path: str, *, kind: Optional[str] = None, data: Optional[str] =
         spec["target"] = path if path in _POLICY_SLOTS else "selection"
         spec["data"] = {"problems": data or "mypkg.problems:build", "seeds": [0]}
         spec["score"] = "auc"
-        spec["agent"] = {"ref": "openai_compatible", "model": "deepseek-v4-flash"}
+        if not agent_explicit or agent == "openai_compatible":
+            spec["agent"] = {"ref": "openai_compatible", "model": "deepseek-v4-flash"}
         # A round is `n_workers` whole inner searches, so ask for few and budget
         # in wall clock: the recorded run asked for 8 rounds and got 2 in 90 min.
         spec["evolve"] = {"rounds": 4, "n_workers": 2, "max_seconds": 5400}
@@ -400,9 +406,47 @@ cases.jsonl, and a real agent instead of the offline one:
     return 0
 
 
+#: Built-in short refs by what they resolve to; keep in step with
+#: ``evolvespec.SHORT_REFS`` / ``WORKSPACE_AGENT_REFS``. A full
+#: ``module:attribute`` ref outside these is not checked here (``plan`` does).
+_WORKSPACE_REFS = ("claude_code", "codex", "dsh", "opencode", "cli_agent")
+_PLAIN_REFS = ("openai_compatible", "host_model", "claude", "echo")
+
+
+def init_agent_mismatch(kind: str, ref: str) -> Optional[str]:
+    """Why ``plan`` would refuse agent ``ref`` for ``kind``, or None (#456).
+
+    The same two rules ``compose`` enforces, checked before ``init`` writes a
+    spec that is doomed at ``plan``: a directory kind needs a WorkspaceAgent,
+    and kind=text needs a plain Completion.
+    """
+    short = ref.split(":", 1)[1] if ref.startswith("agentdescent.agents:") else ref
+    if short == "agentdescent.host_sampling:host_model":
+        short = "host_model"
+    if kind in ("skill_dir", "agent_dir") and short in _PLAIN_REFS:
+        return (f"kind={kind!r} needs a WorkspaceAgent "
+                f"({' / '.join(_WORKSPACE_REFS)}) so the directory is put in front "
+                f"of it; `{ref}` is a plain model call")
+    if kind == "text" and short in _WORKSPACE_REFS:
+        return (f"kind='text' needs a plain Completion ({' / '.join(_PLAIN_REFS[:3])}), "
+                f"not a WorkspaceAgent; `{ref}` is a file-editing agent and would "
+                "cost a whole agent session per case")
+    return None
+
+
 def cmd_init(a: argparse.Namespace) -> int:
     agent, found = (a.agent, True) if a.agent else default_agent_ref()
-    spec = starter_spec(a.path, kind=a.kind, data=a.data, agent=agent)
+    spec = starter_spec(a.path, kind=a.kind, data=a.data, agent=agent,
+                        agent_explicit=bool(a.agent))
+    if a.agent:
+        why = init_agent_mismatch(spec["kind"], a.agent)
+        if why:
+            # Refuse before writing: `plan` would reject this spec anyway, and a
+            # spec that silently swaps the user's --agent is worse (#456).
+            print(f"error: --agent {a.agent}: {why}; pick a matching ref "
+                  "(see `agentdescent doctor`) or omit --agent for the default",
+                  file=sys.stderr)
+            return 2
     out = a.out or os.path.join(".agentdescent", f"{os.path.basename(a.path.rstrip('/')) or 'spec'}.evolve.json")
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     with open(out, "w", encoding="utf-8") as fh:
