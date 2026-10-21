@@ -792,3 +792,45 @@ The loop:
 The measured claim is the STaR one: the artifact boots itself by carrying what
 its own runs taught it — and the report shows the notes it learned to carry.
 
+## Evolved code that beats the shipped implementation on quality-per-cost
+
+`priority_selection` evolves the `selection` priority rule, but its reward is
+quality alone — an evolved rule that costs more than the shipped seed can win
+on AUC and lose on latency, invisibly. `evolve_fast_rule` is the AlphaEvolve /
+FunSearch idea applied to the decision plane: the reward includes **cost**, so
+the search finds a rule that is as good *and cheaper* than the hand-written
+default, and the report measures the evolved rule against the seed on both axes:
+
+```python
+from agentdescent import evolve_fast_rule, priority_grid_problem
+
+report, result = evolve_fast_rule(
+    {"g": priority_grid_problem()}, {"v": priority_grid_problem()},
+    propose=offline_propose, rounds=6, n_workers=2)
+print(report.evolved_ops, report.seed_ops)        # fewer ops ...
+print(report.evolved_quality, report.seed_quality)  # ... at equal quality
+print(report.gain)                                # positive: it beat the seed
+```
+
+The pieces:
+
+* **`source_ops(source)`** — the arithmetic/call nodes of a candidate rule's
+  source, counted from the AST: a deterministic, attributable cost proxy
+  (evaluating a rule costs what its expression tree costs), where wallclock is
+  not reproducible.
+* **`priority_grid_problem()`** — a `Problem` over a fixed grid of priority
+  inputs whose reference ordering is the shipped seed's own: the seed scores
+  `1.0` at the baseline cost, and a rule must be cheaper at equal quality (or
+  better at equal cost) to beat it.
+* **`cost_adjusted_reward(lam, baseline)`** — `quality - lam * (cost / baseline)`,
+  clipped to `[0, 1]`; the cost is read from the outcome's `detail`.
+* **`evolve_fast_rule(...)`** — `meta_evolve` on `selection` with that reward,
+  then `FastRuleReport`: seed vs evolved `ops`, seed vs evolved quality, and
+  the cost-adjusted gain — the number that says "this evolved rule beat the
+  hand-written default on quality-per-cost".
+
+The grid regime spans the root before any expansion, a lone node, deep nodes
+and unrated priors — the same regime `compile_priority` refuses a rule on, so a
+candidate that is not a finite number everywhere never reaches the cost
+comparison.
+
