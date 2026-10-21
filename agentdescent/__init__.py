@@ -215,6 +215,13 @@ from .world_model import (
     simulator_problem,
     simulator_score,
 )
+from .rule_tournament import (
+    EloRating,
+    MatchResult,
+    TournamentReport,
+    rule_tournament,
+    tournament_promote,
+)
 from .learn_to_think import (
     LearnToThinkReport,
     ROUTE_SEED,
@@ -560,6 +567,11 @@ __all__ = [
     "imagine_then_evolve",
     "simulator_problem",
     "simulator_score",
+    "EloRating",
+    "MatchResult",
+    "TournamentReport",
+    "rule_tournament",
+    "tournament_promote",
     "LearnToThinkReport",
     "ROUTE_SEED",
     "learn_to_think",

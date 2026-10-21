@@ -723,6 +723,7 @@ The measured claim is the Dreamer one made concrete: pay the real cost where it
 pays, dream where it is cheap — and the report says how much the dream was
 worth.
 
+
 ## Learn-to-think: the framework evolves *when* to spend compute
 
 Search-R1 / ZigZag train a model to decide when to retrieve, search, or answer
