@@ -200,6 +200,14 @@ from .trajectory_search import (
     SearchTree,
     search_evolve,
 )
+from .agent_society import (
+    AgentNode,
+    SocietyGraph,
+    SocietyReport,
+    society_evolve,
+    society_problem,
+    society_spec,
+)
 from .meta_audit import (
     MetaAuditRecord,
     MetaAuditStore,
@@ -526,6 +534,12 @@ __all__ = [
     "SearchReport",
     "SearchTree",
     "search_evolve",
+    "AgentNode",
+    "SocietyGraph",
+    "SocietyReport",
+    "society_evolve",
+    "society_problem",
+    "society_spec",
     "MetaAuditRecord",
     "MetaAuditStore",
     "audited_meta_validate",
