@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-378 public names across 62 modules.
+380 public names across 63 modules.
 
 ---
 
@@ -4309,6 +4309,10 @@ Where sandboxes come from and go back to.
 
 What environment one rollout needs. Must survive JSON: it crosses processes.
 
+### `SearchTree`
+
+A state tree over rendered artifact values, searched by UCB.
+
 ### `SharedSandboxPool`
 
 A pool whose ceiling is the machine's, not this process's.
@@ -4400,6 +4404,10 @@ Record one harness outcome for a domain. Idempotent by `run_id`.
 ### `rule_id`
 
 Content-address a proposal so identical proposals dedupe automatically.
+
+### `search_evolve`
+
+Search the state tree for the best value under a fixed budget.
 
 ### `select_harness`
 
