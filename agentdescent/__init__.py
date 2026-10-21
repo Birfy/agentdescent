@@ -222,6 +222,12 @@ from .rule_tournament import (
     rule_tournament,
     tournament_promote,
 )
+from .self_rewarding import (
+    LearnableMetaJudge,
+    SelfRewardingReport,
+    outcome_features,
+    self_rewarding_meta_run,
+)
 from .meta_audit import (
     MetaAuditRecord,
     MetaAuditStore,
@@ -569,6 +575,10 @@ __all__ = [
     "TournamentReport",
     "rule_tournament",
     "tournament_promote",
+    "LearnableMetaJudge",
+    "SelfRewardingReport",
+    "outcome_features",
+    "self_rewarding_meta_run",
     "MetaAuditRecord",
     "MetaAuditStore",
     "audited_meta_validate",
