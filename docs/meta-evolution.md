@@ -723,6 +723,7 @@ The measured claim is the Dreamer one made concrete: pay the real cost where it
 pays, dream where it is cheap — and the report says how much the dream was
 worth.
 
+
 ## Chain audit: one adoption, traced through every evidence ring
 
 The framework's promise is that no number in the loop is unverified — the inner
