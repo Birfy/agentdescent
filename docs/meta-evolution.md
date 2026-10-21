@@ -682,3 +682,43 @@ The loop:
 
 A single-node society is the old one-agent loop; a society that delegates to a
 specialist the single node lacked is the dimension up — measured, not assumed.
+
+## World model: the framework learns an internal simulator and dreams before it acts
+
+Dreamer / world-model RL train a simulator from experience and use it for cheap
+rollouts, spending real cost only where it pays. Every evolution run here pays
+the real cost of every rollout; `world_model.py` is the Dreamer loop applied to
+the framework:
+
+```python
+from agentdescent import LearnedSimulator, imagine_then_evolve
+
+sim = LearnedSimulator(k=1)
+sim.fit(observed_pairs)      # (state features, real reward) from the ledger
+report, result = imagine_then_evolve(
+    {"t": problem_a}, {"v": problem_z},
+    slot="task_sampler", spec=slot(), simulator=sim,
+    propose=offline_propose, rounds=6, n_workers=2)
+print(report.simulator_error, report.simulator_agreement)   # is the dream trustworthy?
+print(report.dreamed_rollouts, report.verified_rollouts)    # budget split
+```
+
+The loop:
+
+1. **`LearnedSimulator`** — a pure-Python nearest-neighbour model fit on
+   observed `(state, reward)` pairs: deterministic, dependency-free, and unable
+   to extrapolate beyond what it has seen.
+2. **`simulator_problem(simulator)`** — turns the simulator into a `Problem`: a
+   cheap, model-free rollout (no inner run, no model call), which is what makes
+   dreaming affordable.
+3. **`simulator_score(simulator, real_problem, value, seeds)`** — the simulator
+   against the real problem: mean abs error and rank agreement, so the
+   framework knows when to trust the dream and when to wake up.
+4. **`imagine_then_evolve(...)`** — spends most of its budget in the dream
+   (evolving against the simulator via `meta_evolve`), then verifies the value
+   on the real `val_problems` and reports the dreamed vs verified rollout
+   counts and the real gain over the seed.
+
+The measured claim is the Dreamer one made concrete: pay the real cost where it
+pays, dream where it is cheap — and the report says how much the dream was
+worth.

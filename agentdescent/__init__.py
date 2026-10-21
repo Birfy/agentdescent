@@ -208,6 +208,13 @@ from .agent_society import (
     society_problem,
     society_spec,
 )
+from .world_model import (
+    ImagineReport,
+    LearnedSimulator,
+    imagine_then_evolve,
+    simulator_problem,
+    simulator_score,
+)
 from .meta_audit import (
     MetaAuditRecord,
     MetaAuditStore,
@@ -540,6 +547,11 @@ __all__ = [
     "society_evolve",
     "society_problem",
     "society_spec",
+    "ImagineReport",
+    "LearnedSimulator",
+    "imagine_then_evolve",
+    "simulator_problem",
+    "simulator_score",
     "MetaAuditRecord",
     "MetaAuditStore",
     "audited_meta_validate",

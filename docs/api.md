@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-396 public names across 67 modules.
+401 public names across 68 modules.
 
 ---
 
@@ -4161,6 +4161,10 @@ What a `compose_run` did, and why.
 
 One harness's measured outcome in a `compose_run`.
 
+### `ImagineReport`
+
+What `imagine_then_evolve` did: the verified value, its real gain over the seed, the simulator's trust score, and how much of the budget was spent dreaming vs waking.
+
 ### `KeyedRules`
 
 One entry per *category*: competing proposals contradict and are resolved.
@@ -4168,6 +4172,10 @@ One entry per *category*: competing proposals contradict and are resolved.
 ### `LAYOUTS`
 
 Where a runner writes the evolving tree inside a workspace (`claude_skill`, `skill_library`, `claude_agent`, `dsh_skill`, `agents_skill`, `root`).
+
+### `LearnedSimulator`
+
+A pure-Python nearest-neighbour simulator from observed rollouts.
 
 ### `LearningValueModel`
 
@@ -4425,6 +4433,10 @@ The least a harness can be: a name and a `(tasks, repo) -> result` callable.
 
 The best measured reward this harness has recorded for the domain.
 
+### `imagine_then_evolve`
+
+Evolve against the simulator, verify the result on the real problem.
+
 ### `meta_population_run`
 
 Run a population of meta sessions from the archive's best rules, promote the winner.
@@ -4460,6 +4472,14 @@ Search the state tree for the best value under a fixed budget.
 ### `select_harness`
 
 Route a domain to the harness the archive's evidence says wins there.
+
+### `simulator_problem`
+
+A `Problem` that runs the simulator.
+
+### `simulator_score`
+
+The simulator against the real problem: how much the dream is worth.
 
 ### `society_evolve`
 
