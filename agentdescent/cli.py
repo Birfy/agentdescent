@@ -134,14 +134,60 @@ def default_agent_ref() -> Tuple[str, bool]:
     return _PLACEHOLDER_AGENT, False
 
 
+#: What ``init`` writes where only the user knows the value (#451): the model a
+#: reflector names and, for a non-OpenAI key, its endpoint. The shipped SKILL.md
+#: says "ask the user for the endpoint and the model; never guess either", and a
+#: guessed pair (``deepseek-v4-flash`` against api.openai.com) passed ``plan``
+#: and failed every call. ``plan`` refuses a spec that still holds one.
+PLACEHOLDER_MODEL = "<your-model>"
+PLACEHOLDER_URL = "<your-endpoint-url>"
+
+
+def starter_model_block(*, model: Optional[str] = None, base_url: Optional[str] = None,
+                        key_env: Optional[str] = None,
+                        keys: Optional[Dict[str, bool]] = None) -> Dict[str, Any]:
+    """The ``openai_compatible`` block ``init`` writes, matched to the keys set here.
+
+    The same reading of the environment ``doctor`` gives (#451): with
+    ``OPENAI_API_KEY`` the adapter's defaults apply; with only another provider
+    key (``ARK_API_KEY``, ``DEEPSEEK_API_KEY``, ...) the block names it in
+    ``api_key_env`` and needs ``default_base_url`` -- otherwise that key would be
+    sent to api.openai.com. The model, and that endpoint, are the user's
+    (``--model`` / ``--base-url``) or a placeholder ``plan`` refuses; never a guess.
+    """
+    if keys is None:
+        keys = doctor_report()["provider_keys_present"]
+    if key_env is None and not keys.get("OPENAI_API_KEY"):
+        from .integrations import provider_key_names
+
+        other = [n for n in provider_key_names()
+                 if keys.get(n) and n not in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY")]
+        if other:
+            key_env = other[0]
+    block: Dict[str, Any] = {"ref": "openai_compatible", "model": model or PLACEHOLDER_MODEL}
+    if key_env and key_env != "OPENAI_API_KEY":
+        block["api_key_env"] = key_env
+        if not base_url and "OPENAI" not in key_env.upper():
+            base_url = PLACEHOLDER_URL
+    if base_url:
+        block["default_base_url"] = base_url
+    return block
+
+
 def starter_spec(path: str, *, kind: Optional[str] = None, data: Optional[str] = None,
-                 agent: Optional[str] = None) -> Dict[str, Any]:
+                 agent: Optional[str] = None, model: Optional[str] = None,
+                 base_url: Optional[str] = None,
+                 key_env: Optional[str] = None) -> Dict[str, Any]:
     """A spec to edit, with ``kind`` guessed from what ``path`` is.
 
     ``agent=None`` picks the worker from the CLIs on PATH (:func:`default_agent_ref`).
+    ``model`` / ``base_url`` / ``key_env`` fill the ``openai_compatible`` blocks
+    (:func:`starter_model_block`); left out, they are placeholders or follow the
+    keys in the environment.
     """
     if agent is None:
         agent = default_agent_ref()[0]
+    llm = starter_model_block(model=model, base_url=base_url, key_env=key_env)
     p = os.path.expanduser(path)
     if kind is None:
         if os.path.isfile(p):
@@ -164,27 +210,27 @@ def starter_spec(path: str, *, kind: Optional[str] = None, data: Optional[str] =
         "evolve": {"rounds": 6, "n_workers": 4},
     }
     if kind == "text":
-        spec["agent"] = {"ref": "openai_compatible", "model": "deepseek-v4-flash"}
+        spec["agent"] = dict(llm)
         spec["evolve"] = {"rounds": 8, "n_workers": 8}
     if kind == "skill_dir":
-        spec["reflect"] = {"ref": "openai_compatible", "model": "deepseek-v4-flash"}
+        spec["reflect"] = dict(llm)
         if agent == "claude_code":
             spec["agent"] = {"ref": "claude_code",
                              "extra_args": ["--permission-mode", "acceptEdits"]}
     if kind == "agent_code":
         spec["entrypoint"] = ["python", "main.py"]
-        spec["reflect"] = {"ref": "openai_compatible", "model": "deepseek-v4-flash"}
+        spec["reflect"] = dict(llm)
     if kind == "plugin":
         spec["host"] = ("claude_code" if os.path.exists(os.path.join(p, ".claude-plugin"))
                         else "dsh")
-        spec["reflect"] = {"ref": "openai_compatible", "model": "deepseek-v4-flash"}
+        spec["reflect"] = dict(llm)
     if kind == "policy_slot":
         # `target` is a slot, not a path, and `data` holds refs rather than rows
         # -- an inner problem is a callable and no row format can express one.
         spec["target"] = path if path in _POLICY_SLOTS else "selection"
         spec["data"] = {"problems": data or "mypkg.problems:build", "seeds": [0]}
         spec["score"] = "auc"
-        spec["agent"] = {"ref": "openai_compatible", "model": "deepseek-v4-flash"}
+        spec["agent"] = dict(llm)
         # A round is `n_workers` whole inner searches, so ask for few and budget
         # in wall clock: the recorded run asked for 8 rounds and got 2 in 90 min.
         spec["evolve"] = {"rounds": 4, "n_workers": 2, "max_seconds": 5400}
@@ -403,9 +449,45 @@ cases.jsonl, and a real agent instead of the offline one:
     return 0
 
 
+def _starter_model_warnings(spec: Dict[str, Any], out: str) -> List[str]:
+    """What ``init`` says about the ``openai_compatible`` blocks it just wrote.
+
+    One answer with ``doctor`` (#451): it names the key the block will read --
+    the one that is set here, not always OPENAI_API_KEY -- and every value left
+    for the user to fill in, which ``plan`` refuses until they do.
+    """
+    lines: List[str] = []
+    for field in ("agent", "reflect"):
+        block = spec.get(field)
+        if not (isinstance(block, dict) and block.get("ref") == "openai_compatible"):
+            continue
+        key_env = _key_env(block, "OPENAI_API_KEY")
+        todo = [f"`{field}.{k}`" for k in ("model", "default_base_url")
+                if _is_placeholder(block.get(k))]
+        if todo:
+            via = (f" It reads {key_env}, the provider key set here." if key_env != "OPENAI_API_KEY"
+                   and os.environ.get(key_env) else "")
+            lines.append(
+                f"{' and '.join(todo)} in {out} {'is a placeholder' if len(todo) == 1 else 'are placeholders'}"
+                f": the model (and the endpoint for a non-OpenAI key) come from you, never "
+                f"a guess.{via} Fill {'it' if len(todo) == 1 else 'them'} in, or re-run with "
+                "`--model` / `--base-url`; `plan` refuses the spec until then")
+        if not os.environ.get(key_env):
+            # The starter reflector is a model call whatever worker CLI was found,
+            # so a machine with only `opencode` / `claude` gets one it cannot call.
+            # Run, it used to finish `done` with nothing learned (#395).
+            lines.append(
+                f"`{field}` is `openai_compatible` and {key_env} is not set, so every "
+                "call would fail" + (" and the run would learn nothing" if field == "reflect" else "")
+                + ". Export a provider key (`agentdescent doctor` lists the ones it "
+                "knows), or pass `--key-env NAME` for one that is set")
+    return lines
+
+
 def cmd_init(a: argparse.Namespace) -> int:
     agent, found = (a.agent, True) if a.agent else default_agent_ref()
-    spec = starter_spec(a.path, kind=a.kind, data=a.data, agent=agent)
+    spec = starter_spec(a.path, kind=a.kind, data=a.data, agent=agent,
+                        model=a.model, base_url=a.base_url, key_env=a.key_env)
     out = a.out or os.path.join(".agentdescent", f"{os.path.basename(a.path.rstrip('/')) or 'spec'}.evolve.json")
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     with open(out, "w", encoding="utf-8") as fh:
@@ -419,17 +501,8 @@ def cmd_init(a: argparse.Namespace) -> int:
     elif a.agent is None and spec["kind"] not in ("text", "policy_slot"):
         print(f"agent: `{agent}` (the worker CLI found on PATH; "
               "override with `--agent <ref>`)")
-    reflect = spec.get("reflect")
-    if (isinstance(reflect, dict) and reflect.get("ref") == "openai_compatible"
-            and not os.environ.get("OPENAI_API_KEY")):
-        # The starter spec's reflector is a plain OpenAI-compatible call whatever
-        # worker CLI was found, so a machine with only `opencode` / `claude`
-        # gets a reflector it cannot call. Run, it used to finish `done` with
-        # nothing learned (#395); say so here, where it is cheapest to fix.
-        print("warning: `reflect` is `openai_compatible` and OPENAI_API_KEY is not set, "
-              "so every proposal would fail and the run would learn nothing. Export "
-              "OPENAI_API_KEY (and OPENAI_BASE_URL for a non-OpenAI endpoint), or "
-              f"change `reflect` in {out} before `plan`")
+    for line in _starter_model_warnings(spec, out):
+        print(f"warning: {line}")
     host = spec.get("host") if spec["kind"] == "plugin" else None
     if host in _CLI_BINARIES and not doctor_report()["agent_clis"].get(_CLI_BINARIES[host]):
         # The plugin's format fixes its host; the worker found on PATH does
@@ -595,7 +668,7 @@ def require_cli_on_path(spec: EvolveSpec) -> None:
     Shared with :func:`plan_payload` so plan and start fail closed the same way,
     before ``runstore.create`` / ``launch``.
     """
-    msgs = _missing_cli_messages(spec)
+    msgs = _missing_cli_messages(spec) + _placeholder_messages(spec)
     if msgs:
         raise SpecError("; ".join(msgs))
 
@@ -626,6 +699,29 @@ def require_resume_host_on_path(run_id: str, *, store: Optional[str] = None) -> 
     msgs = _missing_cli_messages(spec, fields=("host",))
     if msgs:
         raise SpecError(f"cannot resume {run_id}: " + "; ".join(msgs))
+
+
+def _is_placeholder(value: Any) -> bool:
+    """A value ``init`` left for the user (``<your-model>``), not a real one."""
+    return isinstance(value, str) and value.startswith("<") and value.endswith(">")
+
+
+def _placeholder_messages(spec: EvolveSpec) -> List[str]:
+    """Hard-fail messages for a starter-spec placeholder that was never filled in (#451).
+
+    ``openai_compatible(model="<your-model>")`` composes fine and fails on every
+    call, so the shape check alone would let it through to a run."""
+    msgs: List[str] = []
+    for field in ("agent", "reflect"):
+        block = getattr(spec, field, None)
+        if not isinstance(block, dict):
+            continue
+        for key, value in block.items():
+            if _is_placeholder(value):
+                msgs.append(f"{field}.{key} is still the placeholder {value!r} that `init` "
+                            "wrote; put the real value there (it comes from the user, "
+                            "never guess it)")
+    return msgs
 
 
 def _key_env(block: Any, default: str, *, field: str = "api_key_env") -> str:
@@ -721,8 +817,18 @@ def _unusable_refs(spec: EvolveSpec) -> List[str]:
             key_env = _key_env(block, "OPENAI_API_KEY")
             url_env = _key_env(block, "OPENAI_BASE_URL", field="base_url_env")
             if not os.environ.get(key_env):
+                # Name what *is* set, as `doctor` does: "needs OPENAI_API_KEY" on a
+                # machine with ARK_API_KEY sent users to the wrong fix (#451).
+                # Only for the adapter's default key: a spec that named its own
+                # `api_key_env` chose it, and other keys are not the fix there.
+                present = [n for n, v in keys.items() if v and n.endswith("_KEY")
+                           and n not in (key_env, "ANTHROPIC_API_KEY")
+                           ] if key_env == "OPENAI_API_KEY" else []
+                route = (f"; {', '.join(present)} {'is' if len(present) == 1 else 'are'} "
+                         f'set -- name one with "api_key_env" plus `default_base_url` '
+                         "for its endpoint" if present else "")
                 out.append(f"{field}: `openai_compatible` needs {key_env} (and "
-                           f"{url_env} for a non-OpenAI endpoint); without it "
+                           f"{url_env} for a non-OpenAI endpoint){route}; without it "
                            + ("every proposal raises and the run fails after two rounds "
                               "with nothing learned" if field == "reflect"
                               else "every call raises"))
@@ -814,6 +920,7 @@ def plan_payload(spec: EvolveSpec, *, usd_per_call: Optional[float] = None) -> D
             f"least {_MIN_TASKS_FOR_SPLIT}, then re-run plan)"
         )
     hard_errors.extend(_missing_cli_messages(spec))
+    hard_errors.extend(_placeholder_messages(spec))
     payload = {"ok": not hard_errors, "spec": spec.to_dict(), "tasks": n_tasks,
             "warnings": warnings,
             "artifact_id": spec.artifact_id(),
@@ -1536,6 +1643,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--agent", default=None,
                    help="worker agent short name (default: the first of claude_code, "
                         "codex, dsh, opencode whose CLI is on PATH; claude_code if none)")
+    s.add_argument("--model", default=None,
+                   help="model name for the openai_compatible reflector/agent "
+                        "(default: a placeholder plan refuses -- never guessed)")
+    s.add_argument("--base-url", dest="base_url", default=None,
+                   help="endpoint URL for that model (written as default_base_url)")
+    s.add_argument("--key-env", dest="key_env", default=None,
+                   help="environment variable holding its key (default: OPENAI_API_KEY, "
+                        "or the one other provider key that is set)")
     s.add_argument("--out", help="where to write the spec")
     s.set_defaults(fn=cmd_init)
 

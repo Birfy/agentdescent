@@ -181,6 +181,26 @@ the `host` CLI is checked on its own: it comes from the plugin's format (a
 `.claude-plugin/` tree needs `claude`), so an installed `agent` does not make
 a missing host pass, and `plan`, `evolve` and MCP `start` refuse it by name.
 
+The reflector (the model that proposes each edit) is an `openai_compatible`
+call, and `init` never guesses its model or endpoint: it writes `<your-model>`
+(and, for a non-OpenAI key, `<your-endpoint-url>`), names the provider key that is
+set here, and `plan` refuses the spec until the placeholders are filled. Pass the
+values at `init` time instead, for example with only `ARK_API_KEY` set:
+
+```bash
+agentdescent init ./my-skill --data cases.jsonl --out spec.json \
+  --model doubao-seed-code --base-url https://ark.cn-beijing.volces.com/api/coding/v3
+```
+
+```json
+"reflect": {"ref": "openai_compatible", "model": "doubao-seed-code",
+            "api_key_env": "ARK_API_KEY",
+            "default_base_url": "https://ark.cn-beijing.volces.com/api/coding/v3"}
+```
+
+`--key-env NAME` picks the key variable when several are set; with
+`OPENAI_API_KEY` alone only `--model` is needed.
+
 `cases.jsonl` is one JSON object per line, and it is the only thing you have to
 build yourself:
 

@@ -30,12 +30,14 @@ def _path_has(monkeypatch, *present):
 def _run_init(tmp_path, monkeypatch, capsys, *extra):
     # Hermetic: the starter reflector needs a key, and `init` warns (#395) when
     # it is missing -- these tests are about the *CLI* warnings, not that one.
+    # `--model` likewise keeps the placeholder warning (#451) out of the way.
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.chdir(tmp_path)
     skill = tmp_path / "my-skill"
     skill.mkdir(exist_ok=True)
     (skill / "SKILL.md").write_text("# x")
-    assert cli.main(["init", str(skill), "--out", "spec.json", *extra]) == 0
+    assert cli.main(["init", str(skill), "--out", "spec.json", "--model", "m",
+                     *extra]) == 0
     out = capsys.readouterr().out
     return json.loads((tmp_path / "spec.json").read_text()), out
 
@@ -89,7 +91,7 @@ def test_text_kind_never_warns_about_cli(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     prompt = tmp_path / "p.md"
     prompt.write_text("be terse")
-    assert cli.main(["init", str(prompt), "--out", "spec.json"]) == 0
+    assert cli.main(["init", str(prompt), "--out", "spec.json", "--model", "m"]) == 0
     assert "warning" not in capsys.readouterr().out
     spec = json.loads((tmp_path / "spec.json").read_text())
     assert spec["agent"]["ref"] == "openai_compatible"
