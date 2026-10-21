@@ -229,6 +229,12 @@ from .evolved_programs import (
     priority_grid_problem,
     source_ops,
 )
+from .self_rewarding import (
+    LearnableMetaJudge,
+    SelfRewardingReport,
+    outcome_features,
+    self_rewarding_meta_run,
+)
 from .meta_audit import (
     MetaAuditRecord,
     MetaAuditStore,
@@ -576,6 +582,10 @@ __all__ = [
     "evolve_fast_rule",
     "priority_grid_problem",
     "source_ops",
+    "LearnableMetaJudge",
+    "SelfRewardingReport",
+    "outcome_features",
+    "self_rewarding_meta_run",
     "MetaAuditRecord",
     "MetaAuditStore",
     "audited_meta_validate",
