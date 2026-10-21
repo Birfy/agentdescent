@@ -230,6 +230,12 @@ from .learn_to_think import (
     think_policy_spec,
     think_problem,
 )
+from .self_rewarding import (
+    LearnableMetaJudge,
+    SelfRewardingReport,
+    outcome_features,
+    self_rewarding_meta_run,
+)
 from .meta_audit import (
     MetaAuditRecord,
     MetaAuditStore,
@@ -578,6 +584,10 @@ __all__ = [
     "quality_per_cost",
     "think_policy_spec",
     "think_problem",
+    "LearnableMetaJudge",
+    "SelfRewardingReport",
+    "outcome_features",
+    "self_rewarding_meta_run",
     "MetaAuditRecord",
     "MetaAuditStore",
     "audited_meta_validate",
