@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-440 public names across 76 modules.
+443 public names across 77 modules.
 
 ---
 
@@ -4574,6 +4574,10 @@ Re-validate the archive's adopted rules against an independent oracle.
 
 One rollout's rationale as a rule the skill can carry.
 
+### `failed_rollouts`
+
+The recorded rollouts that failed, up to `max_failures`.
+
 ### `gate_source`
 
 The candidate's gate: exactly one function of no arguments other than what its signature declares, built only from safe syntax. Imports, dunder access and the calls that reach the interpreter are refused -- the same walk `compile_policy_source` runs over every self-edit.
@@ -4629,6 +4633,10 @@ Score the layers by return-per-cost and reallocate the next window.
 ### `priority_grid_problem`
 
 A `Problem` over the priority grid.
+
+### `problem_from_tasks`
+
+A runnable inner `Problem` over exactly these tasks.
 
 ### `rationale_evolve`
 
@@ -4693,6 +4701,10 @@ The deterministic cost of a candidate rule: arithmetic/call nodes in its source,
 ### `tournament_promote`
 
 Run the tournament and promote the winner into the archive.
+
+### `trajectory_challenger`
+
+A `MetaProblemChallenger` that mines the archive's recorded failures.
 
 ### `verifiable_problem`
 
