@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-416 public names across 71 modules.
+420 public names across 72 modules.
 
 ---
 
@@ -4358,6 +4358,10 @@ How a rollout becomes candidate changes.
 
 The shipped route rule: answer directly unless the task is hard and the budget allows a search. Deliberately conservative -- it refuses to search when the budget is low, which is exactly the decision an evolved rule can improve on (searching hard tasks pays more than the budget it costs).
 
+### `RationaleReport`
+
+What `rationale_evolve` distilled: how many rationales the skill now carries, and the skill itself.
+
 ### `RedTeamReport`
 
 What a `red_team_evolve` round did: the attack's findings and the coverage before and after the retraining.
@@ -4506,9 +4510,17 @@ Evolve a decision slot against a problem distribution the meta loop generates.
 
 Dependency-free dataset loading -- the *data layer* for examples/experiments.
 
+### `distill`
+
+The rationales the artifact will carry: deduped rules from the rollouts, near-miss rationales included -- they are the artifact's own notes about what it still needs. Dedup is on the **exact rationale text**, so the output value stays semantic content (`-1` and `1`, `A` and `a` are different rules, not formatting to normalise away).
+
 ### `exam_archive`
 
 Re-validate the archive's adopted rules against an independent oracle.
+
+### `extract_rationale`
+
+One rollout's rationale as a rule the skill can carry.
 
 ### `harness`
 
@@ -4541,6 +4553,10 @@ The features a judge learns quality from: mean best-so-far, the final reward, an
 ### `policy_improve`
 
 Evolve a decision slot on verifiable reward and report the curve.
+
+### `rationale_evolve`
+
+Evolve the skill, roll out, distill its own successes back into it.
 
 ### `record_harness`
 
