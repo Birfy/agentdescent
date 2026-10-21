@@ -184,6 +184,13 @@ from .meta import (
     policy_source, priority_selection, problem_descriptor, problem_from_archive,
     rollouts_to, seed_source, slot_reflector, transfer_ratio,
 )
+from .world_model import (
+    ImagineReport,
+    LearnedSimulator,
+    imagine_then_evolve,
+    simulator_problem,
+    simulator_score,
+)
 from .meta_audit import (
     MetaAuditRecord,
     MetaAuditStore,
@@ -495,6 +502,11 @@ __all__ = [
     "rollouts_to",
     "slot_reflector",
     "transfer_ratio",
+    "ImagineReport",
+    "LearnedSimulator",
+    "imagine_then_evolve",
+    "simulator_problem",
+    "simulator_score",
     "MetaAuditRecord",
     "MetaAuditStore",
     "audited_meta_validate",
