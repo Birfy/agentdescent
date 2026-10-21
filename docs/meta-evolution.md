@@ -723,6 +723,7 @@ The measured claim is the Dreamer one made concrete: pay the real cost where it
 pays, dream where it is cheap — and the report says how much the dream was
 worth.
 
+
 ## Evolved code that beats the shipped implementation on quality-per-cost
 
 `priority_selection` evolves the `selection` priority rule, but its reward is

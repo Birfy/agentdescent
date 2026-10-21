@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-406 public names across 69 modules.
+411 public names across 70 modules.
 
 ---
 
@@ -4117,6 +4117,10 @@ Build the union of complementary diffs and hand it to the gate.
 
 The multi-file proposal format a `FileTree` reflector is told to emit.
 
+### `EloRating`
+
+A minimal Elo rating over pairwise matches (K-factor 32).
+
 ### `ExaminedRule`
 
 One archived rule's self-exam: what the oracle said about it.
@@ -4208,6 +4212,10 @@ Labels the heaviest stratum needs before the reported interval means what it say
 ### `MIN_UNSEEN`
 
 Below this estimated probability of a new mode, more improvement labels are buying the flat part of the rarefaction curve. Not a law -- the point at which a one-in-twenty chance of learning something stops being worth an oracle call is a budget question -- but it is where the Phase 0 curve had flattened.
+
+### `MatchResult`
+
+One pairwise match: who played whom, on whose ground, and who won.
 
 ### `MemoryCache`
 
@@ -4373,6 +4381,10 @@ Prefix of the output `code_runner` produces when the frozen gate fails, so the f
 
 The default: a bounded pool of threads in this process.
 
+### `TournamentReport`
+
+The ratings a tournament produced, and the matches that moved them.
+
 ### `ValueBudgetAllocator`
 
 Learn which candidates are worth the expensive evaluation.
@@ -4481,6 +4493,10 @@ Evolve, attack the result, retrain on the failures it found.
 
 Content-address a proposal so identical proposals dedupe automatically.
 
+### `rule_tournament`
+
+Run a round-robin between the rules, rated by Elo.
+
 ### `search_evolve`
 
 Search the state tree for the best value under a fixed budget.
@@ -4512,6 +4528,10 @@ The evolvable spec: the value is a gated `society()` source compiled into a `Soc
 ### `source_ops`
 
 The deterministic cost of a candidate rule: arithmetic/call nodes in its source, counted from the AST. An attributable unit of work -- evaluating a rule costs what its expression tree costs, and counting it from the source is reproducible where wallclock is not.
+
+### `tournament_promote`
+
+Run the tournament and promote the winner into the archive.
 
 ### `verifiable_problem`
 
