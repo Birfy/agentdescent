@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-429 public names across 74 modules.
+435 public names across 75 modules.
 
 ---
 
@@ -755,6 +755,71 @@ transfer_ratio(
     source: str,
     target: str
 ) -> Optional[float]
+```
+
+---
+
+## Learn-to-think
+
+Evolve *when* the framework spends compute: direct, search, or reflect. &nbsp;·&nbsp; `agentdescent.learn_to_think` &nbsp;·&nbsp; [guide](meta-evolution.md)
+
+### `LearnToThinkReport(...)`
+
+What `learn_to_think` found: the evolved route rule and how its quality-per-cost compares with the default on validation problems.
+
+```python
+LearnToThinkReport(
+    seed_value: str,
+    value: str,
+    seed_score: float,
+    evolved_score: float,
+    gain: float,
+    routes_on: Dict[str, str]
+) -> None
+```
+
+### `learn_to_think(...)`
+
+Evolve the route rule on quality-per-cost.
+
+```python
+learn_to_think(
+    problems: Union[Sequence[Problem], Mapping[str, Problem]],
+    val_problems: Union[Sequence[Problem], Mapping[str, Problem]],
+    *,
+    propose: Optional[Callable[[str, Task, str, float], Optional[str]]] = None,
+    model: Optional[Any] = None,
+    seeds: Sequence[int] = (0, 1, 2, 3),
+    val_seeds: Sequence[int] = (4, 5, 6, 7),
+    seed_source: str = 'class Policy:\n    # Answer directly unless the task is hard and the budget allows a search.\n    def route(self, difficulty, budget_left, reward):\n        if difficulty >= 0.7 and budget_left >= 0.5:\n            return "search"\n        if difficulty >= 0.4:\n            return "reflect"\n        return "direct"\n',
+    **evolve_kwargs: Any
+) -> Tuple[LearnToThinkReport, EvolutionResult]
+```
+
+### `quality_per_cost(outcome: MetaOutcome) -> float`
+
+The outcome's reward, read back (already quality-per-cost).
+
+### `think_policy_spec(...)`
+
+The evolvable spec: the value is a `Policy.route` source, gated and compiled by `_build_route` (a smoke test runs the route on an easy, a hard-with-budget and a hard-without-budget input).
+
+```python
+think_policy_spec(
+    seed: str = 'class Policy:\n    # Answer directly unless the task is hard and the budget allows a search.\n    def route(self, difficulty, budget_left, reward):\n        if difficulty >= 0.7 and budget_left >= 0.5:\n            return "search"\n        if difficulty >= 0.4:\n            return "reflect"\n        return "direct"\n'
+) -> SourceSlot
+```
+
+### `think_problem(...)`
+
+A `Problem` over one workload instance.
+
+```python
+think_problem(
+    *,
+    lam: float = 0.1,
+    base_quality: Optional[Callable[[float], float]] = None
+) -> Problem
 ```
 
 ---
@@ -4300,6 +4365,10 @@ What a `ProposalPolicy` is given for one rollout.
 ### `ProposalPolicy`
 
 How a rollout becomes candidate changes.
+
+### `ROUTE_SEED`
+
+The shipped route rule: answer directly unless the task is hard and the budget allows a search. Deliberately conservative -- it refuses to search when the budget is low, which is exactly the decision an evolved rule can improve on (searching hard tasks pays more than the budget it costs).
 
 ### `RationaleReport`
 

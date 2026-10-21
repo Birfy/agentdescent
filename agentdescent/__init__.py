@@ -249,6 +249,14 @@ from .evolved_programs import (
     priority_grid_problem,
     source_ops,
 )
+from .learn_to_think import (
+    LearnToThinkReport,
+    ROUTE_SEED,
+    learn_to_think,
+    quality_per_cost,
+    think_policy_spec,
+    think_problem,
+)
 from .self_rewarding import (
     LearnableMetaJudge,
     SelfRewardingReport,
@@ -616,6 +624,12 @@ __all__ = [
     "evolve_fast_rule",
     "priority_grid_problem",
     "source_ops",
+    "LearnToThinkReport",
+    "ROUTE_SEED",
+    "learn_to_think",
+    "quality_per_cost",
+    "think_policy_spec",
+    "think_problem",
     "LearnableMetaJudge",
     "SelfRewardingReport",
     "outcome_features",
