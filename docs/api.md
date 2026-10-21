@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-383 public names across 63 modules.
+386 public names across 64 modules.
 
 ---
 
@@ -3102,6 +3102,9 @@ ConsolidationRecord(
     rounds: int,
     trajectory_store: Optional[str] = None,
     problem: Optional[Dict[str, Any]] = None,
+    exam: Optional[str] = None,
+    exam_flags: int = 0,
+    exam_note: str = '',
     created_at: float = <factory>
 ) -> None
 ```
@@ -3114,6 +3117,7 @@ A durable archive of what runs learned.
 |---|---|
 | `archive(...)` | Archive one run's product. Idempotent by `run_id` (atomic rewrite). |
 | `find(run_id: str) -> Optional[ConsolidationRecord]` | Lookup by identity. |
+| `mark_exam(...)` | Stamp a rule's self-exam status. Idempotent by `run_id`. |
 
 ### `SeedReport(...)`
 
@@ -4109,6 +4113,10 @@ Build the union of complementary diffs and hand it to the gate.
 
 The multi-file proposal format a `FileTree` reflector is told to emit.
 
+### `ExaminedRule`
+
+One archived rule's self-exam: what the oracle said about it.
+
 ### `Executor`
 
 Runs rollouts somewhere. Threads here, processes and hosts later.
@@ -4208,6 +4216,10 @@ Durable JSONL of sampled meta pairs and verdicts, indexed in memory.
 ### `MetaChallengerConfig`
 
 The problem-challenger's dials: how much of the problem budget goes to the frontier, what counts as learned or stuck, and how long a generator may keep trying. The same numbers `curriculum_evolve` uses, one level up.
+
+### `MetaExamReport`
+
+What an `exam_archive` pass did, and why.
 
 ### `MetaPopulationReport`
 
@@ -4384,6 +4396,10 @@ Dependency-free dataset loading -- the *data layer* for examples/experiments.
 ### `evolve_fast_rule`
 
 Evolve a `selection` priority rule on quality-per-cost, beat the seed.
+
+### `exam_archive`
+
+Re-validate the archive's adopted rules against an independent oracle.
 
 ### `harness`
 
