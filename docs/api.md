@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-394 public names across 67 modules.
+405 public names across 69 modules.
 
 ---
 
@@ -4057,6 +4057,10 @@ Commit or not, and -- when not -- which of the merge categories it was.
 
 Whether a candidate is committed.
 
+### `AgentNode`
+
+One node of a society: a name, an instruction (a callable), and a budget (how many uses the node may spend).
+
 ### `AggregatorFactory`
 
 `(ledger, verifier, audit, config, policy) -> AggregatorProtocol` — how a custom optimizer is installed.
@@ -4157,6 +4161,10 @@ What a `compose_run` did, and why.
 
 One harness's measured outcome in a `compose_run`.
 
+### `ImagineReport`
+
+What `imagine_then_evolve` did: the verified value, its real gain over the seed, the simulator's trust score, and how much of the budget was spent dreaming vs waking.
+
 ### `KeyedRules`
 
 One entry per *category*: competing proposals contradict and are resolved.
@@ -4168,6 +4176,10 @@ Where a runner writes the evolving tree inside a workspace (`claude_skill`, `ski
 ### `LayerBudget`
 
 One spending line of the framework: a limit, what it spent, what it bought.
+
+### `LearnedSimulator`
+
+A pure-Python nearest-neighbour simulator from observed rollouts.
 
 ### `LearningValueModel`
 
@@ -4345,6 +4357,14 @@ A pool whose ceiling is the machine's, not this process's.
 
 The artifact **is one value**, and each accepted proposal replaces it.
 
+### `SocietyGraph`
+
+A directed graph of `AgentNode` with delegation edges.
+
+### `SocietyReport`
+
+What `society_evolve` found: the evolved graph, its cost-adjusted correctness on validation tasks, and the same for the seed.
+
 ### `Strategy`
 
 Defines *what evolves and how* -- the representation and the merge rule.
@@ -4421,6 +4441,10 @@ The least a harness can be: a name and a `(tasks, repo) -> result` callable.
 
 The best measured reward this harness has recorded for the domain.
 
+### `imagine_then_evolve`
+
+Evolve against the simulator, verify the result on the real problem.
+
 ### `layers_from_archive`
 
 One layer per decision slot, aggregated from the archive's rule records.
@@ -4464,6 +4488,26 @@ Search the state tree for the best value under a fixed budget.
 ### `select_harness`
 
 Route a domain to the harness the archive's evidence says wins there.
+
+### `simulator_problem`
+
+A `Problem` that runs the simulator.
+
+### `simulator_score`
+
+The simulator against the real problem: how much the dream is worth.
+
+### `society_evolve`
+
+Evolve the society topology on correctness-minus-cost.
+
+### `society_problem`
+
+A `Problem` over multi-step tasks.
+
+### `society_spec`
+
+The evolvable spec: the value is a gated `society()` source compiled into a `SocietyGraph`. `SOCIETY_SEED` is the single-agent baseline -- the topology the search is asked to beat.
 
 ### `verifiable_problem`
 
