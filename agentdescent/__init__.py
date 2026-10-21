@@ -195,6 +195,11 @@ from .red_team import (
     red_team,
     red_team_evolve,
 )
+from .trajectory_search import (
+    SearchReport,
+    SearchTree,
+    search_evolve,
+)
 from .meta_audit import (
     MetaAuditRecord,
     MetaAuditStore,
@@ -518,6 +523,9 @@ __all__ = [
     "RedTeamReport",
     "red_team",
     "red_team_evolve",
+    "SearchReport",
+    "SearchTree",
+    "search_evolve",
     "MetaAuditRecord",
     "MetaAuditStore",
     "audited_meta_validate",
