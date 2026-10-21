@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-443 public names across 77 modules.
+446 public names across 78 modules.
 
 ---
 
@@ -4162,6 +4162,14 @@ Somewhere to keep evaluations. In one process, across many, or on disk.
 
 A mutable per-call max_tokens, set by the engine before each expansion.
 
+### `ChainAuditReport`
+
+What a `chain_audit` pass found, ring by ring.
+
+### `ChainLink`
+
+One ring of an adoption's evidence chain.
+
 ### `Completion`
 
 `Callable[[str], str]` — the one contract every model and agent satisfies.
@@ -4529,6 +4537,10 @@ The control every efficiency number in this repository is missing.
 ### `budgeted_completion`
 
 Wrap a `max_tokens -> Completion` factory into an adaptive Completion.
+
+### `chain_audit`
+
+Trace one archived adoption through its evidence rings.
 
 ### `compose_run`
 

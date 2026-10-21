@@ -296,6 +296,11 @@ from .meta_exam import (
     MetaExamReport,
     exam_archive,
 )
+from .chain_audit import (
+    ChainAuditReport,
+    ChainLink,
+    chain_audit,
+)
 from .filetree import (
     TreeError,
     TreeSpec,
@@ -667,6 +672,9 @@ __all__ = [
     "ExaminedRule",
     "MetaExamReport",
     "exam_archive",
+    "ChainAuditReport",
+    "ChainLink",
+    "chain_audit",
     "compile_priority",
     "priority_selection",
     "SLOT_PROTOCOLS",
