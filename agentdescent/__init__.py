@@ -215,6 +215,13 @@ from .world_model import (
     simulator_problem,
     simulator_score,
 )
+from .rule_tournament import (
+    EloRating,
+    MatchResult,
+    TournamentReport,
+    rule_tournament,
+    tournament_promote,
+)
 from .self_rewarding import (
     LearnableMetaJudge,
     SelfRewardingReport,
@@ -558,6 +565,11 @@ __all__ = [
     "imagine_then_evolve",
     "simulator_problem",
     "simulator_score",
+    "EloRating",
+    "MatchResult",
+    "TournamentReport",
+    "rule_tournament",
+    "tournament_promote",
     "LearnableMetaJudge",
     "SelfRewardingReport",
     "outcome_features",
