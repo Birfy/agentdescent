@@ -228,6 +228,13 @@ from .rule_tournament import (
     rule_tournament,
     tournament_promote,
 )
+from .evolved_programs import (
+    FastRuleReport,
+    cost_adjusted_reward,
+    evolve_fast_rule,
+    priority_grid_problem,
+    source_ops,
+)
 from .learn_to_think import (
     LearnToThinkReport,
     ROUTE_SEED,
@@ -588,6 +595,11 @@ __all__ = [
     "TournamentReport",
     "rule_tournament",
     "tournament_promote",
+    "FastRuleReport",
+    "cost_adjusted_reward",
+    "evolve_fast_rule",
+    "priority_grid_problem",
+    "source_ops",
     "LearnToThinkReport",
     "ROUTE_SEED",
     "learn_to_think",

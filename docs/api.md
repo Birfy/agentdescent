@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-420 public names across 72 modules.
+425 public names across 73 modules.
 
 ---
 
@@ -4206,6 +4206,10 @@ Flip rate above which a rescan is called out rather than reported. The plan's nu
 
 Artifact ids the loop may read but never mutate (L0).
 
+### `FastRuleReport`
+
+How an evolved rule does against the shipped seed, on both axes.
+
 ### `FileCache`
 
 A directory of evaluations, so separate processes can share them.
@@ -4502,6 +4506,10 @@ Wrap a `max_tokens -> Completion` factory into an adaptive Completion.
 
 Run the harness(es) for a domain, record the outcomes, pick a winner.
 
+### `cost_adjusted_reward`
+
+`quality - lam * (cost / baseline)`, clipped to `[0, 1]`.
+
 ### `curriculum_meta_run`
 
 Evolve a decision slot against a problem distribution the meta loop generates.
@@ -4513,6 +4521,10 @@ Dependency-free dataset loading -- the *data layer* for examples/experiments.
 ### `distill`
 
 The rationales the artifact will carry: deduped rules from the rollouts, near-miss rationales included -- they are the artifact's own notes about what it still needs. Dedup is on the **exact rationale text**, so the output value stays semantic content (`-1` and `1`, `A` and `a` are different rules, not formatting to normalise away).
+
+### `evolve_fast_rule`
+
+Evolve a `selection` priority rule on quality-per-cost, beat the seed.
 
 ### `exam_archive`
 
@@ -4553,6 +4565,10 @@ The features a judge learns quality from: mean best-so-far, the final reward, an
 ### `policy_improve`
 
 Evolve a decision slot on verifiable reward and report the curve.
+
+### `priority_grid_problem`
+
+A `Problem` over the priority grid.
 
 ### `rationale_evolve`
 
@@ -4609,6 +4625,10 @@ A `Problem` over multi-step tasks.
 ### `society_spec`
 
 The evolvable spec: the value is a gated `society()` source compiled into a `SocietyGraph`. `SOCIETY_SEED` is the single-agent baseline -- the topology the search is asked to beat.
+
+### `source_ops`
+
+The deterministic cost of a candidate rule: arithmetic/call nodes in its source, counted from the AST. An attributable unit of work -- evaluating a rule costs what its expression tree costs, and counting it from the source is reproducible where wallclock is not.
 
 ### `tournament_promote`
 
