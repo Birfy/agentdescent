@@ -21,10 +21,12 @@ The rule is deliberately a fixed, honest policy first -- it is the product the
 framework can deploy today; evolving the reallocation policy itself via
 ``meta_run`` is the next rung, and the fixed rule is its baseline.
 ``layers_from_archive`` turns the consolidation archive's rule records into
-layer rows (per decision slot: return = mean measured reward, spend = total
-rounds, samples = rule count), and any other layer -- audit bias, harness
-leaderboard, population islands -- is a caller-constructed :class:`LayerBudget`
-added to the same table.
+layer rows (per decision slot: return = mean measured reward, spend = **mean
+rounds per rule** -- the matching aggregate, so return-per-cost is per-rule and
+does not decay as a slot accumulates rules -- budget = total rounds, samples =
+rule count), and any other layer -- audit bias, harness leaderboard,
+population islands -- is a caller-constructed :class:`LayerBudget` added to the
+same table.
 """
 
 from __future__ import annotations
@@ -126,7 +128,10 @@ def portfolio_report(
                 "move budget on")
         elif layer.diminishing or rpc < floor:
             floor_budget = budget * 0.05 if min_budget is None else min_budget
-            new_budget = max(budget * (1.0 - shrink), floor_budget)
+            # never shrink *up*: min_budget larger than the current budget
+            # must not raise the line
+            new_budget = min(budget,
+                             max(budget * (1.0 - shrink), floor_budget))
             reallocated[layer.name] = new_budget
             reasons[layer.name] = (
                 f"shrunk: return-per-cost {rpc:.3f} below floor {floor:.3f}"
