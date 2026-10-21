@@ -190,6 +190,14 @@ from .rationale_distill import (
     extract_rationale,
     rationale_evolve,
 )
+from .self_modify import (
+    SelfModifyReport,
+    apply_patch,
+    evaluate_source,
+    gate_source,
+    improve_source,
+    patch_source,
+)
 from .verifiable_rl import (
     VerifiableReport,
     policy_improve,
@@ -562,6 +570,12 @@ __all__ = [
     "distill",
     "extract_rationale",
     "rationale_evolve",
+    "SelfModifyReport",
+    "apply_patch",
+    "evaluate_source",
+    "gate_source",
+    "improve_source",
+    "patch_source",
     "VerifiableReport",
     "policy_improve",
     "verifiable_problem",
