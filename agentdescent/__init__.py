@@ -206,6 +206,11 @@ from .meta_curriculum import (
     MetaProblemChallenger,
     curriculum_meta_run,
 )
+from .meta_exam import (
+    ExaminedRule,
+    MetaExamReport,
+    exam_archive,
+)
 from .filetree import (
     TreeError,
     TreeSpec,
@@ -515,6 +520,9 @@ __all__ = [
     "MetaChallengerConfig",
     "MetaProblemChallenger",
     "curriculum_meta_run",
+    "ExaminedRule",
+    "MetaExamReport",
+    "exam_archive",
     "compile_priority",
     "priority_selection",
     "SLOT_PROTOCOLS",
