@@ -184,6 +184,12 @@ from .meta import (
     policy_source, priority_selection, problem_descriptor, problem_from_archive,
     rollouts_to, seed_source, slot_reflector, transfer_ratio,
 )
+from .rationale_distill import (
+    RationaleReport,
+    distill,
+    extract_rationale,
+    rationale_evolve,
+)
 from .curious_replay import (
     CuriousReplayReport,
     ReplayExample,
@@ -550,6 +556,10 @@ __all__ = [
     "rollouts_to",
     "slot_reflector",
     "transfer_ratio",
+    "RationaleReport",
+    "distill",
+    "extract_rationale",
+    "rationale_evolve",
     "CuriousReplayReport",
     "ReplayExample",
     "curiosity_weight",
