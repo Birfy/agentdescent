@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-439 public names across 76 modules.
+443 public names across 77 modules.
 
 ---
 
@@ -4250,6 +4250,10 @@ One entry per *category*: competing proposals contradict and are resolved.
 
 Where a runner writes the evolving tree inside a workspace (`claude_skill`, `skill_library`, `claude_agent`, `dsh_skill`, `agents_skill`, `root`).
 
+### `LayerBudget`
+
+One spending line of the framework: a limit, what it spent, what it bought.
+
 ### `LearnableMetaJudge`
 
 A small linear regressor from `outcome_features` to oracle quality, fit by least squares (pure Python, deterministic).
@@ -4341,6 +4345,10 @@ Every replaceable piece, in one argument.
 ### `PopulationIsland`
 
 One island of a `meta_population_run`: a rule's search, and how it went.
+
+### `PortfolioReport`
+
+What a `portfolio_report` pass saw, and decided.
 
 ### `ProcessExecutor`
 
@@ -4594,6 +4602,10 @@ Evolve against the simulator, verify the result on the real problem.
 
 Evolve the source of one function under its own tests and benchmark.
 
+### `layers_from_archive`
+
+One layer per decision slot, aggregated from the archive's rule records.
+
 ### `meta_population_run`
 
 Run a population of meta sessions from the archive's best rules, promote the winner.
@@ -4613,6 +4625,10 @@ A unified diff between two sources -- the patch a human or a reviewer sees, and 
 ### `policy_improve`
 
 Evolve a decision slot on verifiable reward and report the curve.
+
+### `portfolio_report`
+
+Score the layers by return-per-cost and reallocate the next window.
 
 ### `priority_grid_problem`
 

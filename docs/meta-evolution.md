@@ -1016,3 +1016,4 @@ The #429 guarantee is inherited unchanged: the validation set stays fixed and
 the held-out split is computed from the seed tasks alone, so a problem mined
 from a failure can only ever appear in the training frontier. Memory becomes
 the exam — what the meta loop got wrong is what it is asked next.
+
