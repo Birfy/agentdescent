@@ -722,6 +722,7 @@ The loop:
 The measured claim is the Dreamer one made concrete: pay the real cost where it
 pays, dream where it is cheap — and the report says how much the dream was
 worth.
+
 ## Failure-weighted replay: the framework replays the past it is still failing
 
 Curious Replay (ICLR 2025) replays under-explored regions of experience,

@@ -221,6 +221,13 @@ from .world_model import (
     simulator_problem,
     simulator_score,
 )
+from .rule_tournament import (
+    EloRating,
+    MatchResult,
+    TournamentReport,
+    rule_tournament,
+    tournament_promote,
+)
 from .meta_audit import (
     MetaAuditRecord,
     MetaAuditStore,
@@ -562,6 +569,11 @@ __all__ = [
     "imagine_then_evolve",
     "simulator_problem",
     "simulator_score",
+    "EloRating",
+    "MatchResult",
+    "TournamentReport",
+    "rule_tournament",
+    "tournament_promote",
     "MetaAuditRecord",
     "MetaAuditStore",
     "audited_meta_validate",
