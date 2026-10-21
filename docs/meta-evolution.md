@@ -873,6 +873,44 @@ The gate is the same one SICA and Gödel Agent run their self-edits behind:
 enough to keep a model's rewrite to *computing*, not enough to run untrusted
 code from a stranger.
 
+## Learn-to-think: the framework evolves *when* to spend compute
+
+Search-R1 / ZigZag train a model to decide when to retrieve, search, or answer
+directly, with verifiable rewards. The same decision exists in every evolution
+run — spend a cheap rollout, a deep search, or a reflection pass — and nothing
+ever learned *which* for a given difficulty and budget. `learn_to_think` makes
+the routing rule an evolvable artifact:
+
+```python
+from agentdescent import learn_to_think, think_policy_spec, think_problem
+
+report, result = learn_to_think(
+    {"t": think_problem()}, {"v": think_problem()},
+    propose=offline_propose, rounds=6, n_workers=2)
+print(report.routes_on)     # {'easy': 'direct', 'hard': 'search'}
+print(report.gain)          # positive: it beats the default on quality-per-cost
+```
+
+The pieces:
+
+* **`think_policy_spec()`** — the value is a gated source `Policy.route(
+  difficulty, budget_left, reward)` returning exactly `direct` / `search` /
+  `reflect`. The gate refuses imports, dunder access, forbidden calls, a wrong
+  signature, and a return outside the three routes; a smoke test runs the route
+  on easy, hard-with-budget and hard-without-budget inputs.
+* **`think_problem()`** — a workload instance whose outcome depends on the
+  route: each route has a cost model and a quality model, and the reward is
+  quality-per-cost, with the decision and the cost carried in `detail`.
+* **`learn_to_think(...)`** — a bespoke `evolve()` over those problems: the
+  artifact is the route source, the propose rewrites it, the reward is the
+  outcome's quality-per-cost. `LearnToThinkReport` compares the evolved rule
+  with the default on validation problems and shows the route each chose on an
+  easy and a hard input.
+
+The measured claim is the Search-R1 one made concrete: the framework learns,
+from its own measured returns, to search the hard tasks and answer the easy
+ones directly — instead of paying a fixed price everywhere.
+
 ## Trajectory-driven curriculum: the problems come from the run's own failures
 
 `curriculum_meta_run` (#429) gives the meta loop a challenger that generates
