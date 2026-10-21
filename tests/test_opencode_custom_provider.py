@@ -146,7 +146,6 @@ def test_plan_recognises_the_model_flag_spellings(tmp_path, opencode_on_path, ar
 @pytest.mark.parametrize("agent", [
     {"ref": "opencode"},                                              # no pin
     {"ref": "opencode", "extra_args": ["-m", "justamodel"]},          # no provider part
-    {"ref": "opencode", "extra_args": ["-m", "x/y"], "env": {"OPENCODE_CONFIG": "/p.json"}},
 ])
 def test_plan_keeps_the_generic_warning_when_there_is_nothing_to_add(
         tmp_path, opencode_on_path, agent):
@@ -157,3 +156,44 @@ def test_plan_keeps_the_generic_warning_when_there_is_nothing_to_add(
 def test_plan_is_quiet_about_providers_when_not_isolated(tmp_path, opencode_on_path):
     assert _warnings(tmp_path, {"ref": "opencode", "extra_args": ["-m", "x/y"],
                                 "isolate": False}) == []
+
+
+# -- plan: provider key without a pinned model, and the configured recipe (#455)
+
+
+def _with_keys(monkeypatch, **present):
+    real = cli.doctor_report
+
+    def fake():
+        rep = real()
+        keys = {k: False for k in rep["provider_keys_present"]}
+        keys.update(present)
+        return {**rep, "provider_keys_present": keys,
+                "agent_clis": {**rep["agent_clis"], "opencode": "/fake/opencode"}}
+
+    monkeypatch.setattr(cli, "doctor_report", fake)
+
+
+def test_plan_says_a_gateway_key_alone_leaves_opencode_on_its_default_model(
+        tmp_path, monkeypatch):
+    _with_keys(monkeypatch, ARK_API_KEY=True)
+    warns = _warnings(tmp_path, {"ref": "opencode"})
+    assert len(warns) == 1, warns
+    w = warns[0]
+    assert "untested" not in w
+    assert "ARK_API_KEY" in w and "default model" in w
+    assert '"-m", "ark/deepseek-v4-flash"' in w and "OPENCODE_CONFIG" in w
+
+
+def test_plan_keeps_the_generic_warning_without_a_gateway_key(tmp_path, monkeypatch):
+    _with_keys(monkeypatch, OPENAI_API_KEY=True)
+    warns = _warnings(tmp_path, {"ref": "opencode"})
+    assert warns and not any("default model" in w for w in warns), warns
+
+
+@pytest.mark.parametrize("env", [{"OPENCODE_CONFIG": "/p.json"},
+                                 {"OPENCODE_CONFIG_CONTENT": "{}"}])
+def test_plan_is_quiet_about_the_documented_isolated_recipe(tmp_path, monkeypatch, env):
+    _with_keys(monkeypatch, ARK_API_KEY=True)
+    agent = {"ref": "opencode", "extra_args": ["-m", "ark/deepseek-v4-flash"], "env": env}
+    assert _warnings(tmp_path, agent) == []
