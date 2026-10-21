@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-417 public names across 72 modules.
+428 public names across 74 modules.
 
 ---
 
@@ -4141,6 +4141,10 @@ Flip rate above which a rescan is called out rather than reported. The plan's nu
 
 Artifact ids the loop may read but never mutate (L0).
 
+### `FastRuleReport`
+
+How an evolved rule does against the shipped seed, on both axes.
+
 ### `FileCache`
 
 A directory of evaluations, so separate processes can share them.
@@ -4357,6 +4361,10 @@ What environment one rollout needs. Must survive JSON: it crosses processes.
 
 A state tree over rendered artifact values, searched by UCB.
 
+### `SelfModifyReport`
+
+What `improve_source` accepted: the patch, its tests, its gain.
+
 ### `SelfRewardingReport`
 
 What a `self_rewarding_meta_run` did: the evolved value, the judge's measured agreement with the oracle on validation outcomes, whether the judge actually fitted (or fell back to `auc`), how many oracle labels it trained on, and the value's oracle quality vs the seed's on the held-out problems.
@@ -4413,6 +4421,10 @@ Four methods, from `grep 'self\.verifier\.' agentdescent/aggregator.py`.
 
 Provisions `LocalWorkspaceSandbox` -- `mkdtemp`, plus a lease file.
 
+### `apply_patch`
+
+Apply a `patch_source` diff back to a source. `ValueError` when the patch does not apply cleanly -- a patch whose context does not match `source` is refused, never half-applied. Untouched lines outside a hunk's context are preserved, so a middle-of-file edit keeps the rest of the file.
+
 ### `audited_meta_validate`
 
 `meta_validate`, with a probability sample of pairs sent to the oracle.
@@ -4433,6 +4445,10 @@ Wrap a `max_tokens -> Completion` factory into an adaptive Completion.
 
 Run the harness(es) for a domain, record the outcomes, pick a winner.
 
+### `cost_adjusted_reward`
+
+`quality - lam * (cost / baseline)`, clipped to `[0, 1]`.
+
 ### `curriculum_meta_run`
 
 Evolve a decision slot against a problem distribution the meta loop generates.
@@ -4445,6 +4461,14 @@ Dependency-free dataset loading -- the *data layer* for examples/experiments.
 
 The rationales the artifact will carry: deduped rules from the rollouts, near-miss rationales included -- they are the artifact's own notes about what it still needs. Dedup is on the **exact rationale text**, so the output value stays semantic content (`-1` and `1`, `A` and `a` are different rules, not formatting to normalise away).
 
+### `evaluate_source`
+
+Run the candidate against the tests and the benchmark.
+
+### `evolve_fast_rule`
+
+Evolve a `selection` priority rule on quality-per-cost, beat the seed.
+
 ### `exam_archive`
 
 Re-validate the archive's adopted rules against an independent oracle.
@@ -4456,6 +4480,10 @@ One rollout's rationale as a rule the skill can carry.
 ### `failed_rollouts`
 
 The recorded rollouts that failed, up to `max_failures`.
+
+### `gate_source`
+
+The candidate's gate: exactly one function of no arguments other than what its signature declares, built only from safe syntax. Imports, dunder access and the calls that reach the interpreter are refused -- the same walk `compile_policy_source` runs over every self-edit.
 
 ### `harness`
 
@@ -4473,6 +4501,10 @@ The best measured reward this harness has recorded for the domain.
 
 Evolve against the simulator, verify the result on the real problem.
 
+### `improve_source`
+
+Evolve the source of one function under its own tests and benchmark.
+
 ### `meta_population_run`
 
 Run a population of meta sessions from the archive's best rules, promote the winner.
@@ -4485,9 +4517,17 @@ Run a population of meta sessions from the archive's best rules, promote the win
 
 The features a judge learns quality from: mean best-so-far, the final reward, and a constant intercept term. Sweep counts / rollouts are deliberately dropped: raw counts dwarf a `[0, 1]` quality in a linear fit and had the old judge saturating its clip at 1.0 for every outcome. The judge must learn quality from the curve's *shape*, not be handed the answer.
 
+### `patch_source`
+
+A unified diff between two sources -- the patch a human or a reviewer sees, and what an apply can reverse.
+
 ### `policy_improve`
 
 Evolve a decision slot on verifiable reward and report the curve.
+
+### `priority_grid_problem`
+
+A `Problem` over the priority grid.
 
 ### `problem_from_tasks`
 
@@ -4548,6 +4588,10 @@ A `Problem` over multi-step tasks.
 ### `society_spec`
 
 The evolvable spec: the value is a gated `society()` source compiled into a `SocietyGraph`. `SOCIETY_SEED` is the single-agent baseline -- the topology the search is asked to beat.
+
+### `source_ops`
+
+The deterministic cost of a candidate rule: arithmetic/call nodes in its source, counted from the AST. An attributable unit of work -- evaluating a rule costs what its expression tree costs, and counting it from the source is reproducible where wallclock is not.
 
 ### `tournament_promote`
 

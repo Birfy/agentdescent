@@ -190,6 +190,14 @@ from .rationale_distill import (
     extract_rationale,
     rationale_evolve,
 )
+from .self_modify import (
+    SelfModifyReport,
+    apply_patch,
+    evaluate_source,
+    gate_source,
+    improve_source,
+    patch_source,
+)
 from .verifiable_rl import (
     VerifiableReport,
     policy_improve,
@@ -227,6 +235,13 @@ from .rule_tournament import (
     TournamentReport,
     rule_tournament,
     tournament_promote,
+)
+from .evolved_programs import (
+    FastRuleReport,
+    cost_adjusted_reward,
+    evolve_fast_rule,
+    priority_grid_problem,
+    source_ops,
 )
 from .self_rewarding import (
     LearnableMetaJudge,
@@ -559,6 +574,12 @@ __all__ = [
     "distill",
     "extract_rationale",
     "rationale_evolve",
+    "SelfModifyReport",
+    "apply_patch",
+    "evaluate_source",
+    "gate_source",
+    "improve_source",
+    "patch_source",
     "VerifiableReport",
     "policy_improve",
     "verifiable_problem",
@@ -585,6 +606,11 @@ __all__ = [
     "TournamentReport",
     "rule_tournament",
     "tournament_promote",
+    "FastRuleReport",
+    "cost_adjusted_reward",
+    "evolve_fast_rule",
+    "priority_grid_problem",
+    "source_ops",
     "LearnableMetaJudge",
     "SelfRewardingReport",
     "outcome_features",

@@ -792,6 +792,87 @@ The loop:
 The measured claim is the STaR one: the artifact boots itself by carrying what
 its own runs taught it — and the report shows the notes it learned to carry.
 
+## Evolved code that beats the shipped implementation on quality-per-cost
+
+`priority_selection` evolves the `selection` priority rule, but its reward is
+quality alone — an evolved rule that costs more than the shipped seed can win
+on AUC and lose on latency, invisibly. `evolve_fast_rule` is the AlphaEvolve /
+FunSearch idea applied to the decision plane: the reward includes **cost**, so
+the search finds a rule that is as good *and cheaper* than the hand-written
+default, and the report measures the evolved rule against the seed on both axes:
+
+```python
+from agentdescent import evolve_fast_rule, priority_grid_problem
+
+report, result = evolve_fast_rule(
+    {"g": priority_grid_problem()}, {"v": priority_grid_problem()},
+    propose=offline_propose, rounds=6, n_workers=2)
+print(report.evolved_ops, report.seed_ops)        # fewer ops ...
+print(report.evolved_quality, report.seed_quality)  # ... at equal quality
+print(report.gain)                                # positive: it beat the seed
+```
+
+The pieces:
+
+* **`source_ops(source)`** — the arithmetic/call nodes of a candidate rule's
+  source, counted from the AST: a deterministic, attributable cost proxy
+  (evaluating a rule costs what its expression tree costs), where wallclock is
+  not reproducible.
+* **`priority_grid_problem()`** — a `Problem` over a fixed grid of priority
+  inputs whose reference ordering is the shipped seed's own: the seed scores
+  `1.0` at the baseline cost, and a rule must be cheaper at equal quality (or
+  better at equal cost) to beat it.
+* **`cost_adjusted_reward(lam, baseline)`** — `quality - lam * (cost / baseline)`,
+  clipped to `[0, 1]`; the cost is read from the outcome's `detail`.
+* **`evolve_fast_rule(...)`** — `meta_evolve` on `selection` with that reward,
+  then `FastRuleReport`: seed vs evolved `ops`, seed vs evolved quality, and
+  the cost-adjusted gain — the number that says "this evolved rule beat the
+  hand-written default on quality-per-cost".
+
+The grid regime spans the root before any expansion, a lone node, deep nodes
+and unrated priors — the same regime `compile_priority` refuses a rule on, so a
+candidate that is not a finite number everywhere never reaches the cost
+comparison.
+
+## Self-modifying framework: the framework evolves patches to its own code
+
+Everything else in this project evolves artifacts — skills, prompts, decision
+rules. `improve_source` evolves the framework's own source, gated by the
+framework's own tests — a gate strong enough to keep a model's rewrite to
+*computing*, not enough to run untrusted code from a stranger:
+
+```python
+from agentdescent import improve_source, patch_source
+
+tests = [lambda fn: fn(3) == 9, lambda fn: fn(0) == 0]
+bench = lambda fn: 1.0 / (1.0 + len(fn.__code__.co_code))   # bytecode size ~ speed
+report, result = improve_source(seed_source, tests, bench,
+                                propose=offline_propose, rounds=4, n_workers=2)
+print(report.patch)             # the unified diff a reviewer sees
+print(report.evolved_tests, report.gain)
+```
+
+The loop:
+
+1. **`patch_source` / `apply_patch`** — a candidate is the source of one
+   module-level function; `patch_source` makes the diff a reviewer sees and
+   `apply_patch` reverses it (a patch that cannot apply is refused, never
+   half-applied).
+2. **`gate_source`** — the same AST walk every other self-edit runs: no
+   imports, no dunder, no interpreter calls (`exec`, `eval`, `open`,
+   `getattr` ...). The candidate compiles in a namespace of safe builtins only.
+3. **`evaluate_source`** — every test must pass before any benchmark score
+   counts. A patch that breaks anything is a **zero**, never a regression with
+   a number attached; an unparseable candidate is counted, not crashed.
+4. **`improve_source`** — the ordinary `evolve()` over `(test, seed)` tasks,
+   so the framework searches its own code under its own gate. The report
+   carries the accepted patch, the tests it passed, and the measured gain over
+   the seed.
+
+The gate is the same one SICA and Gödel Agent run their self-edits behind:
+enough to keep a model's rewrite to *computing*, not enough to run untrusted
+code from a stranger.
+
 ## Trajectory-driven curriculum: the problems come from the run's own failures
 
 `curriculum_meta_run` (#429) gives the meta loop a challenger that generates
