@@ -190,6 +190,26 @@ from .meta import (
     policy_source, priority_selection, problem_descriptor, problem_from_archive,
     rollouts_to, seed_source, slot_reflector, transfer_ratio,
 )
+from .rationale_distill import (
+    RationaleReport,
+    distill,
+    extract_rationale,
+    rationale_evolve,
+)
+from .self_modify import (
+    SelfModifyReport,
+    apply_patch,
+    evaluate_source,
+    gate_source,
+    improve_source,
+    patch_source,
+)
+from .curious_replay import (
+    CuriousReplayReport,
+    ReplayExample,
+    curiosity_weight,
+    curious_replay_evolve,
+)
 from .verifiable_rl import (
     VerifiableReport,
     policy_improve,
@@ -228,6 +248,21 @@ from .rule_tournament import (
     rule_tournament,
     tournament_promote,
 )
+from .evolved_programs import (
+    FastRuleReport,
+    cost_adjusted_reward,
+    evolve_fast_rule,
+    priority_grid_problem,
+    source_ops,
+)
+from .learn_to_think import (
+    LearnToThinkReport,
+    ROUTE_SEED,
+    learn_to_think,
+    quality_per_cost,
+    think_policy_spec,
+    think_problem,
+)
 from .self_rewarding import (
     LearnableMetaJudge,
     SelfRewardingReport,
@@ -243,12 +278,18 @@ from .meta_audit import (
 from .meta_population import (
     MetaPopulationReport,
     PopulationIsland,
+    async_meta_population_run,
     meta_population_run,
 )
 from .meta_curriculum import (
     MetaChallengerConfig,
     MetaProblemChallenger,
     curriculum_meta_run,
+)
+from .trajectory_curriculum import (
+    failed_rollouts,
+    problem_from_tasks,
+    trajectory_challenger,
 )
 from .meta_exam import (
     ExaminedRule,
@@ -559,6 +600,20 @@ __all__ = [
     "rollouts_to",
     "slot_reflector",
     "transfer_ratio",
+    "RationaleReport",
+    "distill",
+    "extract_rationale",
+    "rationale_evolve",
+    "SelfModifyReport",
+    "apply_patch",
+    "evaluate_source",
+    "gate_source",
+    "improve_source",
+    "patch_source",
+    "CuriousReplayReport",
+    "ReplayExample",
+    "curiosity_weight",
+    "curious_replay_evolve",
     "VerifiableReport",
     "policy_improve",
     "verifiable_problem",
@@ -585,6 +640,17 @@ __all__ = [
     "TournamentReport",
     "rule_tournament",
     "tournament_promote",
+    "FastRuleReport",
+    "cost_adjusted_reward",
+    "evolve_fast_rule",
+    "priority_grid_problem",
+    "source_ops",
+    "LearnToThinkReport",
+    "ROUTE_SEED",
+    "learn_to_think",
+    "quality_per_cost",
+    "think_policy_spec",
+    "think_problem",
     "LearnableMetaJudge",
     "SelfRewardingReport",
     "outcome_features",
@@ -599,6 +665,10 @@ __all__ = [
     "MetaChallengerConfig",
     "MetaProblemChallenger",
     "curriculum_meta_run",
+    "async_meta_population_run",
+    "failed_rollouts",
+    "problem_from_tasks",
+    "trajectory_challenger",
     "ExaminedRule",
     "MetaExamReport",
     "exam_archive",

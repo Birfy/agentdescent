@@ -760,6 +760,262 @@ The loop:
    the oracle on validation outcomes it never trained on — the same
    final-evaluation isolation every other development set gets — plus the
    label count and the oracle gain of the evolved value over the seed.
+## Rationale distillation: the artifact learns to carry its own reasoning
+
+STaR (Self-Taught Reasoner) boots a model by distilling its own successful
+reasoning back into it. Every evolution run here produces rollouts — successes
+and near-misses — and then the artifact dies with the run; nothing distilled
+*why* it succeeded into the artifact itself. `rationale_distill.py` does:
+
+```python
+from agentdescent import rationale_evolve
+
+report, result = rationale_evolve(
+    problems, run=run, reward=reward, propose=offline_propose,
+    rounds=6, n_workers=2)
+print(report.skill)         # the skill now carrying its own notes
+print(report.n_rationales, report.successes)
+```
+
+The loop:
+
+1. **`extract_rationale(task, output, success)`** — one rollout becomes a rule:
+   a success says how it answered ("answer '6' for difficulty 3"), a near-miss
+   says what it needed ("need cap >= 4").
+2. **`distill(records)`** — dedupes the rollouts' rationales into the skill the
+   artifact carries, near-miss rationales included — the artifact's own notes
+   about what it still needs.
+3. **`rationale_evolve`** — runs the ordinary `evolve()`, then distills the
+   run's own successes back into the skill. The report shows the distilled
+   skill, the rationale count and the success count.
+
+The measured claim is the STaR one: the artifact boots itself by carrying what
+its own runs taught it — and the report shows the notes it learned to carry.
+
+## Evolved code that beats the shipped implementation on quality-per-cost
+
+`priority_selection` evolves the `selection` priority rule, but its reward is
+quality alone — an evolved rule that costs more than the shipped seed can win
+on AUC and lose on latency, invisibly. `evolve_fast_rule` is the AlphaEvolve /
+FunSearch idea applied to the decision plane: the reward includes **cost**, so
+the search finds a rule that is as good *and cheaper* than the hand-written
+default, and the report measures the evolved rule against the seed on both axes:
+
+```python
+from agentdescent import evolve_fast_rule, priority_grid_problem
+
+report, result = evolve_fast_rule(
+    {"g": priority_grid_problem()}, {"v": priority_grid_problem()},
+    propose=offline_propose, rounds=6, n_workers=2)
+print(report.evolved_ops, report.seed_ops)        # fewer ops ...
+print(report.evolved_quality, report.seed_quality)  # ... at equal quality
+print(report.gain)                                # positive: it beat the seed
+```
+
+The pieces:
+
+* **`source_ops(source)`** — the arithmetic/call nodes of a candidate rule's
+  source, counted from the AST: a deterministic, attributable cost proxy
+  (evaluating a rule costs what its expression tree costs), where wallclock is
+  not reproducible.
+* **`priority_grid_problem()`** — a `Problem` over a fixed grid of priority
+  inputs whose reference ordering is the shipped seed's own: the seed scores
+  `1.0` at the baseline cost, and a rule must be cheaper at equal quality (or
+  better at equal cost) to beat it.
+* **`cost_adjusted_reward(lam, baseline)`** — `quality - lam * (cost / baseline)`,
+  clipped to `[0, 1]`; the cost is read from the outcome's `detail`.
+* **`evolve_fast_rule(...)`** — `meta_evolve` on `selection` with that reward,
+  then `FastRuleReport`: seed vs evolved `ops`, seed vs evolved quality, and
+  the cost-adjusted gain — the number that says "this evolved rule beat the
+  hand-written default on quality-per-cost".
+
+The grid regime spans the root before any expansion, a lone node, deep nodes
+and unrated priors — the same regime `compile_priority` refuses a rule on, so a
+candidate that is not a finite number everywhere never reaches the cost
+comparison.
+
+## Self-modifying framework: the framework evolves patches to its own code
+
+Everything else in this project evolves artifacts — skills, prompts, decision
+rules. `improve_source` evolves the framework's own source, gated by the
+framework's own tests — a gate strong enough to keep a model's rewrite to
+*computing*, not enough to run untrusted code from a stranger:
+
+```python
+from agentdescent import improve_source, patch_source
+
+tests = [lambda fn: fn(3) == 9, lambda fn: fn(0) == 0]
+bench = lambda fn: 1.0 / (1.0 + len(fn.__code__.co_code))   # bytecode size ~ speed
+report, result = improve_source(seed_source, tests, bench,
+                                propose=offline_propose, rounds=4, n_workers=2)
+print(report.patch)             # the unified diff a reviewer sees
+print(report.evolved_tests, report.gain)
+```
+
+The loop:
+
+1. **`patch_source` / `apply_patch`** — a candidate is the source of one
+   module-level function; `patch_source` makes the diff a reviewer sees and
+   `apply_patch` reverses it (a patch that cannot apply is refused, never
+   half-applied).
+2. **`gate_source`** — the same AST walk every other self-edit runs: no
+   imports, no dunder, no interpreter calls (`exec`, `eval`, `open`,
+   `getattr` ...). The candidate compiles in a namespace of safe builtins only.
+3. **`evaluate_source`** — every test must pass before any benchmark score
+   counts. A patch that breaks anything is a **zero**, never a regression with
+   a number attached; an unparseable candidate is counted, not crashed.
+4. **`improve_source`** — the ordinary `evolve()` over `(test, seed)` tasks,
+   so the framework searches its own code under its own gate. The report
+   carries the accepted patch, the tests it passed, and the measured gain over
+   the seed.
+
+The gate is the same one SICA and Gödel Agent run their self-edits behind:
+enough to keep a model's rewrite to *computing*, not enough to run untrusted
+code from a stranger.
+
+## Learn-to-think: the framework evolves *when* to spend compute
+
+Search-R1 / ZigZag train a model to decide when to retrieve, search, or answer
+directly, with verifiable rewards. The same decision exists in every evolution
+run — spend a cheap rollout, a deep search, or a reflection pass — and nothing
+ever learned *which* for a given difficulty and budget. `learn_to_think` makes
+the routing rule an evolvable artifact:
+
+```python
+from agentdescent import learn_to_think, think_policy_spec, think_problem
+
+report, result = learn_to_think(
+    {"t": think_problem()}, {"v": think_problem()},
+    propose=offline_propose, rounds=6, n_workers=2)
+print(report.routes_on)     # {'easy': 'direct', 'hard': 'search'}
+print(report.gain)          # positive: it beats the default on quality-per-cost
+```
+
+The pieces:
+
+* **`think_policy_spec()`** — the value is a gated source `Policy.route(
+  difficulty, budget_left, reward)` returning exactly `direct` / `search` /
+  `reflect`. The gate refuses imports, dunder access, forbidden calls, a wrong
+  signature, and a return outside the three routes; a smoke test runs the route
+  on easy, hard-with-budget and hard-without-budget inputs.
+* **`think_problem()`** — a workload instance whose outcome depends on the
+  route: each route has a cost model and a quality model, and the reward is
+  quality-per-cost, with the decision and the cost carried in `detail`.
+* **`learn_to_think(...)`** — a bespoke `evolve()` over those problems: the
+  artifact is the route source, the propose rewrites it, the reward is the
+  outcome's quality-per-cost. `LearnToThinkReport` compares the evolved rule
+  with the default on validation problems and shows the route each chose on an
+  easy and a hard input.
+
+The measured claim is the Search-R1 one made concrete: the framework learns,
+from its own measured returns, to search the hard tasks and answer the easy
+ones directly — instead of paying a fixed price everywhere.
+
+## Failure-weighted replay: the framework replays the past it is still failing
+
+Curious Replay (ICLR 2025) replays under-explored regions of experience,
+weighted by learning progress. The trajectory ledger records every past
+rollout; nothing here ever re-examined them. `curious_replay.py` makes the
+past an explicit training set with failure weights (a *need* signal, not
+learning-progress):
+
+```python
+from agentdescent import curious_replay_evolve, ReplayExample
+
+report, result = curious_replay_evolve(
+    past_examples, spec=slot(), run=score_past, propose=offline_propose,
+    rounds=6, n_workers=2)
+print(report.weights)      # which past the framework is still failing
+print(report.curious_gain, report.mastered_gain)
+```
+
+The loop:
+
+1. **`ReplayExample`** — one replayed past task with its rolling scores.
+2. **`curiosity_weight`** — high while the artifact is still failing it (falls
+   as it improves, floor once mastered).
+3. **One task per replayed example**, weighted by a **snapshot** of the weights
+   (taken before any candidate rolls out), with the mastered and still-curious
+   cohorts **interleaved** so both land on both sides of the positional
+   held-out cut — the held-out set cannot be curious-only, so a candidate that
+   forgets the mastered past is rejected by the gate.
+4. **`curious_replay_evolve`** — the ordinary `evolve()` over those tasks,
+   recording each outcome into the examples' rolling scores for the next call;
+   the report shows the weights and the gain on the still-curious vs mastered
+   past.
+
+The measured claim: the signal goes where the artifact is still failing — and
+the report says whether the replay helped there.
+
+## Async meta-population: the islands run concurrently
+
+`meta_population_run` runs its islands one after another; `async_meta_population_run`
+is the same call with a thread pool:
+
+```python
+import os
+
+from agentdescent import async_meta_population_run
+
+report, _ = async_meta_population_run(
+    store, slot="task_sampler", spec=slot(), propose=offline_propose,
+    tasks_for=lambda rec: tasks_for_config(rec.config),
+    run=run, reward=reward, inner_propose=propose, inner_strategy=SingleSlot("cap:0"),
+    config=CONFIG, islands=3, workers=3,
+    problems={"ta": helpful, "tb": helpful}, val_problems={"va": helpful_val},
+    repo_dir=os.path.expanduser("~/.agentdescent/pop-repos"))
+```
+
+The islands are independent sessions — each starts from its own archived rule,
+trains on the shared problems, validates the shared isolated set, and runs in
+its own fresh ledger repo — so `workers` of them run at once (default
+`islands`, i.e. all). The archive is only *read* while the islands run
+(`ConsolidationStore` is thread-safe) and written once at promotion, so the
+decision and the report are identical to the sequential call's, only faster to
+reach. An errored island is reported and never promoted, exactly as sequential;
+an empty archive is refused with the same pointer to run `continuous_meta_run`
+first.
+
+## Trajectory-driven curriculum: the problems come from the run's own failures
+
+`curriculum_meta_run` (#429) gives the meta loop a challenger that generates
+frontier problems; where those problems come from is the challenger's
+hardest question. `trajectory_challenger` answers it with the run's own
+memory — every archived rule links its evidence through
+`ConsolidationRecord.trajectory_store` (#334), and the trajectory ledger (#248)
+records every rollout, including the ones that failed:
+
+```python
+from agentdescent import ConsolidationStore, trajectory_challenger, problem_from_tasks, curriculum_meta_run
+
+challenger = trajectory_challenger(
+    store,
+    tasks_for=lambda ids: tasks_by_id(ids),            # task_id -> Task
+    build_problem=lambda tasks: problem_from_tasks(    # tasks -> Problem
+        tasks, slot="task_sampler", run=run, reward=reward,
+        propose=propose, strategy=SingleSlot("cap:0"), rounds=5, n_workers=1),
+    slot="task_sampler", failure_threshold=0.5)
+
+report, result = curriculum_meta_run(
+    store, slot="task_sampler", spec=slot(), challenger=challenger,
+    propose=offline_propose,
+    problems={"ta": problem_a, "tb": problem_b}, val_problems={"va": problem_z},
+    rounds=6, n_workers=1)
+```
+
+The challenger's generation spec is an **archived run_id**: `generate` reads
+that rule's trajectory store, takes the rollouts whose reward fell below
+`failure_threshold` (a corrupt record is skipped; a rule with no trajectories —
+or no failures to mine — is counted invalid, never crashed over), and `propose`
+advances across the archive's rules that recorded trajectories, so the frontier
+turns across the framework's failures instead of one rule's. `problem_from_tasks`
+is the natural problem builder: an `evolve_problem` over exactly the failed
+tasks.
+
+The #429 guarantee is inherited unchanged: the validation set stays fixed and
+the held-out split is computed from the seed tasks alone, so a problem mined
+from a failure can only ever appear in the training frontier. Memory becomes
+the exam — what the meta loop got wrong is what it is asked next.
 
 ## Chain audit: one adoption, traced through every evidence ring
 

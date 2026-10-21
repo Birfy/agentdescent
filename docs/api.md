@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-417 public names across 72 modules.
+446 public names across 78 modules.
 
 ---
 
@@ -755,6 +755,71 @@ transfer_ratio(
     source: str,
     target: str
 ) -> Optional[float]
+```
+
+---
+
+## Learn-to-think
+
+Evolve *when* the framework spends compute: direct, search, or reflect. &nbsp;·&nbsp; `agentdescent.learn_to_think` &nbsp;·&nbsp; [guide](meta-evolution.md)
+
+### `LearnToThinkReport(...)`
+
+What `learn_to_think` found: the evolved route rule and how its quality-per-cost compares with the default on validation problems.
+
+```python
+LearnToThinkReport(
+    seed_value: str,
+    value: str,
+    seed_score: float,
+    evolved_score: float,
+    gain: float,
+    routes_on: Dict[str, str]
+) -> None
+```
+
+### `learn_to_think(...)`
+
+Evolve the route rule on quality-per-cost.
+
+```python
+learn_to_think(
+    problems: Union[Sequence[Problem], Mapping[str, Problem]],
+    val_problems: Union[Sequence[Problem], Mapping[str, Problem]],
+    *,
+    propose: Optional[Callable[[str, Task, str, float], Optional[str]]] = None,
+    model: Optional[Any] = None,
+    seeds: Sequence[int] = (0, 1, 2, 3),
+    val_seeds: Sequence[int] = (4, 5, 6, 7),
+    seed_source: str = 'class Policy:\n    # Answer directly unless the task is hard and the budget allows a search.\n    def route(self, difficulty, budget_left, reward):\n        if difficulty >= 0.7 and budget_left >= 0.5:\n            return "search"\n        if difficulty >= 0.4:\n            return "reflect"\n        return "direct"\n',
+    **evolve_kwargs: Any
+) -> Tuple[LearnToThinkReport, EvolutionResult]
+```
+
+### `quality_per_cost(outcome: MetaOutcome) -> float`
+
+The outcome's reward, read back (already quality-per-cost).
+
+### `think_policy_spec(...)`
+
+The evolvable spec: the value is a `Policy.route` source, gated and compiled by `_build_route` (a smoke test runs the route on an easy, a hard-with-budget and a hard-without-budget input).
+
+```python
+think_policy_spec(
+    seed: str = 'class Policy:\n    # Answer directly unless the task is hard and the budget allows a search.\n    def route(self, difficulty, budget_left, reward):\n        if difficulty >= 0.7 and budget_left >= 0.5:\n            return "search"\n        if difficulty >= 0.4:\n            return "reflect"\n        return "direct"\n'
+) -> SourceSlot
+```
+
+### `think_problem(...)`
+
+A `Problem` over one workload instance.
+
+```python
+think_problem(
+    *,
+    lam: float = 0.1,
+    base_quality: Optional[Callable[[float], float]] = None
+) -> Problem
 ```
 
 ---
@@ -4113,6 +4178,10 @@ One ring of an adoption's evidence chain.
 
 Which of a batch of mutually contradictory changes survive.
 
+### `CuriousReplayReport`
+
+What `curious_replay_evolve` did: the weights, the gains on the still-curious vs mastered past, and the value produced.
+
 ### `DefaultConflict`
 
 Drop contradicting diffs, keeping whichever scores better (PCGrad-style).
@@ -4148,6 +4217,10 @@ Flip rate above which a rescan is called out rather than reported. The plan's nu
 ### `FROZEN_IDS`
 
 Artifact ids the loop may read but never mutate (L0).
+
+### `FastRuleReport`
+
+How an evolved rule does against the shipped seed, on both axes.
 
 ### `FileCache`
 
@@ -4305,6 +4378,14 @@ What a `ProposalPolicy` is given for one rollout.
 
 How a rollout becomes candidate changes.
 
+### `ROUTE_SEED`
+
+The shipped route rule: answer directly unless the task is hard and the budget allows a search. Deliberately conservative -- it refuses to search when the budget is low, which is exactly the decision an evolved rule can improve on (searching hard tasks pays more than the budget it costs).
+
+### `RationaleReport`
+
+What `rationale_evolve` distilled: how many rationales the skill now carries, and the skill itself.
+
 ### `RedTeamReport`
 
 What a `red_team_evolve` round did: the attack's findings and the coverage before and after the retraining.
@@ -4316,6 +4397,10 @@ A callable named rather than sent: `"module:attribute"` plus config.
 ### `RefError`
 
 A reference could not be resolved, and why -- never a bare ImportError.
+
+### `ReplayExample`
+
+One replayed past example: the task it came from, its recorded outcome, and the rolling statistics that decide how curious the artifact still is.
 
 ### `Result`
 
@@ -4368,6 +4453,10 @@ What environment one rollout needs. Must survive JSON: it crosses processes.
 ### `SearchTree`
 
 A state tree over rendered artifact values, searched by UCB.
+
+### `SelfModifyReport`
+
+What `improve_source` accepted: the patch, its tests, its gain.
 
 ### `SelfRewardingReport`
 
@@ -4425,6 +4514,14 @@ Four methods, from `grep 'self\.verifier\.' agentdescent/aggregator.py`.
 
 Provisions `LocalWorkspaceSandbox` -- `mkdtemp`, plus a lease file.
 
+### `apply_patch`
+
+Apply a `patch_source` diff back to a source. `ValueError` when the patch does not apply cleanly -- a patch whose context does not match `source` is refused, never half-applied. Untouched lines outside a hunk's context are preserved, so a middle-of-file edit keeps the rest of the file.
+
+### `async_meta_population_run`
+
+`meta_population_run` with the islands run concurrently.
+
 ### `audited_meta_validate`
 
 `meta_validate`, with a probability sample of pairs sent to the oracle.
@@ -4449,6 +4546,18 @@ Trace one archived adoption through its evidence rings.
 
 Run the harness(es) for a domain, record the outcomes, pick a winner.
 
+### `cost_adjusted_reward`
+
+`quality - lam * (cost / baseline)`, clipped to `[0, 1]`.
+
+### `curiosity_weight`
+
+How much replay weight this example should carry -- **failure-weighted**: high while the artifact is still failing it (mean far below the ceiling), falling as it improves, floor once mastered. `floor` keeps a mastered example replayable without dominating the still-curious past. (This is a failure/need signal, not learning-progress: a permanently stuck example stays heavily weighted until it is solved.)
+
+### `curious_replay_evolve`
+
+Evolve the artifact on its own past, weighted by curiosity.
+
 ### `curriculum_meta_run`
 
 Evolve a decision slot against a problem distribution the meta loop generates.
@@ -4457,9 +4566,33 @@ Evolve a decision slot against a problem distribution the meta loop generates.
 
 Dependency-free dataset loading -- the *data layer* for examples/experiments.
 
+### `distill`
+
+The rationales the artifact will carry: deduped rules from the rollouts, near-miss rationales included -- they are the artifact's own notes about what it still needs. Dedup is on the **exact rationale text**, so the output value stays semantic content (`-1` and `1`, `A` and `a` are different rules, not formatting to normalise away).
+
+### `evaluate_source`
+
+Run the candidate against the tests and the benchmark.
+
+### `evolve_fast_rule`
+
+Evolve a `selection` priority rule on quality-per-cost, beat the seed.
+
 ### `exam_archive`
 
 Re-validate the archive's adopted rules against an independent oracle.
+
+### `extract_rationale`
+
+One rollout's rationale as a rule the skill can carry.
+
+### `failed_rollouts`
+
+The recorded rollouts that failed, up to `max_failures`.
+
+### `gate_source`
+
+The candidate's gate: exactly one function of no arguments other than what its signature declares, built only from safe syntax. Imports, dunder access and the calls that reach the interpreter are refused -- the same walk `compile_policy_source` runs over every self-edit.
 
 ### `harness`
 
@@ -4477,6 +4610,10 @@ The best measured reward this harness has recorded for the domain.
 
 Evolve against the simulator, verify the result on the real problem.
 
+### `improve_source`
+
+Evolve the source of one function under its own tests and benchmark.
+
 ### `layers_from_archive`
 
 One layer per decision slot, aggregated from the archive's rule records.
@@ -4493,6 +4630,10 @@ Run a population of meta sessions from the archive's best rules, promote the win
 
 The features a judge learns quality from: mean best-so-far, the final reward, and a constant intercept term. Sweep counts / rollouts are deliberately dropped: raw counts dwarf a `[0, 1]` quality in a linear fit and had the old judge saturating its clip at 1.0 for every outcome. The judge must learn quality from the curve's *shape*, not be handed the answer.
 
+### `patch_source`
+
+A unified diff between two sources -- the patch a human or a reviewer sees, and what an apply can reverse.
+
 ### `policy_improve`
 
 Evolve a decision slot on verifiable reward and report the curve.
@@ -4500,6 +4641,18 @@ Evolve a decision slot on verifiable reward and report the curve.
 ### `portfolio_report`
 
 Score the layers by return-per-cost and reallocate the next window.
+
+### `priority_grid_problem`
+
+A `Problem` over the priority grid.
+
+### `problem_from_tasks`
+
+A runnable inner `Problem` over exactly these tasks.
+
+### `rationale_evolve`
+
+Evolve the skill, roll out, distill its own successes back into it.
 
 ### `record_harness`
 
@@ -4553,9 +4706,17 @@ A `Problem` over multi-step tasks.
 
 The evolvable spec: the value is a gated `society()` source compiled into a `SocietyGraph`. `SOCIETY_SEED` is the single-agent baseline -- the topology the search is asked to beat.
 
+### `source_ops`
+
+The deterministic cost of a candidate rule: arithmetic/call nodes in its source, counted from the AST. An attributable unit of work -- evaluating a rule costs what its expression tree costs, and counting it from the source is reproducible where wallclock is not.
+
 ### `tournament_promote`
 
 Run the tournament and promote the winner into the archive.
+
+### `trajectory_challenger`
+
+A `MetaProblemChallenger` that mines the archive's recorded failures.
 
 ### `verifiable_problem`
 
