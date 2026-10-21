@@ -30,6 +30,7 @@ from __future__ import annotations
 import os
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -41,7 +42,8 @@ from .meta import (
     archive_rule, auc, meta_evolve, meta_validate, problem_descriptor,
 )
 
-__all__ = ["PopulationIsland", "MetaPopulationReport", "meta_population_run"]
+__all__ = ["PopulationIsland", "MetaPopulationReport", "meta_population_run",
+           "async_meta_population_run"]
 
 
 @dataclass(frozen=True)
@@ -326,3 +328,140 @@ def _report_dict(report: MetaPopulationReport) -> Dict[str, Any]:
         "archive_count": report.archive_count,
         "reason": report.reason,
     }
+
+
+def async_meta_population_run(
+    store: ConsolidationStore,
+    slot: str,
+    spec: SlotSpec,
+    propose: Optional[Callable[[str, Task, str, float], Optional[str]]] = None,
+    *,
+    tasks_for: Callable[[Any], Sequence[Task]],
+    run: Callable[[str, Task], str],
+    reward: Callable[[Task, str], float],
+    inner_propose: Callable[[str, Task, str, float], Optional[str]],
+    inner_strategy: Any,
+    config: Optional[Dict[str, Any]] = None,
+    islands: int = 3,
+    workers: Optional[int] = None,
+    problems: Optional[Mapping[str, Problem]] = None,
+    val_problems: Optional[Mapping[str, Problem]] = None,
+    artifact_id: str = "meta-rule",
+    train_runs: int = 2,
+    val_runs: int = 1,
+    inner: Optional[Dict[str, Any]] = None,
+    model: Optional[Any] = None,
+    meta_reward: Optional[MetaReward] = None,
+    seeds: Sequence[int] = (0, 1),
+    val_seeds: Sequence[int] = (10, 11),
+    run_id: Optional[str] = None,
+    repo_dir: Optional[str] = None,
+    **evolve_kwargs: Any,
+) -> Tuple[MetaPopulationReport, EvolutionResult]:
+    """:func:`meta_population_run` with the islands run concurrently.
+
+    The islands are independent sessions -- each starts from its own archived
+    rule, trains on the shared problems, validates the shared isolated set, and
+    runs in its own fresh ledger repo -- so they can run in parallel. This is
+    the same call with a ``ThreadPoolExecutor``: ``workers`` islands at a time
+    (default ``islands``, i.e. all of them). The archive is only *read* while
+    the islands run (``ConsolidationStore`` is thread-safe), and the promotion
+    happens once, after every island reports -- so the decision and the report
+    are identical to the sequential call's, only faster to reach. An island
+    that errors is reported and never promoted, exactly as sequential.
+    """
+    if not (isinstance(islands, int) and islands >= 1):
+        raise ValueError(f"islands must be an int >= 1, got {islands!r}")
+    if workers is not None and not (isinstance(workers, int) and workers >= 1):
+        raise ValueError(f"workers must be an int >= 1, got {workers!r}")
+    for taken in ("strategy", "run", "reward", "agent", "initial_state",
+                  "repo_path"):
+        if taken in evolve_kwargs:
+            raise TypeError(
+                f"async_meta_population_run() sets {taken}= itself -- pass "
+                "repo_dir= for the per-island repos' base directory")
+    if propose is None and model is None:
+        raise ValueError("async_meta_population_run() needs propose= or model=")
+    if repo_dir is not None:
+        os.makedirs(repo_dir, exist_ok=True)
+    inner = dict(inner or {})
+    rules = _archived_rules(store, slot=slot, spec=spec, config=config,
+                            artifact_id=artifact_id)
+    if not rules:
+        raise ValueError(
+            "async_meta_population_run() found no archived rule for this slot/"
+            "spec/config -- a population needs distinct starting rules to "
+            "diversify from; run continuous_meta_run() once first")
+    train, val = _session_problems(
+        store, rules, tasks_for=tasks_for, spec=spec, run=run, reward=reward,
+        propose=inner_propose, strategy=inner_strategy,
+        problems=problems, val_problems=val_problems,
+        train_runs=train_runs, val_runs=val_runs, inner=inner)
+    _require_disjoint(train, val, seeds, val_seeds)
+    score = meta_reward or auc
+
+    def run_island(index: int, rule: Any) -> Tuple[PopulationIsland, EvolutionResult]:
+        prior_state = dict(rule.state or {})
+        prior_value = (spec.render(prior_state) if prior_state
+                       else spec.render(spec.initial()))
+        return _island_session(
+            slot, spec, propose, train, val,
+            prior_state=prior_state, prior_value=prior_value,
+            seeded_from=rule.run_id, index=index, meta_reward=score,
+            seeds=seeds, val_seeds=val_seeds, model=model,
+            repo_path=tempfile.mkdtemp(prefix="agentdescent-meta-pop-",
+                                       dir=repo_dir),
+            **evolve_kwargs)
+
+    submitted = list(enumerate(rules[:islands]))
+    with ThreadPoolExecutor(max_workers=workers or max(1, islands)) as pool:
+        futures = {pool.submit(run_island, index, rule): index
+                   for index, rule in submitted}
+        outcomes = {index: future.result()
+                    for future, index in futures.items()}
+
+    rows: List[PopulationIsland] = []
+    results: List[EvolutionResult] = []
+    winners: List[Tuple[float, Optional[float], int, PopulationIsland,
+                        EvolutionResult]] = []
+    for index in sorted(outcomes):
+        island, result = outcomes[index]
+        rows.append(island)
+        if result is not None:
+            results.append(result)
+        if island.verdict == "adopt":
+            winners.append((island.mean_gain, island.transfer, index,
+                            island, result))
+
+    promoted_from, promoted_run_id, chosen = None, None, None
+    if winners:
+        winners.sort(key=lambda w: (w[0], w[1] if w[1] is not None else -1.0,
+                                    -w[2]), reverse=True)
+        _, _, idx, island, result = winners[0]
+        chosen = island
+        rid = run_id or f"meta-pop-{slot}-{int(time.time())}"
+        seed_value = _seed_value_of(spec, rules, idx)
+        report = MetaRunReport(
+            slot=slot, seed_value=seed_value, value=island.value,
+            validation={}, mean_gain=island.mean_gain, transfer=island.transfer,
+            verdict="adopt", reason=island.reason)
+        archive_rule(store, report, result, run_id=rid, slot=slot, spec=spec,
+                     config=config, problem=problem_descriptor(slot, **inner),
+                     artifact_id=artifact_id)
+        promoted_from, promoted_run_id = idx, rid
+
+    reason = (f"promoted island {promoted_from} (seeded from {chosen.seeded_from})"
+              if chosen is not None else
+              "no island cleared the adopt bar; archive unchanged")
+    report = MetaPopulationReport(
+        slot=slot, islands=tuple(rows), promoted_from=promoted_from,
+        promoted_run_id=promoted_run_id, archive_count=store.count(),
+        reason=reason)
+    returned = (winners[0][4] if winners else
+                (results[0] if results else None))
+    if returned is not None:
+        try:
+            returned.meta = _report_dict(report)
+        except AttributeError:
+            pass
+    return report, returned  # type: ignore[return-value]

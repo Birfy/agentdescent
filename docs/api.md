@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-435 public names across 75 modules.
+436 public names across 75 modules.
 
 ---
 
@@ -4501,6 +4501,10 @@ Provisions `LocalWorkspaceSandbox` -- `mkdtemp`, plus a lease file.
 ### `apply_patch`
 
 Apply a `patch_source` diff back to a source. `ValueError` when the patch does not apply cleanly -- a patch whose context does not match `source` is refused, never half-applied. Untouched lines outside a hunk's context are preserved, so a middle-of-file edit keeps the rest of the file.
+
+### `async_meta_population_run`
+
+`meta_population_run` with the islands run concurrently.
 
 ### `audited_meta_validate`
 
