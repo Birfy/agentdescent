@@ -184,6 +184,11 @@ from .meta import (
     policy_source, priority_selection, problem_descriptor, problem_from_archive,
     rollouts_to, seed_source, slot_reflector, transfer_ratio,
 )
+from .red_team import (
+    RedTeamReport,
+    red_team,
+    red_team_evolve,
+)
 from .meta_audit import (
     MetaAuditRecord,
     MetaAuditStore,
@@ -495,6 +500,9 @@ __all__ = [
     "rollouts_to",
     "slot_reflector",
     "transfer_ratio",
+    "RedTeamReport",
+    "red_team",
+    "red_team_evolve",
     "MetaAuditRecord",
     "MetaAuditStore",
     "audited_meta_validate",

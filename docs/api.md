@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-378 public names across 62 modules.
+381 public names across 63 modules.
 
 ---
 
@@ -4253,6 +4253,10 @@ What a `ProposalPolicy` is given for one rollout.
 
 How a rollout becomes candidate changes.
 
+### `RedTeamReport`
+
+What a `red_team_evolve` round did: the attack's findings and the coverage before and after the retraining.
+
 ### `Ref`
 
 A callable named rather than sent: `"module:attribute"` plus config.
@@ -4396,6 +4400,14 @@ Run a population of meta sessions from the archive's best rules, promote the win
 ### `record_harness`
 
 Record one harness outcome for a domain. Idempotent by `run_id`.
+
+### `red_team`
+
+Attack `value` by mutating the seed tasks outward and scoring each mutation. Returns the `(task, score)` failures -- the OOD region where the value does not generalise. A deterministic attacker: the same mutations in the same order, so the attack is reproducible.
+
+### `red_team_evolve`
+
+Evolve, attack the result, retrain on the failures it found.
 
 ### `rule_id`
 
