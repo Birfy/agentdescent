@@ -760,6 +760,37 @@ The loop:
    the oracle on validation outcomes it never trained on — the same
    final-evaluation isolation every other development set gets — plus the
    label count and the oracle gain of the evolved value over the seed.
+## Rationale distillation: the artifact learns to carry its own reasoning
+
+STaR (Self-Taught Reasoner) boots a model by distilling its own successful
+reasoning back into it. Every evolution run here produces rollouts — successes
+and near-misses — and then the artifact dies with the run; nothing distilled
+*why* it succeeded into the artifact itself. `rationale_distill.py` does:
+
+```python
+from agentdescent import rationale_evolve
+
+report, result = rationale_evolve(
+    problems, run=run, reward=reward, propose=offline_propose,
+    rounds=6, n_workers=2)
+print(report.skill)         # the skill now carrying its own notes
+print(report.n_rationales, report.successes)
+```
+
+The loop:
+
+1. **`extract_rationale(task, output, success)`** — one rollout becomes a rule:
+   a success says how it answered ("answer '6' for difficulty 3"), a near-miss
+   says what it needed ("need cap >= 4").
+2. **`distill(records)`** — dedupes the rollouts' rationales into the skill the
+   artifact carries, near-miss rationales included — the artifact's own notes
+   about what it still needs.
+3. **`rationale_evolve`** — runs the ordinary `evolve()`, then distills the
+   run's own successes back into the skill. The report shows the distilled
+   skill, the rationale count and the success count.
+
+The measured claim is the STaR one: the artifact boots itself by carrying what
+its own runs taught it — and the report shows the notes it learned to carry.
 
 ## Async meta-population: the islands run concurrently
 
