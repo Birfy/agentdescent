@@ -507,4 +507,3 @@ Offline demo (a challenger pushes the difficulty outward while the rule climbs):
 ```bash
 python -m examples.meta.curriculum_meta_demo
 ```
-```
