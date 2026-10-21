@@ -722,6 +722,7 @@ The loop:
 The measured claim is the Dreamer one made concrete: pay the real cost where it
 pays, dream where it is cheap — and the report says how much the dream was
 worth.
+
 ## Rationale distillation: the artifact learns to carry its own reasoning
 
 STaR (Self-Taught Reasoner) boots a model by distilling its own successful
