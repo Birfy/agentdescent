@@ -190,6 +190,14 @@ from .rationale_distill import (
     extract_rationale,
     rationale_evolve,
 )
+from .self_modify import (
+    SelfModifyReport,
+    apply_patch,
+    evaluate_source,
+    gate_source,
+    improve_source,
+    patch_source,
+)
 from .curious_replay import (
     CuriousReplayReport,
     ReplayExample,
@@ -567,6 +575,12 @@ __all__ = [
     "distill",
     "extract_rationale",
     "rationale_evolve",
+    "SelfModifyReport",
+    "apply_patch",
+    "evaluate_source",
+    "gate_source",
+    "improve_source",
+    "patch_source",
     "CuriousReplayReport",
     "ReplayExample",
     "curiosity_weight",
