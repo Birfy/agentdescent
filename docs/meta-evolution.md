@@ -507,4 +507,41 @@ Offline demo (a challenger pushes the difficulty outward while the rule climbs):
 ```bash
 python -m examples.meta.curriculum_meta_demo
 ```
+
+## Agent society: the framework evolves a cooperating topology, not just one artifact
+
+Everything else in this project evolves one artifact against one task set.
+`agent_society.py` adds the topology dimension (Anthropic's multi-agent
+research system; AgentEvolve): a society is a graph of agent nodes — each a
+name, an instruction, a budget — with delegation edges, and the whole graph is
+one evolvable artifact:
+
+```python
+from agentdescent import society_evolve, society_problem
+
+report, result = society_evolve(
+    {"t": society_problem(train_tasks, gold=gold)},
+    {"v": society_problem(val_tasks, gold=gold)},    # held-out inputs
+    propose=offline_propose, rounds=6, n_workers=2)
+print(report.gain)            # positive: the delegation won on the held-out set
+print(report.value)           # the evolved graph source
 ```
+
+The loop:
+
+1. **`AgentNode` + `SocietyGraph`** — the container: nodes (instruction,
+   budget) and delegation edges; `solve(input)` routes the input through the
+   graph and returns the output and the cost (nodes used).
+2. **`society_spec`** — the evolvable artifact: a gated `society()` source
+   compiled into a `SocietyGraph`, with `SOCIETY_SEED` the single-agent
+   baseline. The gate is the same AST walk every other self-edit runs.
+3. **`society_problem`** — a multi-step task routed through the graph, rewarded
+   as correctness minus delegation cost: a topology that solves the task with
+   the least hand-off wins.
+4. **`society_evolve`** — the ordinary `evolve()` over those tasks, so the
+   search finds the topology (which nodes exist, who hands to whom, each
+   node's instruction) that wins. `SocietyReport` compares the evolved graph
+   with the seed on validation tasks.
+
+A single-node society is the old one-agent loop; a society that delegates to a
+specialist the single node lacked is the dimension up — measured, not assumed.

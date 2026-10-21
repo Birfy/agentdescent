@@ -184,6 +184,14 @@ from .meta import (
     policy_source, priority_selection, problem_descriptor, problem_from_archive,
     rollouts_to, seed_source, slot_reflector, transfer_ratio,
 )
+from .agent_society import (
+    AgentNode,
+    SocietyGraph,
+    SocietyReport,
+    society_evolve,
+    society_problem,
+    society_spec,
+)
 from .meta_audit import (
     MetaAuditRecord,
     MetaAuditStore,
@@ -495,6 +503,12 @@ __all__ = [
     "rollouts_to",
     "slot_reflector",
     "transfer_ratio",
+    "AgentNode",
+    "SocietyGraph",
+    "SocietyReport",
+    "society_evolve",
+    "society_problem",
+    "society_spec",
     "MetaAuditRecord",
     "MetaAuditStore",
     "audited_meta_validate",
