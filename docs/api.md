@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-378 public names across 62 modules.
+383 public names across 63 modules.
 
 ---
 
@@ -4125,6 +4125,10 @@ Flip rate above which a rescan is called out rather than reported. The plan's nu
 
 Artifact ids the loop may read but never mutate (L0).
 
+### `FastRuleReport`
+
+How an evolved rule does against the shipped seed, on both axes.
+
 ### `FileCache`
 
 A directory of evaluations, so separate processes can share them.
@@ -4365,6 +4369,10 @@ Wrap a `max_tokens -> Completion` factory into an adaptive Completion.
 
 Run the harness(es) for a domain, record the outcomes, pick a winner.
 
+### `cost_adjusted_reward`
+
+`quality - lam * (cost / baseline)`, clipped to `[0, 1]`.
+
 ### `curriculum_meta_run`
 
 Evolve a decision slot against a problem distribution the meta loop generates.
@@ -4372,6 +4380,10 @@ Evolve a decision slot against a problem distribution the meta loop generates.
 ### `dataloader`
 
 Dependency-free dataset loading -- the *data layer* for examples/experiments.
+
+### `evolve_fast_rule`
+
+Evolve a `selection` priority rule on quality-per-cost, beat the seed.
 
 ### `harness`
 
@@ -4393,6 +4405,10 @@ Run a population of meta sessions from the archive's best rules, promote the win
 
 `meta_run` with an audited validation: sample, oracle, persist, decide.
 
+### `priority_grid_problem`
+
+A `Problem` over the priority grid.
+
 ### `record_harness`
 
 Record one harness outcome for a domain. Idempotent by `run_id`.
@@ -4404,3 +4420,7 @@ Content-address a proposal so identical proposals dedupe automatically.
 ### `select_harness`
 
 Route a domain to the harness the archive's evidence says wins there.
+
+### `source_ops`
+
+The deterministic cost of a candidate rule: arithmetic/call nodes in its source, counted from the AST. An attributable unit of work -- evaluating a rule costs what its expression tree costs, and counting it from the source is reproducible where wallclock is not.

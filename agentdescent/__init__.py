@@ -184,6 +184,13 @@ from .meta import (
     policy_source, priority_selection, problem_descriptor, problem_from_archive,
     rollouts_to, seed_source, slot_reflector, transfer_ratio,
 )
+from .evolved_programs import (
+    FastRuleReport,
+    cost_adjusted_reward,
+    evolve_fast_rule,
+    priority_grid_problem,
+    source_ops,
+)
 from .meta_audit import (
     MetaAuditRecord,
     MetaAuditStore,
@@ -495,6 +502,11 @@ __all__ = [
     "rollouts_to",
     "slot_reflector",
     "transfer_ratio",
+    "FastRuleReport",
+    "cost_adjusted_reward",
+    "evolve_fast_rule",
+    "priority_grid_problem",
+    "source_ops",
     "MetaAuditRecord",
     "MetaAuditStore",
     "audited_meta_validate",
