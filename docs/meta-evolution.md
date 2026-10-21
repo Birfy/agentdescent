@@ -834,6 +834,45 @@ and unrated priors — the same regime `compile_priority` refuses a rule on, so 
 candidate that is not a finite number everywhere never reaches the cost
 comparison.
 
+## Self-modifying framework: the framework evolves patches to its own code
+
+Everything else in this project evolves artifacts — skills, prompts, decision
+rules. `improve_source` evolves the framework's own source, gated by the
+framework's own tests — a gate strong enough to keep a model's rewrite to
+*computing*, not enough to run untrusted code from a stranger:
+
+```python
+from agentdescent import improve_source, patch_source
+
+tests = [lambda fn: fn(3) == 9, lambda fn: fn(0) == 0]
+bench = lambda fn: 1.0 / (1.0 + len(fn.__code__.co_code))   # bytecode size ~ speed
+report, result = improve_source(seed_source, tests, bench,
+                                propose=offline_propose, rounds=4, n_workers=2)
+print(report.patch)             # the unified diff a reviewer sees
+print(report.evolved_tests, report.gain)
+```
+
+The loop:
+
+1. **`patch_source` / `apply_patch`** — a candidate is the source of one
+   module-level function; `patch_source` makes the diff a reviewer sees and
+   `apply_patch` reverses it (a patch that cannot apply is refused, never
+   half-applied).
+2. **`gate_source`** — the same AST walk every other self-edit runs: no
+   imports, no dunder, no interpreter calls (`exec`, `eval`, `open`,
+   `getattr` ...). The candidate compiles in a namespace of safe builtins only.
+3. **`evaluate_source`** — every test must pass before any benchmark score
+   counts. A patch that breaks anything is a **zero**, never a regression with
+   a number attached; an unparseable candidate is counted, not crashed.
+4. **`improve_source`** — the ordinary `evolve()` over `(test, seed)` tasks,
+   so the framework searches its own code under its own gate. The report
+   carries the accepted patch, the tests it passed, and the measured gain over
+   the seed.
+
+The gate is the same one SICA and Gödel Agent run their self-edits behind:
+enough to keep a model's rewrite to *computing*, not enough to run untrusted
+code from a stranger.
+
 ## Learn-to-think: the framework evolves *when* to spend compute
 
 Search-R1 / ZigZag train a model to decide when to retrieve, search, or answer
