@@ -508,6 +508,45 @@ Offline demo (a challenger pushes the difficulty outward while the rule climbs):
 python -m examples.meta.curriculum_meta_demo
 ```
 
+## Self-exam: adoptions are provisional until the oracle says so
+
+`archive_rule` writes an adopted rule into the archive, and `_archived_rules`
+keeps seeding the next search from it. `exam_archive` is the rung that makes
+that adoption **provisional**: it re-validates each rule against the problems
+its own descriptor describes, using an independent oracle, and stamps the
+outcome on the record:
+
+```python
+from agentdescent import ConsolidationStore, exam_archive, final_reward
+
+report = exam_archive(
+    store, slot="task_sampler", spec=slot(), oracle=final_reward,
+    tasks_for=lambda rec: tasks_for_config(rec.config),
+    run=run, reward=reward, propose=propose, strategy=SingleSlot("cap:0"),
+    config=CONFIG, min_gain=0.0, max_flags=2)
+print(report.passed, report.flagged, report.demoted)
+```
+
+The ladder:
+
+* **`passed`** — the oracle gain on the rebuilt problems clears `min_gain`
+  (flags reset). The rule keeps seeding the search.
+* **`flagged`** — the oracle disagrees; the rule stays seedable and the flag
+  count climbs.
+* **`demoted`** — a rule that fails truth `max_flags` times in a row is retired:
+  `_archived_rules` skips it, so `continuous_meta_run` and population selection
+  never start a search from a rule truth has rejected.
+
+`ConsolidationRecord.exam` / `exam_flags` / `exam_note` carry the stamp
+(optional, backwards compatible), and `ConsolidationStore.mark_exam` rewrites
+atomically. The meta loop's verdicts are thereby provisional until examined,
+and the archive self-corrects: what the loop believed is checked with evidence,
+and what fails the check stops steering the search.
+
+This is the audit rung made *actionable*: `meta_run_audited` records the
+probability-sampled evidence, and `exam_archive` turns resolved oracle truth
+into a seeding decision.
+
 ## Agent society: the framework evolves a cooperating topology, not just one artifact
 
 Everything else in this project evolves one artifact against one task set.
