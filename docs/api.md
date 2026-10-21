@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-381 public names across 63 modules.
+388 public names across 65 modules.
 
 ---
 
@@ -4093,6 +4093,14 @@ Somewhere to keep evaluations. In one process, across many, or on disk.
 
 A mutable per-call max_tokens, set by the engine before each expansion.
 
+### `ChainAuditReport`
+
+What a `chain_audit` pass found, ring by ring.
+
+### `ChainLink`
+
+One ring of an adoption's evidence chain.
+
 ### `Completion`
 
 `Callable[[str], str]` — the one contract every model and agent satisfies.
@@ -4164,6 +4172,10 @@ One entry per *category*: competing proposals contradict and are resolved.
 ### `LAYOUTS`
 
 Where a runner writes the evolving tree inside a workspace (`claude_skill`, `skill_library`, `claude_agent`, `dsh_skill`, `agents_skill`, `root`).
+
+### `LayerBudget`
+
+One spending line of the framework: a limit, what it spent, what it bought.
 
 ### `LearningValueModel`
 
@@ -4244,6 +4256,10 @@ Every replaceable piece, in one argument.
 ### `PopulationIsland`
 
 One island of a `meta_population_run`: a rule's search, and how it went.
+
+### `PortfolioReport`
+
+What a `portfolio_report` pass saw, and decided.
 
 ### `ProcessExecutor`
 
@@ -4373,6 +4389,10 @@ The control every efficiency number in this repository is missing.
 
 Wrap a `max_tokens -> Completion` factory into an adaptive Completion.
 
+### `chain_audit`
+
+Trace one archived adoption through its evidence rings.
+
 ### `compose_run`
 
 Run the harness(es) for a domain, record the outcomes, pick a winner.
@@ -4401,6 +4421,10 @@ The least a harness can be: a name and a `(tasks, repo) -> result` callable.
 
 The best measured reward this harness has recorded for the domain.
 
+### `layers_from_archive`
+
+One layer per decision slot, aggregated from the archive's rule records.
+
 ### `meta_population_run`
 
 Run a population of meta sessions from the archive's best rules, promote the winner.
@@ -4408,6 +4432,10 @@ Run a population of meta sessions from the archive's best rules, promote the win
 ### `meta_run_audited`
 
 `meta_run` with an audited validation: sample, oracle, persist, decide.
+
+### `portfolio_report`
+
+Score the layers by return-per-cost and reallocate the next window.
 
 ### `record_harness`
 

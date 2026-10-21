@@ -546,3 +546,44 @@ and what fails the check stops steering the search.
 This is the audit rung made *actionable*: `meta_run_audited` records the
 probability-sampled evidence, and `exam_archive` turns resolved oracle truth
 into a seeding decision.
+
+## Chain audit: one adoption, traced through every evidence ring
+
+The framework's promise is that no number in the loop is unverified — the inner
+reward is audited, the meta gain is audited, adoptions are provisional until
+the self-exam says so, and routing evidence can exist for the harness that won.
+`chain_audit` makes that promise inspectable: given one archived rule, it walks
+the rings its adoption passed through and shows, per ring, whether the evidence
+is present, within tolerance, or missing entirely:
+
+```python
+from agentdescent import ConsolidationStore, chain_audit
+
+report = chain_audit(
+    archive, "run-1",
+    meta_audit=meta_store,       # the meta-audit store (#426)
+    inner_audit=inner_store,     # the inner verifier's audit store (#273)
+    harness_evidence=lambda config: leaderboard_best(config))
+for link in report.links:
+    print(link.layer, link.status, link.reason)
+print(report.verified)
+```
+
+The rings:
+
+* **governance** — the slot's layer (decision plane vs machinery): always
+  reported, statically known.
+* **decision** — the recorded verdict and transfer, when a decision trail
+  exists (e.g. `meta_run_audited`'s verdict lines).
+* **meta-gain** — the oracle-vs-verifier gain bias for this run from a
+  `MetaAuditStore`; a bias above `bias_threshold` flags the ring.
+* **self-exam** — the rule's `exam` stamp (passed / flagged / demoted).
+* **inner-reward** — the inner verifier's residual bias from an `AuditStore`.
+* **harness** — routing evidence, when the caller has any.
+
+A ring is `verified` when its evidence is present and within tolerance,
+`flagged` when present and outside it, and `unverified` when the evidence
+simply is not there — reported, never silently assumed.
+`ChainAuditReport.verified` is true only when no ring is flagged or
+unverified; the reason names the rings that keep it false, so "this adoption is
+not fully verified" is a list, not a shrug.

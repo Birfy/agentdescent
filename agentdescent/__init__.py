@@ -163,6 +163,12 @@ from .harness import (
     record_harness,
     select_harness,
 )
+from .portfolio import (
+    LayerBudget,
+    PortfolioReport,
+    layers_from_archive,
+    portfolio_report,
+)
 from .allocator import (
     AllocatorContext,
     AllocatorPolicy,
@@ -204,6 +210,11 @@ from .meta_exam import (
     ExaminedRule,
     MetaExamReport,
     exam_archive,
+)
+from .chain_audit import (
+    ChainAuditReport,
+    ChainLink,
+    chain_audit,
 )
 from .filetree import (
     TreeError,
@@ -371,6 +382,10 @@ __all__ = [
     "harness_score",
     "record_harness",
     "select_harness",
+    "LayerBudget",
+    "PortfolioReport",
+    "layers_from_archive",
+    "portfolio_report",
     # solver-challenger self-play (#329 / #341)
     "Challenger",
     "ChallengerConfig",
@@ -513,6 +528,9 @@ __all__ = [
     "ExaminedRule",
     "MetaExamReport",
     "exam_archive",
+    "ChainAuditReport",
+    "ChainLink",
+    "chain_audit",
     "compile_priority",
     "priority_selection",
     "SLOT_PROTOCOLS",

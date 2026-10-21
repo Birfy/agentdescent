@@ -16,6 +16,9 @@ commands on a host with no MCP.
     agentdescent apply   <run_id> [--to PATH] [--dry-run]           install it, backed up
     agentdescent cancel  <run_id>
     agentdescent resume  <run_id>
+    agentdescent portfolio [archive]                          rank layers, reallocate budget
+    agentdescent exam     [archive] --domain module:builder    re-judge adoptions with an oracle
+    agentdescent audit    <run_id> --archive PATH              trace an adoption's evidence rings
     agentdescent doctor                                             what is installed
     agentdescent --version                                          which AgentDescent this is
     agentdescent install <dsh|claude-code|codex|opencode>           wire a host
@@ -36,7 +39,7 @@ import os
 import shutil
 import sys
 import time
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
 from . import runstore
@@ -1224,6 +1227,167 @@ def _algorithm_card_text(card: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# The meta stack on the command line: portfolio, exam, audit
+# ---------------------------------------------------------------------------
+
+
+def _archive_root(archive: Optional[str]) -> str:
+    """The consolidation archive a meta command reads: ``--archive``, else
+    ``$AGENTDESCENT_HOME/archive``, else ``~/.agentdescent/archive``."""
+    if archive:
+        return os.path.abspath(os.path.expanduser(archive))
+    home = os.environ.get("AGENTDESCENT_HOME") or "~/.agentdescent"
+    return os.path.join(os.path.abspath(os.path.expanduser(home)), "archive")
+
+
+def _load_ref(ref: str) -> Any:
+    """Resolve ``module:attribute`` to the object it names."""
+    if ":" not in ref:
+        raise SpecError(f"expected 'module:attribute', got {ref!r}")
+    module_name, attr = ref.rsplit(":", 1)
+    try:
+        module = __import__(module_name, fromlist=[attr])
+        return getattr(module, attr)
+    except (ImportError, AttributeError) as error:
+        raise SpecError(f"cannot resolve {ref!r}: {error}") from error
+
+
+def cmd_portfolio(a: argparse.Namespace) -> int:
+    """``agentdescent portfolio [archive]`` -- rank the archive's layers and
+    reallocate the next budget window."""
+    from .consolidation import ConsolidationStore
+    from .portfolio import layers_from_archive, portfolio_report
+
+    root = _archive_root(getattr(a, "archive", None))
+    store = ConsolidationStore(root)
+    layers = layers_from_archive(store)
+    if not layers:
+        print(f"no rule records under {root} to build layers from; "
+              f"run continuous_meta_run (or a meta session) first",
+              file=sys.stderr)
+        return 1
+    report = portfolio_report(
+        layers, floor=a.floor, min_samples=a.min_samples, grow=a.grow,
+        shrink=a.shrink, cap=a.cap)
+    if a.json:
+        _out({
+            "archive": root,
+            "total_budget": report.total_budget,
+            "layers": [{**({"name": l.name, "budget": l.budget, "spent": l.spent,
+                            "return_": l.return_, "samples": l.samples,
+                            "return_sd": l.return_sd,
+                            "diminishing": l.diminishing})} for l in report.layers],
+            "reallocated": report.reallocated,
+            "reasons": report.reasons,
+        }, as_json=True)
+        return 0
+    for layer in report.layers:
+        rpc = (layer.return_ / layer.spent) if layer.spent > 0 else 0.0
+        new = report.reallocated[layer.name]
+        print(f"{layer.name}: return-per-cost {rpc:.3f} "
+              f"(return {layer.return_:.3f} / spend {layer.spent:.1f}, "
+              f"{layer.samples} measurements) -> budget {new:.1f}")
+        print(f"    {report.reasons[layer.name]}")
+    print(f"archive: {root}  (total budget {report.total_budget:.1f})")
+    return 0
+
+
+def cmd_exam(a: argparse.Namespace) -> int:
+    """``agentdescent exam [archive] --domain module:builder`` -- re-judge the
+    archive's adopted rules with an independent oracle."""
+    from .consolidation import ConsolidationStore
+    from .meta_exam import exam_archive
+
+    root = _archive_root(getattr(a, "archive", None))
+    domain = _load_ref(a.domain)
+    built = domain() if callable(domain) and not isinstance(domain, dict) else domain
+    if not isinstance(built, Mapping):
+        raise SpecError("--domain must resolve to a builder that returns a dict "
+                        "with keys: oracle, tasks_for, run, reward, propose, "
+                        "strategy (and optionally slot, spec)")
+    store = ConsolidationStore(root)
+    config = None
+    if getattr(a, "config", None) is not None:
+        try:
+            config = json.loads(a.config)
+        except json.JSONDecodeError as error:
+            raise SpecError(f"--config must be a JSON dict, got {a.config!r}: {error}")
+        if not isinstance(config, dict):
+            raise SpecError(f"--config must be a JSON dict, got "
+                            f"{type(config).__name__}")
+    report = exam_archive(
+        store, slot=a.slot,
+        spec=built.get("spec") or _slot_spec(a.slot),
+        oracle=built["oracle"], tasks_for=built["tasks_for"],
+        run=built["run"], reward=built["reward"], propose=built["propose"],
+        strategy=built["strategy"], config=config,
+        min_gain=a.min_gain, max_flags=a.max_flags)
+    if a.json:
+        _out({"archive": root, "slot": a.slot, "passed": report.passed,
+              "flagged": report.flagged, "demoted": report.demoted,
+              "examined": [{**({"run_id": e.run_id, "oracle_gain": e.oracle_gain,
+                                "verdict": e.verdict, "reason": e.reason})}
+                           for e in report.examined]}, as_json=True)
+        return 0
+    print(f"{report.reason}  (archive: {root})")
+    for e in report.examined:
+        print(f"  {e.run_id}: {e.verdict}  (oracle gain {e.oracle_gain:+.3f}) "
+              f"{e.reason}")
+    return 0
+
+
+def _slot_spec(slot: str) -> Any:
+    from .meta import policy_source, priority_selection
+    from .meta import SLOTS
+    if slot not in SLOTS:
+        raise SpecError(f"--slot must be an evolvable slot, one of {SLOTS}; "
+                        f"got {slot!r}")
+    if slot == "selection":
+        return priority_selection()
+    return policy_source(slot)
+
+
+def cmd_audit(a: argparse.Namespace) -> int:
+    """``agentdescent audit <run_id> --archive PATH`` -- trace one adoption
+    through its evidence rings."""
+    from .chain_audit import chain_audit
+    from .consolidation import ConsolidationStore
+    from .meta_audit import MetaAuditStore
+
+    store = ConsolidationStore(_archive_root(a.archive))
+    meta = MetaAuditStore(a.meta_audit) if a.meta_audit else None
+    inner = None
+    if a.inner_audit:
+        from .audit import AuditStore
+        inner = AuditStore(a.inner_audit)
+    harness = None
+    if a.harness:
+        fn = _load_ref(a.harness)
+        if not callable(fn):
+            raise SpecError(f"--harness {a.harness!r} does not resolve to a "
+                            f"callable ({type(fn).__name__})")
+        harness = fn
+    try:
+        report = chain_audit(store, a.run_id, meta_audit=meta, inner_audit=inner,
+                             harness_evidence=harness,
+                             bias_threshold=a.bias_threshold)
+    except KeyError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    if a.json:
+        _out({"run_id": a.run_id, "verified": report.verified, "reason": report.reason,
+              "links": [{**({"layer": l.layer, "status": l.status,
+                             "evidence": l.evidence, "reason": l.reason})}
+                        for l in report.links]}, as_json=True)
+        return 0
+    print(f"run {report.run_id}: {'VERIFIED' if report.verified else 'NOT VERIFIED'}")
+    print(f"  {report.reason}")
+    for link in report.links:
+        print(f"  {link.layer}: {link.status}  {link.reason}")
+    return 0
+
+
 def cmd_algorithms(a: argparse.Namespace) -> int:
     from . import algorithms
 
@@ -1431,6 +1595,46 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--budget", type=float)
     s.add_argument("--usd-per-call", type=float, dest="usd_per_call")
     s.set_defaults(fn=cmd_resume)
+
+    s = sub.add_parser("portfolio",
+                       help="rank the archive's layers and reallocate the next budget window")
+    s.add_argument("archive", nargs="?", default=None,
+                   help="consolidation archive directory (default $AGENTDESCENT_HOME/archive)")
+    s.add_argument("--floor", type=float, default=0.05)
+    s.add_argument("--min-samples", type=int, default=3, dest="min_samples")
+    s.add_argument("--grow", type=float, default=0.5)
+    s.add_argument("--shrink", type=float, default=0.5)
+    s.add_argument("--cap", type=float, default=None)
+    s.set_defaults(fn=cmd_portfolio)
+
+    s = sub.add_parser("exam",
+                       help="re-judge the archive's adopted rules with an independent oracle")
+    s.add_argument("archive", nargs="?", default=None,
+                   help="consolidation archive directory (default $AGENTDESCENT_HOME/archive)")
+    s.add_argument("--domain", required=True,
+                   help="module:attribute builder returning the domain dict "
+                        "(oracle, tasks_for, run, reward, propose, strategy)")
+    s.add_argument("--slot", default="task_sampler",
+                   help="the decision slot the rules evolved (default task_sampler)")
+    s.add_argument("--min-gain", type=float, default=0.0, dest="min_gain")
+    s.add_argument("--max-flags", type=int, default=2, dest="max_flags")
+    s.add_argument("--config", default=None,
+                   help="JSON config dict used to rank the archive's rules")
+    s.set_defaults(fn=cmd_exam)
+
+    s = sub.add_parser("audit",
+                       help="trace one archived adoption through its evidence rings")
+    s.add_argument("run_id")
+    s.add_argument("--archive", default=None,
+                   help="consolidation archive directory (default $AGENTDESCENT_HOME/archive)")
+    s.add_argument("--meta-audit", default=None, dest="meta_audit",
+                   help="a MetaAuditStore path for the meta-gain ring")
+    s.add_argument("--inner-audit", default=None, dest="inner_audit",
+                   help="an inner AuditStore path for the inner-reward ring")
+    s.add_argument("--harness", default=None,
+                   help="module:attribute harness_evidence callable for the harness ring")
+    s.add_argument("--bias-threshold", type=float, default=0.1, dest="bias_threshold")
+    s.set_defaults(fn=cmd_audit)
 
     s = sub.add_parser("doctor", help="which agents, keys and optional pieces are available")
     s.set_defaults(fn=cmd_doctor)

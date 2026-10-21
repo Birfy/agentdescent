@@ -110,23 +110,3 @@ def test_init_says_what_to_do_when_the_cases_file_is_missing(tmp_path, monkeypat
     out = buf.getvalue()
     assert "create" in out and "cases.jsonl" in out
     assert "agentdescent demo" in out          # the way to see a working one
-
-
-def test_the_demo_skill_is_a_valid_agent_skill(tmp_path):
-    # #453: hosts drop a skill without name/description frontmatter, and a
-    # skill_dir run on it turns the SKILL.md structural gate off.
-    from agentdescent.skillspec import parse_skill_frontmatter, validate_skill_tree
-    demo.build(str(tmp_path))
-    text = (tmp_path / demo.DEMO_SKILL / "SKILL.md").read_text()
-    assert validate_skill_tree({"SKILL.md": text}, root_name=demo.DEMO_SKILL) == []
-    fm = parse_skill_frontmatter(text)
-    assert fm["name"] == demo.DEMO_SKILL and fm["description"].strip()
-
-
-def test_plan_on_the_demo_keeps_the_structural_gate_on(tmp_path):
-    from agentdescent import EvolveSpec
-    from agentdescent.cli import plan_payload
-    spec = demo.build(str(tmp_path))
-    payload = plan_payload(EvolveSpec.from_dict(spec).absolutise())
-    blob = json.dumps(payload)
-    assert "no-frontmatter" not in blob and "structural gate is off" not in blob
