@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-390 public names across 66 modules.
+394 public names across 67 modules.
 
 ---
 
@@ -4101,6 +4101,10 @@ A mutable per-call max_tokens, set by the engine before each expansion.
 
 Which of a batch of mutually contradictory changes survive.
 
+### `CuriousReplayReport`
+
+What `curious_replay_evolve` did: the weights, the gains on the still-curious vs mastered past, and the value produced.
+
 ### `DefaultConflict`
 
 Drop contradicting diffs, keeping whichever scores better (PCGrad-style).
@@ -4277,6 +4281,10 @@ A callable named rather than sent: `"module:attribute"` plus config.
 
 A reference could not be resolved, and why -- never a bare ImportError.
 
+### `ReplayExample`
+
+One replayed past example: the task it came from, its recorded outcome, and the rolling statistics that decide how curious the artifact still is.
+
 ### `Result`
 
 What one rollout produced, or why it did not.
@@ -4388,6 +4396,14 @@ Wrap a `max_tokens -> Completion` factory into an adaptive Completion.
 ### `compose_run`
 
 Run the harness(es) for a domain, record the outcomes, pick a winner.
+
+### `curiosity_weight`
+
+How much replay weight this example should carry -- **failure-weighted**: high while the artifact is still failing it (mean far below the ceiling), falling as it improves, floor once mastered. `floor` keeps a mastered example replayable without dominating the still-curious past. (This is a failure/need signal, not learning-progress: a permanently stuck example stays heavily weighted until it is solved.)
+
+### `curious_replay_evolve`
+
+Evolve the artifact on its own past, weighted by curiosity.
 
 ### `curriculum_meta_run`
 
