@@ -198,6 +198,12 @@ from .self_modify import (
     improve_source,
     patch_source,
 )
+from .curious_replay import (
+    CuriousReplayReport,
+    ReplayExample,
+    curiosity_weight,
+    curious_replay_evolve,
+)
 from .verifiable_rl import (
     VerifiableReport,
     policy_improve,
@@ -588,6 +594,10 @@ __all__ = [
     "gate_source",
     "improve_source",
     "patch_source",
+    "CuriousReplayReport",
+    "ReplayExample",
+    "curiosity_weight",
+    "curious_replay_evolve",
     "VerifiableReport",
     "policy_improve",
     "verifiable_problem",

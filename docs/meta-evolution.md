@@ -911,6 +911,42 @@ The measured claim is the Search-R1 one made concrete: the framework learns,
 from its own measured returns, to search the hard tasks and answer the easy
 ones directly — instead of paying a fixed price everywhere.
 
+## Failure-weighted replay: the framework replays the past it is still failing
+
+Curious Replay (ICLR 2025) replays under-explored regions of experience,
+weighted by learning progress. The trajectory ledger records every past
+rollout; nothing here ever re-examined them. `curious_replay.py` makes the
+past an explicit training set with failure weights (a *need* signal, not
+learning-progress):
+
+```python
+from agentdescent import curious_replay_evolve, ReplayExample
+
+report, result = curious_replay_evolve(
+    past_examples, spec=slot(), run=score_past, propose=offline_propose,
+    rounds=6, n_workers=2)
+print(report.weights)      # which past the framework is still failing
+print(report.curious_gain, report.mastered_gain)
+```
+
+The loop:
+
+1. **`ReplayExample`** — one replayed past task with its rolling scores.
+2. **`curiosity_weight`** — high while the artifact is still failing it (falls
+   as it improves, floor once mastered).
+3. **One task per replayed example**, weighted by a **snapshot** of the weights
+   (taken before any candidate rolls out), with the mastered and still-curious
+   cohorts **interleaved** so both land on both sides of the positional
+   held-out cut — the held-out set cannot be curious-only, so a candidate that
+   forgets the mastered past is rejected by the gate.
+4. **`curious_replay_evolve`** — the ordinary `evolve()` over those tasks,
+   recording each outcome into the examples' rolling scores for the next call;
+   the report shows the weights and the gain on the still-curious vs mastered
+   past.
+
+The measured claim: the signal goes where the artifact is still failing — and
+the report says whether the replay helped there.
+
 ## Trajectory-driven curriculum: the problems come from the run's own failures
 
 `curriculum_meta_run` (#429) gives the meta loop a challenger that generates
