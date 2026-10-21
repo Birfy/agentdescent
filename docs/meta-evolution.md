@@ -723,6 +723,7 @@ The measured claim is the Dreamer one made concrete: pay the real cost where it
 pays, dream where it is cheap — and the report says how much the dream was
 worth.
 
+
 ## Trajectory-driven curriculum: the problems come from the run's own failures
 
 `curriculum_meta_run` (#429) gives the meta loop a challenger that generates
