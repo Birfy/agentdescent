@@ -184,6 +184,12 @@ from .meta import (
     policy_source, priority_selection, problem_descriptor, problem_from_archive,
     rollouts_to, seed_source, slot_reflector, transfer_ratio,
 )
+from .self_rewarding import (
+    LearnableMetaJudge,
+    SelfRewardingReport,
+    outcome_features,
+    self_rewarding_meta_run,
+)
 from .meta_audit import (
     MetaAuditRecord,
     MetaAuditStore,
@@ -495,6 +501,10 @@ __all__ = [
     "rollouts_to",
     "slot_reflector",
     "transfer_ratio",
+    "LearnableMetaJudge",
+    "SelfRewardingReport",
+    "outcome_features",
+    "self_rewarding_meta_run",
     "MetaAuditRecord",
     "MetaAuditStore",
     "audited_meta_validate",

@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-378 public names across 62 modules.
+382 public names across 63 modules.
 
 ---
 
@@ -4157,6 +4157,10 @@ One entry per *category*: competing proposals contradict and are resolved.
 
 Where a runner writes the evolving tree inside a workspace (`claude_skill`, `skill_library`, `claude_agent`, `dsh_skill`, `agents_skill`, `root`).
 
+### `LearnableMetaJudge`
+
+A small linear regressor from `outcome_features` to oracle quality, fit by least squares (pure Python, deterministic).
+
 ### `LearningValueModel`
 
 A tiny online logistic model over the candidate features.
@@ -4309,6 +4313,10 @@ Where sandboxes come from and go back to.
 
 What environment one rollout needs. Must survive JSON: it crosses processes.
 
+### `SelfRewardingReport`
+
+What a `self_rewarding_meta_run` did: the evolved value, the judge's measured agreement with the oracle on validation outcomes, whether the judge actually fitted (or fell back to `auc`), how many oracle labels it trained on, and the value's oracle quality vs the seed's on the held-out problems.
+
 ### `SharedSandboxPool`
 
 A pool whose ceiling is the machine's, not this process's.
@@ -4393,6 +4401,10 @@ Run a population of meta sessions from the archive's best rules, promote the win
 
 `meta_run` with an audited validation: sample, oracle, persist, decide.
 
+### `outcome_features`
+
+The features a judge learns quality from: mean best-so-far, the final reward, and a constant intercept term. Sweep counts / rollouts are deliberately dropped: raw counts dwarf a `[0, 1]` quality in a linear fit and had the old judge saturating its clip at 1.0 for every outcome. The judge must learn quality from the curve's *shape*, not be handed the answer.
+
 ### `record_harness`
 
 Record one harness outcome for a domain. Idempotent by `run_id`.
@@ -4404,3 +4416,7 @@ Content-address a proposal so identical proposals dedupe automatically.
 ### `select_harness`
 
 Route a domain to the harness the archive's evidence says wins there.
+
+### `self_rewarding_meta_run`
+
+Evolve a decision slot with a judge that improves against truth.
