@@ -272,6 +272,7 @@ from .meta_audit import (
 from .meta_population import (
     MetaPopulationReport,
     PopulationIsland,
+    async_meta_population_run,
     meta_population_run,
 )
 from .meta_curriculum import (
@@ -649,6 +650,7 @@ __all__ = [
     "MetaChallengerConfig",
     "MetaProblemChallenger",
     "curriculum_meta_run",
+    "async_meta_population_run",
     "failed_rollouts",
     "problem_from_tasks",
     "trajectory_challenger",

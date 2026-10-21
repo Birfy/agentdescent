@@ -947,6 +947,35 @@ The loop:
 The measured claim: the signal goes where the artifact is still failing — and
 the report says whether the replay helped there.
 
+## Async meta-population: the islands run concurrently
+
+`meta_population_run` runs its islands one after another; `async_meta_population_run`
+is the same call with a thread pool:
+
+```python
+import os
+
+from agentdescent import async_meta_population_run
+
+report, _ = async_meta_population_run(
+    store, slot="task_sampler", spec=slot(), propose=offline_propose,
+    tasks_for=lambda rec: tasks_for_config(rec.config),
+    run=run, reward=reward, inner_propose=propose, inner_strategy=SingleSlot("cap:0"),
+    config=CONFIG, islands=3, workers=3,
+    problems={"ta": helpful, "tb": helpful}, val_problems={"va": helpful_val},
+    repo_dir=os.path.expanduser("~/.agentdescent/pop-repos"))
+```
+
+The islands are independent sessions — each starts from its own archived rule,
+trains on the shared problems, validates the shared isolated set, and runs in
+its own fresh ledger repo — so `workers` of them run at once (default
+`islands`, i.e. all). The archive is only *read* while the islands run
+(`ConsolidationStore` is thread-safe) and written once at promotion, so the
+decision and the report are identical to the sequential call's, only faster to
+reach. An errored island is reported and never promoted, exactly as sequential;
+an empty archive is refused with the same pointer to run `continuous_meta_run`
+first.
+
 ## Trajectory-driven curriculum: the problems come from the run's own failures
 
 `curriculum_meta_run` (#429) gives the meta loop a challenger that generates
