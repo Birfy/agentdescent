@@ -184,6 +184,22 @@ from .meta import (
     policy_source, priority_selection, problem_descriptor, problem_from_archive,
     rollouts_to, seed_source, slot_reflector, transfer_ratio,
 )
+from .verifiable_rl import (
+    VerifiableReport,
+    policy_improve,
+    verifiable_problem,
+    verifiable_reward,
+)
+from .red_team import (
+    RedTeamReport,
+    red_team,
+    red_team_evolve,
+)
+from .trajectory_search import (
+    SearchReport,
+    SearchTree,
+    search_evolve,
+)
 from .agent_society import (
     AgentNode,
     SocietyGraph,
@@ -508,6 +524,16 @@ __all__ = [
     "rollouts_to",
     "slot_reflector",
     "transfer_ratio",
+    "VerifiableReport",
+    "policy_improve",
+    "verifiable_problem",
+    "verifiable_reward",
+    "RedTeamReport",
+    "red_team",
+    "red_team_evolve",
+    "SearchReport",
+    "SearchTree",
+    "search_evolve",
     "AgentNode",
     "SocietyGraph",
     "SocietyReport",

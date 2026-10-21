@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-387 public names across 64 modules.
+396 public names across 67 modules.
 
 ---
 
@@ -4269,6 +4269,10 @@ What a `ProposalPolicy` is given for one rollout.
 
 How a rollout becomes candidate changes.
 
+### `RedTeamReport`
+
+What a `red_team_evolve` round did: the attack's findings and the coverage before and after the retraining.
+
 ### `Ref`
 
 A callable named rather than sent: `"module:attribute"` plus config.
@@ -4325,6 +4329,10 @@ Where sandboxes come from and go back to.
 
 What environment one rollout needs. Must survive JSON: it crosses processes.
 
+### `SearchTree`
+
+A state tree over rendered artifact values, searched by UCB.
+
 ### `SharedSandboxPool`
 
 A pool whose ceiling is the machine's, not this process's.
@@ -4356,6 +4364,10 @@ The default: a bounded pool of threads in this process.
 ### `ValueBudgetAllocator`
 
 Learn which candidates are worth the expensive evaluation.
+
+### `VerifiableReport`
+
+What `policy_improve` did: the per-round held-out verifiable reward curve (the trajectory-level signal RL trains on) and the before/after on held-out verifiable facts.
 
 ### `VerifierProtocol`
 
@@ -4421,13 +4433,29 @@ Run a population of meta sessions from the archive's best rules, promote the win
 
 `meta_run` with an audited validation: sample, oracle, persist, decide.
 
+### `policy_improve`
+
+Evolve a decision slot on verifiable reward and report the curve.
+
 ### `record_harness`
 
 Record one harness outcome for a domain. Idempotent by `run_id`.
 
+### `red_team`
+
+Attack `value` by mutating the seed tasks outward and scoring each mutation. Returns the `(task, score)` failures -- the OOD region where the value does not generalise. A deterministic attacker: the same mutations in the same order, so the attack is reproducible.
+
+### `red_team_evolve`
+
+Evolve, attack the result, retrain on the failures it found.
+
 ### `rule_id`
 
 Content-address a proposal so identical proposals dedupe automatically.
+
+### `search_evolve`
+
+Search the state tree for the best value under a fixed budget.
 
 ### `select_harness`
 
@@ -4444,3 +4472,11 @@ A `Problem` over multi-step tasks.
 ### `society_spec`
 
 The evolvable spec: the value is a gated `society()` source compiled into a `SocietyGraph`. `SOCIETY_SEED` is the single-agent baseline -- the topology the search is asked to beat.
+
+### `verifiable_problem`
+
+Wrap a `(value, task) -> output` problem so the outcome's reward is verifiable: `1.0` on exact match with `gold`, `0.0` otherwise, with the output and gold carried in `detail` for `verifiable_reward`.
+
+### `verifiable_reward`
+
+The RL signal: `1.0` when the outcome's output exactly matches its `gold`, `0.0` otherwise. A rule that cannot be checked is not rewarded -- the DeepSeek-R1 verifiability contract.
