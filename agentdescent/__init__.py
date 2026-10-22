@@ -169,6 +169,13 @@ from .portfolio import (
     layers_from_archive,
     portfolio_report,
 )
+from .portfolio_evolve import (
+    ReallocationPolicy,
+    portfolio_evolve,
+    portfolio_problem,
+    reallocation_spec,
+    windows_from_archive,
+)
 from .allocator import (
     AllocatorContext,
     AllocatorPolicy,
@@ -479,6 +486,11 @@ __all__ = [
     "PortfolioReport",
     "layers_from_archive",
     "portfolio_report",
+    "ReallocationPolicy",
+    "portfolio_evolve",
+    "portfolio_problem",
+    "reallocation_spec",
+    "windows_from_archive",
     # solver-challenger self-play (#329 / #341)
     "Challenger",
     "ChallengerConfig",

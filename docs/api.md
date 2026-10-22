@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-452 public names across 79 modules.
+457 public names across 80 modules.
 
 ---
 
@@ -4395,6 +4395,10 @@ The shipped route rule: answer directly unless the task is hard and the budget a
 
 What `rationale_evolve` distilled: how many rationales the skill now carries, and the skill itself.
 
+### `ReallocationPolicy`
+
+The evolvable reallocation rule: four numbers, applied to a layer window.
+
 ### `RedTeamReport`
 
 What a `red_team_evolve` round did: the attack's findings and the coverage before and after the retraining.
@@ -4663,6 +4667,14 @@ A unified diff between two sources -- the patch a human or a reviewer sees, and 
 
 Evolve a decision slot on verifiable reward and report the curve.
 
+### `portfolio_evolve`
+
+Evolve the reallocation rule on the archive's (or the caller's) windows.
+
+### `portfolio_problem`
+
+A `Problem` over one layer window.
+
 ### `portfolio_report`
 
 Score the layers by return-per-cost and reallocate the next window.
@@ -4678,6 +4690,10 @@ A runnable inner `Problem` over exactly these tasks.
 ### `rationale_evolve`
 
 Evolve the skill, roll out, distill its own successes back into it.
+
+### `reallocation_spec`
+
+The evolvable spec: the four numbers as a `ParamSlot`.
 
 ### `record_harness`
 
@@ -4750,3 +4766,7 @@ Wrap a `(value, task) -> output` problem so the outcome's reward is verifiable: 
 ### `verifiable_reward`
 
 The RL signal: `1.0` when the outcome's output exactly matches its `gold`, `0.0` otherwise. A rule that cannot be checked is not rewarded -- the DeepSeek-R1 verifiability contract.
+
+### `windows_from_archive`
+
+Train/validation **layer windows** from the archive's rule records.
