@@ -32,7 +32,9 @@ def test_text_keeps_explicit_plain_agent(ws, ref):
 def test_text_default_unchanged_without_agent(ws):
     assert _init("prompt.txt", "--kind", "text") == 0
     spec = json.loads((ws / "spec.json").read_text())
-    assert spec["agent"] == {"ref": "openai_compatible", "model": "deepseek-v4-flash"}
+    # Without --agent, kind=text keeps its default: the key-aware model block
+    # init writes (#451), here with OPENAI_API_KEY set and no --model.
+    assert spec["agent"] == {"ref": "openai_compatible", "model": cli.PLACEHOLDER_MODEL}
 
 
 def test_text_explicit_openai_compatible_keeps_model(ws):
