@@ -531,17 +531,54 @@ def _opencode_model_arg(block: Any) -> Optional[str]:
     return None
 
 
-def _opencode_provider_remedy(block: Any) -> Optional[str]:
-    """The plan warning's remedy for an isolated ``opencode`` pinning ``-m p/m``.
+def _opencode_has_config(block: Any) -> bool:
+    """The block hands an isolated ``opencode`` its own provider config file."""
+    env = block.get("env") if isinstance(block, dict) else None
+    return isinstance(env, dict) and (
+        "OPENCODE_CONFIG" in env or "OPENCODE_CONFIG_CONTENT" in env)
 
-    ``None`` -- keep the generic remedy -- unless a model with a provider part is
-    pinned and the caller has not already pointed ``OPENCODE_CONFIG`` at a file
-    through the block's ``env``.
+
+def _opencode_configured(block: Any) -> bool:
+    """An isolated ``opencode`` that needs no login: ``-m p/m`` plus a config (#455).
+
+    The documented recipe (``docs/plugins.md``): a pinned ``provider/model`` and
+    ``env.OPENCODE_CONFIG`` naming a provider-only file whose key comes from
+    ``{env:VAR}``. Measured with Ark Coding under isolation, it answers in ~7 s
+    and a 1-round evolve made 4 calls with 0 failures, so "a login does not carry
+    over" is no warning for it.
+    """
+    return bool(_opencode_model_arg(block)) and _opencode_has_config(block)
+
+
+def _opencode_provider_remedy(block: Any, keys: Optional[Dict[str, bool]] = None
+                              ) -> Optional[str]:
+    """The plan warning's remedy for an isolated ``opencode``.
+
+    With ``-m p/m`` pinned and no ``OPENCODE_CONFIG`` in the block's ``env``: the
+    custom-provider trap (#373). With no pin while a provider key is set: the
+    default-model trap (#455) -- OpenCode then picks its own default model for
+    that provider, which the account may not have activated. ``None`` keeps the
+    generic remedy.
     """
     model = _opencode_model_arg(block)
-    env = block.get("env") if isinstance(block, dict) else None
-    if not model or (isinstance(env, dict)
-                     and ("OPENCODE_CONFIG" in env or "OPENCODE_CONFIG_CONTENT" in env)):
+    if not model:
+        # OpenAI / Anthropic accounts serve their provider's default model; a
+        # gateway key such as ARK_API_KEY is where the default was unusable.
+        present = [n for n, v in (keys or {}).items()
+                   if v and n.endswith("_API_KEY")
+                   and n not in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY")]
+        if not present:
+            return None
+        return (f"a provider key ({', '.join(present)}) is not enough on its own: "
+                "with no `-m`, OpenCode picks its own default model for that "
+                "provider, which the account may not have activated (measured with "
+                "only ARK_API_KEY set: every call failed on an unactivated Volcengine "
+                "default). "
+                'Pin the model and hand the worker a provider-only config: '
+                '"extra_args": ["-m", "ark/deepseek-v4-flash"], '
+                '"env": {"OPENCODE_CONFIG": "/abs/path/providers.json"} '
+                "(the file as in docs/plugins.md, keys via {env:VAR}, never inline)")
+    if _opencode_has_config(block):
         return None
     return (f"`-m {model}` works only if that provider is built into OpenCode: a "
             "custom provider (an OpenAI-compatible endpoint, a local server, a "
@@ -780,13 +817,14 @@ def _unusable_refs(spec: EvolveSpec) -> List[str]:
             # and require_cli_on_path (#346); only soft-warn about isolation here.
             isolate = block.get("isolate") if isinstance(block, dict) else None
             if clis.get(binary) and isolate is not False and not keys.get(
-                    _CLI_ENV_FALLBACK.get(ref, ""), False):
+                    _CLI_ENV_FALLBACK.get(ref, ""), False) and not (
+                    ref == "opencode" and _opencode_configured(block)):
                 # The trap that ate a 60-round run: `codex` was on PATH, so
                 # nothing complained, but a worker runs with the host's config
                 # directory redirected -- an interactive login does not carry
                 # over. Every rollout failed. Being present is not being usable.
                 remedy = _CLI_ENV_USELESS.get(ref) or (
-                    ref == "opencode" and _opencode_provider_remedy(block)) or (
+                    ref == "opencode" and _opencode_provider_remedy(block, keys)) or (
                     f"or export {_CLI_ENV_FALLBACK[ref]}"
                     if ref in _CLI_ENV_FALLBACK else
                     "whether a provider key in the environment is enough instead "
