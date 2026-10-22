@@ -175,11 +175,60 @@ def starter_model_block(*, model: Optional[str] = None, base_url: Optional[str] 
     return block
 
 
+def parse_cli_params(pairs: Optional[Sequence[str]]) -> Dict[str, Any]:
+    """``--param k=v`` -> a JSON-typed dict (bare strings when JSON cannot parse).
+
+    Repeated keys are an error: silently keeping the last one makes a typo or a
+    copied flag look applied.
+    """
+    out: Dict[str, Any] = {}
+    for item in pairs or ():
+        if "=" not in item:
+            raise ValueError(f"--param {item!r} must be KEY=VALUE")
+        key, raw = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError(f"--param {item!r} has an empty name")
+        if key in out:
+            raise ValueError(f"--param {key!r} was given more than once")
+        try:
+            out[key] = json.loads(raw)
+        except ValueError:
+            out[key] = raw
+    return out
+
+
+def algorithm_override(name: Optional[str], params: Optional[Mapping[str, Any]],
+                       kind: str) -> Optional[Any]:
+    """Validate ``--algorithm``/``--param`` for ``kind`` and return the spec value.
+
+    Returns ``None`` when no algorithm was named, the name itself when it takes
+    no parameters, and ``{"name": ..., "params": {...}}`` otherwise. Raises
+    :class:`~agentdescent.algorithms.AlgorithmError` for an unknown name, an
+    unsupported kind or a bad parameter -- the same errors ``plan`` would give,
+    but before a spec is written.
+    """
+    if not name:
+        if params:
+            raise ValueError("--param needs --algorithm")
+        return None
+    from . import algorithms
+
+    alg = algorithms.get(name, where="--algorithm")
+    if kind not in alg.kinds:
+        raise algorithms.AlgorithmError(
+            f"--algorithm {name!r} applies to kind {list(alg.kinds)}, not {kind!r}")
+    algorithms.resolve_params(alg, params)      # validates types/unknowns/choices
+    return name if not params else {"name": name, "params": dict(params)}
+
+
 def starter_spec(path: str, *, kind: Optional[str] = None, data: Optional[str] = None,
                  agent: Optional[str] = None,
                  agent_explicit: bool = False, model: Optional[str] = None,
                  base_url: Optional[str] = None,
-                 key_env: Optional[str] = None) -> Dict[str, Any]:
+                 key_env: Optional[str] = None,
+                 algorithm: Optional[str] = None,
+                 algorithm_params: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
     """A spec to edit, with ``kind`` guessed from what ``path`` is.
 
     ``agent=None`` picks the worker from the CLIs on PATH (:func:`default_agent_ref`).
@@ -242,6 +291,9 @@ def starter_spec(path: str, *, kind: Optional[str] = None, data: Optional[str] =
         # in wall clock: the recorded run asked for 8 rounds and got 2 in 90 min.
         spec["evolve"] = {"rounds": 4, "n_workers": 2, "max_seconds": 5400}
         spec["allow"] = ["mypkg"]
+    chosen = algorithm_override(algorithm, algorithm_params, spec["kind"])
+    if chosen is not None:
+        spec["algorithm"] = chosen
     return spec
 
 
@@ -544,9 +596,16 @@ def init_agent_mismatch(kind: str, ref: str) -> Optional[str]:
 
 def cmd_init(a: argparse.Namespace) -> int:
     agent, found = (a.agent, True) if a.agent else default_agent_ref()
-    spec = starter_spec(a.path, kind=a.kind, data=a.data, agent=agent,
-                        agent_explicit=bool(a.agent), model=a.model,
-                        base_url=a.base_url, key_env=a.key_env)
+    try:
+        params = parse_cli_params(getattr(a, "param", None))
+        spec = starter_spec(a.path, kind=a.kind, data=a.data, agent=agent,
+                            agent_explicit=bool(a.agent), model=a.model,
+                            base_url=a.base_url, key_env=a.key_env,
+                            algorithm=getattr(a, "algorithm", None),
+                            algorithm_params=params)
+    except ValueError as e:      # AlgorithmError is a ValueError
+        print(f"error: {e}", file=sys.stderr)
+        return 2
     if a.agent:
         why = init_agent_mismatch(spec["kind"], a.agent)
         if why:
@@ -1068,11 +1127,36 @@ def plan_payload(spec: EvolveSpec, *, usd_per_call: Optional[float] = None) -> D
     return payload
 
 
+def _apply_algorithm_flag(spec: EvolveSpec, a: argparse.Namespace) -> None:
+    """`plan/evolve --algorithm ... --param ...` override the spec in memory.
+
+    A same-name override **merges** params (the CLI wins per key), so
+    `--param b_min=2` on a spec that already set `b_max: 3` keeps `b_max`; a
+    different name replaces the method and its params. `--param` without
+    `--algorithm` tweaks the method the spec already names.
+    """
+    name = getattr(a, "algorithm", None)
+    params = parse_cli_params(getattr(a, "param", None))
+    current = spec.algorithm
+    current_name = (current.get("name") if isinstance(current, dict) else current)
+    current_params = (dict(current.get("params") or {})
+                      if isinstance(current, dict) else {})
+    if not name:
+        if not params:
+            return
+        if not isinstance(current_name, str):
+            raise ValueError("--param needs --algorithm (this spec names none)")
+        name = current_name
+    merged = ({**current_params, **params} if name == current_name else dict(params))
+    spec.algorithm = algorithm_override(name, merged, spec.kind)
+
+
 def cmd_plan(a: argparse.Namespace) -> int:
     spec = load_spec(a.spec)
     try:
+        _apply_algorithm_flag(spec, a)
         payload = plan_payload(spec, usd_per_call=a.usd_per_call)
-    except SpecError as e:
+    except (SpecError, ValueError) as e:
         _out({"ok": False, "error": str(e)}, as_json=a.json)
         return 2
     _out(payload, as_json=a.json)
@@ -1093,8 +1177,9 @@ def _warn_unusable(spec: EvolveSpec) -> None:
 def cmd_evolve(a: argparse.Namespace) -> int:
     spec = load_spec(a.spec)
     try:
+        _apply_algorithm_flag(spec, a)
         comp = compose(spec)                 # fail here, not in the detached child
-    except SpecError as e:
+    except (SpecError, ValueError) as e:
         print(f"spec error: {e}", file=sys.stderr)
         return 2
     # Before create/launch: a missing --usd-per-call must not leave an orphan run
@@ -1968,16 +2053,33 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--key-env", dest="key_env", default=None,
                    help="environment variable holding its key (default: OPENAI_API_KEY, "
                         "or the one other provider key that is set)")
+    s.add_argument("--algorithm", default=None,
+                   help="named method from `agentdescent algorithms list` "
+                        "(e.g. rrsi); other spec fields keep their kind "
+                        "defaults and can override the method's")
+    s.add_argument("--param", action="append", default=[], metavar="KEY=VALUE",
+                   help="algorithm parameter, repeatable; values are JSON "
+                        "when they parse, otherwise strings")
     s.add_argument("--out", help="where to write the spec")
     s.set_defaults(fn=cmd_init)
 
     s = sub.add_parser("plan", help="validate a spec and estimate its cost; runs nothing")
     s.add_argument("spec")
+    s.add_argument("--algorithm", default=None,
+                   help="override the spec's algorithm by name (the same name "
+                        "merges --param with the spec's params)")
+    s.add_argument("--param", action="append", default=[], metavar="KEY=VALUE",
+                   help="algorithm parameter for --algorithm, repeatable")
     s.add_argument("--usd-per-call", type=float, dest="usd_per_call")
     s.set_defaults(fn=cmd_plan)
 
     s = sub.add_parser("evolve", help="run a spec")
     s.add_argument("spec")
+    s.add_argument("--algorithm", default=None,
+                   help="override the spec's algorithm by name (the same name "
+                        "merges --param with the spec's params)")
+    s.add_argument("--param", action="append", default=[], metavar="KEY=VALUE",
+                   help="algorithm parameter for --algorithm, repeatable")
     s.add_argument("--detach", action="store_true", help="return at once; poll with status")
     s.add_argument("--budget", type=float, help="stop after this many dollars (needs --usd-per-call)")
     s.add_argument("--usd-per-call", type=float, dest="usd_per_call")

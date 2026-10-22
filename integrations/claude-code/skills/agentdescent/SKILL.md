@@ -37,6 +37,15 @@ written back until the user says so.
      run asked for 8 rounds and completed 2 in 90 minutes. Read `plan`'s notes
      aloud: they say how many held-out tasks the gate actually gets, and with
      too few it has both committed a worse rule and committed nothing at all.
+   - `algorithm` (optional): a named method. Call `list_algorithms` (or
+     `describe_algorithm` for one) before naming one; the same data is in
+     `agentdescent algorithms list` / `show`. Offer one only when the user asks
+     for a specific method or the artifact clearly fits it; the default recipe
+     for the kind is otherwise the right answer. Never invent a name -- `plan`
+     rejects it. The spec can carry parameters under
+     `algorithm: {name, params}`; explicit `policies` / `evolve` fields in the
+     same spec still override the algorithm's defaults. `plan` echoes what was
+     resolved and what it costs.
    - No data? Offer to draft 12 to 20 cases into `eval/cases.jsonl`
      (`{"prompt": ..., "gold": ...}` per line) and have the user check them.
      Fewer than 12 leaves under 4 held-out cases at the default `held_out_frac`

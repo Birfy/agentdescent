@@ -337,3 +337,100 @@ def test_cli_show_prints_the_card_and_fails_for_an_unknown_name(capsys):
     assert json.loads(capsys.readouterr().out)["name"] == "rrsi"
     assert cli.main(["algorithms", "show", "nope"]) == 2
     assert "unknown algorithm 'nope'" in capsys.readouterr().err
+
+
+# -- the plugin surface: init, CLI overrides, MCP, docs (#384 slice 3) ----------
+
+
+def test_init_writes_the_algorithm_and_only_the_params_given(tmp_path, capsys):
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("be terse\n")
+    assert cli.main(["init", str(prompt), "--out", str(tmp_path / "spec.json"),
+                     "--algorithm", "rrsi", "--param", 'protected=["secret"]',
+                     "--model", "m"]) == 0
+    spec = json.loads((tmp_path / "spec.json").read_text())
+    assert spec["algorithm"] == {"name": "rrsi", "params": {"protected": ["secret"]}}
+    assert "wrote" in capsys.readouterr().out
+
+
+def test_init_refuses_an_unknown_algorithm_or_wrong_kind(tmp_path, capsys):
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("be terse\n")
+    assert cli.main(["init", str(prompt), "--out", str(tmp_path / "a.json"),
+                     "--algorithm", "gepa"]) == 2
+    assert "unknown algorithm" in capsys.readouterr().err
+    skill = tmp_path / "skill"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text("---\nname: s\ndescription: d\n---\nbody\n")
+    assert cli.main(["init", str(skill), "--out", str(tmp_path / "b.json"),
+                     "--algorithm", "rrsi", "--agent", "opencode"]) == 2
+    assert "applies to kind" in capsys.readouterr().err
+
+
+def test_init_refuses_params_without_an_algorithm(tmp_path, capsys):
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("be terse\n")
+    assert cli.main(["init", str(prompt), "--out", str(tmp_path / "a.json"),
+                     "--param", "b_max=3"]) == 2
+    assert "--param needs --algorithm" in capsys.readouterr().err
+
+
+def test_plan_can_override_the_spec_algorithm(tmp_path, capsys):
+    path = _write(tmp_path, _spec())
+    assert cli.main(["--json", "plan", path, "--algorithm", "rrsi",
+                     "--param", "b_max=3"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["algorithm"]["name"] == "rrsi"
+    assert out["algorithm"]["params"]["b_max"] == 3
+    assert json.loads(open(path).read()).get("algorithm") is None   # not written
+
+
+def test_plan_override_fails_closed(tmp_path, capsys):
+    path = _write(tmp_path, _spec())
+    assert cli.main(["--json", "plan", path, "--algorithm", "nope"]) == 2
+    assert "unknown algorithm" in json.loads(capsys.readouterr().out)["error"]
+
+
+def test_mcp_lists_and_describes_the_registry():
+    from agentdescent.mcp import Tools
+
+    t = Tools(None)
+    listed = t.list_algorithms()
+    assert [a["name"] for a in listed["algorithms"]] == algorithms.names()
+    assert [a["name"] for a in t.list_algorithms("skill_dir")["algorithms"]] == \
+        ["archive_selection"]
+    assert "unknown kind" in t.list_algorithms("nope")["error"]
+    card = t.describe_algorithm("rrsi")
+    assert card["name"] == "rrsi" and any(p["name"] == "b_max" for p in card["params"])
+    assert "unknown algorithm" in t.describe_algorithm("gepa")["error"]
+
+
+def test_the_docs_catalog_is_generated_from_the_registry():
+    from tools import gen_algorithms_docs as gen
+
+    current = open(gen.OUT, encoding="utf-8").read()
+    assert current == gen.render()
+    for name in algorithms.names():
+        assert f"## `{name}`" in current
+
+
+def test_a_same_name_override_merges_params(tmp_path, capsys):
+    path = _write(tmp_path, _spec(algorithm={"name": "rrsi", "params": {"b_max": 3}}))
+    assert cli.main(["--json", "plan", path, "--algorithm", "rrsi",
+                     "--param", "b_min=2"]) == 0
+    alg = json.loads(capsys.readouterr().out)["algorithm"]
+    assert alg["params"]["b_max"] == 3 and alg["params"]["b_min"] == 2
+
+
+def test_param_without_flag_tweaks_the_specs_algorithm(tmp_path, capsys):
+    path = _write(tmp_path, _spec(algorithm={"name": "rrsi", "params": {"b_max": 3}}))
+    assert cli.main(["--json", "plan", path, "--param", "b_min=2"]) == 0
+    alg = json.loads(capsys.readouterr().out)["algorithm"]
+    assert alg["params"]["b_max"] == 3 and alg["params"]["b_min"] == 2
+
+
+def test_mcp_explains_that_policy_slot_has_no_algorithms():
+    from agentdescent.mcp import Tools
+
+    out = Tools(None).list_algorithms("policy_slot")
+    assert out["algorithms"] == [] and "no algorithm applies" in out["note"]
