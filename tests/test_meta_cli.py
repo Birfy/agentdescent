@@ -210,9 +210,13 @@ def test_audit_traces_rings(tmp_path, capsys):
                for l in out["links"])
 
 
-def test_audit_unknown_run_fails(tmp_path):
+def test_audit_unknown_run_fails(tmp_path, capsys):
     code = cli.main(["--json", "audit", "nope", "--archive", str(tmp_path)])
-    assert code != 0
+    # Same exit code and unquoted wording as show/cancel/resume on an unknown
+    # run, not the quoted repr of a KeyError (#481).
+    assert code == 2
+    err = capsys.readouterr().err.strip()
+    assert err == "error: no archived run 'nope' to audit"
 
 
 def test_audit_non_callable_harness_fails_cleanly(tmp_path):
