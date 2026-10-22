@@ -329,6 +329,18 @@ def doctor_report() -> Dict[str, Any]:
             f'`"api_key_env": "{other[0]}"` plus `default_base_url` (or `base_url_env`) '
             "for its endpoint; the endpoint and the model name come from the user, "
             "never guess them")
+        # Reflect is not the only role: an isolated `opencode` worker with a
+        # gateway key still needs the Coding recipe (#455). Doctor used to stop
+        # at the openai_compatible hint and leave the worker path unspoken.
+        if clis.get("opencode"):
+            hints.append(
+                "opencode is on PATH and only %s is set: for an isolated worker "
+                "use the OpenCode Coding recipe in docs/plugins.md "
+                '(pin `-m ark/deepseek-v4-flash` and set '
+                '`env.OPENCODE_CONFIG` to a provider-only file with `{env:VAR}` keys); '
+                "a bare `ref: opencode` falls back to OpenCode's built-in "
+                "Volcengine default, which a Coding-only account may not have "
+                "activated" % (", ".join(other),))
     for name, info in hosts.items():
         if info["state"] in ("stale", "partial"):
             problems.append(
@@ -456,11 +468,15 @@ cases.jsonl, and a real agent instead of the offline one:
 
 
 def _starter_model_warnings(spec: Dict[str, Any], out: str) -> List[str]:
-    """What ``init`` says about the ``openai_compatible`` blocks it just wrote.
+    """What ``init`` says about the blocks it just wrote.
 
-    One answer with ``doctor`` (#451): it names the key the block will read --
-    the one that is set here, not always OPENAI_API_KEY -- and every value left
-    for the user to fill in, which ``plan`` refuses until they do.
+    One answer with ``doctor`` (#451): for ``openai_compatible`` it names the key
+    the block will read -- the one that is set here, not always OPENAI_API_KEY --
+    and every value left for the user to fill in, which ``plan`` refuses until
+    they do. For a bare ``opencode`` worker with only a gateway key (#455), it
+    points at the documented ``OPENCODE_CONFIG`` Coding recipe so ``init`` does
+    not leave a silent ``{"ref": "opencode"}`` that dies on OpenCode's built-in
+    Volcengine default under isolation.
     """
     lines: List[str] = []
     for field in ("agent", "reflect"):
@@ -487,6 +503,16 @@ def _starter_model_warnings(spec: Dict[str, Any], out: str) -> List[str]:
                 "call would fail" + (" and the run would learn nothing" if field == "reflect" else "")
                 + ". Export a provider key (`agentdescent doctor` lists the ones it "
                 "knows), or pass `--key-env NAME` for one that is set")
+    # Bare isolated OpenCode + gateway key: same trap `plan` already names (#455).
+    # Warn at init so the written `{"ref": "opencode"}` is not silent.
+    agent = spec.get("agent")
+    if isinstance(agent, dict) and agent.get("ref") == "opencode" and not _opencode_configured(agent):
+        keys = doctor_report()["provider_keys_present"]
+        remedy = _opencode_provider_remedy(agent, keys)
+        if remedy and not _opencode_model_arg(agent):
+            lines.append(
+                f"`agent` in {out} is bare `opencode`: {remedy}. "
+                "See docs/plugins.md (OpenCode Coding / OPENCODE_CONFIG)")
     return lines
 
 
