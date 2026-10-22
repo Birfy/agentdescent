@@ -72,12 +72,24 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
         "this server runs (compare with the shell's `agentdescent doctor` when results "
         "differ). Call this FIRST, before planning a run, and tell the "
         "user what is missing instead of starting a run that fails on round one."),
+    "list_algorithms": (
+        "List the named algorithms a spec can ask for (`algorithm` field), with a "
+        "one-line summary, the kinds each applies to and its fidelity. Call this when "
+        "the user names a method (GEPA, ACE, RRSI, ...) or asks what methods exist; if "
+        "they named none, the default recipe for the kind is usually right. Do not "
+        "invent a name -- an unknown one fails in plan."),
+    "describe_algorithm": (
+        "One algorithm's card: summary, kinds, fidelity, source, extra cost and every "
+        "parameter with its type, default and bounds. Call this before setting "
+        "`algorithm: {name, params}` so the values you pass are the ones plan expects. "
+        "The same data is in `agentdescent algorithms show <name>`."),
     "plan": (
         "Validate an EvolveSpec and estimate its cost WITHOUT running anything. Resolves "
         "every agent/scorer/policy reference and loads the data, so a wrong field fails "
         "here with its name. Returns the composed evolve() arguments, the task count, an "
-        "upper bound on agent calls per round and in total, and notes. Show the user the "
-        "spec and the estimate and get a yes before calling start."),
+        "upper bound on agent calls per round and in total, and notes. When the spec has "
+        "an `algorithm`, the resolved name/params are echoed. Show the user the spec and "
+        "the estimate and get a yes before calling start."),
     "start": (
         "Start an evolution run in the background and return its run_id at once. The run "
         "is a detached process; poll `status` about once per round (not more often) and "
@@ -203,6 +215,28 @@ class Tools:
 
     def doctor(self) -> Dict[str, Any]:
         return doctor_report()
+
+    def list_algorithms(self, kind: Optional[str] = None) -> Dict[str, Any]:
+        from . import algorithms
+        from .evolvespec import KINDS
+
+        if kind is not None and kind not in KINDS:
+            return {"error": f"unknown kind {kind!r}; choose from {list(KINDS)}"}
+        payload: Dict[str, Any] = {
+            "algorithms": [a.describe() for a in algorithms.listing(kind)]}
+        if kind == "policy_slot" and not payload["algorithms"]:
+            payload["note"] = ("no algorithm applies to kind 'policy_slot': that "
+                               "kind evolves a policy slot, and `plan` refuses an "
+                               "algorithm for it")
+        return payload
+
+    def describe_algorithm(self, name: str) -> Dict[str, Any]:
+        from . import algorithms
+
+        try:
+            return algorithms.get(name, where="describe_algorithm").describe()
+        except algorithms.AlgorithmError as e:
+            return {"error": str(e)}
 
     def plan(self, spec: Dict[str, Any], usd_per_call: Optional[float] = None) -> Dict[str, Any]:
         try:
@@ -503,6 +537,14 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent",
     @server.tool(description=TOOL_DESCRIPTIONS["doctor"])
     def doctor() -> Dict[str, Any]:
         return t.doctor()
+
+    @server.tool(description=TOOL_DESCRIPTIONS["list_algorithms"])
+    def list_algorithms(kind: Optional[str] = None) -> Dict[str, Any]:
+        return t.list_algorithms(kind)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["describe_algorithm"])
+    def describe_algorithm(name: str) -> Dict[str, Any]:
+        return t.describe_algorithm(name)
 
     @server.tool(description=TOOL_DESCRIPTIONS["plan"])
     def plan(spec: Dict[str, Any], usd_per_call: Optional[float] = None) -> Dict[str, Any]:

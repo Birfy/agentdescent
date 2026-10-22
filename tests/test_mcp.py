@@ -120,7 +120,7 @@ def test_standalone_mcp_guide_lists_every_registered_tool():
     assert expected is not None
     documented = set(expected.group(1).split())
     assert documented == set(TOOL_DESCRIPTIONS)
-    assert len(documented) == 15
+    assert len(documented) == 17
 
 
 def test_every_tool_has_a_description_written_for_the_model():
