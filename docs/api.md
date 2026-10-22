@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-452 public names across 79 modules.
+454 public names across 80 modules.
 
 ---
 
@@ -543,6 +543,7 @@ continuous_meta_run(
     min_gain: float = 0.0,
     transfer_floor: float = 0.0,
     run_id: Optional[str] = None,
+    min_exam: Optional[str] = None,
     **evolve_kwargs: Any
 ) -> Tuple[ContinuousMetaReport, EvolutionResult]
 ```
@@ -572,6 +573,7 @@ continuous_meta_run(
 | `min_gain` | `float` | `0.0` | As `model`. |
 | `transfer_floor` | `float` | `0.0` | As `model`. |
 | `run_id` | `Optional[str]` | `None` | The archived `run_id` for the adopted rule; a unique `meta-<slot>-<unix time>-<random>` id when omitted (pass one explicitly when you need to find it again). |
+| `min_exam` | `Optional[str]` | `None` | The seeding bar applied to archived rules before they seed this session, via `verified_rules`: `None` (the default) keeps today's behaviour, `"flagged"` accepts flagged **and** passed rules, and `"passed"` seeds only certified rules. Any other value raises. |
 | `**evolve_kwargs` | `Any` |  | Everything else `meta_evolve` takes, except `initial_state` (this function sets it from the archive) and `strategy`/`run`/ `reward` (the inner domain's, passed above). Returns `(report, result)`; `report.value` is the evolved value and `report.verdict` the adopt/reject decision. |
 
 ### `evolve_problem(...)`
@@ -4511,6 +4513,10 @@ Learn which candidates are worth the expensive evaluation.
 
 What `policy_improve` did: the per-round held-out verifiable reward curve (the trajectory-level signal RL trains on) and the before/after on held-out verifiable facts.
 
+### `VerifiedSeed`
+
+The archive's rule records that clear the trust bar, and the reasons the rest were excluded.
+
 ### `VerifierProtocol`
 
 Four methods, from `grep 'self\.verifier\.' agentdescent/aggregator.py`.
@@ -4750,3 +4756,7 @@ Wrap a `(value, task) -> output` problem so the outcome's reward is verifiable: 
 ### `verifiable_reward`
 
 The RL signal: `1.0` when the outcome's output exactly matches its `gold`, `0.0` otherwise. A rule that cannot be checked is not rewarded -- the DeepSeek-R1 verifiability contract.
+
+### `verified_rules`
+
+The archive's seedable rule records, gated by trust.

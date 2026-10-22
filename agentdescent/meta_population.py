@@ -37,10 +37,11 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from .consolidation import ConsolidationStore
 from .evolution import EvolutionResult, Task
 from .meta import (
-    MetaReward, MetaRunReport, Problem, SlotSpec, _archived_rules,
+    MetaReward, MetaRunReport, Problem, SlotSpec,
     _mean_gain, _require_disjoint, _session_problems, _transfer_from,
     archive_rule, auc, meta_evolve, meta_validate, problem_descriptor,
 )
+from .verified_seed import verified_rules
 
 __all__ = ["PopulationIsland", "MetaPopulationReport", "meta_population_run",
            "async_meta_population_run"]
@@ -167,6 +168,7 @@ def meta_population_run(
     val_seeds: Sequence[int] = (10, 11),
     repo_dir: Optional[str] = None,
     run_id: Optional[str] = None,
+    min_exam: Optional[str] = None,
     **evolve_kwargs: Any,
 ) -> Tuple[MetaPopulationReport, EvolutionResult]:
     """Run a population of meta sessions from the archive's best rules, promote the winner.
@@ -205,6 +207,12 @@ def meta_population_run(
         As :func:`~agentdescent.meta.continuous_meta_run`.
     meta_reward, seeds, val_seeds:
         As :func:`~agentdescent.meta.meta_run`.
+    min_exam:
+        The seeding bar applied via
+        :func:`~agentdescent.verified_seed.verified_rules` before choosing the
+        islands' starting rules: ``None`` (default) keeps today's behaviour,
+        ``"flagged"`` accepts flagged and passed rules, ``"passed"`` only
+        certified ones. Any other value raises.
     run_id:
         The archived ``run_id`` of the promoted rule; a timestamp id when
         omitted.
@@ -237,13 +245,16 @@ def meta_population_run(
     if repo_dir is not None:
         os.makedirs(repo_dir, exist_ok=True)
     inner = dict(inner or {})
-    rules = _archived_rules(store, slot=slot, spec=spec, config=config,
-                            artifact_id=artifact_id)
+    rules = list(verified_rules(
+        store, slot=slot, spec=spec, config=config,
+        artifact_id=artifact_id, min_exam=min_exam).rules)
     if not rules:
+        bar = "" if min_exam is None else f" at or above min_exam={min_exam!r}"
         raise ValueError(
-            "meta_population_run() found no archived rule for this slot/spec/"
-            "config -- a population needs distinct starting rules to diversify "
-            "from; run continuous_meta_run() once first")
+            "meta_population_run() found no archived rule"
+            f"{bar} for this slot/spec/config -- a population needs distinct "
+            "starting rules to diversify from; run continuous_meta_run() once "
+            "first")
     train, val = _session_problems(
         store, rules, tasks_for=tasks_for, spec=spec, run=run, reward=reward,
         propose=inner_propose, strategy=inner_strategy,
@@ -356,6 +367,7 @@ def async_meta_population_run(
     val_seeds: Sequence[int] = (10, 11),
     run_id: Optional[str] = None,
     repo_dir: Optional[str] = None,
+    min_exam: Optional[str] = None,
     **evolve_kwargs: Any,
 ) -> Tuple[MetaPopulationReport, EvolutionResult]:
     """:func:`meta_population_run` with the islands run concurrently.
@@ -369,6 +381,10 @@ def async_meta_population_run(
     happens once, after every island reports -- so the decision and the report
     are identical to the sequential call's, only faster to reach. An island
     that errors is reported and never promoted, exactly as sequential.
+
+    ``min_exam`` and the other knobs are :func:`meta_population_run`'s; the
+    seeding gate is the same :func:`~agentdescent.verified_seed.verified_rules`
+    call, so the bar cannot drift between the two.
     """
     if not (isinstance(islands, int) and islands >= 1):
         raise ValueError(f"islands must be an int >= 1, got {islands!r}")
@@ -385,13 +401,16 @@ def async_meta_population_run(
     if repo_dir is not None:
         os.makedirs(repo_dir, exist_ok=True)
     inner = dict(inner or {})
-    rules = _archived_rules(store, slot=slot, spec=spec, config=config,
-                            artifact_id=artifact_id)
+    rules = list(verified_rules(
+        store, slot=slot, spec=spec, config=config,
+        artifact_id=artifact_id, min_exam=min_exam).rules)
     if not rules:
+        bar = "" if min_exam is None else f" at or above min_exam={min_exam!r}"
         raise ValueError(
-            "async_meta_population_run() found no archived rule for this slot/"
-            "spec/config -- a population needs distinct starting rules to "
-            "diversify from; run continuous_meta_run() once first")
+            "async_meta_population_run() found no archived rule"
+            f"{bar} for this slot/spec/config -- a population needs distinct "
+            "starting rules to diversify from; run continuous_meta_run() once "
+            "first")
     train, val = _session_problems(
         store, rules, tasks_for=tasks_for, spec=spec, run=run, reward=reward,
         propose=inner_propose, strategy=inner_strategy,

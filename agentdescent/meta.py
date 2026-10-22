@@ -2001,6 +2001,7 @@ def continuous_meta_run(
     min_gain: float = 0.0,
     transfer_floor: float = 0.0,
     run_id: Optional[str] = None,
+    min_exam: Optional[str] = None,
     **evolve_kwargs: Any,
 ) -> Tuple[ContinuousMetaReport, EvolutionResult]:
     """One session of continuous meta-learning: evolve, judge, archive.
@@ -2061,6 +2062,12 @@ def continuous_meta_run(
         descriptor archived with an adopted rule.
     model, meta_reward, seeds, val_seeds, min_gain, transfer_floor:
         As :func:`meta_run`.
+    min_exam:
+        The seeding bar applied to archived rules before they seed this
+        session, via :func:`~agentdescent.verified_seed.verified_rules`:
+        ``None`` (the default) keeps today's behaviour, ``"flagged"`` accepts
+        flagged **and** passed rules, and ``"passed"`` seeds only certified
+        rules. Any other value raises.
     run_id:
         The archived ``run_id`` for the adopted rule; a unique
         ``meta-<slot>-<unix time>-<random>`` id when omitted (pass one
@@ -2079,8 +2086,13 @@ def continuous_meta_run(
     if propose is None and model is None:
         raise ValueError("continuous_meta_run() needs propose= or model=")
     inner = dict(inner or {})
-    rules = _archived_rules(store, slot=slot, spec=spec, config=config,
-                            artifact_id=artifact_id)
+    # One seeding gate, not a second exam filter: verified_rules owns the
+    # min_exam contract (rank, unknown statuses) for every loop. Meta-audit is
+    # not wired here (meta_audit=None); exam status alone gates the loop.
+    from .verified_seed import verified_rules
+    rules = list(verified_rules(
+        store, slot=slot, spec=spec, config=config,
+        artifact_id=artifact_id, min_exam=min_exam).rules)
     train, val = _session_problems(
         store, rules, tasks_for=tasks_for, spec=spec, run=run, reward=reward,
         propose=inner_propose, strategy=inner_strategy,
