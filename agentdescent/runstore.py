@@ -48,7 +48,7 @@ import time
 import uuid
 import warnings
 from dataclasses import dataclass, field, asdict
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Sequence
 
 from .evolution import EvolutionResult, RoundInfo
 
@@ -343,6 +343,16 @@ class RunDir:
         """Where the engine keeps this run's rollout records (#452)."""
         return os.path.join(self.ledger_path, "trajectories")
 
+    @property
+    def candidates_path(self) -> str:
+        """The diffs the merger measured, one JSON object per line (#452).
+
+        Beside ``rounds.jsonl``, not under the ledger: a rejected candidate is
+        derived data, and putting it in git history would balloon every commit
+        and replay transcripts onto every branch.
+        """
+        return self._file("candidates.jsonl")
+
     # -- reads ---------------------------------------------------------------
 
     def spec_dict(self) -> Dict[str, Any]:
@@ -445,6 +455,75 @@ class RunDir:
                 if fh.read(1) != b"\n":
                     data = b"\n" + data
             fh.write(data)
+
+    def append_candidates(self, records: Sequence[Dict[str, Any]]) -> None:
+        """Append rejected-candidate records as strict-JSON lines (#452)."""
+        if not records:
+            return
+        payload = _sanitize_jsonable(list(records))
+        data = "".join(json.dumps(r, default=str, allow_nan=False) + "\n"
+                       for r in payload).encode("utf-8")
+        with open(self.candidates_path, "ab+") as fh:
+            fh.seek(0, os.SEEK_END)
+            if fh.tell() > 0:
+                fh.seek(-1, os.SEEK_END)
+                if fh.read(1) != b"\n":
+                    data = b"\n" + data
+            fh.write(data)
+
+
+#: How many rejected candidates one round contributes, and how much of each
+#: diff/field is kept. Diagnosis needs the shape of the edit, not a transcript.
+CANDIDATES_PER_ROUND = 5
+CANDIDATE_DIFF_CHARS = 1200
+CANDIDATE_FIELD_CHARS = 300
+
+
+def _candidate_text(value: Any, limit: int = CANDIDATE_FIELD_CHARS) -> str:
+    text = value if isinstance(value, str) else json.dumps(value, default=str)
+    return text if len(text) <= limit else text[:limit] + "..."
+
+
+def candidate_records(reports: Sequence[Any], round_index: int) -> List[Dict[str, Any]]:
+    """The rejected candidates in one round's merge reports, bounded (#452).
+
+    ``MergeReport.candidate_diff`` is the diff the merger actually measured; a
+    rejection used to leave only a counter. Files and a short diff are enough to
+    tell "the reflector proposed nothing useful" from "scoring is too strict".
+    """
+    out: List[Dict[str, Any]] = []
+    for rep in reports:
+        if len(out) >= CANDIDATES_PER_ROUND:
+            break
+        if getattr(rep, "committed_version", None) is not None:
+            continue
+        diff = getattr(rep, "candidate_diff", None)
+        if diff is None:
+            continue
+        ops = getattr(diff, "ops", None) or {}
+        try:
+            entries = list(ops.items())
+        except AttributeError:
+            entries = []
+        files = sorted(str(path) for path, _ in entries)[:20]
+        parts = []
+        for path, value in entries[:10]:
+            if value is None:
+                parts.append(f"- {path} (deleted)")
+            else:
+                parts.append(f"~ {path}:\n{_candidate_text(value, 400)}")
+        out.append({
+            "round": round_index,
+            "artifact_id": getattr(rep, "artifact_id", ""),
+            "diff_id": getattr(diff, "diff_id", ""),
+            "outcome": getattr(rep, "category", "") or "rejected",
+            "reason": _candidate_text(getattr(rep, "reason", "")),
+            "files": files,
+            "diff": _candidate_text("\n".join(parts), CANDIDATE_DIFF_CHARS),
+            "rationale": _candidate_text(getattr(diff, "rationale", "")),
+            "gated_reward": getattr(rep, "prob_improve", None),
+        })
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -713,6 +792,17 @@ def execute(rd: RunDir, *, budget_usd: Optional[float] = None,
         with rd.status_lock():
             _store_round(info, reward)
 
+    candidate_round = [0]
+
+    def on_reports(reports: Sequence[Any]) -> None:
+        # Keep what the merger measured and rejected, so a run that learned
+        # nothing can say *what* it proposed (#452). Same privacy knob as the
+        # rollout records: `record_rollouts: false` writes neither file.
+        records = candidate_records(reports, candidate_round[0])
+        candidate_round[0] += 1
+        if records:
+            rd.append_candidates(records)
+
     def _store_round(info: RoundInfo, reward: Optional[float]) -> None:
         changes: Dict[str, Any] = dict(
             round=info.round + 1, last_reward=reward,
@@ -753,6 +843,9 @@ def execute(rd: RunDir, *, budget_usd: Optional[float] = None,
     if (spec.record_rollouts and "record_trajectories" not in spec.evolve
             and "trajectory_store" not in spec.evolve and spec.kind != "policy_slot"):
         overrides["record_trajectories"] = True
+    if spec.record_rollouts and spec.kind != "policy_slot":
+        # `show` reads the merger's rejected candidates back from this (#452).
+        overrides["on_reports"] = on_reports
     try:
         comp = compose(spec, usage=usage, on_round=on_round, repo_path=rd.ledger_path,
                        **overrides)
