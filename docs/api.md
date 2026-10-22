@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-446 public names across 78 modules.
+452 public names across 79 modules.
 
 ---
 
@@ -4251,6 +4251,10 @@ One harness's measured outcome in a `compose_run`.
 
 What `imagine_then_evolve` did: the verified value, its real gain over the seed, the simulator's trust score, and how much of the budget was spent dreaming vs waking.
 
+### `JointMetaReport`
+
+What a `joint_meta_run` decided, per slot and jointly.
+
 ### `KeyedRules`
 
 One entry per *category*: competing proposals contradict and are resolved.
@@ -4350,6 +4354,10 @@ Upstream ERA's flat PUCT -- `rank + c * P(s,a) * sqrt(N) / (1 + n)` with `c = 1`
 ### `Policies`
 
 Every replaceable piece, in one argument.
+
+### `PoliciesBundle`
+
+The joint artifact: a bundle of per-slot `SlotSpec` values.
 
 ### `PopulationIsland`
 
@@ -4614,6 +4622,22 @@ Evolve against the simulator, verify the result on the real problem.
 ### `improve_source`
 
 Evolve the source of one function under its own tests and benchmark.
+
+### `joint_archive_rule`
+
+Write an adopted bundle to the archive as one `meta-rule` per slot.
+
+### `joint_meta_run`
+
+Evolve several decision slots **together**, validate them jointly, decide.
+
+### `joint_meta_validate`
+
+Attribute a joint change to its slots, and isolate the ones that hurt.
+
+### `joint_problem`
+
+An inner `evolve()` whose candidate is the **whole bundle**.
 
 ### `layers_from_archive`
 

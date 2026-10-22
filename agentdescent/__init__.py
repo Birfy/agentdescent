@@ -301,6 +301,14 @@ from .chain_audit import (
     ChainLink,
     chain_audit,
 )
+from .joint_meta import (
+    JointMetaReport,
+    PoliciesBundle,
+    joint_archive_rule,
+    joint_meta_run,
+    joint_meta_validate,
+    joint_problem,
+)
 from .filetree import (
     TreeError,
     TreeSpec,
@@ -675,6 +683,12 @@ __all__ = [
     "ChainAuditReport",
     "ChainLink",
     "chain_audit",
+    "JointMetaReport",
+    "PoliciesBundle",
+    "joint_archive_rule",
+    "joint_meta_run",
+    "joint_meta_validate",
+    "joint_problem",
     "compile_priority",
     "priority_selection",
     "SLOT_PROTOCOLS",
