@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-452 public names across 79 modules.
+464 public names across 82 modules.
 
 ---
 
@@ -644,6 +644,7 @@ meta_run(
     val_seeds: Sequence[int] = (1, 2),
     min_gain: float = 0.0,
     transfer_floor: float = 0.0,
+    baseline: Optional[str] = None,
     **evolve_kwargs: Any
 ) -> Tuple[MetaRunReport, EvolutionResult]
 ```
@@ -4123,6 +4124,10 @@ Commit or not, and -- when not -- which of the merge categories it was.
 
 Whether a candidate is committed.
 
+### `AdmitVerdict`
+
+The composed decision: `pass` / `flag` / `demote` and why.
+
 ### `AgentNode`
 
 One node of a society: a name, an instruction (a callable), and a budget (how many uses the node may spend).
@@ -4199,6 +4204,10 @@ The multi-file proposal format a `FileTree` reflector is told to emit.
 
 A minimal Elo rating over pairwise matches (K-factor 32).
 
+### `EvidenceSnapshot`
+
+The reconciled view: slots, ports, and the archive's health counters.
+
 ### `ExaminedRule`
 
 One archived rule's self-exam: what the oracle said about it.
@@ -4238,6 +4247,10 @@ One tournament: what the fused candidate scored against the best single.
 ### `Harness`
 
 One algorithm port, named and runnable.
+
+### `HarnessEvidence`
+
+What the archive says about one algorithm port (harness) on a domain.
 
 ### `HarnessReport`
 
@@ -4463,6 +4476,18 @@ What environment one rollout needs. Must survive JSON: it crosses processes.
 
 A state tree over rendered artifact values, searched by UCB.
 
+### `SelfImproveConfig`
+
+What the loop improves, on what, and how hard.
+
+### `SelfImproveReport`
+
+The whole session: every tick, whether anything improved, total gain.
+
+### `SelfImproveTick`
+
+One pass of the loop: targets, per-slot verdicts, and the budget move.
+
 ### `SelfModifyReport`
 
 What `improve_source` accepted: the patch, its tests, its gain.
@@ -4478,6 +4503,10 @@ A pool whose ceiling is the machine's, not this process's.
 ### `SingleSlot`
 
 The artifact **is one value**, and each accepted proposal replaces it.
+
+### `SlotEvidence`
+
+What the archive says about one decision slot's evolution.
 
 ### `SocietyGraph`
 
@@ -4522,6 +4551,14 @@ Four methods, from `grep 'self\.verifier\.' agentdescent/aggregator.py`.
 ### `WorkspaceProvider`
 
 Provisions `LocalWorkspaceSandbox` -- `mkdtemp`, plus a lease file.
+
+### `admit`
+
+Compose the ring statuses into one verdict.
+
+### `admit_record`
+
+Admit an archived rule using its own `exam` stamp plus any ring statuses.
 
 ### `apply_patch`
 
@@ -4675,6 +4712,10 @@ A `Problem` over the priority grid.
 
 A runnable inner `Problem` over exactly these tasks.
 
+### `rank_slots`
+
+The `k` slots to evolve next: paying slots first, plus exploration.
+
 ### `rationale_evolve`
 
 Evolve the skill, roll out, distill its own successes back into it.
@@ -4707,6 +4748,10 @@ Search the state tree for the best value under a fixed budget.
 
 Route a domain to the harness the archive's evidence says wins there.
 
+### `self_improve`
+
+Run the closed loop for `config.ticks` ticks.
+
 ### `self_rewarding_meta_run`
 
 Evolve a decision slot with a judge that improves against truth.
@@ -4718,6 +4763,10 @@ A `Problem` that runs the simulator.
 ### `simulator_score`
 
 The simulator against the real problem: how much the dream is worth.
+
+### `snapshot`
+
+Compose the archive's per-slot, per-port and health evidence.
 
 ### `society_evolve`
 
