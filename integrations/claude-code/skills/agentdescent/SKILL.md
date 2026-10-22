@@ -155,6 +155,10 @@ endpoint the call goes to `api.openai.com` carrying that key, and `plan` warns
 about it. Never write a key into the spec: `base_url` and `api_key` are refused,
 and only the names above exist. Other keys in the block (`temperature`,
 `thinking`) go into the request body.
+A reasoning model (Ark `doubao-seed-code` thinks by default) can sit silent past
+the 120 s timeout; if `propose_error` says `did not answer within`, add
+`"stream": true` to the block (or raise `"timeout"`, or turn thinking off with
+`"thinking": {"type": "disabled"}`).
 
 **Which model runs.** A worker is the host CLI as a subprocess, started with its
 config directory redirected into the rollout workspace -- so it inherits

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import threading
 import time
 import subprocess
@@ -713,6 +714,30 @@ _URL_KWARGS = frozenset({"base_url", "api_base", "api_url", "base", "url", "endp
 _KEY_KWARGS = frozenset({"api_key", "apikey", "key"})
 
 
+def _is_timeout(e: BaseException) -> bool:
+    """True for a request that ran out of ``timeout``: a read timeout raised
+    directly, or a connect timeout that ``urllib`` wraps in ``URLError``."""
+    if isinstance(e, (TimeoutError, socket.timeout)):
+        return True
+    return (isinstance(e, urllib.error.URLError)
+            and isinstance(getattr(e, "reason", None), (TimeoutError, socket.timeout)))
+
+
+def _timeout_message(base: str, model: str, timeout: float, *,
+                     can_stream: bool) -> str:
+    """What a reflector timeout says instead of a bare ``TimeoutError`` (#467).
+
+    It names the endpoint, the model and the seconds, and the knobs that fix it:
+    a reasoning model sends nothing while it thinks, so a non-streaming request
+    can sit silent past ``timeout``."""
+    fixes = ('set "stream": true on this block, raise "timeout", or turn the '
+             "provider's thinking off (e.g. \"thinking\": {\"type\": \"disabled\"})"
+             if can_stream else
+             'raise "timeout", or turn the provider\'s thinking off')
+    return (f"{base} did not answer within {timeout:g}s for model {model!r} "
+            f"(a reasoning model thinks silently before replying): {fixes}")
+
+
 def _reject_connection_kwargs(adapter: str, create_kwargs: Mapping[str, Any]) -> None:
     """Refuse a connection parameter that would otherwise ride into the request body.
 
@@ -839,9 +864,13 @@ def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
                     retry_after = None
                 raise RateLimited(message, retry_after) from e
             raise RuntimeError(message) from e
-        except Exception:
+        except Exception as e:
             if usage is not None:
                 usage.record(seconds=time.time() - t0, failed=True)
+            if _is_timeout(e):
+                # A bare "The read operation timed out" names nothing (#467).
+                raise RuntimeError(_timeout_message(
+                    base, model, timeout, can_stream=not stream)) from e
             raise
         if usage is not None:
             u = data.get("usage") or {}
@@ -949,9 +978,12 @@ def anthropic_compatible(model: str, *, base_url_env: str = "ANTHROPIC_BASE_URL"
                     retry_after = None
                 raise RateLimited(message, retry_after) from e
             raise RuntimeError(message) from e
-        except Exception:
+        except Exception as e:
             if usage is not None:
                 usage.record(seconds=time.time() - t0, failed=True)
+            if _is_timeout(e):
+                raise RuntimeError(_timeout_message(
+                    base, model, timeout, can_stream=False)) from e
             raise
         if usage is not None:
             u = data.get("usage") or {}
