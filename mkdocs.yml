@@ -116,6 +116,7 @@ nav:
     - Cross-run consolidation: consolidation.md
     - Harness composition: harness-composition.md
     - Portfolio governance: portfolio.md
+    - Portfolio evolution — evolve the spend rule: portfolio-evolve.md
     - Self-improvement loop: self-improve.md
     - The meta stack on the CLI: meta-cli.md
     - Self-evolution bench — every rung, end to end: self-evolution-bench.md
