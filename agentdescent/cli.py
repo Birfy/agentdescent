@@ -1094,6 +1094,66 @@ def cmd_watch(a: argparse.Namespace) -> int:
         time.sleep(a.interval)
 
 
+#: How many failing rollouts ``show`` lists, how much of each answer it keeps,
+#: and the hard ceiling on the whole ``samples`` block in bytes of JSON, so an
+#: MCP ``show`` stays small however long the agent's answers were (#452).
+SHOW_SAMPLES = 5
+SHOW_SAMPLE_CHARS = 300
+SHOW_SAMPLES_MAX_BYTES = 4096
+
+
+def _head(value: Any, limit: int = SHOW_SAMPLE_CHARS) -> Optional[str]:
+    if value is None:
+        return None
+    text = value if isinstance(value, str) else json.dumps(value, default=str)
+    return text if len(text) <= limit else text[:limit] + "..."
+
+
+def show_samples(rd: "runstore.RunDir", spec: EvolveSpec, rendered: Optional[str], *,
+                 n: int = SHOW_SAMPLES,
+                 max_bytes: int = SHOW_SAMPLES_MAX_BYTES) -> List[Dict[str, Any]]:
+    """The lowest-reward rollouts of the run's final artifact, next to their gold.
+
+    A run that learned nothing used to leave nothing to say why: the reward
+    curve shows *that* the agent missed, never *what* it answered (#452). The
+    engine already records each rollout's boundary (task id, output, reward);
+    this reads those records back. Rollouts of the final artifact come first
+    (its rendering is the record's identity, so the match is exact); if none
+    were recorded against it, every recorded rollout is a candidate. One
+    sample per task, worst first. Diagnostics: any failure yields ``[]``.
+    """
+    try:
+        from .trajectory import TrajectoryStore
+        records = list(TrajectoryStore(rd.trajectories_path).iter_records())
+    except Exception:  # noqa: BLE001 - diagnostics must never break `show`
+        return []
+    if not records:
+        return []
+    own = [r for r in records if rendered is not None and r.rendered == rendered]
+    pool = own or records
+    try:
+        from .evolvespec import build_tasks
+        gold = {t.id: t.meta.get("gold") for t in build_tasks(spec)}
+    except Exception:  # noqa: BLE001 - the dataset may have moved since the run
+        gold = {}
+    pool.sort(key=lambda r: (r.reward, r.task_id, r.purpose, r.ts))
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    for r in pool:
+        if r.task_id in seen:
+            continue
+        seen.add(r.task_id)
+        out.append({"task_id": r.task_id, "reward": r.reward,
+                    "output": _head(r.output), "gold": _head(gold.get(r.task_id)),
+                    "purpose": r.purpose,
+                    "of": "final" if own else "any"})
+        if len(out) >= n:
+            break
+    while out and len(json.dumps(out, default=str).encode("utf-8")) > max_bytes:
+        out.pop()
+    return out
+
+
 def show_payload(run_id: str, *, store: Optional[str] = None, diff: bool = True,
                  max_chars: int = 40_000) -> Dict[str, Any]:
     rd = runstore.get(run_id, store=store)
@@ -1114,6 +1174,12 @@ def show_payload(run_id: str, *, store: Optional[str] = None, diff: bool = True,
         payload["propose_error"] = next(
             (h.propose_error for h in result.history if h.propose_error), None)
     spec = EvolveSpec.from_dict(rd.spec_dict())
+    # Why the reward is what it is (#452): the worst rollouts of the final
+    # artifact, output vs gold. Only when some were recorded, so a run with
+    # `record_rollouts: false` (or one from before #452) is unchanged.
+    samples = show_samples(rd, spec, getattr(result, "rendered", None))
+    if samples:
+        payload["samples"] = samples
     # What `apply` would overwrite, on every kind. Without it the caller can see
     # the evolved artifact and still not know which file it belongs to -- and an
     # agent that cannot name the file it is about to overwrite is right to
@@ -1168,6 +1234,11 @@ def cmd_show(a: argparse.Namespace) -> int:
         print("files:", ", ".join(payload["files"]))
     if payload.get("apply_plan"):
         print("apply would:", json.dumps(payload["apply_plan"]))
+    if payload.get("samples"):
+        print("\nlowest-reward rollouts (output vs gold):")
+        for smp in payload["samples"]:
+            print(f"  {smp['task_id']}  reward={smp['reward']:.3f}  "
+                  f"output={smp['output']!r}  gold={smp['gold']!r}")
     return 0
 
 

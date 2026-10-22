@@ -3564,6 +3564,7 @@ EvolveSpec(
     evolve: Dict[str, Any] = <factory>,
     extra_artifacts: Dict[str, Any] = <factory>,
     allow: Sequence[str] = (),
+    record_rollouts: bool = True,
     version: int = 1
 ) -> None
 ```

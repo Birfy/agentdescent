@@ -249,6 +249,13 @@ class EvolveSpec:
     #: package's own modules are always allowed; widening this is the moment to
     #: think about who can write the spec.
     allow: Sequence[str] = ()
+    #: Keep each rollout's task id, output and reward under the run's ledger
+    #: (``ledger/trajectories/``) so ``show`` can list the failing ones next
+    #: to their gold (#452). Only the boundary is kept (what the agent was
+    #: shown, what it answered, what that earned) and it stays in the local run
+    #: directory; ``false`` records nothing. Read by the run store; a plain
+    #: :func:`compose` call ignores it.
+    record_rollouts: bool = True
     version: int = 1
 
     # -- (de)serialisation ------------------------------------------------
