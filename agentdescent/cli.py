@@ -33,6 +33,7 @@ commands on a host with no MCP.
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import difflib
 import json
 import os
@@ -1261,6 +1262,46 @@ def show_samples(rd: "runstore.RunDir", spec: EvolveSpec, rendered: Optional[str
     return out
 
 
+#: How many rejected candidates ``show`` lists, and the byte ceiling on the
+#: block -- both files are diagnostic, so an MCP payload must stay small (#452).
+SHOW_REJECTED = 5
+SHOW_REJECTED_MAX_BYTES = 4096
+
+
+def show_rejected(rd: "runstore.RunDir", *, n: int = SHOW_REJECTED,
+                  max_bytes: int = SHOW_REJECTED_MAX_BYTES) -> List[Dict[str, Any]]:
+    """The last few diffs the merger measured and did not adopt (#452).
+
+    ``runstore.execute`` writes one line per rejected candidate: touched files,
+    a short diff, the rationale, the gated probability and the outcome. That is
+    the other half of "why did this run learn nothing" -- the rollouts say what
+    the agent answered, these say what the reflector tried to change. Read from
+    the tail so a long run stays cheap; any failure yields ``[]``.
+    """
+    try:
+        with open(rd.candidates_path, encoding="utf-8", errors="replace") as fh:
+            lines = deque(fh, maxlen=200)
+    except (OSError, AttributeError):
+        return []
+    out: List[Dict[str, Any]] = []
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(record, dict):
+            out.append(record)
+        if len(out) >= n:
+            break
+    out.reverse()
+    while out and len(json.dumps(out, default=str).encode("utf-8")) > max_bytes:
+        out.pop(0)
+    return out
+
+
 #: How many rounds a resultless ``show`` lists (the latest ones).
 SHOW_HISTORY = 20
 
@@ -1293,6 +1334,9 @@ def _partial_show(rd: "runstore.RunDir", st: Any) -> Dict[str, Any]:
         samples = []
     if samples:
         out["samples"] = samples
+    rejected = show_rejected(rd)
+    if rejected:
+        out["rejected"] = rejected
     return out
 
 
@@ -1328,6 +1372,9 @@ def show_payload(run_id: str, *, store: Optional[str] = None, diff: bool = True,
     samples = show_samples(rd, spec, getattr(result, "rendered", None))
     if samples:
         payload["samples"] = samples
+    rejected = show_rejected(rd)
+    if rejected:
+        payload["rejected"] = rejected
     # What `apply` would overwrite, on every kind. Without it the caller can see
     # the evolved artifact and still not know which file it belongs to -- and an
     # agent that cannot name the file it is about to overwrite is right to
@@ -1399,6 +1446,20 @@ def cmd_show(a: argparse.Namespace) -> int:
         for smp in payload["samples"]:
             print(f"  {smp['task_id']}  reward={smp['reward']:.3f}  "
                   f"output={smp['output']!r}  gold={smp['gold']!r}")
+    if payload.get("rejected"):
+        print("\nrejected candidates (what the reflector tried):")
+        for rec in payload["rejected"]:
+            head = f"  round {rec.get('round', '?')}  {rec.get('outcome', 'rejected')}"
+            if rec.get("gated_reward") is not None:
+                head += f"  p_improve={rec['gated_reward']:.3f}"
+            print(head)
+            if rec.get("rationale"):
+                print(f"    rationale: {rec['rationale']}")
+            if rec.get("files"):
+                print(f"    files: {', '.join(rec['files'])}")
+            if rec.get("diff"):
+                for line in str(rec["diff"]).splitlines()[:8]:
+                    print(f"      {line}")
     return 0
 
 
