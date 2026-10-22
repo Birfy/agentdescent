@@ -329,6 +329,12 @@ def doctor_report() -> Dict[str, Any]:
             f'`"api_key_env": "{other[0]}"` plus `default_base_url` (or `base_url_env`) '
             "for its endpoint; the endpoint and the model name come from the user, "
             "never guess them")
+    if clis.get("opencode"):
+        worker = _opencode_worker_advice({"ref": "opencode"}, keys)
+        if worker:
+            # The reflect hint above is not the whole story: the *worker* also
+            # needs a Coding model + provider config once it runs isolated (#455).
+            hints.append(f"opencode is on PATH. {worker}")
     for name, info in hosts.items():
         if info["state"] in ("stale", "partial"):
             problems.append(
@@ -547,6 +553,11 @@ def cmd_init(a: argparse.Namespace) -> int:
               "override with `--agent <ref>`)")
     for line in _starter_model_warnings(spec, out):
         print(f"warning: {line}")
+    worker = _opencode_worker_advice(spec.get("agent"))
+    if worker:
+        # Bare `{ref: opencode}` is not Coding-ready for a gateway-only account:
+        # say so here, before the first isolated rollout fails (#455).
+        print(f"warning: {worker}")
     host = spec.get("host") if spec["kind"] == "plugin" else None
     if host in _CLI_BINARIES and not doctor_report()["agent_clis"].get(_CLI_BINARIES[host]):
         # The plugin's format fixes its host; the worker found on PATH does
@@ -661,6 +672,40 @@ def _opencode_provider_remedy(block: Any, keys: Optional[Dict[str, bool]] = None
             '"env": {"OPENCODE_CONFIG": "/abs/path/providers.json"} (keys via '
             "{env:VAR}, never inline; an OPENCODE_CONFIG exported in your shell is "
             "dropped for an isolated worker)")
+
+
+def _opencode_worker_advice(block: Any, keys: Optional[Dict[str, bool]] = None
+                            ) -> Optional[str]:
+    """What a bare isolated ``opencode`` worker needs when a gateway key is set (#455).
+
+    ``init`` writes ``{"ref": "opencode"}`` for a machine whose only worker is
+    OpenCode. Isolated, it cannot read the user's ``opencode.json`` and, with no
+    ``-m``, uses OpenCode's built-in default model for the configured provider --
+    which a Coding-only Ark account may not have activated. ``plan`` already says
+    this for a spec; ``init``/``doctor`` say it before the spec exists.
+
+    ``None`` when the block is not a bare ``opencode``, is already configured with
+    ``-m p/m`` plus ``OPENCODE_CONFIG``, or no non-OpenAI gateway key is set.
+    """
+    if not (isinstance(block, dict) and block.get("ref") == "opencode"):
+        return None
+    if _opencode_configured(block):
+        return None
+    if keys is None:
+        keys = doctor_report()["provider_keys_present"]
+    present = [n for n, v in keys.items()
+               if v and n.endswith("_API_KEY")
+               and n not in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY")]
+    if not present:
+        return None
+    return (f"an isolated `opencode` worker runs without your opencode.json, so "
+            f"with no `-m` it uses OpenCode's own default model for the provider "
+            f"named by {', '.join(present)} -- which a Coding-only account may not "
+            "have activated (measured: every call failed on an unactivated "
+            "Volcengine default). Pin the model and a provider-only config: "
+            '"extra_args": ["-m", "<provider>/<model>"], '
+            '"env": {"OPENCODE_CONFIG": "/abs/path/providers.json"} '
+            "(keys via {env:VAR}, never inline); see docs/plugins.md")
 
 
 _CLI_ENV_USELESS = {

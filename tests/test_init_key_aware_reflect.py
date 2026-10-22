@@ -78,7 +78,9 @@ def test_filled_in_values_plan_cleanly(tmp_path, monkeypatch, capsys):
     assert spec["reflect"] == {"ref": "openai_compatible", "model": "doubao-seed-code",
                                "api_key_env": "ARK_API_KEY",
                                "default_base_url": "https://ark.example/api/v3"}
-    assert "warning" not in out
+    # The filled-in reflect block is not a placeholder; the remaining warning is
+    # the worker's OpenCode + gateway-key advice (#455), not a reflect guess.
+    assert "placeholder" not in out
     payload = _plan(tmp_path)
     assert payload["ok"] is True, payload.get("error")
     assert not [w for w in payload["warnings"] if w.startswith("reflect:")]

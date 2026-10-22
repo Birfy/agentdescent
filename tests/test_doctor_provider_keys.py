@@ -73,7 +73,7 @@ def test_the_output_shape_keeps_the_old_names_first(monkeypatch):
 def test_only_a_non_openai_key_comes_with_a_how_to_hint(monkeypatch):
     monkeypatch.setenv("ARK_API_KEY", "k")
     hints = [h for h in cli.doctor_report()["hints"] if "ARK_API_KEY" in h]
-    [hint] = hints
+    [hint] = [h for h in hints if "openai_compatible" in h]
     for word in ("openai_compatible", "api_key_env", "default_base_url", "base_url_env",
                  "never guess"):
         assert word in hint, word
