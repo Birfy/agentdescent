@@ -175,12 +175,16 @@ def starter_model_block(*, model: Optional[str] = None, base_url: Optional[str] 
 
 
 def starter_spec(path: str, *, kind: Optional[str] = None, data: Optional[str] = None,
-                 agent: Optional[str] = None, model: Optional[str] = None,
+                 agent: Optional[str] = None,
+                 agent_explicit: bool = False, model: Optional[str] = None,
                  base_url: Optional[str] = None,
                  key_env: Optional[str] = None) -> Dict[str, Any]:
     """A spec to edit, with ``kind`` guessed from what ``path`` is.
 
     ``agent=None`` picks the worker from the CLIs on PATH (:func:`default_agent_ref`).
+    ``agent_explicit`` says the user named ``agent`` (``init --agent``): it is
+    then kept for every kind instead of being replaced by the kind's default
+    model (#456).
     ``model`` / ``base_url`` / ``key_env`` fill the ``openai_compatible`` blocks
     (:func:`starter_model_block`); left out, they are placeholders or follow the
     keys in the environment.
@@ -210,7 +214,8 @@ def starter_spec(path: str, *, kind: Optional[str] = None, data: Optional[str] =
         "evolve": {"rounds": 6, "n_workers": 4},
     }
     if kind == "text":
-        spec["agent"] = dict(llm)
+        if not agent_explicit or agent == "openai_compatible":
+            spec["agent"] = dict(llm)
         spec["evolve"] = {"rounds": 8, "n_workers": 8}
     if kind == "skill_dir":
         spec["reflect"] = dict(llm)
@@ -230,7 +235,8 @@ def starter_spec(path: str, *, kind: Optional[str] = None, data: Optional[str] =
         spec["target"] = path if path in _POLICY_SLOTS else "selection"
         spec["data"] = {"problems": data or "mypkg.problems:build", "seeds": [0]}
         spec["score"] = "auc"
-        spec["agent"] = dict(llm)
+        if not agent_explicit or agent == "openai_compatible":
+            spec["agent"] = dict(llm)
         # A round is `n_workers` whole inner searches, so ask for few and budget
         # in wall clock: the recorded run asked for 8 rounds and got 2 in 90 min.
         spec["evolve"] = {"rounds": 4, "n_workers": 2, "max_seconds": 5400}
@@ -484,10 +490,48 @@ def _starter_model_warnings(spec: Dict[str, Any], out: str) -> List[str]:
     return lines
 
 
+#: Built-in short refs by what they resolve to; keep in step with
+#: ``evolvespec.SHORT_REFS`` / ``WORKSPACE_AGENT_REFS``. A full
+#: ``module:attribute`` ref outside these is not checked here (``plan`` does).
+_WORKSPACE_REFS = ("claude_code", "codex", "dsh", "opencode", "cli_agent")
+_PLAIN_REFS = ("openai_compatible", "host_model", "claude", "echo")
+
+
+def init_agent_mismatch(kind: str, ref: str) -> Optional[str]:
+    """Why ``plan`` would refuse agent ``ref`` for ``kind``, or None (#456).
+
+    The same two rules ``compose`` enforces, checked before ``init`` writes a
+    spec that is doomed at ``plan``: a directory kind needs a WorkspaceAgent,
+    and kind=text needs a plain Completion.
+    """
+    short = ref.split(":", 1)[1] if ref.startswith("agentdescent.agents:") else ref
+    if short == "agentdescent.host_sampling:host_model":
+        short = "host_model"
+    if kind in ("skill_dir", "agent_dir") and short in _PLAIN_REFS:
+        return (f"kind={kind!r} needs a WorkspaceAgent "
+                f"({' / '.join(_WORKSPACE_REFS)}) so the directory is put in front "
+                f"of it; `{ref}` is a plain model call")
+    if kind == "text" and short in _WORKSPACE_REFS:
+        return (f"kind='text' needs a plain Completion ({' / '.join(_PLAIN_REFS[:3])}), "
+                f"not a WorkspaceAgent; `{ref}` is a file-editing agent and would "
+                "cost a whole agent session per case")
+    return None
+
+
 def cmd_init(a: argparse.Namespace) -> int:
     agent, found = (a.agent, True) if a.agent else default_agent_ref()
     spec = starter_spec(a.path, kind=a.kind, data=a.data, agent=agent,
-                        model=a.model, base_url=a.base_url, key_env=a.key_env)
+                        agent_explicit=bool(a.agent), model=a.model,
+                        base_url=a.base_url, key_env=a.key_env)
+    if a.agent:
+        why = init_agent_mismatch(spec["kind"], a.agent)
+        if why:
+            # Refuse before writing: `plan` would reject this spec anyway, and a
+            # spec that silently swaps the user's --agent is worse (#456).
+            print(f"error: --agent {a.agent}: {why}; pick a matching ref "
+                  "(see `agentdescent doctor`) or omit --agent for the default",
+                  file=sys.stderr)
+            return 2
     out = a.out or os.path.join(".agentdescent", f"{os.path.basename(a.path.rstrip('/')) or 'spec'}.evolve.json")
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     with open(out, "w", encoding="utf-8") as fh:
@@ -560,17 +604,54 @@ def _opencode_model_arg(block: Any) -> Optional[str]:
     return None
 
 
-def _opencode_provider_remedy(block: Any) -> Optional[str]:
-    """The plan warning's remedy for an isolated ``opencode`` pinning ``-m p/m``.
+def _opencode_has_config(block: Any) -> bool:
+    """The block hands an isolated ``opencode`` its own provider config file."""
+    env = block.get("env") if isinstance(block, dict) else None
+    return isinstance(env, dict) and (
+        "OPENCODE_CONFIG" in env or "OPENCODE_CONFIG_CONTENT" in env)
 
-    ``None`` -- keep the generic remedy -- unless a model with a provider part is
-    pinned and the caller has not already pointed ``OPENCODE_CONFIG`` at a file
-    through the block's ``env``.
+
+def _opencode_configured(block: Any) -> bool:
+    """An isolated ``opencode`` that needs no login: ``-m p/m`` plus a config (#455).
+
+    The documented recipe (``docs/plugins.md``): a pinned ``provider/model`` and
+    ``env.OPENCODE_CONFIG`` naming a provider-only file whose key comes from
+    ``{env:VAR}``. Measured with Ark Coding under isolation, it answers in ~7 s
+    and a 1-round evolve made 4 calls with 0 failures, so "a login does not carry
+    over" is no warning for it.
+    """
+    return bool(_opencode_model_arg(block)) and _opencode_has_config(block)
+
+
+def _opencode_provider_remedy(block: Any, keys: Optional[Dict[str, bool]] = None
+                              ) -> Optional[str]:
+    """The plan warning's remedy for an isolated ``opencode``.
+
+    With ``-m p/m`` pinned and no ``OPENCODE_CONFIG`` in the block's ``env``: the
+    custom-provider trap (#373). With no pin while a provider key is set: the
+    default-model trap (#455) -- OpenCode then picks its own default model for
+    that provider, which the account may not have activated. ``None`` keeps the
+    generic remedy.
     """
     model = _opencode_model_arg(block)
-    env = block.get("env") if isinstance(block, dict) else None
-    if not model or (isinstance(env, dict)
-                     and ("OPENCODE_CONFIG" in env or "OPENCODE_CONFIG_CONTENT" in env)):
+    if not model:
+        # OpenAI / Anthropic accounts serve their provider's default model; a
+        # gateway key such as ARK_API_KEY is where the default was unusable.
+        present = [n for n, v in (keys or {}).items()
+                   if v and n.endswith("_API_KEY")
+                   and n not in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY")]
+        if not present:
+            return None
+        return (f"a provider key ({', '.join(present)}) is not enough on its own: "
+                "with no `-m`, OpenCode picks its own default model for that "
+                "provider, which the account may not have activated (measured with "
+                "only ARK_API_KEY set: every call failed on an unactivated Volcengine "
+                "default). "
+                'Pin the model and hand the worker a provider-only config: '
+                '"extra_args": ["-m", "ark/deepseek-v4-flash"], '
+                '"env": {"OPENCODE_CONFIG": "/abs/path/providers.json"} '
+                "(the file as in docs/plugins.md, keys via {env:VAR}, never inline)")
+    if _opencode_has_config(block):
         return None
     return (f"`-m {model}` works only if that provider is built into OpenCode: a "
             "custom provider (an OpenAI-compatible endpoint, a local server, a "
@@ -842,13 +923,14 @@ def _unusable_refs(spec: EvolveSpec) -> List[str]:
             # and require_cli_on_path (#346); only soft-warn about isolation here.
             isolate = block.get("isolate") if isinstance(block, dict) else None
             if clis.get(binary) and isolate is not False and not keys.get(
-                    _CLI_ENV_FALLBACK.get(ref, ""), False):
+                    _CLI_ENV_FALLBACK.get(ref, ""), False) and not (
+                    ref == "opencode" and _opencode_configured(block)):
                 # The trap that ate a 60-round run: `codex` was on PATH, so
                 # nothing complained, but a worker runs with the host's config
                 # directory redirected -- an interactive login does not carry
                 # over. Every rollout failed. Being present is not being usable.
                 remedy = _CLI_ENV_USELESS.get(ref) or (
-                    ref == "opencode" and _opencode_provider_remedy(block)) or (
+                    ref == "opencode" and _opencode_provider_remedy(block, keys)) or (
                     f"or export {_CLI_ENV_FALLBACK[ref]}"
                     if ref in _CLI_ENV_FALLBACK else
                     "whether a provider key in the environment is enough instead "
