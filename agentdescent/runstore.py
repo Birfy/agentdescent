@@ -13,6 +13,8 @@ directory::
         result.json      EvolutionResult.save() when the run ends
         tree/            the evolved directory, materialised (directory kinds)
         ledger/          the git ledger; repo_path= to evolve(), which is what resume is
+        ledger/trajectories/  one record per rollout (task, output, reward) unless
+                         the spec sets record_rollouts: false; `show` reads it
         log.txt          stdout + stderr of the detached process
 
 Three decisions, and why:
@@ -335,6 +337,11 @@ class RunDir:
     @property
     def log_path(self) -> str:
         return self._file("log.txt")
+
+    @property
+    def trajectories_path(self) -> str:
+        """Where the engine keeps this run's rollout records (#452)."""
+        return os.path.join(self.ledger_path, "trajectories")
 
     # -- reads ---------------------------------------------------------------
 
@@ -739,6 +746,13 @@ def execute(rd: RunDir, *, budget_usd: Optional[float] = None,
             return usage.calls * usd_per_call >= budget_usd
 
         overrides["stop_when"] = stop_when
+    # Keep the rollouts so `show` can say why the reward is what it is (#452).
+    # The engine's own store lands under the ledger (`ledger/trajectories/`,
+    # outside the ledger's git index). A spec that already chose where (or
+    # whether) to record in its `evolve` block keeps that choice.
+    if (spec.record_rollouts and "record_trajectories" not in spec.evolve
+            and "trajectory_store" not in spec.evolve and spec.kind != "policy_slot"):
+        overrides["record_trajectories"] = True
     try:
         comp = compose(spec, usage=usage, on_round=on_round, repo_path=rd.ledger_path,
                        **overrides)

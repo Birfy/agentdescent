@@ -518,6 +518,7 @@ the run holds the resolved paths and is re-runnable from anywhere.
     result.json    EvolutionResult.save() at the end
     tree/          the evolved directory, materialised
     ledger/        the git ledger; resume re-launches on it
+    ledger/trajectories/  one record per rollout (task, answer, reward); off with "record_rollouts": false
     log.txt        the detached process's output
 ```
 
@@ -553,6 +554,18 @@ rollouts are not spent. A reflector that fails only some of the time does not
 fail the run; the counts are recorded and a `RuntimeWarning` names the first
 error. Fix the key or model (`agentdescent doctor`, `plan` warns about the
 missing key) and `resume` the run.
+
+### A run that learned nothing: `samples`
+
+`show` (CLI `show` / `show --json`, and the MCP `show` tool) carries `samples`:
+up to five of the lowest-reward rollouts of the final artifact, one per task,
+each with `task_id`, `reward`, the agent's `output` and the task's `gold` (both
+cut to 300 characters; the whole block stays under 4 KB). That is the answer to
+"did the agent answer wrongly, or did scoring reject a right answer": an output
+of `21` against a gold of `321` is the first case. The records live under
+`ledger/trajectories/` in the run directory, contain only what your own agent
+was shown and answered, and never leave your machine. Set `"record_rollouts":
+false` in the spec to record nothing; `show` then has no `samples` key.
 
 A dollar budget (`--budget` with `--usd-per-call`, or `budget_usd` on `start`)
 uses `evolve(stop_when=)`: the run stops between rounds once
