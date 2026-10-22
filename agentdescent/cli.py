@@ -329,18 +329,15 @@ def doctor_report() -> Dict[str, Any]:
             f'`"api_key_env": "{other[0]}"` plus `default_base_url` (or `base_url_env`) '
             "for its endpoint; the endpoint and the model name come from the user, "
             "never guess them")
-        # Reflect is not the only role: an isolated `opencode` worker with a
-        # gateway key still needs the Coding recipe (#455). Doctor used to stop
-        # at the openai_compatible hint and leave the worker path unspoken.
-        if clis.get("opencode"):
-            hints.append(
-                "opencode is on PATH and only %s is set: for an isolated worker "
-                "use the OpenCode Coding recipe in docs/plugins.md "
-                '(pin `-m ark/deepseek-v4-flash` and set '
-                '`env.OPENCODE_CONFIG` to a provider-only file with `{env:VAR}` keys); '
-                "a bare `ref: opencode` falls back to OpenCode's built-in "
-                "Volcengine default, which a Coding-only account may not have "
-                "activated" % (", ".join(other),))
+    # Reflect is not the only role: an isolated `opencode` worker with a gateway
+    # key still needs the Coding recipe (#455). Same predicate as `init`
+    # (`_opencode_gateway_keys`): warn whenever a gateway key is present, even
+    # alongside OPENAI_API_KEY, so the two commands never disagree.
+    gateway = _opencode_gateway_keys(keys)
+    if gateway and clis.get("opencode"):
+        hints.append(
+            "opencode is on PATH and %s is set: for an isolated worker %s"
+            % (", ".join(gateway), _opencode_coding_recipe(gateway)))
     for name, info in hosts.items():
         if info["state"] in ("stale", "partial"):
             problems.append(
@@ -649,6 +646,42 @@ def _opencode_configured(block: Any) -> bool:
     return bool(_opencode_model_arg(block)) and _opencode_has_config(block)
 
 
+def _opencode_gateway_keys(keys: Optional[Dict[str, bool]]) -> List[str]:
+    """Present gateway keys: set ``*_API_KEY`` other than OpenAI / Anthropic.
+
+    OpenAI / Anthropic accounts serve their provider's default model; a gateway
+    key such as ARK_API_KEY is where OpenCode's default was unusable (#455).
+    One predicate for ``init``, ``plan`` and ``doctor``.
+    """
+    return [n for n, v in (keys or {}).items()
+            if v and n.endswith("_API_KEY")
+            and n not in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY")]
+
+
+def _opencode_coding_recipe(gateway: List[str]) -> str:
+    """The OpenCode Coding worker recipe, concrete only where it was measured.
+
+    Ark wording (Volcengine default, ``ark/deepseek-v4-flash``) only when
+    ARK_API_KEY is among the present keys; any other gateway gets the generic
+    recipe whose provider and model come from the user, never guessed.
+    """
+    if "ARK_API_KEY" in gateway:
+        return ("use the OpenCode Coding recipe in docs/plugins.md: a bare "
+                "`ref: opencode` falls back to OpenCode's built-in Volcengine "
+                "default, which a Coding-only account may not have activated "
+                "(measured with only ARK_API_KEY set: every call failed). Pin the "
+                'model and hand the worker a provider-only config: '
+                '"extra_args": ["-m", "ark/deepseek-v4-flash"], '
+                '"env": {"OPENCODE_CONFIG": "/abs/path/providers.json"} '
+                "(the file as in docs/plugins.md, keys via {env:ARK_API_KEY}, "
+                "never inline)")
+    return ("use the OpenCode Coding recipe in docs/plugins.md: pin "
+            '"extra_args": ["-m", "<provider>/<model>"] and set '
+            '"env": {"OPENCODE_CONFIG": "/abs/path/providers.json"} with the key '
+            "as {env:%s} (never inline); the provider and model come from the "
+            "user, never guess them" % gateway[0])
+
+
 def _opencode_provider_remedy(block: Any, keys: Optional[Dict[str, bool]] = None
                               ) -> Optional[str]:
     """The plan warning's remedy for an isolated ``opencode``.
@@ -661,22 +694,13 @@ def _opencode_provider_remedy(block: Any, keys: Optional[Dict[str, bool]] = None
     """
     model = _opencode_model_arg(block)
     if not model:
-        # OpenAI / Anthropic accounts serve their provider's default model; a
-        # gateway key such as ARK_API_KEY is where the default was unusable.
-        present = [n for n, v in (keys or {}).items()
-                   if v and n.endswith("_API_KEY")
-                   and n not in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY")]
+        present = _opencode_gateway_keys(keys)
         if not present:
             return None
         return (f"a provider key ({', '.join(present)}) is not enough on its own: "
                 "with no `-m`, OpenCode picks its own default model for that "
-                "provider, which the account may not have activated (measured with "
-                "only ARK_API_KEY set: every call failed on an unactivated Volcengine "
-                "default). "
-                'Pin the model and hand the worker a provider-only config: '
-                '"extra_args": ["-m", "ark/deepseek-v4-flash"], '
-                '"env": {"OPENCODE_CONFIG": "/abs/path/providers.json"} '
-                "(the file as in docs/plugins.md, keys via {env:VAR}, never inline)")
+                "provider, which the account may not have activated. "
+                + _opencode_coding_recipe(present))
     if _opencode_has_config(block):
         return None
     return (f"`-m {model}` works only if that provider is built into OpenCode: a "

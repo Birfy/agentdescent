@@ -107,3 +107,36 @@ def test_doctor_skips_worker_hint_without_opencode_cli(monkeypatch):
     hints = cli.doctor_report()["hints"]
     assert not any("OPENCODE_CONFIG" in h for h in hints)
     assert any("openai_compatible" in h for h in hints)
+
+
+def test_doctor_keeps_non_ark_gateway_recipe_generic(monkeypatch):
+    # A DeepSeek key is not an Ark Coding account: no Volcengine, no ark/ model.
+    _with_opencode(monkeypatch)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "k")
+    hints = cli.doctor_report()["hints"]
+    worker = [h for h in hints if "OPENCODE_CONFIG" in h]
+    assert len(worker) == 1, hints
+    assert "<provider>/<model>" in worker[0]
+    assert "{env:DEEPSEEK_API_KEY}" in worker[0]
+    assert "Volcengine" not in worker[0] and "ark/" not in worker[0]
+
+
+def test_init_keeps_non_ark_gateway_recipe_generic(tmp_path, monkeypatch, capsys):
+    _with_opencode(monkeypatch)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "k")
+    _, out = _init(tmp_path, monkeypatch, capsys)
+    assert "bare `opencode`" in out and "<provider>/<model>" in out
+    assert "Volcengine" not in out and "ark/deepseek-v4-flash" not in out
+
+
+def test_init_and_doctor_agree_when_openai_and_ark_are_both_set(
+        tmp_path, monkeypatch, capsys):
+    _with_opencode(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    monkeypatch.setenv("ARK_API_KEY", "k")
+    hints = cli.doctor_report()["hints"]
+    doctor_warns = any("OPENCODE_CONFIG" in h for h in hints)
+    _, out = _init(tmp_path, monkeypatch, capsys)
+    init_warns = "bare `opencode`" in out
+    assert doctor_warns and init_warns
+    assert "ark/deepseek-v4-flash" in out
