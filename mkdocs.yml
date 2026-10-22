@@ -118,6 +118,7 @@ nav:
     - Portfolio governance: portfolio.md
     - The meta stack on the CLI: meta-cli.md
     - Self-evolution bench — every rung, end to end: self-evolution-bench.md
+    - Joint multi-slot evolution: joint-meta.md
     - Solver-challenger self-play: selfplay.md
   - Self-evolution algorithms:
     - Overview: self-evolution-examples.md
