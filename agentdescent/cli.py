@@ -33,6 +33,7 @@ commands on a host with no MCP.
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import difflib
 import json
 import os
@@ -174,11 +175,60 @@ def starter_model_block(*, model: Optional[str] = None, base_url: Optional[str] 
     return block
 
 
+def parse_cli_params(pairs: Optional[Sequence[str]]) -> Dict[str, Any]:
+    """``--param k=v`` -> a JSON-typed dict (bare strings when JSON cannot parse).
+
+    Repeated keys are an error: silently keeping the last one makes a typo or a
+    copied flag look applied.
+    """
+    out: Dict[str, Any] = {}
+    for item in pairs or ():
+        if "=" not in item:
+            raise ValueError(f"--param {item!r} must be KEY=VALUE")
+        key, raw = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError(f"--param {item!r} has an empty name")
+        if key in out:
+            raise ValueError(f"--param {key!r} was given more than once")
+        try:
+            out[key] = json.loads(raw)
+        except ValueError:
+            out[key] = raw
+    return out
+
+
+def algorithm_override(name: Optional[str], params: Optional[Mapping[str, Any]],
+                       kind: str) -> Optional[Any]:
+    """Validate ``--algorithm``/``--param`` for ``kind`` and return the spec value.
+
+    Returns ``None`` when no algorithm was named, the name itself when it takes
+    no parameters, and ``{"name": ..., "params": {...}}`` otherwise. Raises
+    :class:`~agentdescent.algorithms.AlgorithmError` for an unknown name, an
+    unsupported kind or a bad parameter -- the same errors ``plan`` would give,
+    but before a spec is written.
+    """
+    if not name:
+        if params:
+            raise ValueError("--param needs --algorithm")
+        return None
+    from . import algorithms
+
+    alg = algorithms.get(name, where="--algorithm")
+    if kind not in alg.kinds:
+        raise algorithms.AlgorithmError(
+            f"--algorithm {name!r} applies to kind {list(alg.kinds)}, not {kind!r}")
+    algorithms.resolve_params(alg, params)      # validates types/unknowns/choices
+    return name if not params else {"name": name, "params": dict(params)}
+
+
 def starter_spec(path: str, *, kind: Optional[str] = None, data: Optional[str] = None,
                  agent: Optional[str] = None,
                  agent_explicit: bool = False, model: Optional[str] = None,
                  base_url: Optional[str] = None,
-                 key_env: Optional[str] = None) -> Dict[str, Any]:
+                 key_env: Optional[str] = None,
+                 algorithm: Optional[str] = None,
+                 algorithm_params: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
     """A spec to edit, with ``kind`` guessed from what ``path`` is.
 
     ``agent=None`` picks the worker from the CLIs on PATH (:func:`default_agent_ref`).
@@ -241,6 +291,9 @@ def starter_spec(path: str, *, kind: Optional[str] = None, data: Optional[str] =
         # in wall clock: the recorded run asked for 8 rounds and got 2 in 90 min.
         spec["evolve"] = {"rounds": 4, "n_workers": 2, "max_seconds": 5400}
         spec["allow"] = ["mypkg"]
+    chosen = algorithm_override(algorithm, algorithm_params, spec["kind"])
+    if chosen is not None:
+        spec["algorithm"] = chosen
     return spec
 
 
@@ -329,6 +382,15 @@ def doctor_report() -> Dict[str, Any]:
             f'`"api_key_env": "{other[0]}"` plus `default_base_url` (or `base_url_env`) '
             "for its endpoint; the endpoint and the model name come from the user, "
             "never guess them")
+    # Reflect is not the only role: an isolated `opencode` worker with a gateway
+    # key still needs the Coding recipe (#455). Same predicate as `init`
+    # (`_opencode_gateway_keys`): warn whenever a gateway key is present, even
+    # alongside OPENAI_API_KEY, so the two commands never disagree.
+    gateway = _opencode_gateway_keys(keys)
+    if gateway and clis.get("opencode"):
+        hints.append(
+            "opencode is on PATH and %s is set: for an isolated worker %s"
+            % (", ".join(gateway), _opencode_coding_recipe(gateway)))
     for name, info in hosts.items():
         if info["state"] in ("stale", "partial"):
             problems.append(
@@ -456,11 +518,15 @@ cases.jsonl, and a real agent instead of the offline one:
 
 
 def _starter_model_warnings(spec: Dict[str, Any], out: str) -> List[str]:
-    """What ``init`` says about the ``openai_compatible`` blocks it just wrote.
+    """What ``init`` says about the blocks it just wrote.
 
-    One answer with ``doctor`` (#451): it names the key the block will read --
-    the one that is set here, not always OPENAI_API_KEY -- and every value left
-    for the user to fill in, which ``plan`` refuses until they do.
+    One answer with ``doctor`` (#451): for ``openai_compatible`` it names the key
+    the block will read -- the one that is set here, not always OPENAI_API_KEY --
+    and every value left for the user to fill in, which ``plan`` refuses until
+    they do. For a bare ``opencode`` worker with only a gateway key (#455), it
+    points at the documented ``OPENCODE_CONFIG`` Coding recipe so ``init`` does
+    not leave a silent ``{"ref": "opencode"}`` that dies on OpenCode's built-in
+    Volcengine default under isolation.
     """
     lines: List[str] = []
     for field in ("agent", "reflect"):
@@ -487,6 +553,16 @@ def _starter_model_warnings(spec: Dict[str, Any], out: str) -> List[str]:
                 "call would fail" + (" and the run would learn nothing" if field == "reflect" else "")
                 + ". Export a provider key (`agentdescent doctor` lists the ones it "
                 "knows), or pass `--key-env NAME` for one that is set")
+    # Bare isolated OpenCode + gateway key: same trap `plan` already names (#455).
+    # Warn at init so the written `{"ref": "opencode"}` is not silent.
+    agent = spec.get("agent")
+    if isinstance(agent, dict) and agent.get("ref") == "opencode" and not _opencode_configured(agent):
+        keys = doctor_report()["provider_keys_present"]
+        remedy = _opencode_provider_remedy(agent, keys)
+        if remedy and not _opencode_model_arg(agent):
+            lines.append(
+                f"`agent` in {out} is bare `opencode`: {remedy}. "
+                "See docs/plugins.md (OpenCode Coding / OPENCODE_CONFIG)")
     return lines
 
 
@@ -520,9 +596,16 @@ def init_agent_mismatch(kind: str, ref: str) -> Optional[str]:
 
 def cmd_init(a: argparse.Namespace) -> int:
     agent, found = (a.agent, True) if a.agent else default_agent_ref()
-    spec = starter_spec(a.path, kind=a.kind, data=a.data, agent=agent,
-                        agent_explicit=bool(a.agent), model=a.model,
-                        base_url=a.base_url, key_env=a.key_env)
+    try:
+        params = parse_cli_params(getattr(a, "param", None))
+        spec = starter_spec(a.path, kind=a.kind, data=a.data, agent=agent,
+                            agent_explicit=bool(a.agent), model=a.model,
+                            base_url=a.base_url, key_env=a.key_env,
+                            algorithm=getattr(a, "algorithm", None),
+                            algorithm_params=params)
+    except ValueError as e:      # AlgorithmError is a ValueError
+        print(f"error: {e}", file=sys.stderr)
+        return 2
     if a.agent:
         why = init_agent_mismatch(spec["kind"], a.agent)
         if why:
@@ -623,6 +706,42 @@ def _opencode_configured(block: Any) -> bool:
     return bool(_opencode_model_arg(block)) and _opencode_has_config(block)
 
 
+def _opencode_gateway_keys(keys: Optional[Dict[str, bool]]) -> List[str]:
+    """Present gateway keys: set ``*_API_KEY`` other than OpenAI / Anthropic.
+
+    OpenAI / Anthropic accounts serve their provider's default model; a gateway
+    key such as ARK_API_KEY is where OpenCode's default was unusable (#455).
+    One predicate for ``init``, ``plan`` and ``doctor``.
+    """
+    return [n for n, v in (keys or {}).items()
+            if v and n.endswith("_API_KEY")
+            and n not in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY")]
+
+
+def _opencode_coding_recipe(gateway: List[str]) -> str:
+    """The OpenCode Coding worker recipe, concrete only where it was measured.
+
+    Ark wording (Volcengine default, ``ark/deepseek-v4-flash``) only when
+    ARK_API_KEY is among the present keys; any other gateway gets the generic
+    recipe whose provider and model come from the user, never guessed.
+    """
+    if "ARK_API_KEY" in gateway:
+        return ("use the OpenCode Coding recipe in docs/plugins.md: a bare "
+                "`ref: opencode` falls back to OpenCode's built-in Volcengine "
+                "default, which a Coding-only account may not have activated "
+                "(measured with only ARK_API_KEY set: every call failed). Pin the "
+                'model and hand the worker a provider-only config: '
+                '"extra_args": ["-m", "ark/deepseek-v4-flash"], '
+                '"env": {"OPENCODE_CONFIG": "/abs/path/providers.json"} '
+                "(the file as in docs/plugins.md, keys via {env:ARK_API_KEY}, "
+                "never inline)")
+    return ("use the OpenCode Coding recipe in docs/plugins.md: pin "
+            '"extra_args": ["-m", "<provider>/<model>"] and set '
+            '"env": {"OPENCODE_CONFIG": "/abs/path/providers.json"} with the key '
+            "as {env:%s} (never inline); the provider and model come from the "
+            "user, never guess them" % gateway[0])
+
+
 def _opencode_provider_remedy(block: Any, keys: Optional[Dict[str, bool]] = None
                               ) -> Optional[str]:
     """The plan warning's remedy for an isolated ``opencode``.
@@ -635,22 +754,13 @@ def _opencode_provider_remedy(block: Any, keys: Optional[Dict[str, bool]] = None
     """
     model = _opencode_model_arg(block)
     if not model:
-        # OpenAI / Anthropic accounts serve their provider's default model; a
-        # gateway key such as ARK_API_KEY is where the default was unusable.
-        present = [n for n, v in (keys or {}).items()
-                   if v and n.endswith("_API_KEY")
-                   and n not in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY")]
+        present = _opencode_gateway_keys(keys)
         if not present:
             return None
         return (f"a provider key ({', '.join(present)}) is not enough on its own: "
                 "with no `-m`, OpenCode picks its own default model for that "
-                "provider, which the account may not have activated (measured with "
-                "only ARK_API_KEY set: every call failed on an unactivated Volcengine "
-                "default). "
-                'Pin the model and hand the worker a provider-only config: '
-                '"extra_args": ["-m", "ark/deepseek-v4-flash"], '
-                '"env": {"OPENCODE_CONFIG": "/abs/path/providers.json"} '
-                "(the file as in docs/plugins.md, keys via {env:VAR}, never inline)")
+                "provider, which the account may not have activated. "
+                + _opencode_coding_recipe(present))
     if _opencode_has_config(block):
         return None
     return (f"`-m {model}` works only if that provider is built into OpenCode: a "
@@ -1017,11 +1127,36 @@ def plan_payload(spec: EvolveSpec, *, usd_per_call: Optional[float] = None) -> D
     return payload
 
 
+def _apply_algorithm_flag(spec: EvolveSpec, a: argparse.Namespace) -> None:
+    """`plan/evolve --algorithm ... --param ...` override the spec in memory.
+
+    A same-name override **merges** params (the CLI wins per key), so
+    `--param b_min=2` on a spec that already set `b_max: 3` keeps `b_max`; a
+    different name replaces the method and its params. `--param` without
+    `--algorithm` tweaks the method the spec already names.
+    """
+    name = getattr(a, "algorithm", None)
+    params = parse_cli_params(getattr(a, "param", None))
+    current = spec.algorithm
+    current_name = (current.get("name") if isinstance(current, dict) else current)
+    current_params = (dict(current.get("params") or {})
+                      if isinstance(current, dict) else {})
+    if not name:
+        if not params:
+            return
+        if not isinstance(current_name, str):
+            raise ValueError("--param needs --algorithm (this spec names none)")
+        name = current_name
+    merged = ({**current_params, **params} if name == current_name else dict(params))
+    spec.algorithm = algorithm_override(name, merged, spec.kind)
+
+
 def cmd_plan(a: argparse.Namespace) -> int:
     spec = load_spec(a.spec)
     try:
+        _apply_algorithm_flag(spec, a)
         payload = plan_payload(spec, usd_per_call=a.usd_per_call)
-    except SpecError as e:
+    except (SpecError, ValueError) as e:
         _out({"ok": False, "error": str(e)}, as_json=a.json)
         return 2
     _out(payload, as_json=a.json)
@@ -1042,8 +1177,9 @@ def _warn_unusable(spec: EvolveSpec) -> None:
 def cmd_evolve(a: argparse.Namespace) -> int:
     spec = load_spec(a.spec)
     try:
+        _apply_algorithm_flag(spec, a)
         comp = compose(spec)                 # fail here, not in the detached child
-    except SpecError as e:
+    except (SpecError, ValueError) as e:
         print(f"spec error: {e}", file=sys.stderr)
         return 2
     # Before create/launch: a missing --usd-per-call must not leave an orphan run
@@ -1261,6 +1397,46 @@ def show_samples(rd: "runstore.RunDir", spec: EvolveSpec, rendered: Optional[str
     return out
 
 
+#: How many rejected candidates ``show`` lists, and the byte ceiling on the
+#: block -- both files are diagnostic, so an MCP payload must stay small (#452).
+SHOW_REJECTED = 5
+SHOW_REJECTED_MAX_BYTES = 4096
+
+
+def show_rejected(rd: "runstore.RunDir", *, n: int = SHOW_REJECTED,
+                  max_bytes: int = SHOW_REJECTED_MAX_BYTES) -> List[Dict[str, Any]]:
+    """The last few diffs the merger measured and did not adopt (#452).
+
+    ``runstore.execute`` writes one line per rejected candidate: touched files,
+    a short diff, the rationale, the gated probability and the outcome. That is
+    the other half of "why did this run learn nothing" -- the rollouts say what
+    the agent answered, these say what the reflector tried to change. Read from
+    the tail so a long run stays cheap; any failure yields ``[]``.
+    """
+    try:
+        with open(rd.candidates_path, encoding="utf-8", errors="replace") as fh:
+            lines = deque(fh, maxlen=200)
+    except (OSError, AttributeError):
+        return []
+    out: List[Dict[str, Any]] = []
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(record, dict):
+            out.append(record)
+        if len(out) >= n:
+            break
+    out.reverse()
+    while out and len(json.dumps(out, default=str).encode("utf-8")) > max_bytes:
+        out.pop(0)
+    return out
+
+
 #: How many rounds a resultless ``show`` lists (the latest ones).
 SHOW_HISTORY = 20
 
@@ -1293,6 +1469,9 @@ def _partial_show(rd: "runstore.RunDir", st: Any) -> Dict[str, Any]:
         samples = []
     if samples:
         out["samples"] = samples
+    rejected = show_rejected(rd)
+    if rejected:
+        out["rejected"] = rejected
     return out
 
 
@@ -1328,6 +1507,9 @@ def show_payload(run_id: str, *, store: Optional[str] = None, diff: bool = True,
     samples = show_samples(rd, spec, getattr(result, "rendered", None))
     if samples:
         payload["samples"] = samples
+    rejected = show_rejected(rd)
+    if rejected:
+        payload["rejected"] = rejected
     # What `apply` would overwrite, on every kind. Without it the caller can see
     # the evolved artifact and still not know which file it belongs to -- and an
     # agent that cannot name the file it is about to overwrite is right to
@@ -1399,6 +1581,20 @@ def cmd_show(a: argparse.Namespace) -> int:
         for smp in payload["samples"]:
             print(f"  {smp['task_id']}  reward={smp['reward']:.3f}  "
                   f"output={smp['output']!r}  gold={smp['gold']!r}")
+    if payload.get("rejected"):
+        print("\nrejected candidates (what the reflector tried):")
+        for rec in payload["rejected"]:
+            head = f"  round {rec.get('round', '?')}  {rec.get('outcome', 'rejected')}"
+            if rec.get("gated_reward") is not None:
+                head += f"  p_improve={rec['gated_reward']:.3f}"
+            print(head)
+            if rec.get("rationale"):
+                print(f"    rationale: {rec['rationale']}")
+            if rec.get("files"):
+                print(f"    files: {', '.join(rec['files'])}")
+            if rec.get("diff"):
+                for line in str(rec["diff"]).splitlines()[:8]:
+                    print(f"      {line}")
     return 0
 
 
@@ -1857,16 +2053,33 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--key-env", dest="key_env", default=None,
                    help="environment variable holding its key (default: OPENAI_API_KEY, "
                         "or the one other provider key that is set)")
+    s.add_argument("--algorithm", default=None,
+                   help="named method from `agentdescent algorithms list` "
+                        "(e.g. rrsi); other spec fields keep their kind "
+                        "defaults and can override the method's")
+    s.add_argument("--param", action="append", default=[], metavar="KEY=VALUE",
+                   help="algorithm parameter, repeatable; values are JSON "
+                        "when they parse, otherwise strings")
     s.add_argument("--out", help="where to write the spec")
     s.set_defaults(fn=cmd_init)
 
     s = sub.add_parser("plan", help="validate a spec and estimate its cost; runs nothing")
     s.add_argument("spec")
+    s.add_argument("--algorithm", default=None,
+                   help="override the spec's algorithm by name (the same name "
+                        "merges --param with the spec's params)")
+    s.add_argument("--param", action="append", default=[], metavar="KEY=VALUE",
+                   help="algorithm parameter for --algorithm, repeatable")
     s.add_argument("--usd-per-call", type=float, dest="usd_per_call")
     s.set_defaults(fn=cmd_plan)
 
     s = sub.add_parser("evolve", help="run a spec")
     s.add_argument("spec")
+    s.add_argument("--algorithm", default=None,
+                   help="override the spec's algorithm by name (the same name "
+                        "merges --param with the spec's params)")
+    s.add_argument("--param", action="append", default=[], metavar="KEY=VALUE",
+                   help="algorithm parameter for --algorithm, repeatable")
     s.add_argument("--detach", action="store_true", help="return at once; poll with status")
     s.add_argument("--budget", type=float, help="stop after this many dollars (needs --usd-per-call)")
     s.add_argument("--usd-per-call", type=float, dest="usd_per_call")

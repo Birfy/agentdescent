@@ -116,12 +116,15 @@ nav:
     - Cross-run consolidation: consolidation.md
     - Harness composition: harness-composition.md
     - Portfolio governance: portfolio.md
+    - Portfolio evolution — evolve the spend rule: portfolio-evolve.md
+    - Self-improvement loop: self-improve.md
     - The meta stack on the CLI: meta-cli.md
     - Self-evolution bench — every rung, end to end: self-evolution-bench.md
     - Verified seeding — gate on trust: verified-seed.md
     - Joint multi-slot evolution: joint-meta.md
     - Solver-challenger self-play: selfplay.md
   - Self-evolution algorithms:
+    - Named algorithms (spec / plugin): algorithms.md
     - Overview: self-evolution-examples.md
     - Porting checklist: porting-checklist.md
     - MethodPolicy porting checklist: porting-methodpolicy.md

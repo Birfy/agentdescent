@@ -1581,6 +1581,7 @@ def meta_run(
     val_seeds: Sequence[int] = (1, 2),
     min_gain: float = 0.0,
     transfer_floor: float = 0.0,
+    baseline: Optional[str] = None,
     **evolve_kwargs: Any,
 ) -> Tuple[MetaRunReport, EvolutionResult]:
     """Evolve one decision slot, validate it on unseen problems, and decide.
@@ -1594,6 +1595,11 @@ def meta_run(
       is not below ``transfer_floor``;
     * ``reject`` -- otherwise, with the reason (no gain / a fit that does not
       transfer).
+
+    ``baseline`` is the value the evolved one is measured against; it defaults
+    to the spec's fresh seed. A continuous loop passes its prior rule here (and
+    the matching ``initial_state``) so a tick that finds nothing new is judged
+    against what the archive already has, not against the seed it left behind.
 
     Returns ``(report, result)``. ``report.value`` is the rendered string;
     ``spec.compile(report.value)`` is the object to hand
@@ -1611,7 +1617,8 @@ def meta_run(
     result = meta_evolve(
         problems, slot=slot, spec=spec, propose=propose, model=model,
         meta_reward=meta_reward, seeds=seeds, **evolve_kwargs)
-    seed_value = spec.render(spec.initial())
+    fresh_value = spec.render(spec.initial())
+    seed_value = baseline if baseline is not None else fresh_value
     value = result.rendered or seed_value
     # Source side: gain on the problems that shaped the value (train + seeds).
     # Target side: gain on problems the outer loop never saw (val + val_seeds).

@@ -169,6 +169,13 @@ from .portfolio import (
     layers_from_archive,
     portfolio_report,
 )
+from .portfolio_evolve import (
+    ReallocationPolicy,
+    portfolio_evolve,
+    portfolio_problem,
+    reallocation_spec,
+    windows_from_archive,
+)
 from .allocator import (
     AllocatorContext,
     AllocatorPolicy,
@@ -304,6 +311,24 @@ from .chain_audit import (
     ChainAuditReport,
     ChainLink,
     chain_audit,
+)
+from .evidence import (
+    EvidenceSnapshot,
+    HarnessEvidence,
+    SlotEvidence,
+    rank_slots,
+    snapshot,
+)
+from .admit import (
+    AdmitVerdict,
+    admit,
+    admit_record,
+)
+from .self_improve import (
+    SelfImproveConfig,
+    SelfImproveReport,
+    SelfImproveTick,
+    self_improve,
 )
 from .joint_meta import (
     JointMetaReport,
@@ -483,6 +508,11 @@ __all__ = [
     "PortfolioReport",
     "layers_from_archive",
     "portfolio_report",
+    "ReallocationPolicy",
+    "portfolio_evolve",
+    "portfolio_problem",
+    "reallocation_spec",
+    "windows_from_archive",
     # solver-challenger self-play (#329 / #341)
     "Challenger",
     "ChallengerConfig",
@@ -689,6 +719,18 @@ __all__ = [
     "ChainAuditReport",
     "ChainLink",
     "chain_audit",
+    "EvidenceSnapshot",
+    "HarnessEvidence",
+    "SlotEvidence",
+    "rank_slots",
+    "snapshot",
+    "AdmitVerdict",
+    "admit",
+    "admit_record",
+    "SelfImproveConfig",
+    "SelfImproveReport",
+    "SelfImproveTick",
+    "self_improve",
     "JointMetaReport",
     "PoliciesBundle",
     "joint_archive_rule",

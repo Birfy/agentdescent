@@ -277,6 +277,16 @@ line for line:
 
 The other fields:
 
+* **`algorithm`** (optional): a named method from `agentdescent algorithms list`
+  (`rrsi` and `archive_selection` today; the catalog is
+  [named algorithms](algorithms.md)). A name or `{"name": ..., "params": {...}}`
+  replaces the kind's default recipe with that method's policy/knob defaults;
+  explicit `policies` / `evolve` fields in the same spec still win. `plan` echoes
+  the resolved card, its parameters and its extra cost, and rejects an unknown
+  name, an unknown parameter, a wrong type or a kind the method does not support
+  before any run starts. A host can discover the same cards with the
+  `list_algorithms` / `describe_algorithm` MCP tools, or write the field with
+  `agentdescent init --algorithm NAME --param KEY=VALUE`.
 * **`data`**: one of `path` (`.json` / `.jsonl` / `.csv`), `hf`
   (`{"dataset", "split", "config", "limit"}`, through
   [the data layer](dataloader.md)) or `inline` (a list of rows); `prompt` and
