@@ -1261,6 +1261,41 @@ def show_samples(rd: "runstore.RunDir", spec: EvolveSpec, rendered: Optional[str
     return out
 
 
+#: How many rounds a resultless ``show`` lists (the latest ones).
+SHOW_HISTORY = 20
+
+
+def _partial_show(rd: "runstore.RunDir", st: Any) -> Dict[str, Any]:
+    """What ``show`` can say about a run that has no result (#466)."""
+    out: Dict[str, Any] = {}
+    try:
+        rounds = rd.rounds()
+    except Exception:  # noqa: BLE001 - diagnostics must never break `show`
+        rounds = []
+    if rounds:
+        out["rounds"] = len(rounds)
+        keep = ("round", "held_out_reward", "committed", "rejected", "reasons",
+                "propose_errors", "propose_error")
+        out["history"] = [{k: r[k] for k in keep if r.get(k) not in (None, {})}
+                          for r in rounds[-SHOW_HISTORY:]]
+    if getattr(st, "best_reward", None) is not None:
+        out["best_reward"] = st.best_reward
+    perr = getattr(st, "propose_errors", 0) or sum(
+        int(r.get("propose_errors") or 0) for r in rounds)
+    if perr:
+        out["propose_errors"] = perr
+        out["propose_error"] = getattr(st, "propose_error", None) or next(
+            (r.get("propose_error") for r in rounds if r.get("propose_error")), None)
+    try:
+        spec = EvolveSpec.from_dict(rd.spec_dict())
+        samples = show_samples(rd, spec, None)
+    except Exception:  # noqa: BLE001
+        samples = []
+    if samples:
+        out["samples"] = samples
+    return out
+
+
 def show_payload(run_id: str, *, store: Optional[str] = None, diff: bool = True,
                  max_chars: int = 40_000) -> Dict[str, Any]:
     rd = runstore.get(run_id, store=store)
@@ -1269,6 +1304,12 @@ def show_payload(run_id: str, *, store: Optional[str] = None, diff: bool = True,
     payload: Dict[str, Any] = {"run_id": run_id, "state": st.state,
                                "stop_reason": st.stop_reason, "error": st.error}
     if result is None:
+        # A failed, cancelled or still-running run has no artifact and no diff,
+        # but what it did is on disk: the rounds that finished, the reflector
+        # error, the recorded rollouts. Those are the runs most in need of a
+        # diagnosis, so say what is known instead of only "no result yet"
+        # (#466). A run with nothing recorded is unchanged.
+        payload.update(_partial_show(rd, st))
         payload["note"] = "no result yet"
         return payload
     payload.update(final_reward=result.final_reward, outcomes=result.outcomes(),
@@ -1330,9 +1371,21 @@ def cmd_show(a: argparse.Namespace) -> int:
         _out(payload, as_json=True)
         return 0
     for k in ("run_id", "state", "stop_reason", "error", "final_reward", "outcomes",
-              "propose_errors", "propose_error", "note"):
+              "best_reward", "propose_errors", "propose_error", "note"):
         if payload.get(k) is not None:
             print(f"{k}: {payload[k]}")
+    if payload.get("history"):
+        print("rounds so far:")
+        for h in payload["history"]:
+            line = f"  round {h.get('round')}"
+            if h.get("held_out_reward") is not None:
+                line += f"  held_out_reward={h['held_out_reward']:.3f}"
+            for k in ("committed", "rejected", "propose_errors"):
+                if h.get(k):
+                    line += f"  {k}={h[k]}"
+            if h.get("propose_error"):
+                line += f"  propose_error={h['propose_error']!r}"
+            print(line)
     if "rendered" in payload:
         print("\n" + payload["rendered"])
     if payload.get("diff"):
