@@ -995,6 +995,22 @@ def notify(on_round: Optional[Callable[["RoundInfo"], None]],
                       RuntimeWarning, stacklevel=2)
 
 
+def notify_reports(on_reports: Optional[Callable[[Sequence[Any]], None]],
+                   reports: Sequence[Any]) -> None:
+    """Run a merge-report callback without letting it take the run down (#452).
+
+    Same contract as :func:`notify`: diagnostics must never fail the run, so a
+    recorder that raises is a warning, not a lost round.
+    """
+    if on_reports is None:
+        return
+    try:
+        on_reports(list(reports))
+    except Exception as e:  # noqa: BLE001
+        warnings.warn(f"on_reports callback raised: {type(e).__name__}: {e}",
+                      RuntimeWarning, stacklevel=2)
+
+
 def _fusion_trials(aggregator) -> List[FusionTrial]:
     """Whatever the fusion policy recorded, if it recorded anything.
 
@@ -2052,6 +2068,7 @@ class _Engine:
                      reports: Sequence[Any],
                      history: List["RoundInfo"], early: "EarlyStop",
                      on_round: Optional[Callable[["RoundInfo"], None]],
+                     on_reports: Optional[Callable[[Sequence[Any]], None]] = None,
                      extra_reasons: Optional[Dict[str, int]] = None,
                      stop_when: Optional[Callable[["RoundInfo"], bool]] = None,
                      propose_errors: int = 0,
@@ -2080,6 +2097,10 @@ class _Engine:
         different questions and only the loop knows the second.
         """
         reports = list(reports)
+        # Offer the reports (with the diff each candidate measured) to a
+        # recorder before they are reduced to counters. `show` reads rejected
+        # candidates from what this writes (#452).
+        notify_reports(on_reports, reports)
         committed = sum(1 for x in reports if x.committed_version is not None)
         reasons = _tally(reports)
         if extra_reasons:
@@ -2879,6 +2900,11 @@ def evolve(
     shuffle: bool = False,
     seed: int = 0,
     on_round: Optional[Callable[["RoundInfo"], None]] = None,
+    #: Called with each round's ``MergeReport``s. A report carries the diff the
+    #: merger measured even when it was rejected (``candidate_diff``), so a
+    #: recorder can keep what a run that learned nothing actually proposed
+    #: (#452). An exception raised here is reported but does not abort the run.
+    on_reports: Optional[Callable[[Sequence[Any]], None]] = None,
     stop_when: Optional[Callable[["RoundInfo"], bool]] = None,
     verbose: bool = False,
     #: Share one `Usage` with your model adapters (`claude(usage=u)`) and the
@@ -3229,6 +3255,12 @@ def evolve(
         Called with each :class:`RoundInfo` as the round completes -- progress
         for a long run, which otherwise reports nothing until it returns. An
         exception raised here is reported but does not abort the run.
+    on_reports:
+        Called with each round's ``MergeReport``s, before ``on_round`` reduces
+        them to counters. Each report names the diff the merger measured
+        (``candidate_diff``), so a caller can keep rejected candidates for a
+        diagnosis instead of losing what a run that learned nothing proposed
+        (#452). An exception raised here is reported, not fatal.
     stop_when:
         Called after ``on_round`` with the same :class:`RoundInfo`; return
         ``True`` to end the run with ``stop_reason="stop_when"``. This is the
@@ -3405,7 +3437,8 @@ def evolve(
             max_worker_errors=max_worker_errors,
             eval_concurrency=eval_concurrency,
             pipelined_gate=pipelined_gate, gate_workers=gate_workers,
-            on_round=on_round, stop_when=stop_when, verbose=verbose, usage=usage,
+            on_round=on_round, on_reports=on_reports,
+            stop_when=stop_when, verbose=verbose, usage=usage,
             policies=policies, checkpointing=checkpointing,
             stop_on_diminishing_returns=stop_on_diminishing_returns,
             efficiency_floor=efficiency_floor,
@@ -4032,7 +4065,8 @@ def evolve(
         # are the same three steps in both loops; only "what is a round" differs.
         info, early_stop = eng.record_round(
             index=r, reward=round_reward, n_items=len(dev.state), reports=reports,
-            history=history, early=early, on_round=on_round, extra_reasons=extra,
+            history=history, early=early, on_round=on_round,
+            on_reports=on_reports, extra_reasons=extra,
             stop_when=stop_when, propose_errors=propose_raised[0],
             propose_error=propose_first[0])
         if verbose:

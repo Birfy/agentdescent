@@ -33,6 +33,7 @@ commands on a host with no MCP.
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import difflib
 import json
 import os
@@ -381,6 +382,15 @@ def doctor_report() -> Dict[str, Any]:
             f'`"api_key_env": "{other[0]}"` plus `default_base_url` (or `base_url_env`) '
             "for its endpoint; the endpoint and the model name come from the user, "
             "never guess them")
+    # Reflect is not the only role: an isolated `opencode` worker with a gateway
+    # key still needs the Coding recipe (#455). Same predicate as `init`
+    # (`_opencode_gateway_keys`): warn whenever a gateway key is present, even
+    # alongside OPENAI_API_KEY, so the two commands never disagree.
+    gateway = _opencode_gateway_keys(keys)
+    if gateway and clis.get("opencode"):
+        hints.append(
+            "opencode is on PATH and %s is set: for an isolated worker %s"
+            % (", ".join(gateway), _opencode_coding_recipe(gateway)))
     for name, info in hosts.items():
         if info["state"] in ("stale", "partial"):
             problems.append(
@@ -508,11 +518,15 @@ cases.jsonl, and a real agent instead of the offline one:
 
 
 def _starter_model_warnings(spec: Dict[str, Any], out: str) -> List[str]:
-    """What ``init`` says about the ``openai_compatible`` blocks it just wrote.
+    """What ``init`` says about the blocks it just wrote.
 
-    One answer with ``doctor`` (#451): it names the key the block will read --
-    the one that is set here, not always OPENAI_API_KEY -- and every value left
-    for the user to fill in, which ``plan`` refuses until they do.
+    One answer with ``doctor`` (#451): for ``openai_compatible`` it names the key
+    the block will read -- the one that is set here, not always OPENAI_API_KEY --
+    and every value left for the user to fill in, which ``plan`` refuses until
+    they do. For a bare ``opencode`` worker with only a gateway key (#455), it
+    points at the documented ``OPENCODE_CONFIG`` Coding recipe so ``init`` does
+    not leave a silent ``{"ref": "opencode"}`` that dies on OpenCode's built-in
+    Volcengine default under isolation.
     """
     lines: List[str] = []
     for field in ("agent", "reflect"):
@@ -539,6 +553,16 @@ def _starter_model_warnings(spec: Dict[str, Any], out: str) -> List[str]:
                 "call would fail" + (" and the run would learn nothing" if field == "reflect" else "")
                 + ". Export a provider key (`agentdescent doctor` lists the ones it "
                 "knows), or pass `--key-env NAME` for one that is set")
+    # Bare isolated OpenCode + gateway key: same trap `plan` already names (#455).
+    # Warn at init so the written `{"ref": "opencode"}` is not silent.
+    agent = spec.get("agent")
+    if isinstance(agent, dict) and agent.get("ref") == "opencode" and not _opencode_configured(agent):
+        keys = doctor_report()["provider_keys_present"]
+        remedy = _opencode_provider_remedy(agent, keys)
+        if remedy and not _opencode_model_arg(agent):
+            lines.append(
+                f"`agent` in {out} is bare `opencode`: {remedy}. "
+                "See docs/plugins.md (OpenCode Coding / OPENCODE_CONFIG)")
     return lines
 
 
@@ -682,6 +706,42 @@ def _opencode_configured(block: Any) -> bool:
     return bool(_opencode_model_arg(block)) and _opencode_has_config(block)
 
 
+def _opencode_gateway_keys(keys: Optional[Dict[str, bool]]) -> List[str]:
+    """Present gateway keys: set ``*_API_KEY`` other than OpenAI / Anthropic.
+
+    OpenAI / Anthropic accounts serve their provider's default model; a gateway
+    key such as ARK_API_KEY is where OpenCode's default was unusable (#455).
+    One predicate for ``init``, ``plan`` and ``doctor``.
+    """
+    return [n for n, v in (keys or {}).items()
+            if v and n.endswith("_API_KEY")
+            and n not in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY")]
+
+
+def _opencode_coding_recipe(gateway: List[str]) -> str:
+    """The OpenCode Coding worker recipe, concrete only where it was measured.
+
+    Ark wording (Volcengine default, ``ark/deepseek-v4-flash``) only when
+    ARK_API_KEY is among the present keys; any other gateway gets the generic
+    recipe whose provider and model come from the user, never guessed.
+    """
+    if "ARK_API_KEY" in gateway:
+        return ("use the OpenCode Coding recipe in docs/plugins.md: a bare "
+                "`ref: opencode` falls back to OpenCode's built-in Volcengine "
+                "default, which a Coding-only account may not have activated "
+                "(measured with only ARK_API_KEY set: every call failed). Pin the "
+                'model and hand the worker a provider-only config: '
+                '"extra_args": ["-m", "ark/deepseek-v4-flash"], '
+                '"env": {"OPENCODE_CONFIG": "/abs/path/providers.json"} '
+                "(the file as in docs/plugins.md, keys via {env:ARK_API_KEY}, "
+                "never inline)")
+    return ("use the OpenCode Coding recipe in docs/plugins.md: pin "
+            '"extra_args": ["-m", "<provider>/<model>"] and set '
+            '"env": {"OPENCODE_CONFIG": "/abs/path/providers.json"} with the key '
+            "as {env:%s} (never inline); the provider and model come from the "
+            "user, never guess them" % gateway[0])
+
+
 def _opencode_provider_remedy(block: Any, keys: Optional[Dict[str, bool]] = None
                               ) -> Optional[str]:
     """The plan warning's remedy for an isolated ``opencode``.
@@ -694,22 +754,13 @@ def _opencode_provider_remedy(block: Any, keys: Optional[Dict[str, bool]] = None
     """
     model = _opencode_model_arg(block)
     if not model:
-        # OpenAI / Anthropic accounts serve their provider's default model; a
-        # gateway key such as ARK_API_KEY is where the default was unusable.
-        present = [n for n, v in (keys or {}).items()
-                   if v and n.endswith("_API_KEY")
-                   and n not in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY")]
+        present = _opencode_gateway_keys(keys)
         if not present:
             return None
         return (f"a provider key ({', '.join(present)}) is not enough on its own: "
                 "with no `-m`, OpenCode picks its own default model for that "
-                "provider, which the account may not have activated (measured with "
-                "only ARK_API_KEY set: every call failed on an unactivated Volcengine "
-                "default). "
-                'Pin the model and hand the worker a provider-only config: '
-                '"extra_args": ["-m", "ark/deepseek-v4-flash"], '
-                '"env": {"OPENCODE_CONFIG": "/abs/path/providers.json"} '
-                "(the file as in docs/plugins.md, keys via {env:VAR}, never inline)")
+                "provider, which the account may not have activated. "
+                + _opencode_coding_recipe(present))
     if _opencode_has_config(block):
         return None
     return (f"`-m {model}` works only if that provider is built into OpenCode: a "
@@ -1346,6 +1397,46 @@ def show_samples(rd: "runstore.RunDir", spec: EvolveSpec, rendered: Optional[str
     return out
 
 
+#: How many rejected candidates ``show`` lists, and the byte ceiling on the
+#: block -- both files are diagnostic, so an MCP payload must stay small (#452).
+SHOW_REJECTED = 5
+SHOW_REJECTED_MAX_BYTES = 4096
+
+
+def show_rejected(rd: "runstore.RunDir", *, n: int = SHOW_REJECTED,
+                  max_bytes: int = SHOW_REJECTED_MAX_BYTES) -> List[Dict[str, Any]]:
+    """The last few diffs the merger measured and did not adopt (#452).
+
+    ``runstore.execute`` writes one line per rejected candidate: touched files,
+    a short diff, the rationale, the gated probability and the outcome. That is
+    the other half of "why did this run learn nothing" -- the rollouts say what
+    the agent answered, these say what the reflector tried to change. Read from
+    the tail so a long run stays cheap; any failure yields ``[]``.
+    """
+    try:
+        with open(rd.candidates_path, encoding="utf-8", errors="replace") as fh:
+            lines = deque(fh, maxlen=200)
+    except (OSError, AttributeError):
+        return []
+    out: List[Dict[str, Any]] = []
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(record, dict):
+            out.append(record)
+        if len(out) >= n:
+            break
+    out.reverse()
+    while out and len(json.dumps(out, default=str).encode("utf-8")) > max_bytes:
+        out.pop(0)
+    return out
+
+
 #: How many rounds a resultless ``show`` lists (the latest ones).
 SHOW_HISTORY = 20
 
@@ -1378,6 +1469,9 @@ def _partial_show(rd: "runstore.RunDir", st: Any) -> Dict[str, Any]:
         samples = []
     if samples:
         out["samples"] = samples
+    rejected = show_rejected(rd)
+    if rejected:
+        out["rejected"] = rejected
     return out
 
 
@@ -1413,6 +1507,9 @@ def show_payload(run_id: str, *, store: Optional[str] = None, diff: bool = True,
     samples = show_samples(rd, spec, getattr(result, "rendered", None))
     if samples:
         payload["samples"] = samples
+    rejected = show_rejected(rd)
+    if rejected:
+        payload["rejected"] = rejected
     # What `apply` would overwrite, on every kind. Without it the caller can see
     # the evolved artifact and still not know which file it belongs to -- and an
     # agent that cannot name the file it is about to overwrite is right to
@@ -1484,6 +1581,20 @@ def cmd_show(a: argparse.Namespace) -> int:
         for smp in payload["samples"]:
             print(f"  {smp['task_id']}  reward={smp['reward']:.3f}  "
                   f"output={smp['output']!r}  gold={smp['gold']!r}")
+    if payload.get("rejected"):
+        print("\nrejected candidates (what the reflector tried):")
+        for rec in payload["rejected"]:
+            head = f"  round {rec.get('round', '?')}  {rec.get('outcome', 'rejected')}"
+            if rec.get("gated_reward") is not None:
+                head += f"  p_improve={rec['gated_reward']:.3f}"
+            print(head)
+            if rec.get("rationale"):
+                print(f"    rationale: {rec['rationale']}")
+            if rec.get("files"):
+                print(f"    files: {', '.join(rec['files'])}")
+            if rec.get("diff"):
+                for line in str(rec["diff"]).splitlines()[:8]:
+                    print(f"      {line}")
     return 0
 
 

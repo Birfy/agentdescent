@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-452 public names across 79 modules.
+464 public names across 82 modules.
 
 ---
 
@@ -257,6 +257,7 @@ evolve(
     shuffle: bool = False,
     seed: int = 0,
     on_round: Optional[Callable[['RoundInfo'], None]] = None,
+    on_reports: Optional[Callable[[Sequence[Any]], None]] = None,
     stop_when: Optional[Callable[['RoundInfo'], bool]] = None,
     verbose: bool = False,
     usage: Optional[Usage] = None,
@@ -318,6 +319,7 @@ evolve(
 | `shuffle` | `bool` | `False` | Shuffle `tasks` before that positional split. Off by default, which keeps a run reproducible and keeps `val_frac`'s promise that the engine's held-out split is exactly that `Dataset`'s `val`. Turn it on for **grouped** data -- anything ordered by category, source, difficulty or date -- where the tail of the file is a different distribution from the head, and every gate in the run (the acceptance test, `target_reward`, `final_reward`) would then be measured against it. |
 | `seed` | `int` | `0` | As `shuffle`. |
 | `on_round` | `Optional[Callable[['RoundInfo'], None]]` | `None` | Called with each `RoundInfo` as the round completes -- progress for a long run, which otherwise reports nothing until it returns. An exception raised here is reported but does not abort the run. |
+| `on_reports` | `Optional[Callable[[Sequence[Any]], None]]` | `None` | Called with each round's `MergeReport`s, before `on_round` reduces them to counters. Each report names the diff the merger measured (`candidate_diff`), so a caller can keep rejected candidates for a diagnosis instead of losing what a run that learned nothing proposed (#452). An exception raised here is reported, not fatal. |
 | `stop_when` | `Optional[Callable[['RoundInfo'], bool]]` | `None` | Called after `on_round` with the same `RoundInfo`; return `True` to end the run with `stop_reason="stop_when"`. This is the seam for a budget the engine does not know how to count -- dollars from a shared `Usage`, an external deadline, a kill file. It is asked where `max_seconds` / `max_calls` are, so it stops between rounds and never mid-merge, and the run keeps what it has committed. An exception raised here is reported, not fatal. |
 | `verbose` | `bool` | `False` | Print a line per round. Independent of the `RuntimeWarning` emitted when a run ends early -- that always fires. |
 | `usage` | `Optional[Usage]` | `None` | Share one `Usage` with your model adapters (`claude(usage=u)`, `openai_compatible(usage=u)`) and the result's token counts become real. Without it the run still reports calls, seconds and failures -- `run` is `(rendered, task) -> str`, so an opaque actor has no way to surface tokens, and inventing a number would be worse than reporting zero. |
@@ -644,6 +646,7 @@ meta_run(
     val_seeds: Sequence[int] = (1, 2),
     min_gain: float = 0.0,
     transfer_floor: float = 0.0,
+    baseline: Optional[str] = None,
     **evolve_kwargs: Any
 ) -> Tuple[MetaRunReport, EvolutionResult]
 ```
@@ -1413,7 +1416,8 @@ MergeReport(
     committed_version: Optional[int],
     reason: str = '',
     category: str = '',
-    oversized: int = 0
+    oversized: int = 0,
+    candidate_diff: Optional[Diff] = None
 ) -> None
 ```
 
@@ -3660,6 +3664,7 @@ async_evolve(
     resume_queue: Optional['ResumeQueue'] = None,
     task_sampler: Optional['TaskSampler'] = None,
     on_round: Optional[Callable[[RoundInfo], None]] = None,
+    on_reports: Optional[Callable[[Sequence[Any]], None]] = None,
     stop_when: Optional[Callable[[RoundInfo], bool]] = None,
     verbose: bool = False,
     usage: Optional[Usage] = None,
@@ -3720,6 +3725,7 @@ async_evolve(
 | `resume_queue` | `Optional['ResumeQueue']` | `None` | Turn a counted straggler into a **re-run**. A shared `ResumeQueue` passed here receives every detected straggler's task and the version it measured; the next idle worker whose shard owns that task re-runs it against the **current** head. A straggler measured version N, its re-run measures version N+k, so the pair is a free cross-version A/B signal. Detection is **after-return** -- a rollout that overruns its estimate is noticed once it has finished, not cancelled mid-flight. `None` (the default) keeps the old behaviour exactly: stragglers are counted and dropped. `result.resumed` reports the re-runs. |
 | `task_sampler` | `Optional['TaskSampler']` | `None` | Which task a worker takes next from its shard. |
 | `on_round` | `Optional[Callable[[RoundInfo], None]]` | `None` | Called with each `RoundInfo` as a merger sweep completes -- progress for a long run. It runs on the merger thread and must be cheap and thread-safe; an exception is reported, not fatal. |
+| `on_reports` | `Optional[Callable[[Sequence[Any]], None]]` | `None` | Called with the sweep's `MergeReport`s before `on_round` reduces them to counters; each carries the diff the merger measured, accepted or not (#452). Same thread and same rules as `on_round`. |
 | `stop_when` | `Optional[Callable[[RoundInfo], bool]]` | `None` | Asked after `on_round` with the same `RoundInfo`; `True` ends the run with `stop_reason="stop_when"` -- the caller's own budget (dollars, a deadline, a kill file), checked between merger sweeps like the built-in bounds. Same thread and the same rules as `on_round`. |
 | `verbose` | `bool` | `False` | Print one line per merger sweep. |
 | `usage` | `Optional[Usage]` | `None` | Share one `Usage` with your model adapters (`claude(usage=u)`, `openai_compatible(usage=u)`) and the result's token counts become real. Without it the run still reports calls, seconds and failures -- `run` is `(rendered, task) -> str`, so an opaque actor has no way to surface tokens, and inventing a number would be worse than reporting zero. |
@@ -4123,6 +4129,10 @@ Commit or not, and -- when not -- which of the merge categories it was.
 
 Whether a candidate is committed.
 
+### `AdmitVerdict`
+
+The composed decision: `pass` / `flag` / `demote` and why.
+
 ### `AgentNode`
 
 One node of a society: a name, an instruction (a callable), and a budget (how many uses the node may spend).
@@ -4199,6 +4209,10 @@ The multi-file proposal format a `FileTree` reflector is told to emit.
 
 A minimal Elo rating over pairwise matches (K-factor 32).
 
+### `EvidenceSnapshot`
+
+The reconciled view: slots, ports, and the archive's health counters.
+
 ### `ExaminedRule`
 
 One archived rule's self-exam: what the oracle said about it.
@@ -4238,6 +4252,10 @@ One tournament: what the fused candidate scored against the best single.
 ### `Harness`
 
 One algorithm port, named and runnable.
+
+### `HarnessEvidence`
+
+What the archive says about one algorithm port (harness) on a domain.
 
 ### `HarnessReport`
 
@@ -4463,6 +4481,18 @@ What environment one rollout needs. Must survive JSON: it crosses processes.
 
 A state tree over rendered artifact values, searched by UCB.
 
+### `SelfImproveConfig`
+
+What the loop improves, on what, and how hard.
+
+### `SelfImproveReport`
+
+The whole session: every tick, whether anything improved, total gain.
+
+### `SelfImproveTick`
+
+One pass of the loop: targets, per-slot verdicts, and the budget move.
+
 ### `SelfModifyReport`
 
 What `improve_source` accepted: the patch, its tests, its gain.
@@ -4478,6 +4508,10 @@ A pool whose ceiling is the machine's, not this process's.
 ### `SingleSlot`
 
 The artifact **is one value**, and each accepted proposal replaces it.
+
+### `SlotEvidence`
+
+What the archive says about one decision slot's evolution.
 
 ### `SocietyGraph`
 
@@ -4522,6 +4556,14 @@ Four methods, from `grep 'self\.verifier\.' agentdescent/aggregator.py`.
 ### `WorkspaceProvider`
 
 Provisions `LocalWorkspaceSandbox` -- `mkdtemp`, plus a lease file.
+
+### `admit`
+
+Compose the ring statuses into one verdict.
+
+### `admit_record`
+
+Admit an archived rule using its own `exam` stamp plus any ring statuses.
 
 ### `apply_patch`
 
@@ -4675,6 +4717,10 @@ A `Problem` over the priority grid.
 
 A runnable inner `Problem` over exactly these tasks.
 
+### `rank_slots`
+
+The `k` slots to evolve next: paying slots first, plus exploration.
+
 ### `rationale_evolve`
 
 Evolve the skill, roll out, distill its own successes back into it.
@@ -4707,6 +4753,10 @@ Search the state tree for the best value under a fixed budget.
 
 Route a domain to the harness the archive's evidence says wins there.
 
+### `self_improve`
+
+Run the closed loop for `config.ticks` ticks.
+
 ### `self_rewarding_meta_run`
 
 Evolve a decision slot with a judge that improves against truth.
@@ -4718,6 +4768,10 @@ A `Problem` that runs the simulator.
 ### `simulator_score`
 
 The simulator against the real problem: how much the dream is worth.
+
+### `snapshot`
+
+Compose the archive's per-slot, per-port and health evidence.
 
 ### `society_evolve`
 
