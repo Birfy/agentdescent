@@ -31,6 +31,10 @@ def _run_init(tmp_path, monkeypatch, capsys, *extra):
     # Hermetic: the starter reflector needs a key, and `init` warns (#395) when
     # it is missing -- these tests are about the *CLI* warnings, not that one.
     # `--model` likewise keeps the placeholder warning (#451) out of the way.
+    # Clear gateway keys so a box with ARK_API_KEY set does not trip the bare
+    # opencode Coding warning (#455); that path has its own tests.
+    for name in ("ARK_API_KEY", "DEEPSEEK_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.chdir(tmp_path)
     skill = tmp_path / "my-skill"

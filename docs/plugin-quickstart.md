@@ -95,6 +95,12 @@ agentdescent apply <run_id> --dry-run    # what it would write
 agentdescent apply <run_id>              # write it, keeping a .bak- backup
 ```
 
+When a run learns little, `show` also lists the worst rollouts (`samples`:
+output vs gold) and the diffs the gate measured and refused (`rejected`: files,
+short diff, rationale, outcome), so "the agent answered wrongly" is
+distinguishable from "the reflector proposed nothing useful". Both are
+diagnostics on disk; `record_rollouts: false` keeps neither.
+
 Pass `--dir ./somewhere` to keep the demo's files around and poke at them.
 
 ## 3. Put it in your agent

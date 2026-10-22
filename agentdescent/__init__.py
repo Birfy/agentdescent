@@ -308,6 +308,24 @@ from .chain_audit import (
     ChainLink,
     chain_audit,
 )
+from .evidence import (
+    EvidenceSnapshot,
+    HarnessEvidence,
+    SlotEvidence,
+    rank_slots,
+    snapshot,
+)
+from .admit import (
+    AdmitVerdict,
+    admit,
+    admit_record,
+)
+from .self_improve import (
+    SelfImproveConfig,
+    SelfImproveReport,
+    SelfImproveTick,
+    self_improve,
+)
 from .joint_meta import (
     JointMetaReport,
     PoliciesBundle,
@@ -695,6 +713,18 @@ __all__ = [
     "ChainAuditReport",
     "ChainLink",
     "chain_audit",
+    "EvidenceSnapshot",
+    "HarnessEvidence",
+    "SlotEvidence",
+    "rank_slots",
+    "snapshot",
+    "AdmitVerdict",
+    "admit",
+    "admit_record",
+    "SelfImproveConfig",
+    "SelfImproveReport",
+    "SelfImproveTick",
+    "self_improve",
     "JointMetaReport",
     "PoliciesBundle",
     "joint_archive_rule",

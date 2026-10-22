@@ -35,7 +35,7 @@ import threading
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .advantage import GroupAdvantage
 from .agents import Usage
@@ -139,6 +139,7 @@ def async_evolve(
     resume_queue: Optional["ResumeQueue"] = None,
     task_sampler: Optional["TaskSampler"] = None,
     on_round: Optional[Callable[[RoundInfo], None]] = None,
+    on_reports: Optional[Callable[[Sequence[Any]], None]] = None,
     stop_when: Optional[Callable[[RoundInfo], bool]] = None,
     verbose: bool = False,
     #: Share one `Usage` with your model adapters (`claude(usage=u)`) and the
@@ -380,6 +381,10 @@ def async_evolve(
         Called with each :class:`~agentdescent.evolution.RoundInfo` as a merger
         sweep completes -- progress for a long run. It runs on the merger thread
         and must be cheap and thread-safe; an exception is reported, not fatal.
+    on_reports:
+        Called with the sweep's ``MergeReport``s before ``on_round`` reduces them
+        to counters; each carries the diff the merger measured, accepted or not
+        (#452). Same thread and same rules as ``on_round``.
     stop_when:
         Asked after ``on_round`` with the same ``RoundInfo``; ``True`` ends the
         run with ``stop_reason="stop_when"`` -- the caller's own budget (dollars,
@@ -1135,7 +1140,7 @@ def async_evolve(
         _info, early_stop = eng.record_round(
             index=len(history), reward=r, n_items=len(dev.state),
             reports=reports, history=history, early=early, on_round=on_round,
-            stop_when=stop_when)
+            on_reports=on_reports, stop_when=stop_when)
         # A stalled pipeline: cards keep arriving and none of them commits. Under
         # Guarded with async_ratio > alpha that is a livelock, not slow progress.
         # Counted per sweep **that had cards or reports** -- a poll with neither
@@ -1206,7 +1211,8 @@ def async_evolve(
             # candidate was the one just measured.
             eng.record_round(index=len(history), reward=dev.score(eng.held_out),
                              n_items=len(dev.state), reports=reports,
-                             history=history, early=early, on_round=on_round)
+                             history=history, early=early, on_round=on_round,
+                             on_reports=on_reports)
         except Exception as e:  # noqa: BLE001 - the commits are already in the ledger
             with counter_lock:
                 if errors[0] is None:

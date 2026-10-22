@@ -93,7 +93,11 @@ written back until the user says so.
    shell `sleep`, keep it under a minute -- host shell tools time out near two.
 5. When done, **`show`** with `diff=true`. Explain what changed and why using
    the `outcomes` histogram (`committed`, `below-threshold`, `oracle-rejected`
-   ...). Do not paste the whole tree.
+   ...). Do not paste the whole tree. If `final_reward` is low (or every outcome
+   is a rejection), read `samples` (the worst rollouts, output vs gold) and
+   `rejected` (the diffs the gate measured and refused) and say what went wrong
+   -- the agent answered wrongly, the reflector proposed nothing useful, or the
+   score is too strict -- before suggesting more rounds.
 6. **Ask before `apply`.** It overwrites the target (`show` names it); it backs
    up first. Tell the user the backup path afterwards. If the result has
    `noop: true` (also visible in `show`'s `apply_plan` and `--dry-run`), the target

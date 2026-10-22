@@ -317,6 +317,12 @@ class MergeReport:
     #: decided by the cards that *were* in range (or by staleness) -- which is
     #: how an adaptive region still learns its cap was binding (#226).
     oversized: int = 0
+    #: The diff the merger measured, whether it was accepted or not. ``accepted``
+    #: is ``None`` on every rejection, which left a run that learned nothing with
+    #: no record of *what* was proposed (#452); this is that record. It is
+    #: always ``c.diff``, so a consumer can explain a rejected candidate without
+    #: another merge.
+    candidate_diff: Optional[Diff] = None
 
 
 @dataclass
@@ -1654,8 +1660,8 @@ class Aggregator:
         def report(diff, version, reason, category) -> MergeReport:
             return MergeReport(c.artifact_id, diff, c.fused, c.considered,
                                c.survived, c.discarded, c.conflicts, p_improve,
-                               version, reason, category,
-                               oversized=c.oversized)
+                               version, candidate_diff=c.diff, reason=reason,
+                               category=category, oversized=c.oversized)
 
         # Report *every* measured decision to the value allocator exactly once:
         # the label is "was this candidate worth the expensive evaluation it
