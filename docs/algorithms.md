@@ -14,6 +14,22 @@ agentdescent algorithms show NAME
 agentdescent init PATH --algorithm NAME --param KEY=VALUE
 ```
 
+## `ace`
+
+ACE's sectioned playbook: append content-addressed lessons, refuse near-duplicates, and grow-and-refine instead of gating each bullet on held-out reward.
+
+- **Kinds:** `text`
+- **Fidelity:** `mechanism_microport`
+- **Cost:** none (one reflection call per failed rollout, as the default recipe)
+- **Source:** ACE: Agentic Context Engineering (Zhang et al., 2025)
+- **Details:** [algo-ace.md](algo-ace.md)
+- **Spec:** `"algorithm": "ace"`
+
+| Parameter | Type | Default | Meaning |
+|---|---|---|---|
+| `title` | `str` | `# Playbook (ACE)` | rendered playbook title |
+| `dedup_threshold` | `float` | `0.8` | Jaccard similarity at or above which a same-section lesson is a duplicate |
+
 ## `archive_selection`
 
 Parent sampling from an archive of every accepted candidate, tempered by novelty (DGM's rule by default) instead of always extending the head.
@@ -90,3 +106,21 @@ Regularized recursive self-improvement: an annealed edit budget, a leakage scree
 | `max_history_chars` | `int` | `1500` | how much per-edit history fits in the reflection prompt |
 | `protected` | `list[str]` | `[]` | strings that must not leak into the artifact: task ids, gold answers, names from the evolve set (never the final holdout). A candidate containing one is rejected before it is measured |
 | `base_score` | `float` | `0.0` | the base artifact's evolve-set score, to seed the historical-best floor S* (0 keeps the floor at the first measurement) |
+
+## `skillopt`
+
+SkillOpt's skill-document training: bounded edit patches, a strict held-out gate, a rejected-edit buffer and an annealed textual learning rate.
+
+- **Kinds:** `text`
+- **Fidelity:** `mechanism_microport`
+- **Cost:** one analyst call per failed rollout; the strict gate scores each candidate over the full held-out set
+- **Source:** SkillOpt: skill-document training; see docs/algo-skillopt.md
+- **Details:** [algo-skillopt.md](algo-skillopt.md)
+- **Spec:** `"algorithm": "skillopt"`
+
+| Parameter | Type | Default | Meaning |
+|---|---|---|---|
+| `max_lr` | `int` | `4` | largest edit budget per step |
+| `min_lr` | `int` | `2` | smallest edit budget per step |
+| `total_steps` | `int` | `8` | steps the budget anneals over |
+| `mode` | `str` | `cosine` | anneal schedule |

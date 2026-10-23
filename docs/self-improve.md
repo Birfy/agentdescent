@@ -66,3 +66,34 @@ or population variant can be substituted without changing the loop's shape.
 `meta_run` requires): overlapping problem names, shared `Problem` objects, and
 overlapping seed sets all raise. The loop never measures a verdict on the
 problems that shaped the value.
+
+## The rule that moves the budget is itself evolved
+
+`SelfImproveConfig.reallocation` accepts a compiled `ReallocationPolicy`; the
+default is the shipped fixed rule, so an ordinary run is unchanged. Feeding a
+*rejected* policy keeps the previous rule, and a policy round is never fatal: a
+cold archive has fewer than two windows and is reported as `reject` with the
+reason.
+
+`recursive_self_improve` closes the recursion: each outer round runs
+`self_improve` with the current rule, then `portfolio_evolve` on the archive that
+session just wrote, and carries an adopted rule into the next round. The first
+round starts from `ReallocationPolicy(floor=config.floor,
+min_samples=config.min_samples)` — exactly the fixed rule `self_improve` uses —
+and every later policy round searches from and validates against the incumbent,
+so a candidate has to beat the rule the previous round adopted. The two
+reflectors are separate (`propose` evolves a slot value, `policy_propose`
+rewrites the four reallocation numbers), and `policy_kwargs` keeps the policy
+search's budget separate from the inner one.
+
+```python
+report = recursive_self_improve(
+    store, config, propose=slot_reflector, policy_propose=parameter_reflector,
+    outer_rounds=2,
+    policy_kwargs={"seeds": (0, 1), "val_seeds": (2, 3), "rounds": 4})
+print(report.policy, report.total_gain, report.total_policy_gain)
+```
+
+`SelfImproveConfig.min_exam` applies the `verified_rules` seeding bar before an
+archived rule becomes a prior (`None` keeps every non-demoted rule,
+`"passed"` only certified ones, `"flagged"` also keeps flagged rules).

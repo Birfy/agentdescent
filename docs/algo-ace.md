@@ -7,6 +7,11 @@ description: A runnable reproduction of ACE (Agentic Context Engineering): evolv
 > **Skill / context self-evolution.** Evolve a *playbook of lessons* (the model's
 > context), not the weights. Runs through [`evolve()`](evolution.md) with a custom
 > `Strategy`. Example: [`examples/ace/ace_context_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/ace/ace_context_evolution.py).
+>
+> **Spec form:** the playbook and Curator ship in
+> `agentdescent/algorithms/ace.py`; a spec can name `"algorithm": "ace"`
+> (`title`, `dedup_threshold`). Registry fidelity is `mechanism_microport` —
+> the FiNER reproduction above is the `benchmark_faithful` one.
 
 | | |
 |---|---|

@@ -329,3 +329,61 @@ def test_restore_gives_legacy_duplicate_versions_distinct_ids():
     fresh._bump_selected(cands["left"].version)
     after = {c.state["k"]: c.selected for c in fresh._candidates()}
     assert after == {"root": 2, "left": 1, "right": 1, "kid": 0}
+
+
+def test_lineage_report_survives_checkpoint_restore():
+    """branch survives checkpoint/restore, including islands reaped at finalize."""
+    agg = PopulationAggregator.__new__(PopulationAggregator)
+    agg.selection = Archive(sampling="novelty")
+    agg.population_artifact = "a"
+    agg._archive = [
+        {"state": {"k": "v0"}, "score": 0.5, "version": 1, "selected": 1,
+         "parent": None, "branch": "dev"},
+        {"state": {"k": "v1"}, "score": 0.8, "version": 3, "selected": 2,
+         "parent": 1, "branch": "head/0"},
+    ]
+    agg._keys = {"v0", "v1"}
+    agg._archive_lock = threading.Lock()
+    agg._selections = 4
+    agg._branch_parent = {"dev": 1, "head/0": 1}
+    agg._forks = []
+    agg._all_forks = {"head/0"}
+    agg._seen = set()
+    agg.posteriors = {}
+    agg.promoted_at = {}
+
+    payload = agg.checkpoint()
+    assert payload["all_forks"] == ["head/0"]
+
+    fresh = PopulationAggregator.__new__(PopulationAggregator)
+    fresh.selection = Archive(sampling="novelty")
+    fresh.population_artifact = "a"
+    fresh._archive = []
+    fresh._keys = set()
+    fresh._archive_lock = threading.Lock()
+    fresh._selections = 0
+    fresh._branch_parent = {}
+    fresh._forks = []
+    fresh._all_forks = set()
+    fresh._seen = set()
+    fresh.posteriors = {}
+    fresh.promoted_at = {}
+
+    def _noop(self, state):
+        self.posteriors = dict(state.get("posteriors") or {})
+        self.promoted_at = dict(state.get("promoted_at") or {})
+        seen = state.get("seen")
+        if isinstance(seen, list):
+            self._seen = set(seen)
+
+    original = Aggregator.restore
+    Aggregator.restore = _noop
+    try:
+        fresh.restore(payload)
+    finally:
+        Aggregator.restore = original
+
+    rows = {row["branch"]: row for row in fresh.lineage_report()}
+    assert set(rows) == {"dev", "head/0"}
+    assert rows["dev"]["candidates"] == 1 and rows["dev"]["best_score"] == 0.5
+    assert rows["head/0"]["candidates"] == 1 and rows["head/0"]["best_score"] == 0.8
