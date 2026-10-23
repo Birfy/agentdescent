@@ -1476,6 +1476,13 @@ class EvolutionResult:
     #: validation on problems the outer loop never saw, the transfer ratio and
     #: an ``adopt`` / ``reject`` verdict. ``None`` on a plain run.
     meta: Optional[Dict[str, Any]] = None
+    #: Per-branch view of a population run, when one was installed: one row per
+    #: live lineage (``dev`` plus persistent islands) with its best archived
+    #: candidate, candidate count, selections and lineage tip (#150, semantics
+    #: C). Read-only -- the artifact above is still the official head. ``None``
+    #: on a single-head run, so a consumer can tell "no lineages" from "an empty
+    #: one".
+    lineages: Optional[List[Dict[str, Any]]] = None
 
     # -- what the run cost ----------------------------------------------------
     #
@@ -1776,6 +1783,7 @@ class EvolutionResult:
             "sandboxes_reused": self.sandboxes_reused,
             "sandbox_failures": self.sandbox_failures,
             "fusion_trials": [asdict(t) for t in self.fusion_trials],
+            "lineages": self.lineages,
         }
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, indent=2, ensure_ascii=False)
@@ -1913,6 +1921,7 @@ class EvolutionResult:
             resumed=d.get("resumed", 0),
             stop_reason=d.get("stop_reason", "rounds"),
             fusion_trials=[FusionTrial(**t) for t in d.get("fusion_trials", [])],
+            lineages=d.get("lineages"),
             # Every cost field is `.get` with a default, so a file written before
             # they existed loads as a run that simply did not measure them.
             usage=Usage(calls=u.get("calls", 0),
@@ -4157,4 +4166,7 @@ def evolve(
     eng.cleanup()
     result.replay = _replay_stats(sampler)
     result.audit_drained = getattr(aggregator, "audit_drained", 0)
+    report_lineages = getattr(aggregator, "lineage_report", None)
+    if callable(report_lineages) and getattr(aggregator, "island_count", 0) > 0:
+        result.lineages = report_lineages() or None
     return result

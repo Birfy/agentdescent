@@ -44,6 +44,15 @@ from .advantage import (
     TrustRegion,
     state_distance,
 )
+from .jev import JEVModel
+from .verifier_curriculum import (
+    CoevolutionReport,
+    CoevolutionRound,
+    ProbeRow,
+    VerifierAgreement,
+    VerifierCurriculum,
+)
+from .capability_guard import CapabilityGuard, CapabilityReport, CapabilitySuite
 from .defaults import DefaultConflict, DefaultFusion
 from .invariants import (
     BUILTIN_INVARIANTS,
@@ -330,6 +339,11 @@ from .self_improve import (
     SelfImproveTick,
     self_improve,
 )
+from .recursive import (
+    RecursiveRound,
+    RecursiveSelfImproveReport,
+    recursive_self_improve,
+)
 from .joint_meta import (
     JointMetaReport,
     PoliciesBundle,
@@ -455,6 +469,15 @@ __all__ = [
     "TrustRegion",
     "StableDistanceAcceptance",
     "state_distance",
+    "JEVModel",
+    "CoevolutionReport",
+    "CoevolutionRound",
+    "ProbeRow",
+    "VerifierAgreement",
+    "VerifierCurriculum",
+    "CapabilityGuard",
+    "CapabilityReport",
+    "CapabilitySuite",
     "SelectionPolicy",
     "SelectionContext",
     "Candidate",
@@ -731,6 +754,9 @@ __all__ = [
     "SelfImproveReport",
     "SelfImproveTick",
     "self_improve",
+    "RecursiveRound",
+    "RecursiveSelfImproveReport",
+    "recursive_self_improve",
     "JointMetaReport",
     "PoliciesBundle",
     "joint_archive_rule",

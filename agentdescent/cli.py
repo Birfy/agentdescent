@@ -511,7 +511,7 @@ The skill on disk is untouched -- an evolved artifact only lands when you say so
 Your own run is the same spec with three things changed -- your directory, your
 cases.jsonl, and a real agent instead of the offline one:
 
-  agentdescent init <your-skill-dir> --data <your-cases.jsonl>
+  agentdescent init <your-skill-dir> --data <your-cases.jsonl> --out spec.json
   agentdescent doctor        # what is missing before a real run
   agentdescent plan spec.json""")
     return 0
@@ -1902,6 +1902,9 @@ def cmd_audit(a: argparse.Namespace) -> int:
 def cmd_algorithms(a: argparse.Namespace) -> int:
     from . import algorithms
 
+    for name, error in sorted(algorithms.external_errors().items()):
+        print(f"warning: algorithm plugin {name!r} failed to load: {error}",
+              file=sys.stderr)
     as_json = a.json
     if a.action == "list":
         if a.kind is not None and a.kind not in KINDS:

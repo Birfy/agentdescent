@@ -41,6 +41,7 @@ from .meta import (
     archive_rule, meta_run, problem_descriptor,
 )
 from .portfolio import layers_from_archive, portfolio_report
+from .portfolio_evolve import ReallocationPolicy
 
 __all__ = ["SelfImproveConfig", "SelfImproveTick", "SelfImproveReport",
            "self_improve"]
@@ -61,7 +62,11 @@ class SelfImproveConfig:
     ``seeds``/``val_seeds`` are the outer seeds (must be disjoint, as
     ``meta_run`` requires); ``min_gain`` and ``transfer_floor`` are
     ``meta_run``'s adoption guards (zero gain and a fit that does not transfer
-    are both refused). ``config`` is the
+    are both refused). ``min_exam`` is the seeding bar applied before a rule is
+    used as a prior (``None`` keeps every non-demoted rule; ``"passed"`` seeds
+    only certified ones; ``"flagged"`` also keeps flagged rules).
+    ``reallocation`` is the rule that moves the next tick's budget; ``None``
+    uses the shipped fixed ``portfolio_report`` policy. ``config`` is the
     domain config whose fingerprint keys the archive rows and the harness
     leaderboard. ``run_id_prefix`` names this session's archived records --
     ``None`` stamps ``self-improve-<epoch>`` so separate sessions append; pass a
@@ -77,6 +82,8 @@ class SelfImproveConfig:
     min_samples: int = 1
     min_gain: float = 0.0
     transfer_floor: float = 0.0
+    min_exam: Optional[str] = None
+    reallocation: Optional[ReallocationPolicy] = None
     artifact_id: str = "meta-rule"
     config: Optional[Dict[str, Any]] = None
     run_id_prefix: Optional[str] = None
@@ -225,9 +232,11 @@ def self_improve(
             # If the caller supplies ``initial_state`` in evolve_kwargs,
             # evolution starts there while validation still compares against
             # the prior (the baseline); pass ``baseline=`` to override that.
-            prior_rules = _archived_rules(
+            from .verified_seed import verified_rules
+            prior_rules = list(verified_rules(
                 store, slot=slot, spec=spec, config=config.config,
-                artifact_id=config.artifact_id)
+                artifact_id=config.artifact_id,
+                min_exam=config.min_exam).rules)
             prior = prior_rules[0] if prior_rules else None
             prior_value = ((prior.rendered or spec.render(spec.initial()))
                            if prior is not None else spec.render(spec.initial()))
@@ -276,13 +285,17 @@ def self_improve(
                     total_gain += float(meta_report.mean_gain)
                     if not examined:
                         unexamined.append(key)
-        realloc = portfolio_report(
-            layers_from_archive(store, artifact_id=config.artifact_id),
-            floor=config.floor, min_samples=config.min_samples)
+        layers = layers_from_archive(store, artifact_id=config.artifact_id)
+        if config.reallocation is not None:
+            reallocated = config.reallocation.apply(layers)
+        else:
+            reallocated = portfolio_report(
+                layers, floor=config.floor,
+                min_samples=config.min_samples).reallocated
         out.append(SelfImproveTick(
             index=tick, targets=tuple(targets), verdicts=verdicts,
             gains=gains, budget_before=budget_before,
-            budget_after=dict(realloc.reallocated),
+            budget_after=dict(reallocated),
             unexamined=tuple(unexamined),
             reason=f"evidence routed the tick to {', '.join(targets)}"))
     return SelfImproveReport(ticks=tuple(out), improved=improved,
