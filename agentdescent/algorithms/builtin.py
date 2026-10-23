@@ -129,3 +129,7 @@ register(Algorithm(
 
 # The GEPA port registers itself; importing it is what makes `gepa` a name.
 from . import gepa  # noqa: E402,F401
+
+
+# EvoSkill registers itself; importing it is what makes `evoskill` a name.
+from . import evoskill  # noqa: E402,F401
