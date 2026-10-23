@@ -130,6 +130,9 @@ class PopulationAggregator(Aggregator):
         #: The fork names this aggregator has created, in creation order.
         #: ``head_for_worker`` cycles through them.
         self._forks: List[str] = []
+        #: Every fork name seen this run, including islands reaped by
+        #: `finalize`; the read-only lineage report outlives the branches.
+        self._all_forks: Set[str] = set()
         #: Per-branch lineage tip: the ``Candidate.version`` last selected onto
         #: that branch. The next *new* state admitted from the branch's head is
         #: recorded as a child of that tip (#275). Absent / ``None`` means the
@@ -183,7 +186,41 @@ class PopulationAggregator(Aggregator):
                 "version": node,
                 "selected": 0,
                 "parent": (int(parent) if parent is not None else None),
+                "branch": branch,
             })
+
+    def lineage_report(self) -> List[Dict[str, object]]:
+        """A read-only per-branch view for a population run (#150, semantics C).
+
+        One row per live branch -- ``dev`` plus every persistent island -- with
+        the archive's best candidate on it, how many candidates it holds, the
+        selections that landed there and the lineage tip it was last selected
+        from. Nothing is scored here: the archive already holds the held-out
+        score the gate paid for. Older checkpoints have no ``branch`` on their
+        entries and are read as ``dev``, which is what they were.
+        """
+        with self._archive_lock:
+            entries = [dict(entry) for entry in self._archive]
+            forks = sorted(self._all_forks)
+            tips = dict(self._branch_parent)
+        out: List[Dict[str, object]] = []
+        for name in [Ledger.DEV, *forks]:
+            rows = [entry for entry in entries
+                    if str(entry.get("branch", Ledger.DEV)) == name]
+            if not rows and name != Ledger.DEV:
+                continue
+            best = max(rows, key=lambda entry: (float(entry["score"]),
+                                                -int(entry["version"])),
+                       default=None)
+            out.append({
+                "branch": name,
+                "tip": tips.get(name),
+                "candidates": len(rows),
+                "selected": sum(int(entry.get("selected", 0)) for entry in rows),
+                "best_version": int(best["version"]) if best else None,
+                "best_score": float(best["score"]) if best else None,
+            })
+        return out
 
     def _candidates(self) -> List[Candidate]:
         with self._archive_lock:
@@ -398,6 +435,7 @@ class PopulationAggregator(Aggregator):
                 self._commit_state(target, f"population: head/{idx}",
                                    branch=fork_name)
                 self._forks.append(fork_name)
+                self._all_forks.add(fork_name)
                 branch_name = fork_name
             self._branch_parent[branch_name] = int(cand.version)
         if version is not None:
@@ -461,6 +499,7 @@ class PopulationAggregator(Aggregator):
                 # branches persist in the repo, so a resumed run keeps them and
                 # the lineages accumulated on them.
                 "forks": list(getattr(self, "_forks", [])),
+                "all_forks": sorted(getattr(self, "_all_forks", set())),
                 "island_count": getattr(self, "island_count", 0),
             }
         if parent is not None:
@@ -507,6 +546,8 @@ class PopulationAggregator(Aggregator):
                     # Pre-#275 checkpoints have no parent field → roots.
                     "parent": (int(parent_raw)
                                if parent_raw is not None else None),
+                    # Pre-#483 checkpoints have no branch field → dev.
+                    "branch": str(entry.get("branch", Ledger.DEV)),
                 })
             except (TypeError, ValueError):
                 continue
@@ -574,6 +615,9 @@ class PopulationAggregator(Aggregator):
                 except Exception:  # noqa: BLE001 - a closed/missing ledger
                     live = set()
                 self._forks = [f for f in names if f in live]
+                all_names = state.get("all_forks")
+                self._all_forks = (set(str(f) for f in all_names)
+                                   if isinstance(all_names, list) else set(names))
             try:
                 self.island_count = int(state.get(
                     "island_count", getattr(self, "island_count", 0)))

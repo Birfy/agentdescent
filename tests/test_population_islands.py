@@ -337,3 +337,24 @@ def test_partial_island_loss_never_assigns_two_slots_one_branch(tmp_path):
     assert set(fresh._forks).issubset(set(ledger2.live_heads()))
     for wid in range(3):
         assert fresh.head_for_worker(wid) in ledger2.live_heads()
+
+
+def test_persistent_islands_report_their_lineages(tmp_path):
+    repo = str(tmp_path / "repo")
+    result = _run_evolve(islands=2, repo=repo, rounds=8, n_workers=3)
+    assert result.lineages is not None
+    branches = [row["branch"] for row in result.lineages]
+    assert branches[0] == "dev" and len(branches) >= 2
+    # islands are reaped at finalize, but the read-only report still names them
+    assert any(branch.startswith("head/") for branch in branches)
+    for row in result.lineages:
+        assert row["candidates"] >= 0 and row["selected"] >= 0
+        if row["candidates"]:
+            assert row["best_version"] is not None
+            assert row["best_score"] is not None
+
+
+def test_a_single_head_run_has_no_lineage_report(tmp_path):
+    repo = str(tmp_path / "repo")
+    result = _run_evolve(islands=0, repo=repo, rounds=6, n_workers=2)
+    assert result.lineages is None
