@@ -46,6 +46,23 @@ Parent sampling from an archive of every accepted candidate, tempered by novelty
 | `temperature` | `float` | `1.0` | softmax temperature for performance / novelty; must be > 0 |
 | `seed` | `int` | `0` | seed of the parent draw |
 
+## `dgm`
+
+Darwin Gödel Machine's open-ended archive: keep every capability self-modification and sample the next parent by sigmoid(score) × 1/(1+times chosen).
+
+- **Kinds:** `text`
+- **Fidelity:** `mechanism_microport`
+- **Cost:** one reflection call per failed rollout; each candidate is scored on the held-out set
+- **Source:** Darwin Gödel Machine (Zhang et al., 2025); see docs/algo-dgm.md
+- **Details:** [algo-dgm.md](algo-dgm.md)
+- **Spec:** `"algorithm": "dgm"`
+
+| Parameter | Type | Default | Meaning |
+|---|---|---|---|
+| `seed` | `int` | `0` | seed for the parent draw |
+| `archive_mode` | `str` | `keep_all` | keep_all keeps stepping stones; keep_better drops a child that does not beat its parent |
+| `failure_threshold` | `float` | `0.8` | only rollouts below this reward induce a capability |
+
 ## `gepa`
 
 GEPA's genetic reflective loop: keep a Pareto pool of candidates scored per instance and mutate a win-frequency-selected parent instead of the single best average.

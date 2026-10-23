@@ -37,14 +37,16 @@ def _write(tmp_path, spec):
 
 
 def test_builtin_algorithms_are_registered_with_declared_fidelity():
-    assert algorithms.names() == ["ace", "archive_selection", "gepa", "rrsi", "skillopt"]
+    assert algorithms.names() == ["ace", "archive_selection", "dgm", "gepa", "rrsi", "skillopt"]
+    assert algorithms.names() == ["ace", "archive_selection", "dgm", "gepa", "rrsi", "skillopt"]
     for alg in algorithms.listing():
         assert alg.fidelity in algorithms.FIDELITY
         assert alg.summary and alg.kinds
 
 
 def test_listing_filters_by_kind():
-    assert [a.name for a in algorithms.listing("text")] == ["ace", "archive_selection", "gepa", "rrsi", "skillopt"]
+    assert [a.name for a in algorithms.listing("text")] == ["ace", "archive_selection", "dgm", "gepa", "rrsi", "skillopt"]
+    assert [a.name for a in algorithms.listing("text")] == ["ace", "archive_selection", "dgm", "gepa", "rrsi", "skillopt"]
     assert [a.name for a in algorithms.listing("skill_dir")] == ["archive_selection"]
     assert algorithms.listing("policy_slot") == []
 
@@ -141,7 +143,8 @@ def test_the_spec_round_trips_an_algorithm():
 
 
 @pytest.mark.parametrize("spec_kw, message", [
-    (dict(algorithm="nope"), r"algorithm: unknown algorithm 'nope'; available: \['ace', 'archive_selection', 'gepa', 'rrsi', 'skillopt'\]"),
+    (dict(algorithm="nope"), r"algorithm: unknown algorithm 'nope'; available: \['ace', 'archive_selection', 'dgm', 'gepa', 'rrsi', 'skillopt'\]"),
+    (dict(algorithm="nope"), r"algorithm: unknown algorithm 'nope'; available: \['ace', 'archive_selection', 'dgm', 'gepa', 'rrsi', 'skillopt'\]"),
     (dict(algorithm={"name": "rrsi", "params": {"nope": 1}}),
      r"algorithm\.params: 'rrsi' has no parameter\(s\) \['nope'\]"),
     (dict(algorithm={"name": "rrsi", "params": {"b_max": "x"}}),
@@ -318,7 +321,8 @@ def test_cli_list_text_and_json(capsys):
     for argv in (["--json", "algorithms", "list"], ["algorithms", "list", "--json"]):
         assert cli.main(argv) == 0
         rows = json.loads(capsys.readouterr().out)
-        assert [r["name"] for r in rows] == ["ace", "archive_selection", "gepa", "rrsi", "skillopt"]
+        assert [r["name"] for r in rows] == ["ace", "archive_selection", "dgm", "gepa", "rrsi", "skillopt"]
+        assert [r["name"] for r in rows] == ["ace", "archive_selection", "dgm", "gepa", "rrsi", "skillopt"]
         rrsi = next(r for r in rows if r["name"] == "rrsi")
         assert {p["name"] for p in rrsi["params"]} >= {"b_max", "protected"}
 
@@ -469,6 +473,36 @@ def test_mcp_explains_that_policy_slot_has_no_algorithms():
     assert out["algorithms"] == [] and "no algorithm applies" in out["note"]
 
 
+def test_dgm_registers_the_keep_all_archive():
+    alg = algorithms.get("dgm")
+    assert alg.kinds == ("text",) and alg.fidelity == "mechanism_microport"
+    assert {p.name for p in alg.params} == {
+        "seed", "archive_mode", "failure_threshold"}
+    comp = compose(_spec(algorithm={"name": "dgm",
+                                    "params": {"archive_mode": "keep_better"}}))
+    from agentdescent.algorithms.dgm import HarnessStrategy
+    assert isinstance(comp.kwargs["strategy"], HarnessStrategy)
+    assert callable(comp.kwargs["aggregator_factory"])
+
+
+def test_dgm_runs_an_offline_evolve_round(tmp_path):
+    spec = _spec(
+        algorithm="dgm",
+        reflect={"ref": "tests.test_algorithms:_dgm_reflect", "call": False},
+        allow=["tests."],
+        evolve={"rounds": 2, "n_workers": 1, "seed": 0})
+    comp = compose(spec, repo_path=str(tmp_path / "repo"))
+    holder = comp.kwargs["aggregator_factory"].holder
+    result = comp.run()
+    agg = holder["agg"]
+    assert agg.ctx.archive                      # seeded
+    assert any(len(a.capabilities) > 1 for a in agg.ctx.archive)
+    best = max(agg.ctx.archive, key=lambda a: a.score)
+    assert result.state["capabilities"] == ",".join(sorted(best.capabilities))
+
+
+def _dgm_reflect(prompt):
+    return "plan-first"
 def test_skillopt_registers_the_strict_gate_optimizer():
     alg = algorithms.get("skillopt")
     assert alg.kinds == ("text",) and alg.fidelity == "mechanism_microport"
