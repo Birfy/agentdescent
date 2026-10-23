@@ -227,9 +227,10 @@ asyncio.run(main())
 ```
 
 Expected tools: `apply cancel describe_algorithm doctor list_algorithms plan
-resume show start status audit_drift audit_pending audit_recompute audit_rescan
-audit_resolve audit_scorecard audit_status` and a doctor report (17 total: eight
-run-lifecycle tools, seven audit tools and two algorithm-discovery tools).
+resume rsi show start status audit_drift audit_pending audit_recompute
+audit_rescan audit_resolve audit_scorecard audit_status` and a doctor report
+(18 total: eight run-lifecycle tools, seven audit tools, two
+algorithm-discovery tools and the RSI trend).
 
 ## 6. The web panel
 

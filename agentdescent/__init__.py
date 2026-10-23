@@ -330,6 +330,7 @@ from .self_improve import (
     SelfImproveTick,
     self_improve,
 )
+from .rsi import RSIReport, SlotRSI, rsi_report
 from .recursive import (
     RecursiveRound,
     RecursiveSelfImproveReport,
@@ -736,6 +737,9 @@ __all__ = [
     "SelfImproveReport",
     "SelfImproveTick",
     "self_improve",
+    "RSIReport",
+    "SlotRSI",
+    "rsi_report",
     "RecursiveRound",
     "RecursiveSelfImproveReport",
     "recursive_self_improve",
