@@ -37,21 +37,21 @@ def _write(tmp_path, spec):
 
 
 def test_builtin_algorithms_are_registered_with_declared_fidelity():
-    assert algorithms.names() == ["archive_selection", "rrsi"]
+    assert algorithms.names() == ["archive_selection", "gepa", "rrsi"]
     for alg in algorithms.listing():
         assert alg.fidelity in algorithms.FIDELITY
         assert alg.summary and alg.kinds
 
 
 def test_listing_filters_by_kind():
-    assert [a.name for a in algorithms.listing("text")] == ["archive_selection", "rrsi"]
+    assert [a.name for a in algorithms.listing("text")] == ["archive_selection", "gepa", "rrsi"]
     assert [a.name for a in algorithms.listing("skill_dir")] == ["archive_selection"]
     assert algorithms.listing("policy_slot") == []
 
 
 def test_get_unknown_names_the_available_ones():
-    with pytest.raises(AlgorithmError, match=r"unknown algorithm 'gepa'.*rrsi"):
-        algorithms.get("gepa")
+    with pytest.raises(AlgorithmError, match=r"unknown algorithm 'nope'.*rrsi"):
+        algorithms.get("nope")
 
 
 def test_duplicate_registration_is_refused():
@@ -141,7 +141,7 @@ def test_the_spec_round_trips_an_algorithm():
 
 
 @pytest.mark.parametrize("spec_kw, message", [
-    (dict(algorithm="gepa"), r"algorithm: unknown algorithm 'gepa'; available: \['archive_selection', 'rrsi'\]"),
+    (dict(algorithm="nope"), r"algorithm: unknown algorithm 'nope'; available: \['archive_selection', 'gepa', 'rrsi'\]"),
     (dict(algorithm={"name": "rrsi", "params": {"nope": 1}}),
      r"algorithm\.params: 'rrsi' has no parameter\(s\) \['nope'\]"),
     (dict(algorithm={"name": "rrsi", "params": {"b_max": "x"}}),
@@ -318,8 +318,9 @@ def test_cli_list_text_and_json(capsys):
     for argv in (["--json", "algorithms", "list"], ["algorithms", "list", "--json"]):
         assert cli.main(argv) == 0
         rows = json.loads(capsys.readouterr().out)
-        assert [r["name"] for r in rows] == ["archive_selection", "rrsi"]
-        assert {p["name"] for p in rows[1]["params"]} >= {"b_max", "protected"}
+        assert [r["name"] for r in rows] == ["archive_selection", "gepa", "rrsi"]
+        rrsi = next(r for r in rows if r["name"] == "rrsi")
+        assert {p["name"] for p in rrsi["params"]} >= {"b_max", "protected"}
 
 
 def test_cli_list_filters_by_kind_and_rejects_an_unknown_one(capsys):
@@ -339,6 +340,28 @@ def test_cli_show_prints_the_card_and_fails_for_an_unknown_name(capsys):
     assert "unknown algorithm 'nope'" in capsys.readouterr().err
 
 
+def test_gepa_registers_the_pareto_optimizer():
+    alg = algorithms.get("gepa")
+    assert alg.kinds == ("text",) and alg.fidelity == "mechanism_microport"
+    assert {p.name for p in alg.params} == {"seed", "eval_concurrency"}
+    comp = compose(_spec(algorithm={"name": "gepa", "params": {"seed": 3}}))
+    assert "aggregator_factory" in comp.kwargs
+    factory = comp.kwargs["aggregator_factory"]
+    assert callable(factory) and factory.holder == {}
+
+
+def test_gepa_spec_run_returns_the_best_average_candidate(tmp_path):
+    spec = _spec(algorithm="gepa",
+                 evolve={"rounds": 3, "n_workers": 2, "seed": 0})
+    comp = compose(spec, repo_path=str(tmp_path / "repo"))
+    holder = comp.kwargs["aggregator_factory"].holder
+    result = comp.run()
+    agg = holder["agg"]
+    assert agg.states
+    # finalize() leaves GEPA's best-average candidate on dev, not the last
+    # win-frequency sample the step loop committed.
+    assert result.state == agg.best_state
+    assert "gepa-select" in result.outcomes()
 # -- the plugin surface: init, CLI overrides, MCP, docs (#384 slice 3) ----------
 
 
@@ -357,7 +380,7 @@ def test_init_refuses_an_unknown_algorithm_or_wrong_kind(tmp_path, capsys):
     prompt = tmp_path / "prompt.txt"
     prompt.write_text("be terse\n")
     assert cli.main(["init", str(prompt), "--out", str(tmp_path / "a.json"),
-                     "--algorithm", "gepa"]) == 2
+                     "--algorithm", "nope"]) == 2
     assert "unknown algorithm" in capsys.readouterr().err
     skill = tmp_path / "skill"
     skill.mkdir()
@@ -402,7 +425,7 @@ def test_mcp_lists_and_describes_the_registry():
     assert "unknown kind" in t.list_algorithms("nope")["error"]
     card = t.describe_algorithm("rrsi")
     assert card["name"] == "rrsi" and any(p["name"] == "b_max" for p in card["params"])
-    assert "unknown algorithm" in t.describe_algorithm("gepa")["error"]
+    assert "unknown algorithm" in t.describe_algorithm("nope")["error"]
 
 
 def test_the_docs_catalog_is_generated_from_the_registry():

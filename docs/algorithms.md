@@ -30,6 +30,22 @@ Parent sampling from an archive of every accepted candidate, tempered by novelty
 | `temperature` | `float` | `1.0` | softmax temperature for performance / novelty; must be > 0 |
 | `seed` | `int` | `0` | seed of the parent draw |
 
+## `gepa`
+
+GEPA's genetic reflective loop: keep a Pareto pool of candidates scored per instance and mutate a win-frequency-selected parent instead of the single best average.
+
+- **Kinds:** `text`
+- **Fidelity:** `mechanism_microport`
+- **Cost:** every admitted candidate is scored over the full held-out set once (the Pareto row); no extra reflection calls
+- **Source:** GEPA: Reflective Prompt Evolution (Agrawal et al., 2025); arXiv:2507.19457
+- **Details:** [algo-gepa.md](algo-gepa.md)
+- **Spec:** `"algorithm": "gepa"`
+
+| Parameter | Type | Default | Meaning |
+|---|---|---|---|
+| `seed` | `int` | `0` | seed for the Pareto parent draw |
+| `eval_concurrency` | `int` | `8` | per-instance scorings run in parallel when a candidate enters the pool |
+
 ## `rrsi`
 
 Regularized recursive self-improvement: an annealed edit budget, a leakage screen before measurement, and a historical-best acceptance floor.

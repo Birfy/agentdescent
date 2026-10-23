@@ -8,6 +8,11 @@ description: A runnable reproduction of GEPA (Reflective Prompt Evolution) with 
 > reflective loop whose parent selection is a **per-instance Pareto frontier**.
 > Runs through [`evolve()`](evolution.md) with a custom `aggregator_factory`.
 > Example: [`examples/gepa/gepa_prompt_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/gepa/gepa_prompt_evolution.py).
+>
+> **Spec form:** the mechanism ships in `agentdescent/algorithms/gepa.py` and a
+> spec can name it with `"algorithm": "gepa"` (registry fidelity
+> `mechanism_microport` — the HotpotQA reproduction above is the
+> `benchmark_faithful` one).
 
 | | |
 |---|---|
