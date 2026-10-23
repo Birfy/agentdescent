@@ -10,6 +10,83 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- A persistent-island population run now returns `EvolutionResult.lineages`
+  (#150, semantics C): a read-only row per lineage (`dev` plus each island) with
+  its candidate count, best archived version/score, selection count and lineage
+  tip. It is read from the archive the gate already scored, survives `finalize`,
+  and is `None` on a single-head run; the official artifact is unchanged.
+
+- ACE's grow-and-refine playbook is now a named algorithm (`"algorithm": "ace"`,
+  `kind: text`) in the in-package registry (#384). `ACEPlaybook`, its
+  near-duplicate de-dup and the `GrowAndRefine` Curator moved from `examples/ace`
+  into `agentdescent/algorithms/ace.py`; the example keeps its FiNER domain,
+  prompts and CLI and imports the one implementation.
+
+- SkillOpt's skill-document training is now a named algorithm
+  (`"algorithm": "skillopt"`, `kind: text`) in the in-package registry (#384).
+  The bounded edit patch, strict held-out gate, rejected-edit buffer and annealed
+  textual learning rate moved from `examples/skillopt` into
+  `agentdescent/algorithms/skillopt.py`; the example keeps its SearchQA domain,
+  prompts and CLI and imports the one implementation.
+
+- EvoSkill's bounded skill-library frontier is now a named algorithm
+  (`"algorithm": "evoskill"`, `kind: agent_dir`) in the in-package
+  registry (#384). The two-role Proposer/Generator induction, the top-K frontier
+  and the best-member parent rule moved from `examples/evoskill` into
+  `agentdescent/algorithms/evoskill.py`; the example keeps its OfficeQA domain,
+  prompts and CLI and imports the one implementation.
+
+- Third-party packages can register a named algorithm through the
+  `agentdescent.algorithms` entry-point group (`Algorithm` or a zero-argument
+  factory returning one). A plugin that fails to load is recorded in
+  `agentdescent.algorithms.external_errors()` and does not hide the shipped
+  registry; a name that duplicates a built-in is an error, not a shadow.
+
+- DGM's keep-all capability archive is now a named algorithm
+  (`"algorithm": "dgm"`, `kind: text`) in the in-package registry (#384). The
+  sigmoid×novelty parent draw, the keep-all archive and the one-capability
+  proposal moved into `agentdescent/algorithms/dgm.py`; the example keeps its
+  coding-agent/Docker domain and imports the mechanism.
+
+- `recursive_self_improve`: the self-improvement loop now carries a
+  `ReallocationPolicy`, and each outer round evolves that rule with
+  `portfolio_evolve` on the archive the loop just wrote. The first round uses the same fixed rule as `self_improve` (config floor/min_samples),
+  each later round searches from and validates against the incumbent, and a rejected
+  policy round is reported with the previous rule kept; a cold archive is a reported rejection,
+  not a failure. `SelfImproveConfig.min_exam` also applies the verified-seeding bar
+  before an archived rule is used as a prior.
+
+- `CapabilityGuard`, an acceptance policy that protects capabilities outside the
+  task being evolved: it scores the base artifact and the candidate on named task
+  suites and rejects a self-modification that misses a suite's absolute floor or
+  falls below the base by more than its tolerance, then delegates to the inner
+  acceptance policy. This is the anti-catastrophic-forgetting gate for recursive
+  self-improvement rather than a second verifier.
+
+- `VerifierCurriculum` and `VerifierAgreement`: a curriculum that selects the
+  tasks where a verifier disagrees most with the oracle (abs / overestimate /
+  underestimate), feeds the selected oracle labels back into the verifier, and
+  reports the gap before/after (one oracle label per task per round); plus an
+  acceptance policy that audits a sample of commits and refuses a verifier-only
+  gain or an oracle regression (`oracle-disagrees`). This targets the
+  Goodhart failure mode of recursive self-improvement without adding a second
+  verifier.
+
+- `JEVModel`, a dependency-free distilled Judge–Evaluator–Verifier student: a
+  linear logistic scorer over caller-supplied `(artifact, task)` features that
+  learns oracle labels online (`observe`), in passes (`fit`), predicts in `[0, 1]`
+  where a verifier is expected, and checkpoints as JSON. Intended to distil oracle labels from a disagreement-selected task loop, not to
+  replace the oracle; features are standardised online and the JSON checkpoint
+  carries the scaling state.
+
+- `safety_report` / `agentdescent safety`: a read-only pre-flight check for an
+  archive that a recursive loop is about to seed from. It combines exam coverage,
+  whether each slot's best eligible rule is trusted, and the worst oracle-vs-
+  verifier gain bias from an optional `MetaAuditStore` on the *seedable* set, returning `safe` /
+  `caution` / `unsafe` with the named checks and reasons. `--min-exam` mirrors
+  `verified_rules`; CLI exit codes are 0 safe, 1 caution, 3 unsafe, 2 usage. No
+  model calls, no writes.
+
 - `agentdescent uninstall <dsh|claude-code|codex|opencode>` (`--dry-run`, `--home`)
   reverses `install` (#165): it removes the skill files and the plugin directory,
   the marker-delimited `cordis.patch.yml` block, the `[mcp_servers.agentdescent]`
@@ -694,6 +771,10 @@ All notable changes to AgentDescent are documented here. The format follows
   keeps it that way; `tests/test_repo_hygiene.py` asserts none are tracked.
 
 ### Fixed
+
+- `agentdescent demo`'s next-step footer now shows `init ... --out spec.json`, so
+  the `plan spec.json` line after it names a file that exists; bare `init` writes
+  `.agentdescent/<name>.evolve.json` (#484).
 
 - Dynamic Cheatsheet online mode now matches its claim (#292, follow-up to #317):
   `MethodPolicy` gains opt-in `cheap_eval_tasks` (default `None`, engine default)
