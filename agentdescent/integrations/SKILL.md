@@ -87,6 +87,9 @@ written back until the user says so.
    in one line, and say it loudest when they asked for many rounds or workers
    (cost is rounds x n_workers x tasks). Starting a run whose size the user has
    not seen is the one thing this procedure exists to prevent.
+   To keep improving across sessions, offer `agentdescent campaign <spec>
+   --sessions N`; it works on a copy, reports the workspace/final target and
+   never touches the live target. Run its `--dry-run` first.
 4. **`start`**. It replies with `host_model_route` when the spec uses
    `host_model` -- report the route it actually got (`sampling`, or a CLI name)
    rather than assuming; only the sampling route dies with this session.

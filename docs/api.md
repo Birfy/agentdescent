@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-474 public names across 85 modules.
+478 public names across 86 modules.
 
 ---
 
@@ -4177,6 +4177,14 @@ Somewhere to keep evaluations. In one process, across many, or on disk.
 
 A mutable per-call max_tokens, set by the engine before each expansion.
 
+### `CampaignReport`
+
+Every session, the best artifact and where it lives.
+
+### `CampaignSession`
+
+One evolution session inside a campaign.
+
 ### `ChainAuditReport`
 
 What a `chain_audit` pass found, ring by ring.
@@ -4641,6 +4649,10 @@ Dependency-free dataset loading -- the *data layer* for examples/experiments.
 
 The rationales the artifact will carry: deduped rules from the rollouts, near-miss rationales included -- they are the artifact's own notes about what it still needs. Dedup is on the **exact rationale text**, so the output value stays semantic content (`-1` and `1`, `A` and `a` are different rules, not formatting to normalise away).
 
+### `estimate_campaign`
+
+Price a campaign without running it (one composed arm per session).
+
 ### `evaluate_source`
 
 Run the candidate against the tests and the benchmark.
@@ -4780,6 +4792,10 @@ Content-address a proposal so identical proposals dedupe automatically.
 ### `rule_tournament`
 
 Run a round-robin between the rules, rated by Elo.
+
+### `run_campaign`
+
+Run up to `sessions` sessions, keeping the best artifact.
 
 ### `search_evolve`
 

@@ -1924,6 +1924,47 @@ def cmd_algorithms(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_campaign(a: argparse.Namespace) -> int:
+    """``agentdescent campaign`` -- iterate a spec, carrying the artifact forward."""
+    from .campaign import estimate_campaign, run_campaign
+
+    try:
+        spec = load_spec(a.spec)
+        if a.dry_run:
+            est = estimate_campaign(spec, sessions=a.sessions,
+                                    rounds=a.rounds, algorithm=a.algorithm)
+            if a.json:
+                _out(est, as_json=True)
+            else:
+                print(f"kind: {est['kind']}  sessions: {est['sessions']}  "
+                      f"total calls <= {est['total_calls']}")
+                print(f"  {est['calls_per_session']} calls/session x "
+                      f"{est['sessions']} = {est['total_calls']}")
+            return 0
+        report = run_campaign(
+            spec, sessions=a.sessions, rounds=a.rounds,
+            algorithm=a.algorithm, patience=a.patience,
+            workdir=a.workdir, keep_ledgers=a.keep_ledgers)
+    except (SpecError, ValueError) as e:
+        print(f"spec error: {e}", file=sys.stderr)
+        return 2
+    if a.json:
+        _out(report.to_dict(), as_json=True)
+        return 0 if report.stopped_reason != "error" else 1
+    print(f"kind: {report.kind}  stopped: {report.stopped_reason}  "
+          f"best: {report.best_reward:.3f}")
+    print(f"{'session':<8} {'reward':<8} {'best':<8} {'improved':<9} "
+          f"{'calls':<7} stop")
+    for session in report.sessions:
+        print(f"{session.index:<8} {session.reward:<8.3f} "
+              f"{session.best_reward:<8.3f} {str(session.improved):<9} "
+              f"{session.calls:<7} {session.stop_reason}"
+              + (f"  {session.error[:120]}" if session.error else ""))
+    print(f"artifact: {report.final_target}")
+    print(f"workspace: {report.workspace}")
+    return 0 if report.stopped_reason != "error" else 1
+
+
 def cmd_install(a: argparse.Namespace) -> int:
     from .integrations import install
 
@@ -2199,6 +2240,26 @@ def build_parser() -> argparse.ArgumentParser:
     s2.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
                     help="machine-readable output")
     s2.set_defaults(fn=cmd_algorithms)
+
+    s = sub.add_parser("campaign",
+                       help="iterate a spec, carrying the evolved artifact forward")
+    s.add_argument("spec")
+    s.add_argument("--sessions", type=int, default=3,
+                   help="maximum sessions to run (default 3)")
+    s.add_argument("--rounds", type=int,
+                   help="rounds per session (default: the spec's own budget)")
+    s.add_argument("--algorithm", default=None,
+                   help="algorithm to use for every session (default: the spec's own)")
+    s.add_argument("--patience", type=int, default=1,
+                   help="non-improving sessions before stopping (default 1)")
+    s.add_argument("--workdir", help="workspace for the carried artifact")
+    s.add_argument("--keep-ledgers", action="store_true", dest="keep_ledgers",
+                   help="keep each session's ledger for diagnosis")
+    s.add_argument("--dry-run", action="store_true", dest="dry_run",
+                   help="show the total call estimate without running")
+    s.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                   help="machine-readable output")
+    s.set_defaults(fn=cmd_campaign)
 
     s = sub.add_parser("serve", help="serve a read-only run panel on loopback, for a host UI")
     s.add_argument("--host", default=runstore.DEFAULT_HTTP_HOST)
