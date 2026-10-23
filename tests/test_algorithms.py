@@ -37,7 +37,7 @@ def _write(tmp_path, spec):
 
 
 def test_builtin_algorithms_are_registered_with_declared_fidelity():
-    assert algorithms.names() == ["ace", "archive_selection", "gepa", "rrsi", "skillopt"]
+    assert algorithms.names() == ["ace", "archive_selection", "evoskill", "gepa", "rrsi", "skillopt"]
     for alg in algorithms.listing():
         assert alg.fidelity in algorithms.FIDELITY
         assert alg.summary and alg.kinds
@@ -46,6 +46,7 @@ def test_builtin_algorithms_are_registered_with_declared_fidelity():
 def test_listing_filters_by_kind():
     assert [a.name for a in algorithms.listing("text")] == ["ace", "archive_selection", "gepa", "rrsi", "skillopt"]
     assert [a.name for a in algorithms.listing("skill_dir")] == ["archive_selection"]
+    assert [a.name for a in algorithms.listing("agent_dir")] == ["archive_selection", "evoskill"]
     assert algorithms.listing("policy_slot") == []
 
 
@@ -141,7 +142,7 @@ def test_the_spec_round_trips_an_algorithm():
 
 
 @pytest.mark.parametrize("spec_kw, message", [
-    (dict(algorithm="nope"), r"algorithm: unknown algorithm 'nope'; available: \['ace', 'archive_selection', 'gepa', 'rrsi', 'skillopt'\]"),
+    (dict(algorithm="nope"), r"algorithm: unknown algorithm 'nope'; available: \['ace', 'archive_selection', 'evoskill', 'gepa', 'rrsi', 'skillopt'\]"),
     (dict(algorithm={"name": "rrsi", "params": {"nope": 1}}),
      r"algorithm\.params: 'rrsi' has no parameter\(s\) \['nope'\]"),
     (dict(algorithm={"name": "rrsi", "params": {"b_max": "x"}}),
@@ -318,7 +319,7 @@ def test_cli_list_text_and_json(capsys):
     for argv in (["--json", "algorithms", "list"], ["algorithms", "list", "--json"]):
         assert cli.main(argv) == 0
         rows = json.loads(capsys.readouterr().out)
-        assert [r["name"] for r in rows] == ["ace", "archive_selection", "gepa", "rrsi", "skillopt"]
+        assert [r["name"] for r in rows] == ["ace", "archive_selection", "evoskill", "gepa", "rrsi", "skillopt"]
         rrsi = next(r for r in rows if r["name"] == "rrsi")
         assert {p["name"] for p in rrsi["params"]} >= {"b_max", "protected"}
 
@@ -432,6 +433,8 @@ def test_mcp_lists_and_describes_the_registry():
     assert [a["name"] for a in listed["algorithms"]] == algorithms.names()
     assert [a["name"] for a in t.list_algorithms("skill_dir")["algorithms"]] == \
         ["archive_selection"]
+    assert [a["name"] for a in t.list_algorithms("agent_dir")["algorithms"]] == \
+        ["archive_selection", "evoskill"]
     assert "unknown kind" in t.list_algorithms("nope")["error"]
     card = t.describe_algorithm("rrsi")
     assert card["name"] == "rrsi" and any(p["name"] == "b_max" for p in card["params"])
@@ -467,6 +470,69 @@ def test_mcp_explains_that_policy_slot_has_no_algorithms():
 
     out = Tools(None).list_algorithms("policy_slot")
     assert out["algorithms"] == [] and "no algorithm applies" in out["note"]
+
+
+def test_evoskill_registers_the_skill_library_frontier(tmp_path):
+    (tmp_path / "AGENT.md").write_text("# agent\n")
+    spec = EvolveSpec(kind="agent_dir", target=str(tmp_path),
+                      data={"inline": ROWS}, agent="opencode",
+                      editable=["SKILL.md"], frozen=["skip/**"],
+                      algorithm={"name": "evoskill",
+                                 "params": {"max_frontier": 3}})
+    comp = compose(spec)
+    from agentdescent.algorithms.evoskill import SkillLibraryTree
+    strategy = comp.kwargs["strategy"]
+    assert isinstance(strategy, SkillLibraryTree)
+    assert strategy.editable == ("SKILL.md",)
+    assert strategy.frozen == ("skip/**",)
+    assert not strategy.writable("skills/new/SKILL.md")   # guardrail honoured
+    assert callable(comp.kwargs["aggregator_factory"])
+    assert comp.algorithm["params"]["max_frontier"] == 3
+
+
+def test_evoskill_make_propose_offers_a_skill_path():
+    from agentdescent.algorithms.evoskill import (EvoSkillContext, Frontier,
+                                                   make_propose)
+    from agentdescent.filetree import canonical
+
+    ctx = EvoSkillContext(docs={}, frontier=Frontier(), batch_size=1)
+
+    def complete(prompt):
+        return "create careful" if "Skill Proposer" in prompt else "Read the task."
+
+    propose = make_propose(ctx, complete)
+    class T:
+        prompt = "q"
+        meta = {"gold": "a"}
+    assert propose(canonical({"SKILL.md": "seed"}), T(), "wrong", 0.0) == \
+        "careful :: Read the task."
+
+
+def test_evoskill_runs_an_offline_evolve_round(tmp_path):
+    from tests.test_evolvespec import _dir_spec
+
+    spec = _dir_spec(
+        str(tmp_path), kind="agent_dir",
+        reflect={"ref": "tests.test_algorithms:_evoskill_reflect", "call": False},
+        algorithm={"name": "evoskill", "params": {"batch_size": 1}},
+        evolve={"rounds": 2, "n_workers": 1, "seed": 0})
+    comp = compose(spec, repo_path=str(tmp_path / "repo"))
+    holder = comp.kwargs["aggregator_factory"].holder
+    result = comp.run()
+    agg = holder["agg"]
+    assert result.state is not None
+    assert agg.ctx.frontier.members            # seeded, even if nothing was admitted
+    assert any(
+        any(path.startswith("skills/") and path.endswith("SKILL.md")
+            for path in state)
+        for state, _ in agg.ctx.frontier.members
+    ), "the frontier never saw an induced skills/<name>/SKILL.md"
+
+
+def _evoskill_reflect(prompt):
+    if "Skill Proposer" in prompt:
+        return "create careful\nreason"
+    return "Read the task carefully."
 
 
 def test_skillopt_registers_the_strict_gate_optimizer():

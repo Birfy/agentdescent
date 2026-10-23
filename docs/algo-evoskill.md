@@ -9,6 +9,13 @@ description: A runnable reproduction of EvoSkill automated skill discovery: lear
 > [`evolve()`](evolution.md) with a custom `Strategy` + `aggregator_factory`.
 > Example: [`examples/evoskill/evoskill_skill_discovery.py`](https://github.com/Birfy/agentdescent/blob/main/examples/evoskill/evoskill_skill_discovery.py).
 
+> **Spec form:** the mechanism ships in
+> `agentdescent/algorithms/evoskill.py`; a spec can name
+> `"algorithm": "evoskill"` (`kind: agent_dir`; `max_frontier`, `batch_size`,
+> `eval_concurrency`) over its own skill directory. Registry fidelity
+> is `mechanism_microport`; the OfficeQA reproduction below is the
+> `benchmark_faithful` one.
+
 | | |
 |---|---|
 | **Paper** | *EvoSkill: Automated Skill Discovery for Coding Agents* — Alzubi et al., 2026 ([arXiv:2603.02766](https://arxiv.org/abs/2603.02766)) |

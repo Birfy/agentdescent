@@ -46,6 +46,23 @@ Parent sampling from an archive of every accepted candidate, tempered by novelty
 | `temperature` | `float` | `1.0` | softmax temperature for performance / novelty; must be > 0 |
 | `seed` | `int` | `0` | seed of the parent draw |
 
+## `evoskill`
+
+EvoSkill's two-role skill induction: Proposer analyses a failure batch, Generator writes one SKILL.md, and a bounded top-K frontier keeps the best skill libraries.
+
+- **Kinds:** `agent_dir`
+- **Fidelity:** `mechanism_microport`
+- **Cost:** two model calls per induced skill; one full held-out re-eval per admitted candidate
+- **Source:** EvoSkill: skill discovery (see docs/algo-evoskill.md)
+- **Details:** [algo-evoskill.md](algo-evoskill.md)
+- **Spec:** `"algorithm": "evoskill"`
+
+| Parameter | Type | Default | Meaning |
+|---|---|---|---|
+| `max_frontier` | `int` | `5` | frontier size |
+| `batch_size` | `int` | `4` | failures per induction batch |
+| `eval_concurrency` | `int` | `8` | held-out re-evaluations run in parallel |
+
 ## `gepa`
 
 GEPA's genetic reflective loop: keep a Pareto pool of candidates scored per instance and mutate a win-frequency-selected parent instead of the single best average.
