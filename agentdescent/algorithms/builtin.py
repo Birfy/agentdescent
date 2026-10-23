@@ -127,5 +127,6 @@ register(Algorithm(
     extra_calls="none"))
 
 
-# The GEPA port registers itself; importing it is what makes `gepa` a name.
+# GEPA and SkillOpt register themselves; importing them makes the names.
 from . import gepa  # noqa: E402,F401
+from . import skillopt  # noqa: E402,F401

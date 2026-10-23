@@ -9,6 +9,13 @@ description: A runnable reproduction of SkillOpt (ReflACT) skill-document editin
 > [`evolve()`](evolution.md) with a custom `Strategy` + `aggregator_factory`.
 > Example: [`examples/skillopt/skillopt_skill_training.py`](https://github.com/Birfy/agentdescent/blob/main/examples/skillopt/skillopt_skill_training.py).
 
+> **Spec form:** the optimizer ships in
+> `agentdescent/algorithms/skillopt.py`; a spec can name
+> `"algorithm": "skillopt"` (`max_lr`, `min_lr`, `total_steps`, `mode`)
+> over its own skill document. Registry fidelity is
+> `mechanism_microport`; the SearchQA reproduction below is the
+> `benchmark_faithful` one.
+
 | | |
 |---|---|
 | **Paper** | *SkillOpt: Executive Strategy for Self-Evolving Agent Skills* — Yang et al., 2025 ([arXiv:2605.23904](https://arxiv.org/abs/2605.23904)) |

@@ -37,14 +37,14 @@ def _write(tmp_path, spec):
 
 
 def test_builtin_algorithms_are_registered_with_declared_fidelity():
-    assert algorithms.names() == ["archive_selection", "gepa", "rrsi"]
+    assert algorithms.names() == ["archive_selection", "gepa", "rrsi", "skillopt"]
     for alg in algorithms.listing():
         assert alg.fidelity in algorithms.FIDELITY
         assert alg.summary and alg.kinds
 
 
 def test_listing_filters_by_kind():
-    assert [a.name for a in algorithms.listing("text")] == ["archive_selection", "gepa", "rrsi"]
+    assert [a.name for a in algorithms.listing("text")] ==         ["archive_selection", "gepa", "rrsi", "skillopt"]
     assert [a.name for a in algorithms.listing("skill_dir")] == ["archive_selection"]
     assert algorithms.listing("policy_slot") == []
 
@@ -141,7 +141,7 @@ def test_the_spec_round_trips_an_algorithm():
 
 
 @pytest.mark.parametrize("spec_kw, message", [
-    (dict(algorithm="nope"), r"algorithm: unknown algorithm 'nope'; available: \['archive_selection', 'gepa', 'rrsi'\]"),
+    (dict(algorithm="nope"), r"algorithm: unknown algorithm 'nope'; available: \['archive_selection', 'gepa', 'rrsi', 'skillopt'\]"),
     (dict(algorithm={"name": "rrsi", "params": {"nope": 1}}),
      r"algorithm\.params: 'rrsi' has no parameter\(s\) \['nope'\]"),
     (dict(algorithm={"name": "rrsi", "params": {"b_max": "x"}}),
@@ -318,7 +318,7 @@ def test_cli_list_text_and_json(capsys):
     for argv in (["--json", "algorithms", "list"], ["algorithms", "list", "--json"]):
         assert cli.main(argv) == 0
         rows = json.loads(capsys.readouterr().out)
-        assert [r["name"] for r in rows] == ["archive_selection", "gepa", "rrsi"]
+        assert [r["name"] for r in rows] ==             ["archive_selection", "gepa", "rrsi", "skillopt"]
         rrsi = next(r for r in rows if r["name"] == "rrsi")
         assert {p["name"] for p in rrsi["params"]} >= {"b_max", "protected"}
 
@@ -457,3 +457,22 @@ def test_mcp_explains_that_policy_slot_has_no_algorithms():
 
     out = Tools(None).list_algorithms("policy_slot")
     assert out["algorithms"] == [] and "no algorithm applies" in out["note"]
+
+
+def test_skillopt_registers_the_strict_gate_optimizer():
+    alg = algorithms.get("skillopt")
+    assert alg.kinds == ("text",) and alg.fidelity == "mechanism_microport"
+    assert {p.name for p in alg.params} == {"max_lr", "min_lr", "total_steps", "mode"}
+    comp = compose(_spec(algorithm={"name": "skillopt",
+                                    "params": {"max_lr": 3, "min_lr": 1}}))
+    from agentdescent.algorithms.skillopt import SkillDocStrategy
+    assert isinstance(comp.kwargs["strategy"], SkillDocStrategy)
+    assert comp.kwargs["strategy"].seed
+    assert callable(comp.kwargs["aggregator_factory"])
+    assert isinstance(comp.kwargs["initial_state"], dict)
+
+
+def test_skillopt_runs_an_offline_evolve_round(tmp_path):
+    result = _run(_spec(algorithm="skillopt"), tmp_path)
+    assert sum(result.outcomes().values()) >= 1
+    assert "unknown" not in result.outcomes()
