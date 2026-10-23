@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-471 public names across 84 modules.
+474 public names across 85 modules.
 
 ---
 
@@ -4174,6 +4174,18 @@ Somewhere to keep evaluations. In one process, across many, or on disk.
 ### `CallBudget`
 
 A mutable per-call max_tokens, set by the engine before each expansion.
+
+### `CapabilityGuard`
+
+Reject a self-modification that regresses a protected capability.
+
+### `CapabilityReport`
+
+What the protected suites measured for one candidate.
+
+### `CapabilitySuite`
+
+Tasks a self-modification must not regress, and the bar it must clear.
 
 ### `ChainAuditReport`
 

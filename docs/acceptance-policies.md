@@ -38,6 +38,33 @@ silently could when the example above read
 the other two from the run. `DefaultAcceptance.from_config(cfg)` is the fully
 pinned form.
 
+## Protecting capabilities outside the target
+
+A recursive self-modification can raise the task it is optimising and quietly
+lower another capability. `CapabilityGuard` wraps the acceptance policy with a
+set of protected task suites: it scores the base artifact and the candidate on
+every suite and rejects when either the suite's absolute `floor` or the base
+minus its `tolerance` is missed. Only then does it consult the inner policy, so
+the guard can only make acceptance stricter.
+
+```python
+from agentdescent import CapabilityGuard, CapabilitySuite
+
+policies = Policies(acceptance=CapabilityGuard(
+    [CapabilitySuite("tool-use", tool_tasks, floor=0.85),
+     CapabilitySuite("json", json_tasks, tolerance=0.01)],
+    inner=DefaultAcceptance()))
+```
+
+The suites use the run's own scorer and agent (a suite is a task set, not a
+second verifier). Scores go through the bound verifier's `eval_fn` when the
+aggregator installed one, and through `artifact.score(tasks)` otherwise; a
+custom `Evolvable` that offers neither raises `ContractError` naming the
+requirement (`score` is not part of the `Evolvable` protocol). `CapabilityReport`
+carries the per-suite base/candidate/bar alongside the regressions for a report
+or a log. `inner=None` means the shipped `DefaultAcceptance`, configured through
+the forwarded `configure` hook, so the guard is never looser than the default.
+
 ## Installing a policy: the two optional hooks
 
 A policy may need two things only the engine has: the verifier, for anything

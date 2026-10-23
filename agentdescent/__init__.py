@@ -44,6 +44,7 @@ from .advantage import (
     TrustRegion,
     state_distance,
 )
+from .capability_guard import CapabilityGuard, CapabilityReport, CapabilitySuite
 from .defaults import DefaultConflict, DefaultFusion
 from .invariants import (
     BUILTIN_INVARIANTS,
@@ -455,6 +456,9 @@ __all__ = [
     "TrustRegion",
     "StableDistanceAcceptance",
     "state_distance",
+    "CapabilityGuard",
+    "CapabilityReport",
+    "CapabilitySuite",
     "SelectionPolicy",
     "SelectionContext",
     "Candidate",
