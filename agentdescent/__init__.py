@@ -330,6 +330,8 @@ from .self_improve import (
     SelfImproveTick,
     self_improve,
 )
+from .tournament import (AlgorithmArm, AlgorithmScore, AlgorithmTournamentReport,
+                         estimate_tournament, run_tournament)
 from .recursive import (
     RecursiveRound,
     RecursiveSelfImproveReport,
@@ -736,6 +738,11 @@ __all__ = [
     "SelfImproveReport",
     "SelfImproveTick",
     "self_improve",
+    "AlgorithmArm",
+    "AlgorithmScore",
+    "AlgorithmTournamentReport",
+    "estimate_tournament",
+    "run_tournament",
     "RecursiveRound",
     "RecursiveSelfImproveReport",
     "recursive_self_improve",

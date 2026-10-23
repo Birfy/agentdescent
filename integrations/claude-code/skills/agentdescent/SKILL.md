@@ -39,7 +39,11 @@ written back until the user says so.
      too few it has both committed a worse rule and committed nothing at all.
    - `algorithm` (optional): a named method. Call `list_algorithms` (or
      `describe_algorithm` for one) before naming one; the same data is in
-     `agentdescent algorithms list` / `show`. Offer one only when the user asks
+     `agentdescent algorithms list` / `show`. To compare methods on the user's
+     own spec, offer `agentdescent tournament <spec> --algorithm default
+     --algorithm NAME` (same budget per arm; the winner is the best mean over
+     seeds, and a tie is reported as a tie). Run its `--dry-run` first and quote
+     the total call estimate before starting. Offer one only when the user asks
      for a specific method or the artifact clearly fits it; the default recipe
      for the kind is otherwise the right answer. Never invent a name -- `plan`
      rejects it. The spec can carry parameters under

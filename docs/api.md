@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-474 public names across 85 modules.
+479 public names across 86 modules.
 
 ---
 
@@ -4145,6 +4145,18 @@ One node of a society: a name, an instruction (a callable), and a budget (how ma
 
 `(ledger, verifier, audit, config, policy) -> AggregatorProtocol` — how a custom optimizer is installed.
 
+### `AlgorithmArm`
+
+One algorithm/seed arm of a tournament.
+
+### `AlgorithmScore`
+
+One algorithm's aggregate over its seeds.
+
+### `AlgorithmTournamentReport`
+
+Every arm, the per-algorithm aggregate, the winner and any tie.
+
 ### `AllocatorContext`
 
 One candidate, as the allocator sees it.
@@ -4641,6 +4653,10 @@ Dependency-free dataset loading -- the *data layer* for examples/experiments.
 
 The rationales the artifact will carry: deduped rules from the rollouts, near-miss rationales included -- they are the artifact's own notes about what it still needs. Dedup is on the **exact rationale text**, so the output value stays semantic content (`-1` and `1`, `A` and `a` are different rules, not formatting to normalise away).
 
+### `estimate_tournament`
+
+The per-arm plan estimate without running anything.
+
 ### `evaluate_source`
 
 Run the candidate against the tests and the benchmark.
@@ -4780,6 +4796,10 @@ Content-address a proposal so identical proposals dedupe automatically.
 ### `rule_tournament`
 
 Run a round-robin between the rules, rated by Elo.
+
+### `run_tournament`
+
+Run every `(algorithm, seed)` arm and return the measured ranking.
 
 ### `search_evolve`
 
