@@ -45,6 +45,14 @@ from .advantage import (
     state_distance,
 )
 from .jev import JEVModel
+from .verifier_curriculum import (
+    CoevolutionReport,
+    CoevolutionRound,
+    ProbeRow,
+    VerifierAgreement,
+    VerifierCurriculum,
+)
+from .capability_guard import CapabilityGuard, CapabilityReport, CapabilitySuite
 from .defaults import DefaultConflict, DefaultFusion
 from .invariants import (
     BUILTIN_INVARIANTS,
@@ -462,6 +470,14 @@ __all__ = [
     "StableDistanceAcceptance",
     "state_distance",
     "JEVModel",
+    "CoevolutionReport",
+    "CoevolutionRound",
+    "ProbeRow",
+    "VerifierAgreement",
+    "VerifierCurriculum",
+    "CapabilityGuard",
+    "CapabilityReport",
+    "CapabilitySuite",
     "SelectionPolicy",
     "SelectionContext",
     "Candidate",

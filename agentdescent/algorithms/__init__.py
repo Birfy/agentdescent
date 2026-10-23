@@ -40,8 +40,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
-__all__ = ["Algorithm", "AlgorithmError", "BuildContext", "FIDELITY", "Overrides",
-           "Param", "get", "names", "register", "resolve_params", "listing"]
+__all__ = ["Algorithm", "AlgorithmError", "BuildContext", "ENTRY_POINT_GROUP",
+           "FIDELITY", "Overrides", "Param", "external_errors", "get", "names",
+           "register", "resolve_params", "listing"]
 
 FIDELITY = ("benchmark_faithful", "mechanism_microport", "preset")
 
@@ -168,6 +169,13 @@ class Algorithm:
 
 
 _REGISTRY: Dict[str, Algorithm] = {}
+#: Names registered by the shipped ``builtin`` module, for the generated catalog.
+_BUILTIN_NAMES: set = set()
+
+#: Entry-point group a third-party package can register an :class:`Algorithm` under.
+ENTRY_POINT_GROUP = "agentdescent.algorithms"
+_EXTERNAL_ERRORS: Dict[str, str] = {}
+_external_loaded = False
 
 
 def register(algorithm: Algorithm, *, replace: bool = False) -> Algorithm:
@@ -178,14 +186,32 @@ def register(algorithm: Algorithm, *, replace: bool = False) -> Algorithm:
     return algorithm
 
 
-def names() -> List[str]:
+def names(*, builtin_only: bool = False) -> List[str]:
     _load_builtin()
-    return sorted(_REGISTRY)
+    _load_external()
+    return sorted(name for name in _REGISTRY
+                  if not builtin_only or name in _BUILTIN_NAMES)
+
+
+def external_errors() -> Dict[str, str]:
+    """Entry-point algorithms that failed to load, ``name -> error``.
+
+    A broken third-party plugin must not take the shipped registry down; it is
+    recorded here instead, and `get` raises when that exact name is requested.
+    """
+    _load_builtin()
+    _load_external()
+    return dict(_EXTERNAL_ERRORS)
 
 
 def get(name: Any, *, where: str = "algorithm") -> Algorithm:
     """The named algorithm, or an :class:`AlgorithmError` listing the valid names."""
     _load_builtin()
+    _load_external()
+    if (isinstance(name, str) and name in _EXTERNAL_ERRORS
+            and name not in _REGISTRY):
+        raise AlgorithmError(
+            f"{where}: algorithm {name!r} failed to load: {_EXTERNAL_ERRORS[name]}")
     if not isinstance(name, str) or name not in _REGISTRY:
         raise AlgorithmError(
             f"{where}: unknown algorithm {name!r}; available: {sorted(_REGISTRY)} "
@@ -193,10 +219,19 @@ def get(name: Any, *, where: str = "algorithm") -> Algorithm:
     return _REGISTRY[name]
 
 
-def listing(kind: Optional[str] = None) -> List[Algorithm]:
-    """Registered algorithms, by name; only those that apply to ``kind`` when given."""
+def listing(kind: Optional[str] = None, *,
+            builtin_only: bool = False) -> List[Algorithm]:
+    """Registered algorithms, by name; only those that apply to ``kind`` when given.
+
+    ``builtin_only`` excludes algorithms a third-party entry point installed in
+    this environment registered -- what the generated catalog and its check use
+    so an installed plugin cannot rewrite our docs.
+    """
     _load_builtin()
-    return [a for _, a in sorted(_REGISTRY.items()) if kind is None or kind in a.kinds]
+    _load_external()
+    return [a for name, a in sorted(_REGISTRY.items())
+            if (kind is None or kind in a.kinds)
+            and (not builtin_only or name in _BUILTIN_NAMES)]
 
 
 def resolve_params(algorithm: Algorithm, params: Optional[Mapping[str, Any]], *,
@@ -232,6 +267,46 @@ def _load_builtin() -> None:
         _loaded = True
         try:
             from . import builtin  # noqa: F401  (registers on import)
+            _BUILTIN_NAMES.update(_REGISTRY)
         except BaseException as e:
             _load_error = e
             raise
+
+
+def _load_external() -> None:
+    """Register algorithms advertised by installed packages via entry points.
+
+    One import is one plugin's chance to add a name; a failure is recorded in
+    ``_EXTERNAL_ERRORS`` rather than raised, so a broken third-party package
+    cannot hide the shipped algorithms. The group is the whole contract: an
+    entry point loads to an :class:`Algorithm` (or a zero-argument callable
+    returning one) and its name must match the entry point name.
+    """
+    global _external_loaded
+    if _external_loaded:
+        return
+    _external_loaded = True
+    from importlib import metadata
+
+    try:
+        points = metadata.entry_points(group=ENTRY_POINT_GROUP)
+    except TypeError:       # Python 3.9: no `group=` keyword
+        points = metadata.entry_points().get(ENTRY_POINT_GROUP, [])
+    for point in points:
+        name = getattr(point, "name", repr(point))
+        try:
+            loaded = point.load()
+            algorithm = (loaded() if callable(loaded)
+                         and not isinstance(loaded, Algorithm) else loaded)
+            if not isinstance(algorithm, Algorithm):
+                raise TypeError(
+                    f"entry point returned {type(algorithm).__name__}, expected Algorithm")
+            if algorithm.name != name:
+                raise ValueError(
+                    f"entry point is named {name!r} but returned {algorithm.name!r}; "
+                    "the names must match")
+            register(algorithm)
+        except KeyboardInterrupt:
+            raise
+        except BaseException as e:  # noqa: BLE001 - one plugin must not break the registry
+            _EXTERNAL_ERRORS[name] = f"{type(e).__name__}: {e}"
