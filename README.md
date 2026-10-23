@@ -69,10 +69,10 @@ cannot drift from what the paper shows.
 
 ## Install and run the offline demo
 
-Install **0.6.0** from PyPI:
+Install **0.7.0** from PyPI:
 
 ```bash
-pip install "agentdescent>=0.6.0"
+pip install "agentdescent>=0.7.0"
 agentdescent demo
 ```
 
