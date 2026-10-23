@@ -44,6 +44,13 @@ from .advantage import (
     TrustRegion,
     state_distance,
 )
+from .verifier_curriculum import (
+    CoevolutionReport,
+    CoevolutionRound,
+    ProbeRow,
+    VerifierAgreement,
+    VerifierCurriculum,
+)
 from .defaults import DefaultConflict, DefaultFusion
 from .invariants import (
     BUILTIN_INVARIANTS,
@@ -460,6 +467,11 @@ __all__ = [
     "TrustRegion",
     "StableDistanceAcceptance",
     "state_distance",
+    "CoevolutionReport",
+    "CoevolutionRound",
+    "ProbeRow",
+    "VerifierAgreement",
+    "VerifierCurriculum",
     "SelectionPolicy",
     "SelectionContext",
     "Candidate",
