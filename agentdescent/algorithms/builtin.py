@@ -132,3 +132,4 @@ from . import ace  # noqa: E402,F401
 from . import evoskill  # noqa: E402,F401
 from . import gepa  # noqa: E402,F401
 from . import skillopt  # noqa: E402,F401
+from . import dgm  # noqa: E402,F401
