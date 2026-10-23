@@ -331,6 +331,11 @@ from .self_improve import (
     SelfImproveTick,
     self_improve,
 )
+from .recursive import (
+    RecursiveRound,
+    RecursiveSelfImproveReport,
+    recursive_self_improve,
+)
 from .joint_meta import (
     JointMetaReport,
     PoliciesBundle,
@@ -735,6 +740,9 @@ __all__ = [
     "SelfImproveReport",
     "SelfImproveTick",
     "self_improve",
+    "RecursiveRound",
+    "RecursiveSelfImproveReport",
+    "recursive_self_improve",
     "JointMetaReport",
     "PoliciesBundle",
     "joint_archive_rule",
