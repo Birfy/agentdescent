@@ -511,7 +511,7 @@ The skill on disk is untouched -- an evolved artifact only lands when you say so
 Your own run is the same spec with three things changed -- your directory, your
 cases.jsonl, and a real agent instead of the offline one:
 
-  agentdescent init <your-skill-dir> --data <your-cases.jsonl>
+  agentdescent init <your-skill-dir> --data <your-cases.jsonl> --out spec.json
   agentdescent doctor        # what is missing before a real run
   agentdescent plan spec.json""")
     return 0

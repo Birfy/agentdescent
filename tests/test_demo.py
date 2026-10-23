@@ -85,6 +85,10 @@ def test_the_demo_command_runs_a_real_evolution_and_fixes_the_skill(tmp_path, mo
     assert "held-out reward: 1.000" in out, out
     assert "'COLUMN: amount'" in out, out
     assert "agentdescent apply" in out and "--dry-run" in out
+    # the next-step footer must name a spec path that the init line it shows
+    # actually writes (#484): bare init writes .agentdescent/<name>.evolve.json
+    assert "agentdescent plan spec.json" in out
+    assert "--out spec.json" in out
 
     # the run is in the store, and the user's skill on disk is untouched
     runs = runstore.list_runs(store=str(tmp_path / "runs"))
