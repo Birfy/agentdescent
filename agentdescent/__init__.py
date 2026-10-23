@@ -339,6 +339,7 @@ from .self_improve import (
     SelfImproveTick,
     self_improve,
 )
+from .safety import SafetyCheck, SafetyReport, safety_report
 from .recursive import (
     RecursiveRound,
     RecursiveSelfImproveReport,
@@ -754,6 +755,9 @@ __all__ = [
     "SelfImproveReport",
     "SelfImproveTick",
     "self_improve",
+    "SafetyCheck",
+    "SafetyReport",
+    "safety_report",
     "RecursiveRound",
     "RecursiveSelfImproveReport",
     "recursive_self_improve",
