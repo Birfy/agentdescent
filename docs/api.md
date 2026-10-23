@@ -44,6 +44,7 @@ EvolutionResult(
     replay: Optional[Dict[str, Any]] = None,
     curriculum: Optional[Dict[str, Any]] = None,
     meta: Optional[Dict[str, Any]] = None,
+    lineages: Optional[List[Dict[str, Any]]] = None,
     usage: Usage = <factory>,
     wallclock: float = 0.0,
     rollouts: int = 0,
@@ -3129,6 +3130,7 @@ PopulationAggregator(
 | `checkpoint() -> Optional[dict]` | Serialise the archive and the selection counter. |
 | `finalize() -> None` | Leave the best-scoring candidate on the head, then promote. |
 | `head_for_worker(worker_id: int = 0) -> str` | The branch a worker should snapshot. |
+| `lineage_report() -> List[Dict[str, object]]` | A read-only per-branch view for a population run (#150, semantics C). |
 | `restore(state: dict) -> None` | Restore the archive written by `checkpoint`. |
 | `step(n_workers: int = 1) -> List[MergeReport]` | Fire every artifact bucket that is ready and return per-artifact reports. |
 

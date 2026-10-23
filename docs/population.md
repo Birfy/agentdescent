@@ -26,6 +26,23 @@ that accumulates.
 | `population_islands=N` | `N` persistent head-islands on top of `dev`. `0` (the default) keeps the old per-step-fork behaviour exactly. A value above `0` without a declared selection policy is refused (the "honour or refuse" rule). |
 | checkpointing | The archive, the islands (`forks`), the per-island lineage (`branch_parent`) and the selection counter all checkpoint/restore, so a resumed run keeps the population tree it had built. |
 
+## Reading the lineages
+
+A persistent-island run returns a read-only `EvolutionResult.lineages`: one row
+per live lineage (`dev` plus each island) with its `candidates`, the archive's
+`best_version` / `best_score` on that branch, the `selected` count and its
+lineage `tip`. It is read from the archive the gate already scored, so it costs
+no extra evaluation, and it outlives `finalize` (islands are reaped from the
+ledger at the end, but the report still names them). `None` on a single-head
+run. The official `state` / `rendered` remain the primary head; this is a
+report, not a second way to commit.
+
+```python
+result = evolve(..., population_islands=4)
+for line in result.lineages or []:
+    print(line["branch"], line["best_score"], line["candidates"])
+```
+
 ## Honest measurement
 
 `bench/population_engine.py` A/Bs three arms (single-head / CladeThompson /
