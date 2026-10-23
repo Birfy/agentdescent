@@ -63,6 +63,23 @@ Darwin Gödel Machine's open-ended archive: keep every capability self-modificat
 | `archive_mode` | `str` | `keep_all` | keep_all keeps stepping stones; keep_better drops a child that does not beat its parent |
 | `failure_threshold` | `float` | `0.8` | only rollouts below this reward induce a capability |
 
+## `evoskill`
+
+EvoSkill's two-role skill induction: Proposer analyses a failure batch, Generator writes one SKILL.md, and a bounded top-K frontier keeps the best skill libraries.
+
+- **Kinds:** `agent_dir`
+- **Fidelity:** `mechanism_microport`
+- **Cost:** two model calls per induced skill; one full held-out re-eval per admitted candidate
+- **Source:** EvoSkill: skill discovery (see docs/algo-evoskill.md)
+- **Details:** [algo-evoskill.md](algo-evoskill.md)
+- **Spec:** `"algorithm": "evoskill"`
+
+| Parameter | Type | Default | Meaning |
+|---|---|---|---|
+| `max_frontier` | `int` | `5` | frontier size |
+| `batch_size` | `int` | `4` | failures per induction batch |
+| `eval_concurrency` | `int` | `8` | held-out re-evaluations run in parallel |
+
 ## `gepa`
 
 GEPA's genetic reflective loop: keep a Pareto pool of candidates scored per instance and mutate a win-frequency-selected parent instead of the single best average.
