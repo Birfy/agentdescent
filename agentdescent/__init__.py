@@ -44,6 +44,7 @@ from .advantage import (
     TrustRegion,
     state_distance,
 )
+from .jev import JEVModel
 from .verifier_curriculum import (
     CoevolutionReport,
     CoevolutionRound,
@@ -468,6 +469,7 @@ __all__ = [
     "TrustRegion",
     "StableDistanceAcceptance",
     "state_distance",
+    "JEVModel",
     "CoevolutionReport",
     "CoevolutionRound",
     "ProbeRow",
