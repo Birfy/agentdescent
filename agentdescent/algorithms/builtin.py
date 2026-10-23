@@ -125,3 +125,7 @@ register(Algorithm(
     build=_build_archive,
     source="Darwin Gödel Machine (choose_selfimproves), ADAS archive, SICA best-agent",
     extra_calls="none"))
+
+
+# The GEPA port registers itself; importing it is what makes `gepa` a name.
+from . import gepa  # noqa: E402,F401
