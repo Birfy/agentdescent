@@ -6,6 +6,1275 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-10-23
+
+### Added
+
+- A persistent-island population run now returns `EvolutionResult.lineages`
+  (#150, semantics C): a read-only row per lineage (`dev` plus each island) with
+  its candidate count, best archived version/score, selection count and lineage
+  tip. It is read from the archive the gate already scored, survives `finalize`,
+  and is `None` on a single-head run; the official artifact is unchanged.
+
+- ACE's grow-and-refine playbook is now a named algorithm (`"algorithm": "ace"`,
+  `kind: text`) in the in-package registry (#384). `ACEPlaybook`, its
+  near-duplicate de-dup and the `GrowAndRefine` Curator moved from `examples/ace`
+  into `agentdescent/algorithms/ace.py`; the example keeps its FiNER domain,
+  prompts and CLI and imports the one implementation.
+
+- SkillOpt's skill-document training is now a named algorithm
+  (`"algorithm": "skillopt"`, `kind: text`) in the in-package registry (#384).
+  The bounded edit patch, strict held-out gate, rejected-edit buffer and annealed
+  textual learning rate moved from `examples/skillopt` into
+  `agentdescent/algorithms/skillopt.py`; the example keeps its SearchQA domain,
+  prompts and CLI and imports the one implementation.
+
+- EvoSkill's bounded skill-library frontier is now a named algorithm
+  (`"algorithm": "evoskill"`, `kind: agent_dir`) in the in-package
+  registry (#384). The two-role Proposer/Generator induction, the top-K frontier
+  and the best-member parent rule moved from `examples/evoskill` into
+  `agentdescent/algorithms/evoskill.py`; the example keeps its OfficeQA domain,
+  prompts and CLI and imports the one implementation.
+
+- Third-party packages can register a named algorithm through the
+  `agentdescent.algorithms` entry-point group (`Algorithm` or a zero-argument
+  factory returning one). A plugin that fails to load is recorded in
+  `agentdescent.algorithms.external_errors()` and does not hide the shipped
+  registry; a name that duplicates a built-in is an error, not a shadow.
+
+- DGM's keep-all capability archive is now a named algorithm
+  (`"algorithm": "dgm"`, `kind: text`) in the in-package registry (#384). The
+  sigmoid×novelty parent draw, the keep-all archive and the one-capability
+  proposal moved into `agentdescent/algorithms/dgm.py`; the example keeps its
+  coding-agent/Docker domain and imports the mechanism.
+
+- `recursive_self_improve`: the self-improvement loop now carries a
+  `ReallocationPolicy`, and each outer round evolves that rule with
+  `portfolio_evolve` on the archive the loop just wrote. The first round uses the same fixed rule as `self_improve` (config floor/min_samples),
+  each later round searches from and validates against the incumbent, and a rejected
+  policy round is reported with the previous rule kept; a cold archive is a reported rejection,
+  not a failure. `SelfImproveConfig.min_exam` also applies the verified-seeding bar
+  before an archived rule is used as a prior.
+
+- `CapabilityGuard`, an acceptance policy that protects capabilities outside the
+  task being evolved: it scores the base artifact and the candidate on named task
+  suites and rejects a self-modification that misses a suite's absolute floor or
+  falls below the base by more than its tolerance, then delegates to the inner
+  acceptance policy. This is the anti-catastrophic-forgetting gate for recursive
+  self-improvement rather than a second verifier.
+
+- `VerifierCurriculum` and `VerifierAgreement`: a curriculum that selects the
+  tasks where a verifier disagrees most with the oracle (abs / overestimate /
+  underestimate), feeds the selected oracle labels back into the verifier, and
+  reports the gap before/after (one oracle label per task per round); plus an
+  acceptance policy that audits a sample of commits and refuses a verifier-only
+  gain or an oracle regression (`oracle-disagrees`). This targets the
+  Goodhart failure mode of recursive self-improvement without adding a second
+  verifier.
+
+- `JEVModel`, a dependency-free distilled Judge–Evaluator–Verifier student: a
+  linear logistic scorer over caller-supplied `(artifact, task)` features that
+  learns oracle labels online (`observe`), in passes (`fit`), predicts in `[0, 1]`
+  where a verifier is expected, and checkpoints as JSON. Intended to distil oracle labels from a disagreement-selected task loop, not to
+  replace the oracle; features are standardised online and the JSON checkpoint
+  carries the scaling state.
+
+- `safety_report` / `agentdescent safety`: a read-only pre-flight check for an
+  archive that a recursive loop is about to seed from. It combines exam coverage,
+  whether each slot's best eligible rule is trusted, and the worst oracle-vs-
+  verifier gain bias from an optional `MetaAuditStore` on the *seedable* set, returning `safe` /
+  `caution` / `unsafe` with the named checks and reasons. `--min-exam` mirrors
+  `verified_rules`; CLI exit codes are 0 safe, 1 caution, 3 unsafe, 2 usage. No
+  model calls, no writes.
+
+- `agentdescent uninstall <dsh|claude-code|codex|opencode>` (`--dry-run`, `--home`)
+  reverses `install` (#165): it removes the skill files and the plugin directory,
+  the marker-delimited `cordis.patch.yml` block, the `[mcp_servers.agentdescent]`
+  table and the pinned `mcp.agentdescent` entry, and nothing else. A Codex table
+  is removed even when Codex has appended other tables after it. Anything that is
+  no longer exactly what `install` writes (an edited launcher, a bare
+  `opencode mcp add` entry, a hand-written table) is kept and reported with exit
+  status 1, a commented `opencode.jsonc` is never rewritten, and the run store is
+  untouched. New `integrations.uninstall()`.
+
+- Genesis (`examples/genesis`): a blind mode in which the acceptance suite lives
+  outside the repository and the agents see the requirement and the assertion's
+  name rather than its source, `own_review` / `own_test_failures` so a child's own
+  tests are run and implementation code with no test under its node is sent back
+  (a test file is `test_*.py` or `*_test.py`; package markers, `conftest.py` and
+  generated modules owe none), the `fly` domain (only `REQUIREMENTS.md` is frozen),
+  a containerised session sandbox that forwards credentials by name rather than by
+  value, and the `claude-cli` provider with `--max-tokens` / `--timeout` in
+  `examples/_common.py`. `agentdescent/` itself is untouched (#188).
+
+- Multi-artifact evolution — `extra_artifacts=` on `evolve()` and `async_evolve()`
+  (#197): register any number of artifacts beside the primary; the worker loop
+  proposes against each (PP stages name them; `PipelineParallel` lifts once
+  extras exist), the aggregator merges by `diff.target`, and a contract-breaking
+  diff lands atomically via `Ledger.commit_atomic` with exact dependent-adapter
+  coverage (`missing-adapters` when incomplete) and CAS retry that refuses a
+  stale adapter. `Contract.depends_on` drives dependent cache eviction
+  (`MemoryCache` / `FileCache.invalidate`). Sync/async rollout records attribute
+  extras to the extra's artifact id. Default path without extras is unchanged.
+
+- RRSI wired into `evolve()` (`examples/rrsi/rrsi_policies.py`, #254 / #221):
+  `build_rrsi_bundle()` assembles the three regularizers -- `RRsiCritic`
+  (pre-evaluation screen: annealed edit-budget gate + deterministic leakage
+  screening + optional model reviewer), `RRsiProposalPolicy` (injects budget,
+  measured per-edit history, pruning targets and stall exploration into the
+  reflection), and `RRsiAcceptance` (the pinned Algorithm-2 floor + both
+  cost-rule branches + novelty, with monotone `S*`) -- into one `Policies`
+  bundle sharing a checkpointable `RRsiState`. New engine seam
+  `Policies(screen=...)` (`ScreenPolicy`) runs **before measurement**, so a
+  leaking or over-budget card is settled and reported as `critic-rejected`
+  without a held-out sweep; new outcomes `noise-floor` / `cost-rule`; new
+  counters `critic_checked` / `critic_rejected`; the aggregator's checkpoint
+  now carries an acceptance policy's optional state, so a resumed run does not
+  lose `S*`. The selection core and schedule fixtures are reused, not
+  rewritten; declared deviations (one-candidate-per-round judging, per-merge
+  anneal on the barrier-free path, configured `noise_band`) are recorded in
+  `docs/algo-rrsi.md`. Default behaviour unchanged -- a run without the bundle
+  reports zeros.
+
+- Verifier bootstrap flywheel (`agentdescent/audit/boost.py`, #273):
+  `VerifierBoost` wraps any verifier and learns a monotone calibration curve
+  (`isotonic_fit`, numpy-only PAV) from the audit's **IMPROVEMENT** pool, then
+  activates it **only if it provably reduces residual error on a held-out slice
+  of that pool** (the bootstrap gate). When active it corrects the cheap and
+  learned layers the aggregator uses to rank candidates and the audit uses for
+  its trust signal; `eval_counts` / `full_eval` are delegated **raw**, so the
+  commit gate keeps the oracle's authority over what commits. It trains on the
+  IMPROVEMENT pool only (never the CALIBRATION pool that measures it), filters
+  to the current verifier version, and declares itself as a new verifier version
+  (`version_tag`) so `attach(boost=...)` / `Audit.recompute()` refresh the audit
+  fingerprint and `VerifierWatch` withdraws the old calibration. Default
+  behaviour unchanged -- no boost means no fitting and no correction.
+
+- `examples/textgrad/`: a `mechanism_microport` of TextGrad
+  (zou-group/textgrad@75e912e2) as a reflection / propose seam. A proposal is a
+  textual-gradient call (the base-case backward prompt) followed by a TGD rewrite
+  read from `<IMPROVED_VARIABLE>` tags, applied to one prompt slot whose diff id
+  hashes the text (an unchanged rewrite is a counted no-op). Acceptance is the
+  default held-out gate, so no core contract changes; it is stricter than
+  upstream's `run_validation_revert` (a tie is kept upstream, rejected by the
+  Beta-posterior gate), which is a declared departure. Registered in
+  `bench.candidate_methods`, with `docs/algo-textgrad.md` and an offline
+  `tests/test_textgrad_example.py`; `--dry-run` needs no network and no API key.
+  The reflection family no longer lists TextGrad as unimplemented (#290).
+
+- `examples/gskill`, a `mechanism_microport` of GEPA's gskill: `optimize_anything`
+  learning a repository-specific `SKILL.md` for a coding agent. The artifact is a
+  `FileTree` skill directory behind the `skill_dir` structural validator, scored
+  by a binary fail-to-pass / pass-to-pass fitness over a vendored twelve-bug
+  fixture repository (no SWE-smith, no Docker), accepted under a strict held-out
+  gate, and exported as a valid `.claude/skills/<name>/` tree with
+  `--export-skill`. `python -m examples.gskill --dry-run` needs no network,
+  Docker or API key. Real gskill (Jinja, Bleve) numbers are not claimed (#291).
+
+- `examples/dynamic_cheatsheet/`: a `mechanism_microport` of Dynamic Cheatsheet
+  DC-Cu (arXiv:2504.07952, `suzgunmirac/dynamic-cheatsheet@5cfe3c3`), the
+  test-time Gen + label-free Cur memory baseline ACE improves on, on a vendored
+  offline Game-of-24 slice. The curator never receives a gold answer or the
+  reward; the default is online (every rewrite kept) and `--gated` installs the
+  held-out gate. `MethodPolicy` gains `blast_radius` (default 0.6, so every other
+  port is unchanged) because above 0.3 the runtime audits every commit in front of
+  the acceptance policy; the cheatsheet declares 0.2. Registered in
+  `bench.candidate_methods`; page `docs/algo-dynamic-cheatsheet.md` (#292).
+
+- LearnableFusionPolicy (#298): a `FusionPolicy` that learns when merging wins.
+  An online logistic over diff-only features (candidate count, key overlap, diff
+  sizes) is trained on the tournament's own `FusionTrial`s, and once confident
+  that the union is the right answer for a merge shape it returns the union
+  **without buying the cheap ranking sweep**; uncertain merges still run the
+  tournament and observe a fresh label. The rollback guard scores the **pre-
+  update** prediction -- the rule actually in force -- and retires skipping
+  permanently after a confident-and-wrong counterfactual (default
+  `max_wrong_skips=1`). The budget-governor's `tournament=False` degrades to the
+  plain union and keeps recording unranked trials on the list `fusion_stats`
+  reads. With no trials the policy is `DefaultFusion(tournament=True)` verbatim.
+  Commits are unaffected: a skip returns the same union the non-tournament
+  default would have committed, and the acceptance gate still scores it on the
+  full held-out set.
+
+- Solver-challenger self-play (`agentdescent/selfplay.py`): `curriculum_evolve()`
+  co-evolves the solver and its task distribution. A `Challenger` owns a
+  task-generation spec; each round it generates a validated frontier batch, the
+  `FrontierSampler` mixes those into the solver's train pool, and the challenger
+  tunes its spec on the measured learnability (GoDoors-style `r0` = a frontier
+  task's last solver score minus its first). The engine runs once -- one
+  aggregator, one ledger, held-out fixed from the seed tasks -- so the challenger
+  never touches the reported evaluation. A validity gate is mandatory
+  (`Challenger.validate` raises on malformed tasks; failures are counted), the
+  frontier is self-regulating (tasks the solver already passes leave instantly,
+  tasks it never learns are dropped as stuck), and the sampler may return a Task
+  object directly, which the engine resolves without a pool lookup (both the
+  synchronous and barrier-free paths). `EvolutionResult.curriculum` carries the
+  run's `r0_mean` / learned / stuck / invalid / generated stats. Offline demo:
+  `python -m examples.selfplay.selfplay_demo --dry-run`.
+
+- Cross-run consolidation (`agentdescent/consolidation.py`): what a run learned
+  survives it. `ConsolidationStore` archives a run's product — the artifact
+  state, rendered skill, measured reward, rounds and configuration — one JSON
+  record per run under `<path>/runs/<run_id>.json`, atomic and idempotent, with
+  a durable trajectory-store path linked rather than copied. `seed_from_archive`
+  retrieves a candidate for the next run (same configuration fingerprint first,
+  then measured reward, same strategy only) and hands its state to
+  `evolve(initial_state=...)` **only if a mini-eval on a sample of the new tasks
+  shows it does not regress beyond `min_reward` against the empty baseline** —
+  a harmful cross-domain seed is refused and reported, never installed.
+  `ConsolidationRecord` / `SeedReport` carry what was decided and why;
+  non-finite rewards are refused. Offline demo:
+  `python -m examples.consolidation.consolidation_demo` (seeded run reaches the
+  quality bar ~200x sooner than the empty seed on the measured domain).
+
+- Persistent-island population engine: `evolve(population_islands=N)` (and
+  `async_evolve`) widens the population layer into a *persistent* search. With a
+  declared selection policy (e.g. `Policies(selection=CladeThompson())`), `N`
+  head-islands survive across steps and each records its own lineage
+  (`_branch_parent`), so tree-shaped policies score clades -- a lineage that
+  accumulates, which is what HGM's metaproductivity means. `PopulationAggregator`
+  creates/reuses the island forks instead of re-forking from `dev` every step,
+  checkpoints them (`forks`, `island_count`, `branch_parent`, the archive), and
+  reaps them at `finalize`. `island_count=0` keeps the old per-step-fork
+  behaviour exactly; a value above `0` without a declared selection policy is
+  refused ("honour or refuse"). `bench/population_engine.py` A/Bs single-head /
+  CladeThompson / islands+CladeThompson at equal budget and reports time-to-
+  quality, final reward and committed counts honestly (on a smooth monotone
+  landscape single-head is competitive; the population engine targets rugged
+  landscapes).
+
+- `ConsolidationStore` / `ConsolidationRecord` / `SeedReport` /
+  `config_fingerprint` / `seed_from_archive` and `Challenger` /
+  `ChallengerConfig` / `FrontierSampler` / `curriculum_evolve` are listed in
+  `agentdescent.__all__` and rendered in `docs/api.md`, matching the
+  consolidation and selfplay guides (#341).
+
+- Meta-evolution product surface: `meta_run()` evolves one decision slot of the
+  inner search (`meta_evolve` on the train problems), validates the evolved value
+  on problems the outer loop never saw (`meta_validate`, with `val_seeds`
+  disjoint from the training seeds), and returns a `MetaRunReport` — the rendered
+  value (`report.value`; compile with `spec.compile(...)`), the per-problem
+  before/after/gain, the transfer ratio (mean val gain / mean train gain), and an
+  `adopt` / `reject` verdict with its reason. A value is adopted only when its
+  mean gain on unseen problems clears `min_gain` and the transfer is not below
+  `transfer_floor`; otherwise it is rejected and the reason says whether that is
+  "no gain" or "a fit that does not transfer". The report rides the run result
+  (`EvolutionResult.meta`), so a CLI or plugin shows the decision without
+  recomputing it. Governance: the caller must keep validation problems and seeds
+  disjoint from the training set (`meta_run` raises on overlap), so a verdict is
+  never measured on the problems that shaped the value — the same final-evaluation
+  isolation every other development set gets. Offline demo:
+  `python -m examples.meta.meta_evolve_demo`.
+
+- `agentdescent doctor` (CLI and the MCP `doctor` tool) now reports whether each
+  host is wired up and whether it is still current (#382). New read-only
+  `integrations.host_status(host)` compares the installed `SKILL.md` with the one
+  this package would write (`ok` / `stale` / `missing`) and checks the MCP entry,
+  following the same `DSH_HOME` / `CODEX_HOME` / `XDG_CONFIG_HOME` paths as
+  `install`. `doctor_report()` gains `hosts` and `hints`: a stale or half-written
+  integration is a problem (the skill a `pip install -U` left behind teaches the
+  host a procedure the package no longer has), while a host CLI on `PATH` with no
+  integration is only a hint. Nothing is written.
+
+- Algorithm registry (#384, slice 1): `EvolveSpec.algorithm` (`"rrsi"` or
+  `{"name": ..., "params": {...}}`) picks a named recipe whose `Policies` slots,
+  `agg_config` and `evolve` defaults the spec can still override; `agentdescent
+  algorithms list [--kind K] [--json]` and `algorithms show <name>` describe each
+  one (kinds, typed parameters with defaults, extra cost, fidelity label) from the
+  wheel. Unknown names, unknown or mistyped parameters and a kind the algorithm
+  does not apply to fail in `plan` naming the field and the valid choices, and
+  `plan` echoes the resolved algorithm and which of its defaults the spec
+  overrides. Two entries ship: `rrsi` (text; the RRSI screen / proposal /
+  acceptance policies) and `archive_selection` (DGM-style archive parent sampling,
+  any kind). The RRSI mechanisms moved from `examples/rrsi/` into
+  `agentdescent/algorithms/rrsi/` so the wheel carries them; the `examples.rrsi.*`
+  modules remain as aliases.
+  Because four of those modules are adapted from google-research/rrsi
+  (Apache-2.0), the wheel now declares `MIT AND Apache-2.0` (PEP 639; build
+  requires setuptools>=77) and ships `LICENSE`, `NOTICE` and
+  `LICENSES/Apache-2.0.txt` in its `.dist-info/licenses/`. `plan` warns when
+  `rrsi` runs with an empty `protected` list (the leakage screen is then
+  vacuous), `archive_selection`'s `temperature` now declares its real lower
+  bound, and a failed built-in registry load re-raises the original error.
+
+- `agentdescent --version` (and `-V`) prints `agentdescent <version>` and exits 0.
+  `doctor` — the CLI text and `--json` output and the MCP `doctor` tool — now
+  reports `version` (`agentdescent.__version__`) and `executable`
+  (`sys.executable`), so a host-side `doctor` and a shell-side `doctor` can be
+  compared directly to tell whether the host's MCP server runs the same install.
+  The SKILL's `doctor` step, `docs/plugin-quickstart.md` and
+  `docs/testing-the-plugins.md` say to compare them when results differ (#416).
+
+- Continuous meta-learning (`agentdescent/continuous_meta_run`): the archive
+  drives the next session. `ConsolidationRecord` gains an optional `problem`
+  descriptor (backwards compatible); `archive_rule` writes an adopted slot rule
+  back to the archive with its problem descriptor; `problem_from_archive`
+  rebuilds a runnable inner `Problem` from an archived descriptor (the caller
+  supplies the tasks via `tasks_for`, the archive supplies the slot and inner
+  settings -- the "link, don't copy" rule applied to a problem instead of a
+  trajectory); and `continuous_meta_run` closes the loop between sessions --
+  train and validation problems come from the archive, the search starts from
+  the best archived rule for the slot/spec/config, the gain is measured both
+  against that prior and against the fresh seed (the honest cross-session
+  number), and an adopted rule is archived so the next session starts from a
+  better one. An empty archive is an ordinary `meta_run`. A record archived by a
+  different spec is refused at rebuild, never misread.
+
+- Meta-audit — the trust layer for the loop that evolves the rules
+  (`agentdescent/meta_audit.py`). `audited_meta_validate` scores every
+  `(problem, seed)` validation pair under the meta reward for the decision, and
+  with probability `sample_rate` scores the pair again under an independent
+  oracle and persists it to a `MetaAuditStore` — a probability sample (every
+  record carries its `inclusion_prob`) with a durable, append-only JSONL trail
+  that reconciles by last occurrence, so truth arriving later from another
+  process can be attached without a rewrite. `meta_run_audited` is `meta_run`
+  with this validation: the verdict is persisted beside the sampled evidence,
+  and the report carries `audited_n` / `oracle_gain` / `gain_bias`. Over the
+  resolved sample, `gain_bias` is the Hajek estimate of `verifier_gain -
+  oracle_gain` — the number that says "your meta reward is 0.3 optimistic"
+  instead of letting that optimism adopt rules in silence. The decision path
+  never sees the oracle (auditing can be turned on mid-fleet without changing
+  which rules are adopted), and the same `_require_disjoint` isolation `meta_run`
+  enforces applies.
+
+- Meta-population (`agentdescent/meta_population.py`): the archive seeds a
+  population, the population promotes. `meta_population_run` ranks the archive's
+  rule records for a slot/spec/config as `continuous_meta_run` does, seeds the
+  top `islands` distinct rules each into its own session, and every island trains
+  on the same problems and validates the same `val_problems` at `val_seeds`
+  disjoint from training — so the islands differ only in where they started. Each
+  island runs in its own fresh ledger repo (`repo_dir=` names the base directory;
+  a shared `repo_path` would resume the ledger and silently ignore the distinct
+  `initial_state`), the best island whose verdict is `adopt` is written back via
+  `archive_rule`, and `MetaPopulationReport` / `PopulationIsland` report every
+  starting rule's outcome, the promotion and the archive count. An island that
+  errors is reported and never promoted without stopping the others; a population
+  needs at least one archived rule to diversify from (an empty archive is
+  refused, with a pointer to run `continuous_meta_run` once first). Offline demo:
+  `python -m examples.meta.population_meta_demo`.
+
+- Meta-curriculum (`agentdescent/meta_curriculum.py`): the meta loop generates
+  the problems it is judged on. `curriculum_meta_run` is `continuous_meta_run`
+  plus a `MetaProblemChallenger` — the solver-challenger of `curriculum_evolve`
+  (#329) applied one level up, where the challenger generates frontier *problems*
+  instead of frontier *tasks*. Between outer rounds the challenger draws a
+  candidate problem configuration, runs it through a mandatory validity gate
+  (`validate(config) -> Problem`; a payload that does not build a runnable inner
+  problem is counted, never crashed over), and installs the validated problems
+  into a `FrontierSampler` that mixes them with the seed problems. Learnability
+  is two-phase and measured online (`record` sees the meta reward; a problem the
+  rule already solves is dropped at once, one it never learns is dropped as
+  stuck), and the challenger's `propose(descriptor, report)` pushes the
+  generation spec outward. The challenger never touches the final evaluation —
+  the validation set is fixed from `val_problems` and the held-out split is
+  computed from the seed tasks alone. The archive still drives continuity: the
+  search starts from the best archived rule in a fresh ledger repo, and on
+  `adopt` the rule is written back with its problem descriptor. The report
+  carries the decision fields plus the frontier statistics (`generated_total`,
+  `invalid_total`, `learned`, `stuck`, `r0_mean`). Offline demo:
+  `python -m examples.meta.curriculum_meta_demo`.
+
+- Harness composition (`agentdescent/harness.py`): combine algorithm ports, learn
+  which wins where. A `Harness` is a named `(tasks, repo) -> EvolutionResult`
+  callable; the consolidation archive becomes the leaderboard — one
+  `ConsolidationRecord` per `(config, harness)` under `artifact_id="harness:<name>"`
+  with the domain's `config` and the measured `final_reward`, written atomically
+  and idempotently. `record_harness` / `harness_score` / `harness_leaderboard`
+  read and write that evidence; `select_harness` routes a new domain to the
+  harness the recorded rewards say wins there (same-config fingerprint first, best
+  reward), falling back to round-robin or a caller default when no evidence exists
+  — a harness with no runs on a domain can never beat one that was measured there.
+  `compose_run` runs the selected harness (`mode="best"`) or every harness
+  (`mode="all"`, the leaderboard's training mode), each on a fresh ledger repo,
+  records the outcomes, and returns a `HarnessReport` (per-harness reward /
+  time-to-quality, winner, selection reason). Every algorithm port binds into a
+  `Harness` unchanged; the archive's shape and `config_fingerprint` domain
+  separation are reused as-is.
+
+- Self-exam (`agentdescent/meta_exam.py`): adoptions are provisional until the
+  oracle says so. `exam_archive` walks the archive's rule records, re-validates
+  each against the problems its own `problem` descriptor describes (rebuilt by
+  `problem_from_archive`) using an independent oracle, and stamps the outcome on
+  the record via `ConsolidationStore.mark_exam`: `passed` when the oracle gain
+  clears `min_gain` (flags reset), `flagged` when it does not (flags + 1), and
+  `demoted` when a rule fails truth `max_flags` times in a row. A demoted rule is
+  excluded from future seeding — `_archived_rules` skips it, so
+  `continuous_meta_run` and population selection never start a search from a rule
+  truth has retired. `ConsolidationRecord` gains optional `exam` / `exam_flags` /
+  `exam_note` fields (backwards compatible: an archive written before the exam
+  read back as `None` and stays seedable until examined); `mark_exam` rewrites
+  atomically (tmp + rename). Adoptions are thus provisional, and the archive is
+  self-correcting: what the loop believed is checked with evidence, and what
+  fails the check is retired.
+
+- Portfolio governance (`agentdescent/portfolio.py`): watch every layer's
+  measured return, shift the budget to what pays. A `LayerBudget` is one spending
+  line (a spend limit, what it spent, the measured return that spend bought, and
+  how many measurements it rests on). `portfolio_report` ranks layers by
+  return-per-cost and reallocates the next window deterministically and
+  conservatively: a layer at or above `floor` with at least `min_samples`
+  measurements grows (`budget * (1 + grow)`, capped), one below the floor or
+  flagged `diminishing` shrinks (`budget * (1 - shrink)`), one with too few
+  measurements is held (no budget moves on a sample of one), and no layer is ever
+  zeroed. `layers_from_archive` turns the consolidation archive's rule records
+  into one layer per decision slot (return = mean measured reward, spend = mean
+  rounds per rule, budget = total rounds, samples = rule count) — the honest view
+  of "which decision's evolution
+  pays" — and other layers (audit bias, harness leaderboard, population islands)
+  are caller rows in the same table. Non-finite inputs are refused. The rule is
+  the fixed, deployable baseline for the next rung: evolving the reallocation
+  policy itself via `meta_run`.
+
+- Chain audit (`agentdescent/chain_audit.py`): one adoption, traced through every
+  evidence ring. `chain_audit` walks an archived rule's rings — governance
+  (decision plane vs machinery), the recorded decision, the meta-gain oracle
+  bias (from a `MetaAuditStore`, #426), the self-exam stamp (passed/flagged/
+  demoted), the inner verifier's residual bias (from an `AuditStore`, #273), and
+  harness routing evidence — and reports each ring as `verified` (evidence
+  present and within `bias_threshold`), `flagged` (present and outside it), or
+  `unverified` (the evidence simply is not there, reported rather than silently
+  assumed). `ChainAuditReport.verified` is true only when no ring is flagged or
+  unverified, and the reason names the rings that keep it false. An unknown run
+  is refused with `KeyError`. The promise "no number in the loop is unverified"
+  becomes inspectable end to end.
+
+- The meta stack on the command line: `agentdescent portfolio`, `exam`, and
+  `audit`. `portfolio [archive]` reads the consolidation archive (default
+  `$AGENTDESCENT_HOME/archive`), builds one `LayerBudget` per decision slot via
+  `layers_from_archive`, runs `portfolio_report`, and prints each layer's
+  return-per-cost and reallocated budget with its reason (`--json` for
+  machine-readable output; empty archive exits 1 with a pointer to run a meta
+  session first). `exam [archive] --domain module:builder` resolves the domain
+  through a `module:attribute` ref (a zero-arg builder returning `oracle`,
+  `tasks_for`, `run`, `reward`, `propose`, `strategy`, and optionally `spec`),
+  runs `exam_archive`, and reports passed / flagged / demoted per rule. `audit
+  <run_id> --archive PATH [--meta-audit ...] [--inner-audit ...] [--harness
+  module:callable] [--bias-threshold N]` traces one archived adoption through its
+  evidence rings via `chain_audit` and prints each ring's verified / flagged /
+  unverified status; an unknown run or a bad ref fails cleanly (non-zero exit),
+  never with a traceback. One surface, two transports: the same verbs the MCP
+  server can expose.
+
+- Trajectory-driven curriculum (`agentdescent/trajectory_curriculum.py`): the
+  problems come from the run's own failures. `failed_rollouts` reads a rule's
+  linked `TrajectoryStore` (via `ConsolidationRecord.trajectory_store`, #334) and
+  returns the rollouts whose reward fell below `failure_threshold` — the memory
+  of #248 turned into evidence. `trajectory_challenger` is a
+  `MetaProblemChallenger` whose generation spec is an archived run_id: `generate`
+  mines that rule's recorded failures, `validate` builds a frontier problem over
+  the failed tasks via `problem_from_tasks` (raising — and so counted invalid —
+  when there is nothing to mine), and `propose` advances across the archive's
+  rules that recorded trajectories. Plug it into `curriculum_meta_run` (#429) and
+  the meta loop's frontier is generated from what its own runs got wrong, with
+  the #429 guarantee inherited unchanged: the validation set stays fixed and the
+  held-out split is computed from the seed tasks alone, so a mined failure can
+  only ever appear in the training frontier.
+
+- Async meta-population (`async_meta_population_run`): the islands of
+  `meta_population_run` run concurrently. Each island starts from its own
+  archived rule, trains on the shared problems, validates the shared isolated
+  set, and runs in its own fresh ledger repo — so they are independent sessions
+  run through a `ThreadPoolExecutor` with `workers` islands at a time (default
+  all of them). The archive is only read while the islands run
+  (`ConsolidationStore` is thread-safe) and written once at promotion, so the
+  decision and the report are identical to the sequential call's, only faster to
+  reach. An errored island is reported and never promoted, exactly as sequential;
+  an empty archive is refused with the same pointer to run `continuous_meta_run`
+  first.
+
+- Evolved decision code that beats the shipped implementation on quality-per-cost
+  (`agentdescent/evolved_programs.py`). `source_ops` counts the arithmetic/call
+  nodes of a candidate rule's source — a deterministic, attributable cost proxy;
+  `priority_grid_problem` scores a compiled `priority` rule's ordering agreement
+  with the shipped seed's own ordering on a fixed grid (the seed scores 1.0 at
+  the baseline cost); `cost_adjusted_reward` is `quality - lam * (cost / baseline)`,
+  so a candidate must be cheaper at equal quality (or better at equal cost) to
+  outscore the seed; and `evolve_fast_rule` evolves the `selection` priority rule
+  on that reward and reports the evolved rule against the seed on **both axes**
+  (`FastRuleReport.seed_ops` / `evolved_ops` / quality / the cost-adjusted gain).
+  The AlphaEvolve / FunSearch idea applied to the decision plane: the search
+  finds a rule that is as good *and cheaper* than the hand-written default, and
+  the report measures it.
+
+- Learn-to-think (`agentdescent/learn_to_think.py`): the framework evolves *when*
+  to spend compute. The route rule is a gated source `Policy.route(difficulty,
+  budget_left, reward)` returning `direct` / `search` / `reflect` (the gate
+  refuses imports, dunder access, forbidden calls, a wrong signature, and a
+  return outside the three routes; a smoke test runs the route on easy /
+  hard-with-budget / hard-without-budget inputs). `think_problem` is a workload
+  instance whose outcome depends on the route — each route has a cost model and a
+  quality model, and the reward is quality-per-cost — and `learn_to_think` runs a
+  bespoke `evolve()` over those problems (the artifact is the route source, the
+  propose rewrites it) so the framework learns, from its own measured returns, to
+  search the hard tasks and answer the easy ones directly, instead of paying a
+  fixed price everywhere. `LearnToThinkReport` compares the evolved rule with the
+  default on validation problems and shows the route each chose on an easy and a
+  hard input. The Search-R1 / ZigZag "learn when to search" idea, applied to the
+  decision plane.
+
+- Self-rewarding meta-evolution (`agentdescent/self_rewarding.py`): the judge
+  improves as the run goes. `outcome_features` turns a `MetaOutcome` into
+  curve-shape features (mean best-so-far, final, sweeps, rollouts — never the
+  answer); `LearnableMetaJudge` is a small pure-Python linear regressor from those
+  features to oracle quality, fit by least squares (deterministic, no numpy),
+  trained **only on labels the oracle actually produced**; and
+  `self_rewarding_meta_run` alternates — evolve the slot with the plain `auc`,
+  score `judge_sample` outcomes with the oracle and fit the judge, then re-evolve
+  with the judge as the meta reward and refit on the newly oracle-labelled
+  outcomes — so each round the search moves against a closer approximation of
+  truth. The report carries the judge's measured agreement with the oracle on
+  validation outcomes it never trained on (`SelfRewardingReport.judge_agreement`),
+  how many labels it learned from, and the evolved value's oracle gain over the
+  seed. The Self-Rewarding Language Models (Meta 2024) idea applied to the meta
+  level.
+
+- Rule tournament (`agentdescent/rule_tournament.py`): candidates play against
+  each other, ratings decide promotion. `rule_tournament` runs a round-robin
+  where every pair plays twice on each other's ground — rule A is scored by a
+  critic on rule B's challenge problem (rebuilt from B's descriptor via
+  `problem_from_archive`, or a caller-supplied `challenges` map) and rule B on
+  A's — and `EloRating` (K-factor 32, rating mass conserved, draws split) converts
+  the matches into ratings. A rule that wins on its rival's ground is a better
+  rule, and `tournament_promote` re-archives the winner with its measured final
+  reward (its mean critic score on rivals' ground), so the next session's
+  `_archived_rules` ranks the tournament's choice first. The self-play /
+  verifiable-reward idea (DeepSeek-R1, self-playing agents) applied to the
+  archive; a tournament with fewer than two rules is reported as no tournament.
+
+- Self-modifying framework (`agentdescent/self_modify.py`): the framework evolves
+  patches to its own code, gated by its own tests. `patch_source` / `apply_patch` turn a candidate into a
+  unified diff and back (a patch that cannot apply is refused); `gate_source` is
+  the same AST walk every other self-edit in the framework runs (no imports, no
+  dunder, no interpreter calls — a candidate compiles in a namespace of safe
+  builtins only); `evaluate_source` runs the candidate against callable tests and
+  a benchmark, where **every test must pass before any benchmark score counts** —
+  a patch that breaks anything is a zero, never a regression with a number
+  attached; and `improve_source` runs the ordinary `evolve()` over `(test, seed)`
+  tasks, so the framework searches its own code under its own gate and reports
+  the accepted patch, the tests it passed, and the measured gain over the seed
+  (`SelfModifyReport`).
+
+- World model (`agentdescent/world_model.py`): the framework learns an internal
+  simulator and dreams before it acts. `LearnedSimulator` is a pure-Python
+  nearest-neighbour model fit on observed `(state, reward)` pairs — deterministic,
+  dependency-free, and unable to extrapolate beyond what it has seen, which is
+  exactly the honesty a simulator of a measured domain should have;
+  `simulator_problem` turns the simulator into a `Problem` (a cheap, model-free
+  rollout); `simulator_score` measures the simulator against the real problem
+  (mean abs error + rank agreement), so the framework knows when to trust the
+  dream; and `imagine_then_evolve` spends most of its budget in the dream —
+  evolving against the simulator via `meta_evolve` — then verifies the value on
+  the real `val_problems`, reporting the dreamed vs verified rollout counts and
+  the real gain over the seed (`ImagineReport`). The Dreamer loop applied to the
+  framework: pay the real cost where it pays, dream where it is cheap.
+
+- Agent society (`agentdescent/agent_society.py`): the framework evolves a
+  cooperating topology, not just one artifact. `AgentNode` (name, instruction,
+  budget) + `SocietyGraph` (nodes, delegation edges, root) are the container;
+  `society_spec` is the evolvable artifact — a gated `society()` source compiled
+  into a `SocietyGraph`, with `SOCIETY_SEED` the single-agent baseline;
+  `society_problem` is a multi-step task routed through the graph, rewarded as
+  correctness minus delegation cost; and `society_evolve` runs the ordinary
+  `evolve()` over those tasks, so the search finds the topology that solves the
+  task with the least hand-off. `SocietyReport` compares the evolved graph with
+  the seed on validation tasks — the delegation dimension (Anthropic's
+  multi-agent research system; AgentEvolve) measured, not assumed.
+
+- Trajectory tree search (`agentdescent/trajectory_search.py`): the evolution
+  loop becomes a learned MCTS over states. `SearchTree` is a state tree over
+  rendered values with UCB selection (`ucb_c`), expand and back-propagation;
+  `search_evolve` spends a fixed budget expanding the most promising branches —
+  each leaf is branched by a callable, scored by a critic (`auc` by default, or
+  an oracle / the self-rewarding judge) over seeds, and the value back-propagated
+  — and returns the highest-mean-value state with a `SearchReport` carrying the
+  budget, the node count, the search's own value estimate, and a **freshly
+  verified** score of the best state side by side, so the search's reasoning is
+  inspectable against final truth. The LATS / AlphaCodium idea applied to the
+  state space, using the same UCB bandit the tree policies in `selection` run,
+  one level up.
+
+- Failure-weighted replay (`agentdescent/curious_replay.py`): the framework
+  replays the past it is still failing. `ReplayExample` is one replayed past task
+  with its rolling scores; `curiosity_weight` is high while the artifact is still
+  failing it (falls as it improves, floor once mastered); `curious_replay_evolve`
+  runs the ordinary `evolve()` over one task per replayed example, weighted by a
+  **snapshot** of the weights taken before any candidate rolls out, with the
+  mastered and still-curious cohorts interleaved so both land on both sides of
+  the held-out cut; each outcome is recorded into the examples' rolling scores
+  for the next call, and a `CuriousReplayReport` shows the weights and the gain
+  on the still-curious vs mastered past. The Curious Replay (ICLR 2025) idea:
+  spend the budget on the past not yet conquered, measured not assumed.
+
+- Rationale distillation (`agentdescent/rationale_distill.py`): the artifact
+  learns to carry its own reasoning. `extract_rationale` turns one rollout into a
+  rule — a success says how it answered, a near-miss says what it needed
+  (`need cap >= d+1`) — and `distill` dedupes the rollouts' rationales into the
+  skill the artifact carries; `rationale_evolve` runs the ordinary `evolve()` and
+  then distills the run's own successes back into the skill, returning a
+  `RationaleReport` with the distilled skill, the rationale count and the success
+  count. The STaR (Self-Taught Reasoner) idea: the artifact boots itself by
+  carrying what its own runs taught it, near-misses included.
+
+- Self red-teaming (`agentdescent/red_team.py`): the framework attacks its own
+  value to find the OOD gap. `red_team` mutates the training tasks outward and
+  scores the current value on each mutation, collecting the failures — the
+  out-of-distribution region where the value does not generalise (deterministic,
+  reproducible); and `red_team_evolve` runs the ordinary `evolve()`, attacks its
+  own result, and retrains on the union of the problems and the failures it
+  found, closing the OOD gap. `RedTeamReport` shows the failures found and the
+  coverage (fraction of the attack's mutations solved) before and after the
+  retraining, so "the framework found its own blind spot and fixed it" is
+  measured, not claimed.
+
+- `show` (CLI and MCP) now explains a low reward: a new `samples` key lists up to
+  five of the lowest-reward rollouts of the final artifact, each with task id,
+  the agent's output, the task's gold (both cut to 300 characters) and reward,
+  under a fixed 4 KB cap; text mode prints a short block. The run store keeps the
+  engine's rollout records under `ledger/trajectories/` in the run directory. A
+  new spec field `record_rollouts` (default `true`) turns this off. First part of
+  #452; rejected-candidate diffs follow separately.
+
+- Verifiable-reward policy improvement (`agentdescent/verifiable_rl.py`): the
+  framework trains on truth it can check. `verifiable_problem` wraps a
+  `(value, task) -> output` problem so its outcome carries the output and the
+  gold in `detail`; `verifiable_reward` scores exact match (1.0 / 0.0 — a rule
+  that cannot be checked is not rewarded, the DeepSeek-R1 verifiability
+  contract); and `policy_improve` evolves a decision slot with that reward via
+  `meta_evolve`, reporting the per-round verifiable reward curve (the
+  trajectory-level signal RL trains on) and the before/after on held-out
+  verifiable facts (`VerifiableReport`).
+
+- Joint multi-slot evolution (`agentdescent/joint_meta.py`): search the whole
+  decision plane as one artifact. A `PoliciesBundle` holds several `SLOTS`
+  together; each outer rollout installs **all** the slots on `Policies` and runs
+  the inner search, so an effect that only appears when two rules change
+  together is visible to the search (an effect two independently evolved rules
+  never see). A proposal names one or more slots with `=== <slot> ===` blocks, so
+  the aggregator's existing union-on-distinct-keys / resolve-on-same-key rules
+  apply unchanged. `joint_meta_validate` attributes a joint change to each slot by
+  its **marginal** held-out gain and, with `isolate=True`, rolls back a slot that
+  regresses while adopting the rest -- so one over-eager rule cannot smuggle a
+  regression into the archive. An adopted bundle archives one ordinary
+  `meta-rule` record per slot, so `_archived_rules`, `exam_archive` and
+  `continuous_meta_run` keep seeding and examining it unchanged.
+
+  Based on #388 (P7 multi-slot joint evolution + isolating untrusted rules).
+
+- Closed self-improvement loop (`agentdescent/self_improve.py`, with
+  `agentdescent/evidence.py` and `agentdescent/admit.py`). `evidence.snapshot`
+  reconciles the consolidation archive into one deterministic view -- per decision
+  slot's return-per-cost and exam stamps (from `portfolio.layers_from_archive`),
+  the harness leaderboard, and the archive's demoted/flagged counters -- and
+  `rank_slots` turns it into the next targets (falling back to round-robin on a
+  cold archive). `admit` composes an adoption's trust rings (exam / audit /
+  tournament / red-team / chain) into one fail-closed `pass` / `flag` / `demote`
+  verdict -- the generalisation of the joint rung's "isolating untrusted rules" to
+  every adoption path. `self_improve` runs the loop: read evidence, evolve the
+  paying slots with `meta_run` (adopt -> `archive_rule`), trust-gate each adoption (a
+  `demote`/`flag` is stamped on the record with `mark_exam`, quarantining it in the
+  archive's own paths), and move the next tick's budget with `portfolio_report` --
+  for a bounded number of ticks. Ticks compound: each target is seeded from the
+  archive's best rule for its slot, like `continuous_meta_run`. Targets are chosen
+  by evidence with an exploration share and a per-tick rotation, so an unseen slot
+  is tried instead of starved.
+
+  Based on #465.
+
+- End-to-end self-evolution bench (`bench/self_evolution.py`): one command runs
+  the whole chain — seed the archive (`continuous_meta_run`), diversify
+  (`meta_population_run`), re-judge with truth (`exam_archive`), reallocate spend
+  (`layers_from_archive` + `portfolio_report`), compose competing harnesses
+  (`compose_run` / `harness_leaderboard` / `select_harness`) and trace one
+  adoption (`chain_audit`) — on a deterministic offline arithmetic domain, and
+  reports every rung's measured number. Exits non-zero only when a rung fails to
+  run or produces no measurement; a raising rung is recorded as a failed stage,
+  not a crash. `--json` prints the structured report.
+
+- Portfolio evolution (`agentdescent/portfolio_evolve.py`): the framework evolves
+  the rule that governs its own spend. `ReallocationPolicy` is the reallocation
+  rule as four numbers (`floor`, `grow`, `shrink`, `min_samples`); its `apply`
+  delegates to the shipped `portfolio_report`, so the evolved rule is the fixed
+  policy with different numbers (the default is the baseline, no second
+  implementation to drift). `reallocation_spec` compiles the numbers with
+  `ParamSlot`; a `LayerBudget` window is the problem, scored by the projected
+  return the policy's reallocation would buy; `portfolio_evolve` runs the ordinary
+  `evolve()` over the archive's (or the caller's) windows and reports the evolved
+  policy's validation gain over the fixed baseline with an adopt/reject verdict.
+
+- Verified seeding (`agentdescent/verified_seed.py`): trust becomes a gate, not a
+  report. `verified_rules` starts from `_archived_rules` and returns only the rule
+  records that clear the caller's bar -- `min_exam` (default `"passed"`, so an
+  unexamined or once-flagged rule does not seed) and, when a `MetaAuditStore` is
+  supplied, a gain bias within `bias_threshold` -- and explains, per excluded run,
+  why it did not qualify. `continuous_meta_run`, `meta_population_run` and
+  `async_meta_population_run` gain a `min_exam` knob that filters the seeding
+  rules before the session starts; `None` keeps the existing behaviour unchanged.
+
+- `show` (CLI and MCP) can now say what a run that learned nothing actually
+  proposed. The run store writes `candidates.jsonl` beside `rounds.jsonl` with the
+  last few diffs the merger measured and refused: touched files, a short diff, the
+  rationale, the gated probability and the outcome. `MergeReport.candidate_diff`
+  and `evolve(on_reports=...)` expose the record; `record_rollouts: false` still
+  writes neither diagnostic file. `show` returns a bounded `rejected` block, and
+  the shipped SKILL.md tells the host to read `samples`/`rejected` before
+  suggesting more rounds.
+
+- The named-algorithm registry is now reachable from the plugin surface, not just
+  from a spec file: MCP gains `list_algorithms` / `describe_algorithm`, `init` and
+  `plan` accept `--algorithm NAME --param KEY=VALUE`, and `docs/algorithms.md` is
+  generated from the registry. The shared SKILL.md, the Claude Code `/evolve`
+  command and `docs/plugins.md` explain when to offer a method (only when the user
+  names one or the artifact clearly fits) and that the kind's default recipe is
+  used otherwise.
+
+- GEPA's Pareto illumination is now a named algorithm (`"algorithm": "gepa"`,
+  `kind: text`) in the in-package registry (#384, slice 5a). The Pareto pool,
+  per-instance scoring and win-frequency parent selection moved from
+  `examples/gepa` into `agentdescent/algorithms/gepa.py`; the example keeps its
+  HotpotQA domain, prompts and CLI and imports the one implementation, and the
+  generated catalog lists its `seed` / `eval_concurrency` parameters.
+
+### Changed
+
+- Install docs no longer say "once published" / "before publication" for 0.6.0:
+  the release is on PyPI. README installs it with `pip install "agentdescent>=0.6.0"`
+  (core package; the offline demo needs no extra), `docs/plugins.md` and
+  `docs/plugin-quickstart.md` use `pip install "agentdescent[mcp]>=0.6.0"` for the
+  CLI and MCP tools, and `docs/install.md` answers "Can I install from PyPI?" with
+  that command while keeping the installer / current-main flow first; a source
+  checkout is the alternative (#165).
+
+- RRSI wiring fidelity closure (`examples/rrsi/rrsi_policies.py`): the wired
+  proposer/selector now consume the **pinned upstream fixtures**, not
+  approximations. Component attribution goes through `components.normalize` /
+  `classify_diff` (the upstream `K` / `K_STR` evidence rules — `skills/x/SKILL.md`
+  is a `skill` edit, `ToolRegistry(...)` is `client_tool`, pure prose is
+  `prompt`), replacing the first-path-segment heuristic. The per-edit ledger is
+  `history.History` (the pinned durable JSONL) when `build_rrsi_bundle(
+  history_path=...)` is given, with an in-memory twin for scratch runs pinned to
+  the same summaries by a parity test. `RRsiProposalPolicy` reads
+  `History.render` / `prune_set` (with the actionable accepted edits) /
+  `stall_flag`; `RRsiAcceptance` scores novelty over
+  `History.incumbent_component_counts`; the aggregator checkpoint now carries
+  only the search state (round, S*, incumbent cost, progress), while the
+  per-edit evidence is the History's own file — so a resumed run reads the same
+  evidence the loop conditioned on. Six fidelity tests pin the vocabulary, the
+  memory/file parity, durable resume and a genuinely novel structural component
+  carrying a within-band candidate.
+
+### Removed
+
+- `integrations/dsh-agentdescent/node_modules` (210 tracked files of a pnpm peer
+  install) is no longer in git (#165). The package's `files` list never shipped
+  it, the tests build their own tmp `node_modules`, and the npm publish workflow
+  uses only the declared `files`. A root `node_modules/` entry in `.gitignore`
+  keeps it that way; `tests/test_repo_hygiene.py` asserts none are tracked.
+
+### Fixed
+
+- `agentdescent demo`'s next-step footer now shows `init ... --out spec.json`, so
+  the `plan spec.json` line after it names a file that exists; bare `init` writes
+  `.agentdescent/<name>.evolve.json` (#484).
+
+- Dynamic Cheatsheet online mode now matches its claim (#292, follow-up to #317):
+  `MethodPolicy` gains opt-in `cheap_eval_tasks` (default `None`, engine default)
+  so a cheap/full held-out disagreement can no longer lower the audit's trust
+  below 0.75 and veto a rewrite the accept-everything policy meant to keep, and
+  opt-in `test_time_learning` (default `False`) so the runner scores the test
+  split as a sequential Gen -> Cur stream. No other port changes. The
+  self-evolution catalog counts (twenty-three ports, fifteen microports) are
+  corrected across the docs, README and install guide.
+  Standard baseline/final scores stay frozen so quality_gain is not
+  mixed-protocol; streamed learning is under `framework.test_stream`.
+
+- `tools.changelog_fragments` release no longer truncates `CHANGELOG.md` before
+  the replacement is safely on disk (#297). The folded text is staged in a
+  sibling temporary file, flushed and closed, then atomically replaced with
+  `os.replace`; fragments are removed only after that replace succeeds. A
+  write, flush, close or replace failure leaves the original history and every
+  fragment untouched.
+
+- `tools.changelog_fragments` release now syncs `CHANGELOG.md`'s parent
+  directory after the atomic replace and before deleting any fragment, and
+  keeps the existing file's POSIX permission bits instead of publishing the
+  private `0600` staging file (#301). If the directory sync fails, the error
+  says `CHANGELOG.md` may already have been replaced and every fragment is
+  kept. Non-POSIX platforms skip the directory sync and mode copy explicitly.
+
+- `LearnableFusionPolicy` no longer trains on an unranked union after its
+  tournament flag is switched on at runtime (including the engine budget
+  governor's re-enable) (#302). The label-producing path now always delegates
+  to an inner policy that actually ranks the candidates, and a merge the inner
+  did not rank is neither counted as a tournament run nor used as a training
+  label. The budget-disabled union path and the default behaviour are unchanged.
+
+- Multi-artifact contract dependencies now include the primary artifact (#303):
+  the reverse dependency graph is built from every registered artifact's
+  effective contract, so a primary whose `contract=` `depends_on` an extra is
+  required to land an adapter with a contract-breaking change to that extra
+  (`missing-adapters` otherwise) and has its cached evaluations invalidated on
+  the branch that changed, in both `evolve()` and `async_evolve()`. Runs without
+  primary dependencies are unchanged.
+
+- `VerifierBoost` no longer flips between active and inactive on repeated
+  `Audit.recompute()` calls with no new data, and a wrapped verifier that only
+  defines the legacy `oracle_eval` no longer raises `AttributeError` (#304).
+  Activation changes the audit's measurement version but not the scorer's:
+  `AuditedReward.scorer_version` (stamped on records as an optional
+  `AuditRecord.scorer_version`, omitted when equal to `verifier_version`) names
+  the scorer alone, the boost trains on every label of that scorer, and keeps a
+  validated curve when the unchanged scorer merely lacks labels — a different
+  scorer still withdraws it. `VerifierBoost.full_eval` / `oracle_eval` delegate
+  through `full_eval_of`, preserving the inner verifier's independence declaration.
+
+- `prob_improvement` no longer hangs forever on a non-finite posterior (a damaged
+  or hand-edited `checkpoint.json` restored via `Aggregator.restore()`) or
+  crashes on negative counts / `samples < 1`. `BetaPosterior` refuses a
+  non-finite or negative count or update weight, `observe_delta(nan)` is ignored,
+  `prob_improvement` raises `ValueError` before sampling, `restore()` skips such
+  a posterior like any malformed entry, and `DefaultAcceptance` rejects
+  `accept_samples < 1` at construction / configure time (#305).
+
+- `VerifierBoost.retrain()` no longer activates a calibration curve that
+  only shifts the verifier's mean: the bootstrap gate must now also beat the best
+  constant predictor (the train slice's mean oracle score) on the validation
+  slice by `min_gain`, so a verifier with no discriminating power that merely
+  reads systematically high or low is rejected ("no discrimination beyond a
+  constant") instead of being "validated" and re-ranking candidates. A curve with
+  fewer than two distinct fitted levels is rejected too, and `status()` and
+  `BoostState` expose the new `error_const` baseline (#306). On rejection via the constant-baseline or bootstrap gate, the measured `error_const` / validation MSEs are retained on the rejected `BoostState` so `status()` can diagnose why the candidate failed.
+
+- `audit.ppi.t_ppf` is now accurate for every `df > 0`. The Cornish-Fisher expansion
+  was 11% too narrow at df = 1 (36% at the 99% level) and badly off below 1, and
+  cluster-robust PPI intervals (`df = groups - 1`) routinely land there. The
+  expansion is kept for `df >= 30`; df 1 and 2 use closed forms and every other
+  `df < 30` inverts the exact Student-t CDF (regularized incomplete beta) with a
+  bracket that grows instead of saturating (#313).
+
+- `audit.ppi` refuses what it used to turn into a NaN or zero-width interval:
+  `Stratum` raises `PPIError` for a non-finite `weight`, any non-finite score in
+  `f_lab`/`y_lab`/`f_unlab`, non-finite `mean_unlab`/`var_unlab`, and a non-integral
+  or non-finite `n_unlab`; `ppi_mean_stratified` raises `PPIError` unless
+  `0 < alpha < 1` and `k_folds >= 2`, and its weight-sum check now fails on NaN.
+  `Calibrator` rejects an invalid `alpha` with `ValueError` at construction, and
+  `Calibrator.recompute` turns any unexpected estimator exception into a stale
+  rectification, keeping `current()`'s "never raises" contract (#314).
+
+- Audit records that carry a nonempty `scorer_version` (VerifierBoost identity) now persist `schema_version=2`. The previous release kept `SCHEMA_VERSION=1` while adding the field, so an older v0.6.0 reader hit `TypeError` on the unknown keyword, counted the line corrupt, and silently skipped pending work. The new reader still migrates v1 lines (unstamped and the mistaken early stamp); unsupported versions keep raising explicitly (#315). Scorer-identity behaviour from #304/#312 is unchanged.
+  A v1 line that parses but cannot construct a record (missing key, invalid inclusion probability) is now one corrupt line rather than an unopenable store, and a record with an unknown key is counted corrupt instead of loading under default values.
+
+- `audit.plan_audit` (`audit.sampler.plan`) now refuses an enabled `AuditPolicy` with `alpha` outside (0, 1), `calibration_fraction` outside [0, 1], a NaN `target_halfwidth`, negative or fractional label counts, and negative or non-finite stratum weights or `expected_units`, raising a `ValueError` that names the field. Previously these crashed with unrelated errors, returned NaN inclusion probabilities, or silently planned the wrong number of labels (#325). A disabled policy is unchanged.
+
+- `audit.ppi.Stratum` now refuses a numeric string or a `bool` in `weight`,
+  `n_unlab`, `mean_unlab` or `var_unlab` with a `PPIError` that names the field,
+  and stores those fields as plain `float` (`int` for `n_unlab`). Previously
+  `weight="0.5"` escaped as an unrelated `TypeError`, `mean_unlab="0.3"` was
+  stored as a string and broke `ppi_mean_stratified` later, and `True` was
+  silently read as 1 and reported back as `True` in `per_stratum`. numpy scalars
+  and integral-float counts are still accepted (#327).
+
+- `audit.sampler.plan` now refuses a stratum-weight total that is not finite and
+  positive (two finite `1e308` weights used to overflow the sum to `inf` and raise
+  `ZeroDivisionError`), and requires `AuditPolicy.target_halfwidth` to be finite
+  and `> 0` (0 / negative used to silently fall back to `max_labels`; ±inf
+  collapsed the Neyman total so only the floors decided) (#330).
+
+- `audit.calibrator.Calibrator` now refuses `min_labels` / `min_per_stratum` that
+  are not non-negative integers (`numbers.Integral`, not `bool`) at construction,
+  matching `AuditPolicy` (#325). Floats, numeric strings and negatives used to be
+  stored and later poison folding or the stale message as `TypeError` (#331).
+
+- `audit.gate.RectifiedAcceptance` now requires `inflate_when_stale` to be a
+  finite real number `>= 1.0` (`bool` refused). NaN and inf used to pass the old
+  `< 1.0` check and yield `var_after=nan` (or zero evidence) on the stale path
+  (#332).
+
+- `FrontierSampler.install` keeps the measured history of a task that is redrawn
+  (an equivalent task is deduplicated, a conflicting task under a known id is
+  refused and counted invalid), so redrawing no longer erases learning or resets
+  the stuck threshold; and the engine records only the designated solver's
+  rollouts in the sampler, so an extra artifact's score on the same task is not
+  read as the primary's first-to-last learning (#336).
+
+- The RRSI example bundle's default in-memory history now rides the checkpoint, so
+  a resumed bundle keeps accepted component counts, pruning and proposer evidence
+  (an already-accepted skill is no longer "novel" again; a durable `history_path`
+  still reads its own file). `upstream_components` now classifies each op through
+  a real changed-line diff, and slot-keyed ops (`SingleSlot` / rule ids) as
+  `prompt`, so prose such as "Do not mention ToolRegistry" no longer gets
+  structural novelty, and comment- or string-only edits stay `prompt` (#337).
+
+- `ConsolidationStore` filenames hash the complete `run_id`, so distinct ids
+  such as `a/b` and `ab` no longer share `runs/ab.json` and overwrite each
+  other's archived products; `find` still accepts a pre-#338 sanitized file
+  only when the stored identity matches (#338).
+
+- `PopulationAggregator.restore` drops island fork names whose ledger branches
+  were already deleted by `finalize`, and `step` recreates a missing island
+  head before committing to it — a clean-stop checkpoint no longer routes workers
+  to nonexistent branches on resume (#339).
+
+- `compose` / `plan` refuse `kind: "text"` when `agent` resolves to a
+  `WorkspaceAgent` (`claude_code` / `codex` / `dsh` / `opencode` / `cli_agent`),
+  with a `SpecError` naming `agent` and pointing at `openai_compatible` /
+  `host_model` / `claude` instead of returning `ok: true` (#340).
+
+- `--budget` / `budget_usd` without `--usd-per-call` / `usd_per_call` is rejected
+  before a run directory is created, so detach and MCP `start` no longer report
+  ok/started and then fail only in `log.txt`; `status` also surfaces the real
+  `error:` line from the log when a child dies without writing a terminal state.
+  The plugin quickstart now shows both flags (#342).
+
+- `plan` / MCP `plan` returns `ok: false` when a spec has fewer than 4 tasks —
+  the same train/held-out rule `evolve()` already raises — instead of a soft note
+  that let agents start a run that then crashed. Soft "8–20 is a workable minimum"
+  notes remain for 4 ≤ n < 8 (#343).
+
+- `plan` / MCP `start` / CLI `evolve` fail closed when a named CLI agent
+  (`claude_code` / `codex` / `dsh` / `opencode`) is missing from `PATH`, instead of
+  returning `ok: true` and failing later with `AgentError`; the error names the
+  binary and how to install or switch agents. Isolation/login notes stay soft
+  warnings when the binary is present (#346).
+
+- MCP `start` in nested mode (`AGENTDESCENT_NESTED=1`) still returns the
+  documented refused stub when the proposed `agent` / `reflect` CLI is absent
+  from `PATH`; the missing-CLI fail-closed gate runs only for non-nested starts
+  (#351).
+
+- `meta_run` no longer rejects distinct sequence-based train and validation
+  problems (#356). The disjointness gate compared synthetic `p0`/`p1` labels
+  assigned independently by `_named_problems`, so every pair of nonempty
+  `Sequence[Problem]` inputs collided before `meta_evolve`. Isolation now
+  checks explicit mapping keys when both sides are mappings, and problem
+  object identity for genuine shared callables (including the sequence API);
+  seed-overlap rejection is unchanged.
+
+- `status` (CLI and MCP) now shows `pending_calls` and `phase` while an actor
+  (`propose` / `run`) is in flight, so a multi-minute first openai_compatible
+  propose no longer looks hung at `calls=0` (#358). In-flight state is paired
+  by token (`Usage.begin` / `Usage.end`), so a provider's own retry records on
+  a shared `Usage` do not end the actor call, `phase` reflects the calls still
+  pending, and concurrent status rewrites are serialized per run.
+
+- `agentdescent init` without `--agent` now writes the worker CLI that is on
+  PATH (first of `claude_code`, `codex`, `dsh`, `opencode`, as `doctor` sees
+  them) instead of always `claude_code`, so the quickstart `init` -> `plan` path
+  works on an OpenCode-only machine. With no worker CLI on PATH it keeps the
+  `claude_code` placeholder and prints a warning pointing at `doctor` /
+  `--agent`; `--agent` still overrides, and only `claude_code` gets
+  `--permission-mode acceptEdits` (#361).
+
+- The `kind=skill_dir` / `agent_dir` "needs a WorkspaceAgent" error (and the
+  `tree_runner` one) now lists `opencode` alongside `claude_code`, `codex`, `dsh`
+  and `cli_agent`; the directory-kind and `kind=text` messages share one
+  `WORKSPACE_AGENT_REFS` phrase so they cannot drift apart (#362).
+
+- `plan`, `evolve` and MCP `start` now check a host plugin's `host` CLI on
+  `PATH` separately from `agent` and `reflect`, so an OpenCode-only machine no
+  longer gets `ok: true` (or a launched, doomed run) for a Claude-format plugin
+  whose `claude` host is missing. `init` warns when the plugin's host CLI is
+  absent. The nested MCP start stub is unchanged (#368).
+
+- `resume` (CLI and MCP) now re-checks a stopped `kind="plugin"` run's stored
+  `host` CLI on `PATH` before relaunching it (#370). A run started where `claude`
+  was installed and resumed where it is not used to reach `runstore.launch`,
+  write a fresh `running` status and fail only inside the detached child; it now
+  refuses with an error naming the `host` role and the missing binary, leaving
+  the stopped status, PID, spec and ledger untouched. Only the host is a hard
+  check on resume: `agent` / `reflect` keep their soft warnings, an
+  already-running run still gets its own rejection, and the host is never
+  switched to whichever CLI happens to be installed.
+
+- A worker CLI now runs in the rollout workspace even when it resolves its project
+  directory from `$PWD` (#371). `worker_env()` set no `PWD`, so the caller's was
+  passed through and OpenCode (Bun) worked in the directory `agentdescent` was
+  launched from: it never saw the staged candidate, could read the dataset's gold
+  labels and the run store, and with the default `build` agent could edit the
+  user's real files. `worker_env(workspace)` now sets `PWD` to the workspace for
+  both `isolate` values (`extra` can still override it), and `code_runner`'s
+  trimmed child environment sets it too.
+
+- A worker CLI no longer inherits the caller's stdin (#372). `cli_agent()` ran a
+  worker with `input=None` unless `via_stdin` was set, and `runners._sh` started
+  gate commands and plugin hosts with no `stdin=` at all, so under an open pipe
+  that never reaches EOF (a CI step, `… | agentdescent evolve spec.json`, a
+  notebook kernel, a tool runner) `opencode run "<prompt>"` waited on the pipe and
+  every call burned the whole agent `timeout` before ending as `AgentError:
+  ... exceeded timeout`. A worker that gets its prompt as an argument now gets
+  `stdin=DEVNULL`, as do `runners._sh` commands; `via_stdin=True` still delivers
+  the prompt on stdin.
+
+- An isolated `opencode` worker that cannot see a custom provider now says so
+  (#373). A custom provider (an OpenAI-compatible endpoint such as Volcengine Ark,
+  a local vLLM, a gateway) lives in the user's `opencode.json`, which an isolated
+  worker cannot read, so `-m ark/model` failed every call with OpenCode's opaque
+  `UnknownError` while `plan` was `ok`. The `AgentError` of an isolated `opencode`
+  worker that exits with `UnknownError` / `ProviderModelNotFound` now carries a
+  hint naming the cause and the two fixes (`"isolate": false`, or
+  `"env": {"OPENCODE_CONFIG": "/abs/providers.json"}` with a provider-only file);
+  the hint is skipped when `OPENCODE_CONFIG` is already set in the worker's `env`
+  and for every other CLI. The `plan` warning for an isolated `opencode` that pins
+  `-m/--model provider/model` now names custom providers and the
+  `OPENCODE_CONFIG` recipe. `docs/plugins.md`, `docs/agents.md` and the skill no
+  longer say `extra_args` pins an OpenCode model "without giving up isolation";
+  they document the recipe, and that an `OPENCODE_CONFIG` exported in the
+  launching shell is dropped for an isolated worker, so it belongs in `env`.
+  Providers are not copied out of the user's `opencode.json` automatically: that
+  file also holds inline keys, MCP servers and plugins that isolation keeps out.
+
+- Candidate code in a container sandbox now sees `PWD=/work`, matching its actual
+  working directory (#377). `docker`/`podman exec -w /work` moves the process but
+  leaves `$PWD` as whatever the image or the `run` set, so a CLI that finds its
+  project from `$PWD` could look past the staged candidate. `exec_prefix()` now sets
+  `PWD` to the container workdir for Docker and Podman, never the host workspace
+  path; the engine CLI still gets the host environment and the
+  candidate environment allowlist is unchanged.
+
+- `status` (CLI and MCP) now reports `pending=1 phase=merge` while the merge step
+  runs (#380). Conflict resolution, the fusion tournament and the held-out gate
+  were invisible to `pending_calls` / `phase` (#358 only covered the `propose` and
+  `run` actors), so a reflective merge blocked on one model call for minutes read
+  as `calls` standing still with nothing in flight, and a host polling `status`
+  could not tell it from a wedged run. `Meter.timed("merge_gate_seconds")` now marks
+  its block in flight on both `evolve()` and `async_evolve()`. The shipped
+  `SKILL.md` tells the host what `phase` means, to judge liveness from `status`
+  rather than `ps`, and to keep shell waits under a minute.
+
+- `plan` no longer reports `ok: true` for a spec whose `evolve` block names an
+  object-valued `evolve()` parameter as a string (`strategy`, `aggregator_factory`,
+  `run`, `propose`, `staleness_policy`, …), which `evolve` then crashed on in round
+  setup with `'str' object has no attribute 'initial'`; an unknown `evolve` key is
+  refused the same way, naming the valid knobs. A spec holds JSON, so objects come
+  through `policies` / `agent` / `reflect`, not `evolve` (#384).
+
+- `plan` now also refuses `evolve.allocator` (it is annotated `Any` but is an
+  object) and `evolve.extra_artifacts` (values must be `EvolvingArtifact`
+  instances), and `kind: policy_slot` converts `evolve.agg_config` through
+  `build_agg_config` the same way every other kind does -- without that, `plan`
+  said ok and the run died on `'dict' object has no attribute
+  'audit_drain_per_step'` (#385 review / #384).
+
+- `plan` again accepts `evolve.parallel: null` (the supported engine default) after #385's object-knob guard rejected every value for that key; `null` on an object-typed evolve knob (including `agg_config`) means "use the engine/compose default" and no longer clears objects `compose` assembled (`#392`).
+
+- `agentdescent install` no longer writes an MCP launcher that breaks when the host
+  is started in a directory containing an `agentdescent/` folder (#394). `python -m`
+  puts the host's cwd first on `sys.path`, so that folder shadowed the installed
+  package and the server died on import, which the host shows only as `Connection
+  closed`. The pinned launcher is now `<python> -P -m agentdescent.cli mcp` on
+  Python >= 3.11 and the absolute path of the `agentdescent` console script on 3.9
+  and 3.10 (only a script that actually runs this interpreter; plain `-m` otherwise, and `install` then prints a WARNING that the launcher still honours the host's cwd); `-I` is not used because it would
+  hide `pip install --user` packages. `install` recognises the old, `-P` and
+  console-script shapes as its own, so reinstalling upgrades an existing config in
+  place without duplicating it, and `uninstall` removes any of them. When the server
+  cannot be imported, `agentdescent mcp` now prints one line (naming the directory
+  that shadows the package, when that is the cause) and exits 3, instead of a second
+  traceback from `mcp_unavailable()`.
+
+- A reflector that raises on every call no longer ends a run as `done` with nothing
+  recorded (#395). `propose` exceptions used to be folded into the worker failures
+  after that worker's rollout had already counted as a success, so `rounds.jsonl`
+  showed only `considered: 0` and the cause appeared nowhere. Each round now carries
+  `propose_errors` (calls that raised) and `propose_error` (the first, as
+  `Type: message`), `status` / `watch` / `show` and the MCP `status` / `show`
+  payloads show them, and `evolve()` warns when any occurred. When every proposal
+  raises in two consecutive rounds (`evolution.PROPOSE_FAIL_ROUNDS`) the run stops
+  as `state: failed` with `error: reflector failed on every call in rounds N-M:
+  <first exception>`, and `agentdescent evolve` exits non-zero; a reflector that
+  fails only some of the time still finishes, and rounds with no `propose` call
+  neither count nor reset the streak. `agentdescent init` now warns when the
+  starter `reflect` is `openai_compatible` and `OPENAI_API_KEY` is unset, and the
+  `plan` warning says what will happen. The barrier-free `asynchronous=True` path is unchanged.
+
+- `agentdescent apply` (CLI and MCP `apply`, both through `cli.apply_payload`) no
+  longer reports every file as written, and no longer leaves a `.bak-N`, for a run
+  that changed nothing (#396). The evolved tree is compared with the target file by
+  file: `written` lists only files whose content differs (new, changed, or a script
+  that lost its exec bit), identical ones are in the new `unchanged` list, and the
+  backup is made only when something is written or pruned. When nothing would
+  change the result is `{"written": [], "unchanged": [...], "backup": [], "noop":
+  true}` and the CLI prints `nothing to apply: <dest> already matches run <id>` on
+  stderr (stdout stays the JSON document), exit 0. A single-file (`text`) target
+  gets the same treatment. `show`'s `apply would:` and `apply --dry-run` use the
+  same judgement (`EvolutionResult.write_to` now returns `unchanged` and `noop`
+  too, and only rewrites the files that changed). The SKILL.md step and the MCP
+  `apply` description say what `noop` means.
+  Files are compared and written verbatim (CRLF included), a script counts as
+  unchanged only with both user and group exec bits, the `text` dry-run result also
+  carries `written`, and an artifact with no files is a no-op that creates nothing.
+
+- `--store <relative path>` now works for `resume` and every other detached launch
+  (#400). The launcher runs with the run directory as its cwd and was handed the
+  still-relative `log.txt` path, so `agentdescent --store ./store resume <id>` died
+  with `could not start the run: ... FileNotFoundError: './store/<id>/log.txt'`
+  while an absolute store worked. `RunDir` now always holds an absolute path.
+
+- A literal `~` in `--store` or `$AGENTDESCENT_HOME` is now expanded everywhere
+  (#402). It arrives unexpanded from an MCP host config's `args`/`env` or a quoted
+  `--store '~/st'`; `create` already landed the run under `$HOME` (via `RunDir`,
+  #400) but `status`/`list_runs` looked in `./~/st`, said "no runs", and left a
+  stray `~` directory in the cwd, and `AGENTDESCENT_HOME=~/x` put every run under
+  `./~/x`. The store base is now expanded and made absolute once
+  (`runstore.store_path`), so the CLI, MCP `status`'s `store`, and `doctor`'s
+  `run_store` all report the same absolute path.
+
+- Codex scrubs the environment of an MCP server, so the AgentDescent server it
+  started saw no provider key and no `AGENTDESCENT_HOME`. `install codex` now
+  writes an `env_vars` line (the provider keys, `ARK_API_KEY` and
+  `AGENTDESCENT_HOME`) into `[mcp_servers.agentdescent]`, and the plugin's
+  `.mcp.json` carries the same key for the `codex plugin add` route. Re-running
+  `install codex` repairs a block written before this, `uninstall codex` still
+  removes both forms, and `doctor` reads the old block as `stale` (#404).
+
+- A spec-driven run (`evolve`, `evolve --detach`, MCP `start`) now counts the
+  tokens its spec-built model adapters report: the run's `Usage` reaches every
+  `openai_compatible` / `claude` (or any factory with a `usage=` parameter) named
+  in `agent`, `reflect` or `policies`, as a token-only view
+  (`Usage.token_sink()`), so `status` / `rounds.jsonl` show real `tokens` and
+  `evolve.max_tokens` stops the run (`stop_reason="max_tokens"`) instead of being
+  accepted and never firing. `calls` still counts one per actor invocation, so
+  `max_calls` and `usd_per_call` budgets are unchanged. The Python API
+  (`openai_compatible(usage=u)` with `evolve(usage=u)`) behaves as before (#405).
+
+- `plan`, `evolve` and MCP `start` now check the variable an `openai_compatible`
+  reflector/agent will actually read -- the block's own `api_key_env` (and name
+  `base_url_env` in the hint) instead of a hard-coded `OPENAI_API_KEY`. A spec
+  with `"api_key_env": "ARK_API_KEY"` no longer gets a false "needs
+  OPENAI_API_KEY" alarm when `ARK_API_KEY` is set, and a missing `ARK_API_KEY` is
+  no longer hidden by an unrelated `OPENAI_API_KEY`. The `claude` branch does the
+  same, and `claude()` now really accepts `api_key_env` (it used to forward it to
+  `messages.create` and fail on the first call). String refs and default names
+  warn exactly as before (#406).
+
+- `install`, `uninstall` and `host_status` with an explicit `--home` no longer let
+  an exported `CODEX_HOME`, `DSH_HOME` or `XDG_CONFIG_HOME` redirect them to the
+  real configuration: `--home` is now the host's whole world (a probe cannot edit,
+  or remove, your real install). Without `--home` the variables apply as before
+  (#410).
+
+- `install`, `uninstall` and `host_status` refuse an explicitly empty `--home`
+  (`--home ""`, which is what `--home "$UNSET_VAR"` expands to) with a clear error
+  and exit code 2 instead of falling back to the real home and its
+  `CODEX_HOME` / `DSH_HOME` / `XDG_CONFIG_HOME`, so a probe with a typo can no
+  longer edit or remove your real install. Omitting `--home` is unchanged (#412).
+
+- `plan` / MCP `plan` now notes the condition `evolve()` warns about — a held-out
+  set under 4 tasks — from the same computation (`held_out_size`, `MIN_HELD_OUT`
+  in `agentdescent.evolution`) instead of a separate `4 <= tasks < 8` rule. 8–11
+  tasks at the default `held_out_frac=0.3` hold out 2–3 and used to plan clean;
+  the note names the held-out count, both fixes (more tasks, or a higher
+  `evolve.held_out_frac`) and the smallest task count that works (12 at 0.3). A
+  detached / MCP `start` run records the note in `status`'s `notes` from the first
+  poll (and `start` / `evolve --detach` return it), `agentdescent status` prints
+  it, and a foreground `agentdescent evolve` shows one plain `warning:` line
+  instead of a source-line `RuntimeWarning`. The SKILL and quickstart now say
+  "12 to 20 cases" rather than 8 (#414).
+
+- `agentdescent install dsh` and the native `dsh-agentdescent` plugin now forward
+  the same environment list as Codex (`FORWARDED_ENV`: `DEEPSEEK_API_KEY`,
+  `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`,
+  `ARK_API_KEY`, `AGENTDESCENT_HOME`) instead of four keys, so `ARK_API_KEY`, which
+  dsh scrubs unless it is declared, reaches the MCP server. There is one tuple
+  for every host (`DSH_FORWARDED_KEYS` is gone). Re-running `install dsh` rewrites
+  an older four-key block, `doctor` / `host_status("dsh")` report it as `stale`,
+  and `install dsh` prints the new list. `docs/plugins.md` lists the names and
+  notes that a custom `api_key_env` must be added by hand (#415).
+
+- `agentdescent --help` no longer prints `run  ==SUPPRESS==`, and neither the help
+  nor the usage line shown on every argparse error lists the internal `run`
+  worker (what `evolve --detach` spawns) next to `evolve`; argparse does not
+  honour `help=SUPPRESS` on a sub-parser. `agentdescent run --run-dir ...` still
+  works, and `run --help` now says it is internal (#420).
+
+- `openai_compatible` and `anthropic_compatible` no longer put a connection-shaped
+  keyword (`base_url`, `api_base`, `api_url`, `base`, `url`, `endpoint`, `api_key`,
+  `apikey`, `key`) into the request body. A spec that wrote `"base_url": "https://..."`
+  was accepted, `plan` said `ok`, and every call went to `api.openai.com` carrying the
+  other provider's key. It is now refused by `plan`, `evolve` and MCP `start`, naming
+  the spelling that exists (`default_base_url` / `base_url_env` for the endpoint,
+  `api_key_env` for the key); other body extras such as `temperature` are unaffected.
+  `plan` also warns when `openai_compatible` would send a non-OpenAI `api_key_env` to
+  `api.openai.com` because no endpoint is configured, and `docs/plugins.md` documents
+  the three connection parameters (#422).
+
+- `doctor` (CLI and MCP) now reports every provider key the installers forward --
+  the key names of the shared `FORWARDED_ENV` list, `ARK_API_KEY` included -- in
+  `provider_keys_present`, and raises "no provider key in the environment" only when
+  none of them is set. Before, it checked three hard-coded names, so a machine with
+  only `ARK_API_KEY` exited 1 and told the host there was no key. When the only key
+  present is not OpenAI's or Anthropic's, `doctor` adds a hint to use it through
+  `openai_compatible` with `api_key_env` and `default_base_url` / `base_url_env`
+  (endpoint and model from the user). The shipped `SKILL.md` gains an "Other
+  providers" paragraph saying the same, so a host never has to read the package
+  source (#423).
+
+- `agentdescent init` no longer guesses a model: the `openai_compatible` reflector
+  (and the `kind: text` / `policy_slot` agent) is written with the key that is set
+  here (`"api_key_env": "ARK_API_KEY"` when only a non-OpenAI key is present) and a
+  `<your-model>` / `<your-endpoint-url>` placeholder, or the values from the new
+  `--model`, `--base-url` and `--key-env` flags. Its warning names that key, `plan`
+  and `evolve` refuse a spec that still holds a placeholder, and `plan`'s
+  missing-OPENAI_API_KEY warning lists the provider keys that are set (#451).
+
+- `agentdescent demo` now writes a valid Agent Skill: the generated
+  `csv-total/SKILL.md` carries `name` / `description` frontmatter, so a real run on
+  the demo skill keeps the SKILL.md structural gate on (no more `no-frontmatter`
+  note from `plan` / `evolve --detach` / `status`) and hosts such as OpenCode,
+  Claude Code and Codex actually load the skill. The offline agent and reflector
+  are unchanged.
+
+- `init` and `doctor` now name the OpenCode Coding worker recipe when only a
+  gateway key such as `ARK_API_KEY` is set. `init` used to write a silent
+  `{"ref": "opencode"}` (every isolated call then failed on OpenCode's built-in
+  Volcengine default) and `doctor` only mentioned the `openai_compatible` reflect
+  route; both now point at `docs/plugins.md` (`-m` plus `env.OPENCODE_CONFIG`).
+  The Ark-specific wording (Volcengine default, `ark/deepseek-v4-flash`) appears only
+  when `ARK_API_KEY` is set; any other gateway key gets a generic
+  `<provider>/<model>` recipe, and `init` and `doctor` share one predicate, so
+  they also agree when `OPENAI_API_KEY` is set alongside a gateway key.
+  The `plan` half of this landed earlier in the same issue.
+
+- `plan` / `evolve` no longer call a provider key "untested" for an isolated
+  OpenCode worker. With no `-m` and only a gateway key such as `ARK_API_KEY` set,
+  the warning now says OpenCode would fall back to its own default model for that
+  provider (measured: an unactivated Volcengine default, every call failed) and
+  gives the documented fix, `-m ark/deepseek-v4-flash` plus
+  `env.OPENCODE_CONFIG` pointing at a provider-only file. That documented recipe
+  itself (a pinned `provider/model` and `OPENCODE_CONFIG` or
+  `OPENCODE_CONFIG_CONTENT` in the agent's `env`) no longer gets the "a login does
+  not carry over" warning at all.
+
+- `agentdescent init --agent <ref>` is no longer silently discarded for
+  `kind: text` and `kind: policy_slot`: an explicit `--agent host_model` (or any
+  other plain model ref) is written as given instead of being replaced by
+  `openai_compatible` + `deepseek-v4-flash`. When the ref cannot work for the kind,
+  `init` now refuses with exit 2 and writes nothing, using the same rules `plan`
+  enforces: `kind: text` refuses file-editing agents (`claude_code`, `codex`,
+  `dsh`, `opencode`, `cli_agent`), and `skill_dir` / `agent_dir` refuse plain model
+  calls (`host_model`, `openai_compatible`, `claude`, `echo`). Omitting `--agent`
+  keeps the old defaults.
+
+- `agentdescent show` (CLI and MCP `show`) on a run without a result -- `failed`,
+  `cancelled` or still `running` -- no longer returns only `note: no result yet`.
+  It now also reports what is on disk: the round count and a short per-round
+  `history` (held-out reward, committed/rejected, `propose_error`), the run's
+  `best_reward` and `propose_errors`/`propose_error`, and the lowest-reward
+  recorded rollouts as `samples` (output vs gold, same 4 KB cap). The `note` is
+  kept and there is still no `diff`/`apply_plan`. A run with nothing recorded
+  is unchanged.
+
+- A reflector call through `openai_compatible` or `anthropic_compatible` that runs
+  out of `timeout` no longer surfaces as a bare `TimeoutError: The read operation
+  timed out`. It now raises a `RuntimeError` naming the endpoint, the model and the
+  seconds, and how to fix it (`"stream": true`, a higher `"timeout"`, or turning the
+  provider's thinking off), so `status` / `propose_error` say what to change. Read
+  and connect timeouts are both covered; `with_retries` still retries them. The
+  `openai_compatible` docs and the host skill now say reasoning models need
+  `"stream": true`.
+
+- `agentdescent audit` on an unknown run id now prints an unquoted
+  `error: no archived run ... to audit` and exits 2, like the other unknown-run
+  errors, instead of a quoted `KeyError` repr with exit 1 (#481).
+
 ## [0.6.0] — 2026-10-16
 
 ### Added
@@ -4681,7 +5950,8 @@ First public release on PyPI as **`agentdescent`**.
   discrete-space `Aggregator`, staleness policies, DP/TP/PP parallelism, layered
   governance, and the provider-agnostic `agentdescent.agents` completion layer.
 
-[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/Birfy/agentdescent/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Birfy/agentdescent/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/Birfy/agentdescent/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Birfy/agentdescent/compare/v0.4.6...v0.5.0
