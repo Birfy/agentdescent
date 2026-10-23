@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-471 public names across 84 modules.
+474 public names across 85 modules.
 
 ---
 
@@ -4419,6 +4419,14 @@ What `rationale_evolve` distilled: how many rationales the skill now carries, an
 
 The evolvable reallocation rule: four numbers, applied to a layer window.
 
+### `RecursiveRound`
+
+One outer round: the inner self-improvement session and the policy move.
+
+### `RecursiveSelfImproveReport`
+
+The outer session: every round, the final rule, and both gains.
+
 ### `RedTeamReport`
 
 What a `red_team_evolve` round did: the attack's findings and the coverage before and after the retraining.
@@ -4750,6 +4758,10 @@ The evolvable spec: the four numbers as a `ParamSlot`.
 ### `record_harness`
 
 Record one harness outcome for a domain. Idempotent by `run_id`.
+
+### `recursive_self_improve`
+
+Run `self_improve` and `portfolio_evolve` alternately.
 
 ### `red_team`
 
