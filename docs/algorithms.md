@@ -14,6 +14,22 @@ agentdescent algorithms show NAME
 agentdescent init PATH --algorithm NAME --param KEY=VALUE
 ```
 
+## `ace`
+
+ACE's sectioned playbook: append content-addressed lessons, refuse near-duplicates, and grow-and-refine instead of gating each bullet on held-out reward.
+
+- **Kinds:** `text`
+- **Fidelity:** `mechanism_microport`
+- **Cost:** none (one reflection call per failed rollout, as the default recipe)
+- **Source:** ACE: Agentic Context Engineering (Zhang et al., 2025)
+- **Details:** [algo-ace.md](algo-ace.md)
+- **Spec:** `"algorithm": "ace"`
+
+| Parameter | Type | Default | Meaning |
+|---|---|---|---|
+| `title` | `str` | `# Playbook (ACE)` | rendered playbook title |
+| `dedup_threshold` | `float` | `0.8` | Jaccard similarity at or above which a same-section lesson is a duplicate |
+
 ## `archive_selection`
 
 Parent sampling from an archive of every accepted candidate, tempered by novelty (DGM's rule by default) instead of always extending the head.

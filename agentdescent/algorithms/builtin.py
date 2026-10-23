@@ -127,6 +127,7 @@ register(Algorithm(
     extra_calls="none"))
 
 
-# GEPA and SkillOpt register themselves; importing them makes the names.
+# ACE, GEPA and SkillOpt register themselves; importing them makes the names.
+from . import ace  # noqa: E402,F401
 from . import gepa  # noqa: E402,F401
 from . import skillopt  # noqa: E402,F401

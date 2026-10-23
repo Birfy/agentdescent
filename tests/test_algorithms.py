@@ -37,14 +37,14 @@ def _write(tmp_path, spec):
 
 
 def test_builtin_algorithms_are_registered_with_declared_fidelity():
-    assert algorithms.names() == ["archive_selection", "gepa", "rrsi", "skillopt"]
+    assert algorithms.names() == ["ace", "archive_selection", "gepa", "rrsi", "skillopt"]
     for alg in algorithms.listing():
         assert alg.fidelity in algorithms.FIDELITY
         assert alg.summary and alg.kinds
 
 
 def test_listing_filters_by_kind():
-    assert [a.name for a in algorithms.listing("text")] ==         ["archive_selection", "gepa", "rrsi", "skillopt"]
+    assert [a.name for a in algorithms.listing("text")] == ["ace", "archive_selection", "gepa", "rrsi", "skillopt"]
     assert [a.name for a in algorithms.listing("skill_dir")] == ["archive_selection"]
     assert algorithms.listing("policy_slot") == []
 
@@ -141,7 +141,7 @@ def test_the_spec_round_trips_an_algorithm():
 
 
 @pytest.mark.parametrize("spec_kw, message", [
-    (dict(algorithm="nope"), r"algorithm: unknown algorithm 'nope'; available: \['archive_selection', 'gepa', 'rrsi', 'skillopt'\]"),
+    (dict(algorithm="nope"), r"algorithm: unknown algorithm 'nope'; available: \['ace', 'archive_selection', 'gepa', 'rrsi', 'skillopt'\]"),
     (dict(algorithm={"name": "rrsi", "params": {"nope": 1}}),
      r"algorithm\.params: 'rrsi' has no parameter\(s\) \['nope'\]"),
     (dict(algorithm={"name": "rrsi", "params": {"b_max": "x"}}),
@@ -318,7 +318,7 @@ def test_cli_list_text_and_json(capsys):
     for argv in (["--json", "algorithms", "list"], ["algorithms", "list", "--json"]):
         assert cli.main(argv) == 0
         rows = json.loads(capsys.readouterr().out)
-        assert [r["name"] for r in rows] ==             ["archive_selection", "gepa", "rrsi", "skillopt"]
+        assert [r["name"] for r in rows] == ["ace", "archive_selection", "gepa", "rrsi", "skillopt"]
         rrsi = next(r for r in rows if r["name"] == "rrsi")
         assert {p["name"] for p in rrsi["params"]} >= {"b_max", "protected"}
 
@@ -340,6 +340,16 @@ def test_cli_show_prints_the_card_and_fails_for_an_unknown_name(capsys):
     assert "unknown algorithm 'nope'" in capsys.readouterr().err
 
 
+def test_ace_registers_the_grow_and_refine_playbook():
+    alg = algorithms.get("ace")
+    assert alg.kinds == ("text",) and alg.fidelity == "mechanism_microport"
+    assert {p.name for p in alg.params} == {"title", "dedup_threshold"}
+    comp = compose(_spec(algorithm={"name": "ace",
+                                    "params": {"dedup_threshold": 0.7}}))
+    from agentdescent.algorithms.ace import ACEPlaybook, GrowAndRefine
+    assert isinstance(comp.kwargs["strategy"], ACEPlaybook)
+    assert comp.kwargs["strategy"].dedup_threshold == 0.7
+    assert isinstance(comp.kwargs["policies"].acceptance, GrowAndRefine)
 def test_gepa_registers_the_pareto_optimizer():
     alg = algorithms.get("gepa")
     assert alg.kinds == ("text",) and alg.fidelity == "mechanism_microport"
