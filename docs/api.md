@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-474 public names across 85 modules.
+475 public names across 86 modules.
 
 ---
 
@@ -4272,6 +4272,10 @@ One harness's measured outcome in a `compose_run`.
 ### `ImagineReport`
 
 What `imagine_then_evolve` did: the verified value, its real gain over the seed, the simulator's trust score, and how much of the budget was spent dreaming vs waking.
+
+### `JEVModel`
+
+A linear student verifier trained on oracle labels.
 
 ### `JointMetaReport`
 

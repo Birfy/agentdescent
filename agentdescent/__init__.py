@@ -44,6 +44,7 @@ from .advantage import (
     TrustRegion,
     state_distance,
 )
+from .jev import JEVModel
 from .defaults import DefaultConflict, DefaultFusion
 from .invariants import (
     BUILTIN_INVARIANTS,
@@ -460,6 +461,7 @@ __all__ = [
     "TrustRegion",
     "StableDistanceAcceptance",
     "state_distance",
+    "JEVModel",
     "SelectionPolicy",
     "SelectionContext",
     "Candidate",
