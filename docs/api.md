@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-474 public names across 85 modules.
+477 public names across 86 modules.
 
 ---
 
