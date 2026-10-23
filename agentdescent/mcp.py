@@ -224,6 +224,9 @@ class Tools:
             return {"error": f"unknown kind {kind!r}; choose from {list(KINDS)}"}
         payload: Dict[str, Any] = {
             "algorithms": [a.describe() for a in algorithms.listing(kind)]}
+        errors = algorithms.external_errors()
+        if errors:
+            payload["load_errors"] = errors
         if kind == "policy_slot" and not payload["algorithms"]:
             payload["note"] = ("no algorithm applies to kind 'policy_slot': that "
                                "kind evolves a policy slot, and `plan` refuses an "
