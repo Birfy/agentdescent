@@ -286,7 +286,18 @@ The other fields:
   name, an unknown parameter, a wrong type or a kind the method does not support
   before any run starts. A host can discover the same cards with the
   `list_algorithms` / `describe_algorithm` MCP tools, or write the field with
-  `agentdescent init --algorithm NAME --param KEY=VALUE`.
+  `agentdescent init --algorithm NAME --param KEY=VALUE`. Third-party packages
+  can add a name by exposing an `Algorithm` under the
+  `agentdescent.algorithms` entry-point group; a plugin that fails to load is
+  skipped, printed as a warning by `agentdescent algorithms list`, and reported
+  by `agentdescent.algorithms.external_errors()` rather than taking the shipped
+  registry down. The value loads to an `Algorithm` (or a zero-argument factory
+  returning one), and its `name` must equal the entry-point name:
+
+  ```toml
+  [project.entry-points."agentdescent.algorithms"]
+  my_method = "my_pkg:ALGORITHM"
+  ```
 * **`data`**: one of `path` (`.json` / `.jsonl` / `.csv`), `hf`
   (`{"dataset", "split", "config", "limit"}`, through
   [the data layer](dataloader.md)) or `inline` (a list of rows); `prompt` and

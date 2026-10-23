@@ -51,6 +51,7 @@ from .verifier_curriculum import (
     VerifierAgreement,
     VerifierCurriculum,
 )
+from .capability_guard import CapabilityGuard, CapabilityReport, CapabilitySuite
 from .defaults import DefaultConflict, DefaultFusion
 from .invariants import (
     BUILTIN_INVARIANTS,
@@ -472,6 +473,9 @@ __all__ = [
     "ProbeRow",
     "VerifierAgreement",
     "VerifierCurriculum",
+    "CapabilityGuard",
+    "CapabilityReport",
+    "CapabilitySuite",
     "SelectionPolicy",
     "SelectionContext",
     "Candidate",

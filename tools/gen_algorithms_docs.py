@@ -77,7 +77,7 @@ def render() -> str:
         "```",
         "",
     ]
-    for algorithm in algorithms.listing():
+    for algorithm in algorithms.listing(builtin_only=True):
         lines += _card(algorithm)
     return "\n".join(lines).rstrip() + "\n"
 
