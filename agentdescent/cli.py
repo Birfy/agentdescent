@@ -1882,8 +1882,10 @@ def cmd_audit(a: argparse.Namespace) -> int:
                              harness_evidence=harness,
                              bias_threshold=a.bias_threshold)
     except KeyError as error:
-        print(f"error: {error}", file=sys.stderr)
-        return 1
+        # str(KeyError) wraps the message in quotes; print the message itself,
+        # and exit 2 like every other unknown-run error (#481).
+        print(f"error: {error.args[0] if error.args else error}", file=sys.stderr)
+        return 2
     if a.json:
         _out({"run_id": a.run_id, "verified": report.verified, "reason": report.reason,
               "links": [{**({"layer": l.layer, "status": l.status,
