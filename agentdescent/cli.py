@@ -1924,6 +1924,39 @@ def cmd_algorithms(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_safety(a: argparse.Namespace) -> int:
+    """``agentdescent safety`` -- is this archive safe to keep seeding from?"""
+    from .meta_audit import MetaAuditStore
+    from .safety import safety_report
+
+    root = _archive_root(getattr(a, "archive", None))
+    audit = None
+    if getattr(a, "audit", None):
+        if not os.path.isfile(os.path.expanduser(a.audit)):
+            print(f"error: audit store {a.audit!r} does not exist", file=sys.stderr)
+            return 2
+        audit = MetaAuditStore(a.audit)
+    try:
+        report = safety_report(
+            root, audit=audit,
+            bias_threshold=getattr(a, "bias_threshold", 0.1),
+            min_exam=(None if getattr(a, "min_exam", "passed") == "none"
+                      else getattr(a, "min_exam", "passed")))
+    except (FileNotFoundError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    if a.json:
+        _out(report.to_dict(), as_json=True)
+    else:
+        print(f"verdict: {report.verdict}  ({report.reason})")
+        print(f"archive: {root}  rules: {report.rules}  unexamined: "
+              f"{report.unexamined}  flagged: {report.flagged}  "
+              f"demoted: {report.demoted}")
+        for check in report.checks:
+            print(f"  [{check.status:<4}] {check.name:<14} {check.detail}")
+    return {"safe": 0, "caution": 1, "unsafe": 3}.get(report.verdict, 1)
+
+
 def cmd_install(a: argparse.Namespace) -> int:
     from .integrations import install
 
@@ -2199,6 +2232,19 @@ def build_parser() -> argparse.ArgumentParser:
     s2.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
                     help="machine-readable output")
     s2.set_defaults(fn=cmd_algorithms)
+
+    s = sub.add_parser("safety", help="is this archive safe to keep seeding from?")
+    s.add_argument("--archive", help="consolidation archive (default: $AGENTDESCENT_HOME/archive)")
+    s.add_argument("--audit", help="MetaAuditStore JSONL to check verifier bias")
+    s.add_argument("--bias-threshold", type=float, default=0.1,
+                   dest="bias_threshold",
+                   help="worst |gain bias| allowed by the audit check")
+    s.add_argument("--min-exam", choices=("passed", "flagged", "none"),
+                   default="passed", dest="min_exam",
+                   help="seeding bar to check (default: passed)")
+    s.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                   help="machine-readable output")
+    s.set_defaults(fn=cmd_safety)
 
     s = sub.add_parser("serve", help="serve a read-only run panel on loopback, for a host UI")
     s.add_argument("--host", default=runstore.DEFAULT_HTTP_HOST)

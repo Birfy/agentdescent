@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-474 public names across 85 modules.
+477 public names across 86 modules.
 
 ---
 
@@ -4477,6 +4477,14 @@ Reward at or above which a task counts as solved (`0.999`). Lower it for a grade
 
 Variance multiplier the acceptance gate applies while a rectification is stale. Not a correction -- a stale rectifier has no number to correct *with* -- but a widening, so a gate that cannot be told how biased its verifier is commits less rather than the same amount with more confidence.
 
+### `SafetyCheck`
+
+One named check and why it passed, warned or failed.
+
+### `SafetyReport`
+
+The archive's trust posture, with every check that produced it.
+
 ### `Sandbox`
 
 One acquired execution environment.
@@ -4780,6 +4788,10 @@ Content-address a proposal so identical proposals dedupe automatically.
 ### `rule_tournament`
 
 Run a round-robin between the rules, rated by Elo.
+
+### `safety_report`
+
+Check whether the archive is safe to keep seeding from.
 
 ### `search_evolve`
 
