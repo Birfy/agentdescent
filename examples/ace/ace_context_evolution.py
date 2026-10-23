@@ -67,121 +67,13 @@ from examples._common import (add_standard_args, completion_for, confirm,
 FINER = ("nlpaueb/finer-139", "validation", "finer-139")   # (dataset, split, config)
 
 
-# ===========================================================================
-# The ACE representation: an itemised, incremental-delta playbook
-# ===========================================================================
-
-
-def _norm(text: str) -> str:
-    return re.sub(r"\s+", " ", text.strip().lower())
-
-
-def _tokens(text: str) -> set:
-    return set(re.findall(r"[a-z0-9]+", text.lower()))
-
-
-def jaccard(a: str, b: str) -> float:
-    """Lexical overlap -- a dependency-free proxy for ACE's embedding de-dup."""
-    ta, tb = _tokens(a), _tokens(b)
-    if not ta or not tb:
-        return 0.0
-    return len(ta & tb) / len(ta | tb)
-
-
-class ACEPlaybook:
-    """ACE's context object: sectioned, itemised bullets, grown by delta only.
-
-    State is ``{bullet_id: "SECTION :: text"}``. A proposal is ``"section ::
-    lesson"``. `to_diff` **appends** a new content-addressed bullet, or returns
-    ``None`` when the lesson duplicates (exact or near-duplicate) an existing one
-    -- ACE's *grow-and-refine*. It never rewrites existing bullets, so the
-    playbook accumulates detail instead of collapsing into a lossy summary."""
-
-    def __init__(self, title: str = "# Playbook (ACE)", dedup_threshold: float = 0.8):
-        self.title = title
-        self.dedup_threshold = dedup_threshold
-
-    def initial(self) -> Dict[str, str]:
-        return {}
-
-    @staticmethod
-    def _split(entry: str) -> Tuple[str, str]:
-        section, _, text = entry.partition(" :: ")
-        return (section or "general"), text
-
-    def render(self, state: Dict[str, str]) -> str:
-        if not state:
-            return f"{self.title}\n(empty -- no lessons yet)"
-        by_section: Dict[str, List[str]] = {}
-        for bid in sorted(state):
-            section, text = self._split(state[bid])
-            by_section.setdefault(section, []).append(f"  - [{bid}] {text}")
-        out = [self.title]
-        for section in sorted(by_section):
-            out.append(f"## {section}")
-            out.extend(by_section[section])
-        return "\n".join(out)
-
-    def to_diff(self, state, proposal, author, base_version, target) -> Optional[Diff]:
-        m = re.match(r"\s*([\w\- /]+?)\s*::\s*(.+)", proposal, re.DOTALL)
-        if m:
-            section, text = m.group(1).strip().lower(), m.group(2).strip()
-        else:
-            section, text = "general", proposal.strip()
-        if not text:
-            return None
-        entry = f"{section} :: {text}"
-        bid = rule_id(entry)
-        if bid in state:
-            return None  # exact duplicate
-        # grow-and-refine: reject a near-duplicate of an existing bullet in the
-        # same section (proactive de-dup, ACE Section 3.3).
-        for other in state.values():
-            other_section, other_text = self._split(other)
-            if other_section == section and jaccard(text, other_text) >= self.dedup_threshold:
-                return None
-        return Diff(diff_id=f"{author}:{bid}:{base_version}", target=target,
-                    ops={bid: entry}, author=author)
-
-
-class GrowAndRefine:
-    """ACE's Curator at the acceptance seam: apply the delta, do not gate it.
-
-    Upstream (`ace/core/curator.py`) validates the Reflector's operations
-    *structurally* -- reasoning is a string, operations is a list -- and applies
-    them. There is no held-out evaluation of a bullet before it enters the
-    playbook, and no acceptance threshold; utility is tracked afterwards by
-    per-bullet `helpful=X harmful=Y` counters, and size is managed by the
-    de-duplication this port already performs in `ACEPlaybook.to_diff` plus a
-    token budget (upstream default 80,000).
-
-    The port previously used the engine's shipped `DefaultAcceptance` -- a Beta
-    posterior requiring each bullet to raise held-out reward. That is a different
-    algorithm, and on a 139-way concept space it is a *strictly* different one:
-    a single bullet teaches one concept, so it can only move a validation split
-    that happens to contain that concept. Measured on FiNER at `--pool 3200`,
-    five committed bullets covered **4 of 32** validation tasks; widening the
-    gate's sample to 64 dropped commits from 5 to **0**. The playbook therefore
-    never accumulates, and ACE's whole claim is that it accumulates -- the
-    reported +8.6% comes from a large playbook whose *aggregate* coverage is
-    high, not from bullets that each prove themselves.
-
-    So this is a fidelity fix, and the effect on the numbers is a consequence of
-    it rather than the reason for it. What is given up is real and belongs in
-    the row's notes: nothing now stops a wrong lesson entering the playbook,
-    which is exactly the exposure upstream carries and manages with counters.
-    """
-
-    def accept(self, ctx):
-        from agentdescent.policies import AcceptDecision, MergeContext
-        base = MergeContext.rate(ctx.base_counts)
-        cand = MergeContext.rate(ctx.cand_counts)
-        return AcceptDecision(
-            accept=True, category="",
-            detail=f"grow-and-refine (upstream Curator applies; val {base:.3f} "
-                   f"-> {cand:.3f} is recorded, not gated on)",
-            observed_delta=cand - base)
-
+# The playbook and its Curator live in the package registry, so a spec can name
+# `"algorithm": "ace"` and run the same implementation (#384).
+from agentdescent.algorithms.ace import (  # noqa: E402
+    ACEPlaybook,
+    GrowAndRefine,
+    jaccard,
+)
 
 # ACE separates the Reflector from the Curator "to avoid conflating what to learn
 # with how to store it" (paper Section 3.2). The Curator is this framework's

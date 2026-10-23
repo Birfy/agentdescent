@@ -9,6 +9,14 @@ description: A runnable reproduction of DGM (Darwin Godel Machine): a coding age
 > [`evolve()`](evolution.md) with a custom `Strategy` + `aggregator_factory` at
 > **L1** governance. Example:
 > [`examples/dgm/dgm_self_improve.py`](https://github.com/Birfy/agentdescent/blob/main/examples/dgm/dgm_self_improve.py).
+>
+> **Spec form:** the archive mechanism ships in
+> `agentdescent/algorithms/dgm.py`; a spec can name `"algorithm": "dgm"`
+> (`seed`, `archive_mode`, `failure_threshold`) with the capability list as its
+> text artifact. Registry fidelity is `mechanism_microport` — the vendored-bug
+> reproduction below is the `benchmark_faithful` one. The spec's `patience` /
+> `target_reward` still apply, so set them explicitly for an open-ended search;
+> the default patience can stop it early.
 
 | | |
 |---|---|

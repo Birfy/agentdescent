@@ -206,6 +206,7 @@ def _evolve_policy(
     model: Optional[Any],
     seeds: Sequence[int],
     meta_reward: Optional[MetaReward] = None,
+    initial_state: Optional[Dict[str, str]] = None,
     **evolve_kwargs: Any,
 ) -> EvolutionResult:
     """The ordinary engine over the reallocation parameters.
@@ -246,7 +247,7 @@ def _evolve_policy(
 
     return evolve(
         tasks, reward, run=run, propose=reflector, strategy=spec,
-        initial_state=spec.initial(), self_verify=False,
+        initial_state=initial_state or spec.initial(), self_verify=False,
         solved_threshold=1.1, **evolve_kwargs)
 
 
@@ -265,6 +266,7 @@ def portfolio_evolve(
     meta_reward: Optional[MetaReward] = None,
     seeds: Sequence[int] = (0, 1),
     val_seeds: Sequence[int] = (2, 3),
+    baseline: Optional[str] = None,
     **evolve_kwargs: Any,
 ) -> Tuple[Dict[str, Any], EvolutionResult]:
     """Evolve the reallocation rule on the archive's (or the caller's) windows.
@@ -279,9 +281,11 @@ def portfolio_evolve(
     **gain** over the baseline on the validation windows, and an
     ``adopt``/``reject`` verdict (adopt only when that gain is strictly
     positive, so a refused no-op is not called an adoption). ``meta_reward``
-    scores the projected return in the search *and* in the validation. Returns
-    ``(report, result)`` where ``result.rendered`` is the evolved parameter
-    block.
+    scores the projected return in the search *and* in the validation.
+    ``baseline`` is the incumbent parameter block to search from and validate
+    against; it defaults to the shipped fixed policy, so a caller that never
+    passes it is unchanged. Returns ``(report, result)`` where
+    ``result.rendered`` is the evolved parameter block.
     """
     if propose is None and model is None:
         raise ValueError("portfolio_evolve() needs propose= or model=")
@@ -304,10 +308,17 @@ def portfolio_evolve(
     val = {f"v{i}": portfolio_problem(list(w))
            for i, w in enumerate(val_windows)}
 
-    seed_value = spec.render(spec.initial())          # the shipped fixed policy
+    seed_value = (baseline if baseline is not None
+                  else spec.render(spec.initial()))
+    seed_state = spec.initial()
+    if baseline is not None:
+        try:
+            seed_state.update(spec._parse(baseline))
+        except Exception:  # noqa: BLE001 - an unparseable baseline fails in validate
+            pass
     result = _evolve_policy(spec, train, propose=propose, model=model,
                             seeds=seeds, meta_reward=meta_reward,
-                            **evolve_kwargs)
+                            initial_state=seed_state, **evolve_kwargs)
     value = result.rendered or seed_value
     train_validation = meta_validate(spec, seed_value, value, train,
                                      seeds=seeds, meta_reward=meta_reward)
