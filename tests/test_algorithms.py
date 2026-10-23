@@ -38,6 +38,7 @@ def _write(tmp_path, spec):
 
 def test_builtin_algorithms_are_registered_with_declared_fidelity():
     assert algorithms.names() == ["ace", "archive_selection", "dgm", "evoskill", "gepa", "rrsi", "skillopt"]
+    assert algorithms.names(builtin_only=True) == ["ace", "archive_selection", "dgm", "evoskill", "gepa", "rrsi", "skillopt"]
     for alg in algorithms.listing():
         assert alg.fidelity in algorithms.FIDELITY
         assert alg.summary and alg.kinds
