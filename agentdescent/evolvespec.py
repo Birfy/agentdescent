@@ -570,7 +570,8 @@ def build_audit(spec: EvolveSpec, *, reward: Callable, run: Optional[Callable],
 
 def build_policies(spec: EvolveSpec, *, merger: Optional[Any] = None,
                    base: Optional[Mapping[str, Any]] = None,
-                   usage: Optional[Usage] = None) -> Optional[Policies]:
+                   usage: Optional[Usage] = None,
+                   merge_replaced: bool = False) -> Optional[Policies]:
     """The ``Policies`` bundle a spec asks for, or the default merge pair.
 
     Every merge-side rule is installed by the aggregator through
@@ -582,6 +583,11 @@ def build_policies(spec: EvolveSpec, *, merger: Optional[Any] = None,
     ``base`` is the slots an algorithm already built
     (:class:`~agentdescent.algorithms.Overrides`); each is a default that a slot
     named in ``spec.policies`` replaces.
+
+    ``merge_replaced`` says an ``aggregator_factory`` will run instead of the
+    shipped merge pipeline (an algorithm such as ``gepa`` brings its own), so the
+    default merge pair would never be read: it is left out rather than installed
+    for ``evolve()`` to warn about (#504).
     """
     base = dict(base or {})
     asked = dict(spec.policies)
@@ -596,7 +602,7 @@ def build_policies(spec: EvolveSpec, *, merger: Optional[Any] = None,
     # names an unrelated slot -- `staleness`, say -- is not asking to stop
     # merging, and silently dropping the pair there would make the default
     # depend on a field that has nothing to do with it.
-    default_merge = (merger is not None
+    default_merge = (merger is not None and not merge_replaced
                      and not {"reflective_merge", "conflict", "fusion"} & set(asked)
                      and not {"conflict", "fusion"} & set(base))
     if not asked:
@@ -1227,7 +1233,8 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
     # in `reflect`, and that is what merges.
     merger = reflect if not hasattr(reflect, "in_workspace") else None
     policies = build_policies(spec, merger=merger, base=ov.policies if ov else None,
-                              usage=usage)
+                              usage=usage,
+                              merge_replaced=knobs.get("aggregator_factory") is not None)
 
     # The audit wraps the reward and the run, so it has to be built after both
     # exist and before the policies bundle is finalised -- its acceptance rule
