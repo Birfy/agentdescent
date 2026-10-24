@@ -3,5 +3,5 @@ import sys
 
 from .cli import main
 
-if __name__ == "__main__":  # pragma: no cover - exercised in a subprocess
+if __name__ == "__main__":  # pragma: no cover - covered by tests/test_python_m_main.py
     sys.exit(main())
