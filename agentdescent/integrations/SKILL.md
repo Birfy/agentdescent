@@ -244,6 +244,27 @@ turn the correction on.
    `verifier` argument is imported and **run**; anything outside the
    `agentdescent` package needs the user to widen `allow`. Ask them.
 
+## When the user asks about an archive
+
+Meta runs adopt rules into a consolidation archive (default
+`$AGENTDESCENT_HOME/archive`). Three read-only tools answer questions about it;
+none of them writes anything, and a missing archive comes back as an `error`
+rather than being created:
+
+- **`safety`** — "is this archive safe to keep seeding from?" Relay `verdict`
+  (safe / caution / unsafe) and every check that is not `ok`. Pass `audit` (a
+  meta-audit JSONL) when one exists: without it the bias check is a warning,
+  not a pass.
+- **`portfolio`** — "how do the layers rank, and how should the next budget
+  window be split?" It reports `reallocated` and a `reasons` line per layer;
+  it only suggests, nothing is applied.
+- **`audit_trace`** — "where did this adopted rule's evidence come from?" for
+  one `run_id`. A ring with no store passed in is missing evidence, not a pass.
+
+`agentdescent exam` re-judges rules with an independent oracle: it needs a
+`--domain module:builder` and runs it, so it is CLI-only. Suggest the command
+to the user rather than looking for a tool.
+
 ## Guardrails
 
 - Never edit the target directory yourself while a run is in progress.
@@ -262,4 +283,5 @@ agentdescent evolve spec.json --detach
 agentdescent status <run_id>
 agentdescent show   <run_id>
 agentdescent apply  <run_id> --dry-run
+agentdescent safety --archive PATH        # also: portfolio, audit <run_id>, exam
 ```

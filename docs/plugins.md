@@ -221,6 +221,11 @@ doctor  →  write a spec  →  plan (show the user)  →  start  →  status (o
 * **`apply` is its own tool and says it is destructive.** The evolved artifact
   reaches your real directory only through it, after `show` has displayed the
   diff and the plan (`write_to(dry_run=True)`), and it backs up first.
+* **Questions about an archive are read-only tools.** `safety` (safe to keep
+  seeding from?), `portfolio` (layer ranking and a suggested budget split) and
+  `audit_trace` (one adoption's evidence rings) return the same JSON as the
+  CLI's `safety` / `portfolio` / `audit <run_id>` verbs and write nothing.
+  `exam` runs an oracle module, so it stays CLI-only.
 
 **The tool names differ by how the server was added**, which matters when you
 allowlist them or write a probe that greps for one (verified against Claude Code
