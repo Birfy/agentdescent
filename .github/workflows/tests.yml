@@ -14,7 +14,11 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: the 26.04 image setup-python resolves to has
+    # no 3.9 build (the job fails before checkout finishes), and timing-based
+    # tests such as test_era_algotune's reference speedup measured 0.07x there.
+    # Move this deliberately, with the matrix, when 3.9 support is dropped.
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
