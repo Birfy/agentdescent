@@ -1808,6 +1808,26 @@ def _archive_root(archive: Optional[str]) -> str:
     return os.path.join(os.path.abspath(os.path.expanduser(home)), "archive")
 
 
+def _missing_archive(root: str) -> bool:
+    """Report a missing archive the way ``safety`` does and return True.
+
+    The read-only archive commands must not create ``root`` as a side effect
+    of opening it: ``ConsolidationStore`` makes its directory, so a typo'd path
+    used to come back as an empty-but-valid archive (#502)."""
+    if os.path.isdir(root):
+        return False
+    print(f"error: archive {root!r} does not exist", file=sys.stderr)
+    return True
+
+
+def _missing_file(flag: str, path: str) -> bool:
+    """Report a missing ``--flag`` store file and return True (#502)."""
+    if os.path.isfile(os.path.expanduser(path)):
+        return False
+    print(f"error: {flag} store {path!r} does not exist", file=sys.stderr)
+    return True
+
+
 def _load_ref(ref: str) -> Any:
     """Resolve ``module:attribute`` to the object it names."""
     if ":" not in ref:
@@ -1827,6 +1847,8 @@ def cmd_portfolio(a: argparse.Namespace) -> int:
     from .portfolio import layers_from_archive, portfolio_report
 
     root = _archive_root(getattr(a, "archive", None))
+    if _missing_archive(root):
+        return 2
     store = ConsolidationStore(root)
     layers = layers_from_archive(store)
     if not layers:
@@ -1867,6 +1889,8 @@ def cmd_exam(a: argparse.Namespace) -> int:
     from .meta_exam import exam_archive
 
     root = _archive_root(getattr(a, "archive", None))
+    if _missing_archive(root):
+        return 2
     domain = _load_ref(a.domain)
     built = domain() if callable(domain) and not isinstance(domain, dict) else domain
     if not isinstance(built, Mapping):
@@ -1922,7 +1946,14 @@ def cmd_audit(a: argparse.Namespace) -> int:
     from .consolidation import ConsolidationStore
     from .meta_audit import MetaAuditStore
 
-    store = ConsolidationStore(_archive_root(a.archive))
+    root = _archive_root(a.archive)
+    if _missing_archive(root):
+        return 2
+    if a.meta_audit and _missing_file("--meta-audit", a.meta_audit):
+        return 2
+    if a.inner_audit and _missing_file("--inner-audit", a.inner_audit):
+        return 2
+    store = ConsolidationStore(root)
     meta = MetaAuditStore(a.meta_audit) if a.meta_audit else None
     inner = None
     if a.inner_audit:

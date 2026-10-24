@@ -11,6 +11,9 @@ tracebacking.
 """
 
 import json
+import os
+
+import pytest
 
 from agentdescent import cli
 from agentdescent import (
@@ -115,9 +118,39 @@ def test_portfolio_defaults_to_agentdescent_home(tmp_path, monkeypatch, capsys):
 
 
 def test_portfolio_empty_archive_exits_one(tmp_path, capsys):
+    (tmp_path / "empty").mkdir()
     code = cli.main(["--json", "portfolio", str(tmp_path / "empty")])
     assert code == 1
     assert "no rule records" in capsys.readouterr().err
+
+
+# -- a missing archive is an error, not a fresh empty one (#502) ----------------
+
+
+@pytest.mark.parametrize("argv", [
+    ["portfolio", "{missing}"],
+    ["exam", "{missing}", "--domain", "tests.test_meta_cli:build_domain",
+     "--slot", "task_sampler"],
+    ["audit", "run-0", "--archive", "{missing}"],
+])
+def test_missing_archive_fails_without_creating_it(tmp_path, capsys, argv):
+    missing = tmp_path / "typo"
+    code = cli.main([x.format(missing=missing) for x in argv])
+    assert code == 2
+    assert capsys.readouterr().err.strip() == (
+        f"error: archive {str(missing)!r} does not exist")
+    assert not missing.exists()
+
+
+@pytest.mark.parametrize("flag", ["--meta-audit", "--inner-audit"])
+def test_audit_missing_store_file_fails(tmp_path, capsys, flag):
+    archive = _archive(tmp_path)
+    missing = str(tmp_path / "nope.jsonl")
+    code = cli.main(["audit", "run-0", "--archive", archive, flag, missing])
+    assert code == 2
+    assert capsys.readouterr().err.strip() == (
+        f"error: {flag} store {missing!r} does not exist")
+    assert not os.path.exists(missing)
 
 
 # -- exam -----------------------------------------------------------------------
