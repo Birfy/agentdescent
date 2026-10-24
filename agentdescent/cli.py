@@ -175,6 +175,43 @@ def starter_model_block(*, model: Optional[str] = None, base_url: Optional[str] 
     return block
 
 
+def _opencode_provider_id(base_url: str) -> str:
+    """The provider id an ``init``-written OpenCode config uses for ``base_url``.
+
+    ``ark`` for Volcengine Ark, matching docs/plugins.md; ``custom`` otherwise.
+    It is only a local name inside the file ``init`` writes, so nothing about
+    the endpoint is guessed from it.
+    """
+    from urllib.parse import urlparse
+
+    host = (urlparse(base_url).hostname or "").lower()
+    return "ark" if host.endswith("volces.com") else "custom"
+
+
+def opencode_coding_recipe(*, model: str, base_url: str, key_env: str,
+                           config_path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """The ``agent`` block and provider-only config for an isolated OpenCode worker (#485).
+
+    The documented Coding recipe (docs/plugins.md): ``-m <provider>/<model>`` plus
+    ``env.OPENCODE_CONFIG`` naming a file that holds only a ``provider`` block,
+    with the key as ``{env:VAR}`` -- never inline. Returns ``(agent, config)``;
+    the caller writes ``config`` to ``config_path`` (an absolute path).
+    """
+    provider = _opencode_provider_id(base_url)
+    agent = {"ref": "opencode", "extra_args": ["-m", f"{provider}/{model}"],
+             "env": {"OPENCODE_CONFIG": config_path}}
+    config = {
+        "$schema": "https://opencode.ai/config.json",
+        "provider": {provider: {
+            "npm": "@ai-sdk/openai-compatible",
+            "name": "Ark" if provider == "ark" else "Custom",
+            "options": {"baseURL": base_url, "apiKey": "{env:%s}" % key_env},
+            "models": {model: {"name": model}},
+        }},
+    }
+    return agent, config
+
+
 def parse_cli_params(pairs: Optional[Sequence[str]]) -> Dict[str, Any]:
     """``--param k=v`` -> a JSON-typed dict (bare strings when JSON cannot parse).
 
@@ -617,9 +654,30 @@ def cmd_init(a: argparse.Namespace) -> int:
             return 2
     out = a.out or os.path.join(".agentdescent", f"{os.path.basename(a.path.rstrip('/')) or 'spec'}.evolve.json")
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    providers_out = None
+    if spec.get("agent") == {"ref": "opencode"} and a.model and a.base_url:
+        # The user named the model and endpoint, so wire them into the worker
+        # too, not only the reflector: a bare `opencode` would ignore both and
+        # fall back on OpenCode's own default (#485). Without both flags the
+        # bare ref and the #455 warning stay -- nothing is guessed.
+        llm = next((b for b in (spec.get("reflect"), spec.get("agent"))
+                    if isinstance(b, dict) and b.get("ref") == "openai_compatible"), {})
+        key_env = llm.get("api_key_env") or a.key_env or "OPENAI_API_KEY"
+        stem = os.path.splitext(os.path.basename(out))[0]
+        providers_out = os.path.join(os.path.dirname(os.path.abspath(out)),
+                                     f"{stem}.opencode-providers.json")
+        agent_block, providers = opencode_coding_recipe(
+            model=a.model, base_url=a.base_url, key_env=key_env,
+            config_path=providers_out)
+        spec["agent"] = agent_block
+        with open(providers_out, "w", encoding="utf-8") as fh:
+            json.dump(providers, fh, indent=2)
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(spec, fh, indent=2)
     print(f"wrote {out}")
+    if providers_out:
+        print(f"wrote {providers_out} (OpenCode provider-only config for the worker; "
+              f"key read from ${key_env}, never inline)")
     if not found and spec["kind"] not in ("text", "policy_slot"):
         print(f"warning: no worker CLI (claude, codex, dsh, opencode) is on PATH; "
               f"wrote the placeholder agent `{agent}`. Run `agentdescent doctor`, "
@@ -2084,7 +2142,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="worker agent short name (default: the first of claude_code, "
                         "codex, dsh, opencode whose CLI is on PATH; claude_code if none)")
     s.add_argument("--model", default=None,
-                   help="model name for the openai_compatible reflector/agent "
+                   help="model name for the openai_compatible reflector/agent; with "
+                        "--base-url and an `opencode` worker it is also pinned into "
+                        "the worker (-m plus a provider-only OPENCODE_CONFIG) "
                         "(default: a placeholder plan refuses -- never guessed)")
     s.add_argument("--base-url", dest="base_url", default=None,
                    help="endpoint URL for that model (written as default_base_url)")
