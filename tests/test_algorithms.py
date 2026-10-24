@@ -583,3 +583,38 @@ def test_skillopt_runs_an_offline_evolve_round(tmp_path):
     result = _run(_spec(algorithm="skillopt"), tmp_path)
     assert sum(result.outcomes().values()) >= 1
     assert "unknown" not in result.outcomes()
+
+
+# -- an algorithm that brings its own aggregator gets no default merge pair (#504) --
+
+_REFLECT = {"ref": "tests.test_algorithms:_dgm_reflect", "call": False}
+
+
+@pytest.mark.parametrize("name", ["gepa", "skillopt", "dgm"])
+def test_factory_algorithms_do_not_get_the_default_merge_pair(name, tmp_path):
+    comp = compose(_spec(algorithm=name, reflect=_REFLECT, allow=["tests."]),
+                   repo_path=str(tmp_path / "repo"))
+    assert comp.kwargs["aggregator_factory"] is not None
+    pol = comp.kwargs.get("policies")
+    assert pol is None or (pol.conflict is None and pol.fusion is None)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        comp.run()
+    assert not [w for w in caught if "aggregator_factory= replaces" in str(w.message)]
+
+
+def test_plain_text_spec_still_merges_by_default():
+    pol = compose(_spec(reflect=_REFLECT, allow=["tests."])).kwargs["policies"]
+    assert pol.conflict is not None and pol.fusion is not None
+
+
+def test_plan_names_merge_policies_a_factory_algorithm_replaces():
+    spec = _spec(algorithm="gepa", reflect=_REFLECT, allow=["tests."],
+                 policies={"reflective_merge": {"ref": "reflective_merge",
+                                                "complete": _REFLECT}})
+    payload = cli.plan_payload(spec)
+    joined = " ".join(payload["warnings"])
+    assert "['conflict', 'fusion']" in joined and "'gepa'" in joined
+    assert not [w for w in cli.plan_payload(_spec(algorithm="gepa", reflect=_REFLECT,
+                                                  allow=["tests."]))["warnings"]
+                if "replaced by" in w]
