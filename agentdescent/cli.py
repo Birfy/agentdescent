@@ -1845,14 +1845,6 @@ def _missing_archive(root: str) -> bool:
     return True
 
 
-def _missing_file(flag: str, path: str) -> bool:
-    """Report a missing ``--flag`` store file and return True (#502)."""
-    if os.path.isfile(os.path.expanduser(path)):
-        return False
-    print(f"error: {flag} store {path!r} does not exist", file=sys.stderr)
-    return True
-
-
 def _load_ref(ref: str) -> Any:
     """Resolve ``module:attribute`` to the object it names."""
     if ":" not in ref:
@@ -1865,45 +1857,90 @@ def _load_ref(ref: str) -> Any:
         raise SpecError(f"cannot resolve {ref!r}: {error}") from error
 
 
-def cmd_portfolio(a: argparse.Namespace) -> int:
-    """``agentdescent portfolio [archive]`` -- rank the archive's layers and
-    reallocate the next budget window."""
+class MetaCommandError(Exception):
+    """A read-only meta command (portfolio / safety / audit trace) cannot answer.
+
+    ``code`` is the CLI exit status: 2 for a missing archive or store, an
+    unknown run or a bad argument; 1 when the archive exists but holds nothing
+    to report on. The MCP tools return the message as ``{"error": ...}``.
+    """
+
+    def __init__(self, message: str, code: int = 2) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _require_archive(root: str) -> None:
+    """Refuse a missing archive *before* anything opens it (#502).
+
+    ``ConsolidationStore`` makes its directory, so a typo'd path would come
+    back as an empty-but-valid archive."""
+    if not os.path.isdir(root):
+        raise MetaCommandError(f"archive {root!r} does not exist")
+
+
+def _require_file(flag: str, path: str) -> None:
+    if not os.path.isfile(os.path.expanduser(path)):
+        raise MetaCommandError(f"{flag} store {path!r} does not exist")
+
+
+def _meta_error(error: MetaCommandError) -> int:
+    print(f"error: {error}" if error.code == 2 else str(error), file=sys.stderr)
+    return error.code
+
+
+def portfolio_payload(archive: Optional[str] = None, *, floor: float = 0.05,
+                      min_samples: int = 3, grow: float = 0.5,
+                      shrink: float = 0.5,
+                      cap: Optional[float] = None) -> Dict[str, Any]:
+    """What ``agentdescent portfolio --json`` prints, for the CLI and the MCP
+    ``portfolio`` tool alike. Reports a reallocation; writes nothing."""
     from .consolidation import ConsolidationStore
     from .portfolio import layers_from_archive, portfolio_report
 
-    root = _archive_root(getattr(a, "archive", None))
-    if _missing_archive(root):
-        return 2
-    store = ConsolidationStore(root)
-    layers = layers_from_archive(store)
+    root = _archive_root(archive)
+    _require_archive(root)
+    layers = layers_from_archive(ConsolidationStore(root))
     if not layers:
-        print(f"no rule records under {root} to build layers from; "
-              f"run continuous_meta_run (or a meta session) first",
-              file=sys.stderr)
-        return 1
-    report = portfolio_report(
-        layers, floor=a.floor, min_samples=a.min_samples, grow=a.grow,
-        shrink=a.shrink, cap=a.cap)
+        raise MetaCommandError(
+            f"no rule records under {root} to build layers from; "
+            f"run continuous_meta_run (or a meta session) first", code=1)
+    report = portfolio_report(layers, floor=floor, min_samples=min_samples,
+                              grow=grow, shrink=shrink, cap=cap)
+    return {
+        "archive": root,
+        "total_budget": report.total_budget,
+        "layers": [{"name": l.name, "budget": l.budget, "spent": l.spent,
+                    "return_": l.return_, "samples": l.samples,
+                    "return_sd": l.return_sd,
+                    "diminishing": l.diminishing} for l in report.layers],
+        "reallocated": report.reallocated,
+        "reasons": report.reasons,
+    }
+
+
+def cmd_portfolio(a: argparse.Namespace) -> int:
+    """``agentdescent portfolio [archive]`` -- rank the archive's layers and
+    reallocate the next budget window."""
+    try:
+        payload = portfolio_payload(
+            getattr(a, "archive", None), floor=a.floor,
+            min_samples=a.min_samples, grow=a.grow, shrink=a.shrink, cap=a.cap)
+    except MetaCommandError as error:
+        return _meta_error(error)
     if a.json:
-        _out({
-            "archive": root,
-            "total_budget": report.total_budget,
-            "layers": [{**({"name": l.name, "budget": l.budget, "spent": l.spent,
-                            "return_": l.return_, "samples": l.samples,
-                            "return_sd": l.return_sd,
-                            "diminishing": l.diminishing})} for l in report.layers],
-            "reallocated": report.reallocated,
-            "reasons": report.reasons,
-        }, as_json=True)
+        _out(payload, as_json=True)
         return 0
-    for layer in report.layers:
-        rpc = (layer.return_ / layer.spent) if layer.spent > 0 else 0.0
-        new = report.reallocated[layer.name]
-        print(f"{layer.name}: return-per-cost {rpc:.3f} "
-              f"(return {layer.return_:.3f} / spend {layer.spent:.1f}, "
-              f"{layer.samples} measurements) -> budget {new:.1f}")
-        print(f"    {report.reasons[layer.name]}")
-    print(f"archive: {root}  (total budget {report.total_budget:.1f})")
+    for layer in payload["layers"]:
+        spent = layer["spent"]
+        rpc = (layer["return_"] / spent) if spent > 0 else 0.0
+        new = payload["reallocated"][layer["name"]]
+        print(f"{layer['name']}: return-per-cost {rpc:.3f} "
+              f"(return {layer['return_']:.3f} / spend {spent:.1f}, "
+              f"{layer['samples']} measurements) -> budget {new:.1f}")
+        print(f"    {payload['reasons'][layer['name']]}")
+    print(f"archive: {payload['archive']}  "
+          f"(total budget {payload['total_budget']:.1f})")
     return 0
 
 
@@ -1964,52 +2001,72 @@ def _slot_spec(slot: str) -> Any:
     return policy_source(slot)
 
 
-def cmd_audit(a: argparse.Namespace) -> int:
-    """``agentdescent audit <run_id> --archive PATH`` -- trace one adoption
-    through its evidence rings."""
+def audit_trace_payload(run_id: str, *, archive: Optional[str] = None,
+                        meta_audit: Optional[str] = None,
+                        inner_audit: Optional[str] = None,
+                        harness: Any = None,
+                        bias_threshold: float = 0.1) -> Dict[str, Any]:
+    """What ``agentdescent audit <run_id> --json`` prints, for the CLI and the
+    MCP ``audit_trace`` tool alike. ``harness`` is an already-resolved
+    callable: resolving a ``module:attr`` runs code, so only the CLI does it."""
     from .chain_audit import chain_audit
     from .consolidation import ConsolidationStore
     from .meta_audit import MetaAuditStore
 
-    root = _archive_root(a.archive)
-    if _missing_archive(root):
-        return 2
-    if a.meta_audit and _missing_file("--meta-audit", a.meta_audit):
-        return 2
-    if a.inner_audit and _missing_file("--inner-audit", a.inner_audit):
-        return 2
+    root = _archive_root(archive)
+    _require_archive(root)
+    if meta_audit:
+        _require_file("--meta-audit", meta_audit)
+    if inner_audit:
+        _require_file("--inner-audit", inner_audit)
     store = ConsolidationStore(root)
-    meta = MetaAuditStore(a.meta_audit) if a.meta_audit else None
+    meta = MetaAuditStore(meta_audit) if meta_audit else None
     inner = None
-    if a.inner_audit:
+    if inner_audit:
         from .audit import AuditStore
-        inner = AuditStore(a.inner_audit)
-    harness = None
-    if a.harness:
-        fn = _load_ref(a.harness)
-        if not callable(fn):
-            raise SpecError(f"--harness {a.harness!r} does not resolve to a "
-                            f"callable ({type(fn).__name__})")
-        harness = fn
+        inner = AuditStore(inner_audit)
     try:
-        report = chain_audit(store, a.run_id, meta_audit=meta, inner_audit=inner,
+        report = chain_audit(store, run_id, meta_audit=meta, inner_audit=inner,
                              harness_evidence=harness,
-                             bias_threshold=a.bias_threshold)
+                             bias_threshold=bias_threshold)
     except KeyError as error:
-        # str(KeyError) wraps the message in quotes; print the message itself,
-        # and exit 2 like every other unknown-run error (#481).
-        print(f"error: {error.args[0] if error.args else error}", file=sys.stderr)
-        return 2
+        # str(KeyError) wraps the message in quotes; report the message
+        # itself, as an unknown-run error like every other (#481).
+        raise MetaCommandError(
+            str(error.args[0] if error.args else error)) from None
+    return {"run_id": run_id, "verified": report.verified, "reason": report.reason,
+            "links": [{"layer": l.layer, "status": l.status,
+                       "evidence": l.evidence, "reason": l.reason}
+                      for l in report.links]}
+
+
+def cmd_audit(a: argparse.Namespace) -> int:
+    """``agentdescent audit <run_id> --archive PATH`` -- trace one adoption
+    through its evidence rings."""
+    try:
+        root = _archive_root(a.archive)
+        _require_archive(root)
+        harness = None
+        if a.harness:
+            fn = _load_ref(a.harness)
+            if not callable(fn):
+                raise SpecError(f"--harness {a.harness!r} does not resolve to a "
+                                f"callable ({type(fn).__name__})")
+            harness = fn
+        payload = audit_trace_payload(
+            a.run_id, archive=a.archive, meta_audit=a.meta_audit,
+            inner_audit=a.inner_audit, harness=harness,
+            bias_threshold=a.bias_threshold)
+    except MetaCommandError as error:
+        return _meta_error(error)
     if a.json:
-        _out({"run_id": a.run_id, "verified": report.verified, "reason": report.reason,
-              "links": [{**({"layer": l.layer, "status": l.status,
-                             "evidence": l.evidence, "reason": l.reason})}
-                        for l in report.links]}, as_json=True)
+        _out(payload, as_json=True)
         return 0
-    print(f"run {report.run_id}: {'VERIFIED' if report.verified else 'NOT VERIFIED'}")
-    print(f"  {report.reason}")
-    for link in report.links:
-        print(f"  {link.layer}: {link.status}  {link.reason}")
+    print(f"run {payload['run_id']}: "
+          f"{'VERIFIED' if payload['verified'] else 'NOT VERIFIED'}")
+    print(f"  {payload['reason']}")
+    for link in payload["links"]:
+        print(f"  {link['layer']}: {link['status']}  {link['reason']}")
     return 0
 
 
@@ -2041,37 +2098,49 @@ def cmd_algorithms(a: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_safety(a: argparse.Namespace) -> int:
-    """``agentdescent safety`` -- is this archive safe to keep seeding from?"""
+def safety_payload(archive: Optional[str] = None, *,
+                   audit: Optional[str] = None, bias_threshold: float = 0.1,
+                   min_exam: Optional[str] = "passed") -> Dict[str, Any]:
+    """What ``agentdescent safety --json`` prints, for the CLI and the MCP
+    ``safety`` tool alike. ``min_exam`` is ``passed``, ``flagged``, or
+    ``none`` / None for every non-demoted rule. Reads only."""
     from .meta_audit import MetaAuditStore
     from .safety import safety_report
 
-    root = _archive_root(getattr(a, "archive", None))
-    audit = None
-    if getattr(a, "audit", None):
-        if not os.path.isfile(os.path.expanduser(a.audit)):
-            print(f"error: audit store {a.audit!r} does not exist", file=sys.stderr)
-            return 2
-        audit = MetaAuditStore(a.audit)
+    root = _archive_root(archive)
+    store = None
+    if audit:
+        if not os.path.isfile(os.path.expanduser(audit)):
+            raise MetaCommandError(f"audit store {audit!r} does not exist")
+        store = MetaAuditStore(audit)
     try:
         report = safety_report(
-            root, audit=audit,
+            root, audit=store, bias_threshold=bias_threshold,
+            min_exam=None if min_exam in (None, "none") else min_exam)
+    except (FileNotFoundError, ValueError) as error:
+        raise MetaCommandError(str(error)) from None
+    return {"archive": root, **report.to_dict()}
+
+
+def cmd_safety(a: argparse.Namespace) -> int:
+    """``agentdescent safety`` -- is this archive safe to keep seeding from?"""
+    try:
+        payload = safety_payload(
+            getattr(a, "archive", None), audit=getattr(a, "audit", None),
             bias_threshold=getattr(a, "bias_threshold", 0.1),
-            min_exam=(None if getattr(a, "min_exam", "passed") == "none"
-                      else getattr(a, "min_exam", "passed")))
-    except (FileNotFoundError, ValueError) as e:
-        print(f"error: {e}", file=sys.stderr)
-        return 2
+            min_exam=getattr(a, "min_exam", "passed"))
+    except MetaCommandError as error:
+        return _meta_error(error)
     if a.json:
-        _out(report.to_dict(), as_json=True)
+        _out(payload, as_json=True)
     else:
-        print(f"verdict: {report.verdict}  ({report.reason})")
-        print(f"archive: {root}  rules: {report.rules}  unexamined: "
-              f"{report.unexamined}  flagged: {report.flagged}  "
-              f"demoted: {report.demoted}")
-        for check in report.checks:
-            print(f"  [{check.status:<4}] {check.name:<14} {check.detail}")
-    return {"safe": 0, "caution": 1, "unsafe": 3}.get(report.verdict, 1)
+        print(f"verdict: {payload['verdict']}  ({payload['reason']})")
+        print(f"archive: {payload['archive']}  rules: {payload['rules']}  "
+              f"unexamined: {payload['unexamined']}  "
+              f"flagged: {payload['flagged']}  demoted: {payload['demoted']}")
+        for check in payload["checks"]:
+            print(f"  [{check['status']:<4}] {check['name']:<14} {check['detail']}")
+    return {"safe": 0, "caution": 1, "unsafe": 3}.get(payload["verdict"], 1)
 
 
 def cmd_install(a: argparse.Namespace) -> int:
