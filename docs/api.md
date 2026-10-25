@@ -3182,7 +3182,7 @@ ConsolidationRecord(
 ) -> None
 ```
 
-### `ConsolidationStore(root: str) -> None`
+### `ConsolidationStore(root: str, *, create: bool = True) -> None`
 
 A durable archive of what runs learned.
 
