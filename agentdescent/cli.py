@@ -1838,10 +1838,12 @@ def _missing_archive(root: str) -> bool:
 
     The read-only archive commands must not create ``root`` as a side effect
     of opening it: ``ConsolidationStore`` makes its directory, so a typo'd path
-    used to come back as an empty-but-valid archive (#502)."""
+    used to come back as an empty-but-valid archive (#502). The message names
+    the only writer (#512)."""
     if os.path.isdir(root):
         return False
-    print(f"error: archive {root!r} does not exist", file=sys.stderr)
+    from .consolidation import missing_archive_message
+    print(f"error: {missing_archive_message(root)}", file=sys.stderr)
     return True
 
 
@@ -1871,12 +1873,14 @@ class MetaCommandError(Exception):
 
 
 def _require_archive(root: str) -> None:
-    """Refuse a missing archive *before* anything opens it (#502).
+    """Refuse a missing archive *before* anything opens it (#502 / #512).
 
-    ``ConsolidationStore`` makes its directory, so a typo'd path would come
-    back as an empty-but-valid archive."""
+    ``ConsolidationStore`` makes its directory by default, so a typo'd path
+    would come back as an empty-but-valid archive. The message names the only
+    writer so a plugin host does not invent a nonexistent next step."""
     if not os.path.isdir(root):
-        raise MetaCommandError(f"archive {root!r} does not exist")
+        from .consolidation import missing_archive_message
+        raise MetaCommandError(missing_archive_message(root))
 
 
 def _require_file(flag: str, path: str) -> None:
@@ -1900,7 +1904,7 @@ def portfolio_payload(archive: Optional[str] = None, *, floor: float = 0.05,
 
     root = _archive_root(archive)
     _require_archive(root)
-    layers = layers_from_archive(ConsolidationStore(root))
+    layers = layers_from_archive(ConsolidationStore(root, create=False))
     if not layers:
         raise MetaCommandError(
             f"no rule records under {root} to build layers from; "
@@ -1959,7 +1963,7 @@ def cmd_exam(a: argparse.Namespace) -> int:
         raise SpecError("--domain must resolve to a builder that returns a dict "
                         "with keys: oracle, tasks_for, run, reward, propose, "
                         "strategy (and optionally slot, spec)")
-    store = ConsolidationStore(root)
+    store = ConsolidationStore(root, create=False)
     config = None
     if getattr(a, "config", None) is not None:
         try:
@@ -2019,7 +2023,7 @@ def audit_trace_payload(run_id: str, *, archive: Optional[str] = None,
         _require_file("--meta-audit", meta_audit)
     if inner_audit:
         _require_file("--inner-audit", inner_audit)
-    store = ConsolidationStore(root)
+    store = ConsolidationStore(root, create=False)
     meta = MetaAuditStore(meta_audit) if meta_audit else None
     inner = None
     if inner_audit:

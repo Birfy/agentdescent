@@ -11,8 +11,11 @@ agentdescent audit    <run_id> --archive PATH              trace an adoption's e
 
 `archive` defaults to `$AGENTDESCENT_HOME/archive` (or `~/.agentdescent/archive`).
 Every command accepts `--json` for machine-readable output. An `archive` that
-does not exist is an error (`error: archive '<path>' does not exist`, exit `2`),
-never silently created, so a typo'd path cannot pass for an empty archive.
+does not exist is an error (exit `2`) that names `continuous_meta_run` and
+[consolidation](consolidation.md) — `evolve` / plugin runs do not write one —
+and is never silently created, so a typo'd path cannot pass for an empty
+archive. The read-only verbs also leave an existing empty archive untouched
+(no `runs/` directory is created as a side effect).
 
 ## `portfolio` — rank the layers, reallocate the next window
 

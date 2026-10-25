@@ -82,7 +82,10 @@ def test_audit_trace_unknown_run_is_an_error(tmp_path):
 def test_missing_archive_is_an_error_and_is_not_created(tmp_path, call):
     missing = tmp_path / "typo"
     got = call(Tools(), str(missing))
-    assert got == {"error": f"archive {str(missing)!r} does not exist"}
+    assert "error" in got
+    assert got["error"].startswith(f"archive {str(missing)!r} does not exist")
+    assert "continuous_meta_run" in got["error"]
+    assert "evolve / plugin runs do not write" in got["error"]
     assert not missing.exists()
 
 
@@ -93,6 +96,22 @@ def test_audit_trace_missing_store_is_an_error_and_is_not_created(tmp_path, kwar
     got = Tools().audit_trace("run-0", archive=archive, **{kwarg: missing})
     assert "does not exist" in got["error"]
     assert not os.path.exists(missing)
+
+
+
+
+@pytest.mark.parametrize("call", [
+    lambda t, p: t.safety(p),
+    lambda t, p: t.portfolio(p),
+    lambda t, p: t.audit_trace("run-0", archive=p),
+])
+def test_readonly_tools_do_not_create_runs_under_empty_archive(tmp_path, call):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    before = list(empty.iterdir())
+    got = call(Tools(), str(empty))
+    assert "error" in got or got.get("verdict") in ("safe", "caution", "unsafe")
+    assert list(empty.iterdir()) == before == []
 
 
 def test_safety_defaults_to_agentdescent_home(tmp_path, monkeypatch):

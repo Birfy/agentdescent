@@ -18,7 +18,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from .consolidation import ConsolidationStore, config_fingerprint
+from .consolidation import (ConsolidationStore, config_fingerprint,
+                             missing_archive_message)
 
 __all__ = ["SafetyCheck", "SafetyReport", "safety_report"]
 
@@ -91,8 +92,8 @@ def safety_report(store: Any, *,
     if isinstance(store, str):
         path = os.path.abspath(os.path.expanduser(store))
         if not os.path.isdir(path):
-            raise FileNotFoundError(f"archive {path!r} does not exist")
-        store = ConsolidationStore(path)
+            raise FileNotFoundError(missing_archive_message(path))
+        store = ConsolidationStore(path, create=False)
     records = [r for r in store.iter_archive()
                if getattr(r, "artifact_id", None) == artifact_id
                and _slot_of(r) is not None]
