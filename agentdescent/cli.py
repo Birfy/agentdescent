@@ -2443,7 +2443,29 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_mcp)
 
     sub.metavar = "{" + ",".join(n for n in sub.choices if n not in _INTERNAL_COMMANDS) + "}"
+    _accept_json_after_verb(sub)
     return p
+
+
+def _accept_json_after_verb(sub: "argparse._SubParsersAction") -> None:
+    """Let ``--json`` follow the verb as well as precede it (#513).
+
+    The top-level parser owns ``--json``; each leaf subcommand also gets one
+    whose default is SUPPRESS, so a flag written after the verb sets the same
+    ``json`` attribute and a missing one leaves the top-level value alone.
+    Subcommands that already declare ``--json`` keep their own definition.
+    """
+    for parser in dict.fromkeys(sub.choices.values()):
+        nested = [a for a in parser._actions
+                  if isinstance(a, argparse._SubParsersAction)]
+        if nested:
+            for n in nested:
+                _accept_json_after_verb(n)
+            continue
+        if "--json" in parser._option_string_actions:
+            continue
+        parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                            help="machine-readable output")
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
