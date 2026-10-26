@@ -339,9 +339,12 @@ from .self_improve import (
     SelfImproveTick,
     self_improve,
 )
+from .variance_sampler import VarianceSampler
 from .safety import SafetyCheck, SafetyReport, safety_report
 from .controller import (ControllerConfig, ControllerReport, SessionOutcome,
                          SessionRecord, run_controller)
+from .manifest import (RunManifest, build_manifest, diff_manifest,
+                       verify_manifest)
 from .recursive import (
     RecursiveRound,
     RecursiveSelfImproveReport,
@@ -757,6 +760,7 @@ __all__ = [
     "SelfImproveReport",
     "SelfImproveTick",
     "self_improve",
+    "VarianceSampler",
     "SafetyCheck",
     "SafetyReport",
     "safety_report",
@@ -765,6 +769,10 @@ __all__ = [
     "SessionOutcome",
     "SessionRecord",
     "run_controller",
+    "RunManifest",
+    "build_manifest",
+    "diff_manifest",
+    "verify_manifest",
     "RecursiveRound",
     "RecursiveSelfImproveReport",
     "recursive_self_improve",
