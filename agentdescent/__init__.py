@@ -340,6 +340,8 @@ from .self_improve import (
     self_improve,
 )
 from .safety import SafetyCheck, SafetyReport, safety_report
+from .rsi_metrics import (RSIMetrics, alerts, metrics_from_log,
+                          metrics_from_records, to_prometheus)
 from .recursive import (
     RecursiveRound,
     RecursiveSelfImproveReport,
@@ -758,6 +760,11 @@ __all__ = [
     "SafetyCheck",
     "SafetyReport",
     "safety_report",
+    "RSIMetrics",
+    "alerts",
+    "metrics_from_log",
+    "metrics_from_records",
+    "to_prometheus",
     "RecursiveRound",
     "RecursiveSelfImproveReport",
     "recursive_self_improve",
