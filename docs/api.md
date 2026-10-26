@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-486 public names across 89 modules.
+488 public names across 90 modules.
 
 ---
 
@@ -4273,6 +4273,10 @@ How complementary diffs become one candidate.
 
 One tournament: what the fused candidate scored against the best single.
 
+### `GuardedRun`
+
+The evolution result, the recorded decision and the acceptance chain.
+
 ### `Harness`
 
 One algorithm port, named and runnable.
@@ -4824,6 +4828,10 @@ Content-address a proposal so identical proposals dedupe automatically.
 ### `rule_tournament`
 
 Run a round-robin between the rules, rated by Elo.
+
+### `run_guarded`
+
+Run one spec with an injected acceptance policy and optional records.
 
 ### `safety_report`
 
