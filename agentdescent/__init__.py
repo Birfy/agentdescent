@@ -339,8 +339,11 @@ from .self_improve import (
     SelfImproveTick,
     self_improve,
 )
+from .variance_sampler import VarianceSampler
 from .safety import SafetyCheck, SafetyReport, safety_report
 from .risk_policy import RiskContext, RiskDecision, RiskPolicy, RiskRule
+from .manifest import (RunManifest, build_manifest, diff_manifest,
+                       verify_manifest)
 from .recursive import (
     RecursiveRound,
     RecursiveSelfImproveReport,
@@ -756,6 +759,7 @@ __all__ = [
     "SelfImproveReport",
     "SelfImproveTick",
     "self_improve",
+    "VarianceSampler",
     "SafetyCheck",
     "SafetyReport",
     "safety_report",
@@ -763,6 +767,10 @@ __all__ = [
     "RiskDecision",
     "RiskPolicy",
     "RiskRule",
+    "RunManifest",
+    "build_manifest",
+    "diff_manifest",
+    "verify_manifest",
     "RecursiveRound",
     "RecursiveSelfImproveReport",
     "recursive_self_improve",
