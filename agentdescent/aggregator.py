@@ -242,6 +242,11 @@ class MergeOutcome(str, Enum):
     #: The reason is on the report; the card was settled without a held-out
     #: sweep, so no invented measurement ever justified it.
     CRITIC_REJECTED = "critic-rejected"
+    #: An approval gate queued the change for a human; it was not committed.
+    NEEDS_APPROVAL = "needs-approval"
+    #: A human explicitly rejected the queued change; it stays rejected until
+    #: the content changes.
+    APPROVAL_REJECTED = "approval-rejected"
     #: An RRSI-style selector refused the candidate at its historical-best
     #: noise floor (``score < S* - delta``).
     NOISE_FLOOR = "noise-floor"
