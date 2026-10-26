@@ -340,6 +340,7 @@ from .self_improve import (
     self_improve,
 )
 from .safety import SafetyCheck, SafetyReport, safety_report
+from .risk_policy import RiskContext, RiskDecision, RiskPolicy, RiskRule
 from .recursive import (
     RecursiveRound,
     RecursiveSelfImproveReport,
@@ -758,6 +759,10 @@ __all__ = [
     "SafetyCheck",
     "SafetyReport",
     "safety_report",
+    "RiskContext",
+    "RiskDecision",
+    "RiskPolicy",
+    "RiskRule",
     "RecursiveRound",
     "RecursiveSelfImproveReport",
     "recursive_self_improve",
