@@ -542,6 +542,15 @@ def opencode_mcp_entry(launcher: Optional[List[str]] = None) -> Dict[str, object
     return {"type": "local", "command": [*(launcher or [MCP_COMMAND]), *MCP_ARGS]}
 
 
+def _parse_json_object(raw: str) -> Optional[Dict[str, object]]:
+    """``raw`` as a JSON object (empty text is ``{}``), or None if json cannot read it."""
+    try:
+        data = json.loads(raw) if raw.strip() else {}
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def install_opencode(home: str, w: _Writer) -> None:
     config_home = _host_root("XDG_CONFIG_HOME", os.path.join(home, ".config"), w.honour_env)
     root = os.path.join(config_home, "opencode")
@@ -550,19 +559,29 @@ def install_opencode(home: str, w: _Writer) -> None:
     w.write(os.path.join(root, "skill", "agentdescent", "SKILL.md"), skill_text())
 
     path = os.path.join(root, "opencode.jsonc")
-    current, raw = {}, ""
-    if os.path.exists(path):
-        with open(path, encoding="utf-8") as fh:
-            raw = fh.read()
-        try:
-            current = json.loads(raw) if raw.strip() else {}
-        except json.JSONDecodeError:
-            # JSONC allows comments, which json cannot read. Merging by hand
-            # would corrupt the file, so say what to add instead of guessing.
-            w.note("NOTE: could not parse opencode.jsonc (comments?); add this "
-                   "under \"mcp\" yourself: "
-                   + json.dumps({"agentdescent": opencode_mcp_entry(w.launcher)}))
+    entry = json.dumps({"agentdescent": opencode_mcp_entry(w.launcher)})
+    raw = _read(path)
+    if raw is not None and _parse_json_object(raw) is None:
+        # JSONC allows comments and trailing commas, which json cannot read, and
+        # merging by hand would corrupt the file -- so it is never rewritten.
+        if '"agentdescent"' in raw:
+            w.note(f"NOTE: {path} has comments and already names agentdescent, so it "
+                   "was left as it is; check the entry with `opencode mcp list`")
             return
+        # OpenCode merges opencode.json and opencode.jsonc from the same
+        # directory (#516), so the entry goes into the plain-JSON sibling.
+        w.note(f"NOTE: {path} has comments, so it was left as it is; the mcp entry "
+               "goes into opencode.json beside it, which OpenCode merges")
+        path = os.path.join(root, "opencode.json")
+        raw = _read(path)
+    current: Dict[str, object] = {}
+    if raw is not None:
+        parsed = _parse_json_object(raw)
+        if parsed is None:
+            w.note(f"FAILED: could not parse {path} (comments?); add this under "
+                   f"\"mcp\" yourself: {entry}")
+            return
+        current = parsed
     existing = (current.get("mcp") or {}).get("agentdescent")
     stock = (isinstance(existing, dict) and set(existing) == {"type", "command"}
              and existing["type"] == "local" and _stock_mcp_argv(existing["command"]))
@@ -570,7 +589,8 @@ def install_opencode(home: str, w: _Writer) -> None:
         w.lines.append(f"kept {path} (mcp entry already present)")
         return
     merged = dict(current)
-    merged.setdefault("$schema", "https://opencode.ai/config.json")
+    if raw is None:                    # a file of our own; one the user had stays theirs
+        merged["$schema"] = "https://opencode.ai/config.json"
     merged["mcp"] = {**(current.get("mcp") or {}), "agentdescent": opencode_mcp_entry(w.launcher)}
     w.write(path, json.dumps(merged, indent=2) + "\n")
     w.note("verify: opencode mcp list")
@@ -917,20 +937,23 @@ def _opencode_mcp_state(root: str) -> str:
     """The MCP entry in OpenCode's config: ``opencode.jsonc`` (what ``install``
     writes) or ``opencode.json`` (what a user may keep by hand).
 
-    ``unknown`` when neither file holds the entry and one of them cannot be
-    parsed -- JSONC allows comments and ``json`` cannot read them, so the entry
-    might be there and guessing either way would be wrong."""
+    ``unknown`` when neither file holds the entry and one that cannot be parsed
+    (JSONC allows comments, which ``json`` cannot read) names ``agentdescent`` --
+    the entry might be there and guessing either way would be wrong. A commented
+    file that never names it is ``missing`` (#516): ``install`` puts the entry in
+    ``opencode.json`` beside it, and ``doctor`` must not call that host ``ok``."""
     unreadable = False
     for name in ("opencode.jsonc", "opencode.json"):
         raw = _read(os.path.join(root, name))
         if raw is None:
             continue
-        try:
-            data = json.loads(raw) if raw.strip() else {}
-        except json.JSONDecodeError:
-            unreadable = True
+        data = _parse_json_object(raw)
+        if data is None:
+            # A file json cannot read that never names us holds no entry of ours
+            # (JSONC keys are quoted strings), so only one that does is a maybe.
+            unreadable = unreadable or '"agentdescent"' in raw
             continue
-        if isinstance(data, dict) and (data.get("mcp") or {}).get("agentdescent"):
+        if (data.get("mcp") or {}).get("agentdescent"):
             return "ok"
     return "unknown" if unreadable else "missing"
 
@@ -1343,19 +1366,24 @@ def _uninstall_opencode(home: str, e: _Eraser) -> None:
     skill_dir = os.path.join(root, "skill", "agentdescent")
     e.remove_file(os.path.join(skill_dir, "SKILL.md"))
     e.prune_dirs(skill_dir, root)
-    path = os.path.join(root, "opencode.jsonc")
+    # Both files: `install` falls back to opencode.json when opencode.jsonc has
+    # comments (#516).
+    for name in ("opencode.jsonc", "opencode.json"):
+        _uninstall_opencode_file(os.path.join(root, name), e)
+
+
+def _uninstall_opencode_file(path: str, e: _Eraser) -> None:
     raw = _read(path)
     if raw is None or "agentdescent" not in raw:
         return
-    try:
-        data = json.loads(raw) if raw.strip() else {}
-    except json.JSONDecodeError:
+    data = _parse_json_object(raw)
+    if data is None:
         # JSONC allows comments, which json cannot read; editing it blind could
         # corrupt the file, so say what to remove instead of guessing.
         e.kept(path, "could not parse it (comments?); remove the \"agentdescent\" "
                      "entry under \"mcp\" yourself")
         return
-    servers = data.get("mcp") if isinstance(data, dict) else None
+    servers = data.get("mcp")
     existing = servers.get("agentdescent") if isinstance(servers, dict) else None
     if existing is None:
         return
@@ -1374,7 +1402,7 @@ def _uninstall_opencode(home: str, e: _Eraser) -> None:
     out = {k: v for k, v in data.items() if k != "mcp"}
     if rest:
         out["mcp"] = rest
-    if out == {"$schema": "https://opencode.ai/config.json"}:
+    if out in ({}, {"$schema": "https://opencode.ai/config.json"}):
         e.remove_file(path)        # what `install` creates, with nothing else in it
     else:
         e.rewrite(path, json.dumps(out, indent=2) + "\n", "mcp entry removed")

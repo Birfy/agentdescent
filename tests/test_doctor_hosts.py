@@ -174,7 +174,8 @@ def test_an_unreadable_opencode_config_on_a_fresh_home_is_missing_not_partial(
     cfg.mkdir(parents=True)
     (cfg / "opencode.jsonc").write_text('{\n  // my providers\n  "provider": {}\n}\n')
     info = host_status("opencode", home=str(home))
-    assert (info["state"], info["skill"], info["mcp"]) == ("missing", "missing", "unknown")
+    # It never names agentdescent, so it holds no entry of ours (#516).
+    assert (info["state"], info["skill"], info["mcp"]) == ("missing", "missing", "missing")
     rep = _report(monkeypatch, present=("opencode",))
     assert not any("integration" in p for p in rep["problems"]), rep["problems"]
     assert any("install opencode" in h for h in rep["hints"])
@@ -209,3 +210,29 @@ def test_a_surviving_config_without_our_live_entry_is_not_ok(home):
     open(cfg, "w").write("# [mcp_servers.agentdescent]\n# command = \"agentdescent\"\n")
     assert host_status("codex", home=str(home))["mcp"] == "missing"
     assert host_status("codex", home=str(home))["state"] == "partial"
+
+
+# -- #516 ---------------------------------------------------------------------
+
+_COMMENTED = ('{\n  // my settings\n  "model": "ark/deepseek-v4-flash",\n'
+              '  "provider": {"ark": {"models": {"deepseek-v4-flash": {}},},},\n}\n')
+
+
+def test_install_beside_a_commented_opencode_jsonc_is_ok(home):
+    root = home / ".config" / "opencode"
+    root.mkdir(parents=True)
+    (root / "opencode.jsonc").write_text(_COMMENTED)
+    install("opencode", home=str(home))
+    assert (root / "opencode.jsonc").read_text() == _COMMENTED
+    info = host_status("opencode", home=str(home))
+    assert (info["state"], info["mcp"]) == ("ok", "ok")
+
+
+def test_a_skill_beside_a_commented_config_without_our_entry_is_partial(home):
+    """Before #516 this read `ok: nothing missing` while OpenCode had no tools."""
+    install("opencode", home=str(home))
+    root = home / ".config" / "opencode"
+    os.remove(root / "opencode.jsonc")
+    (root / "opencode.jsonc").write_text(_COMMENTED)
+    info = host_status("opencode", home=str(home))
+    assert (info["state"], info["mcp"]) == ("partial", "missing")

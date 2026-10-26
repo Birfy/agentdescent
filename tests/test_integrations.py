@@ -138,7 +138,8 @@ def test_install_opencode_writes_the_shape_opencode_itself_writes(tmp_path, monk
 
 
 def test_install_opencode_does_not_corrupt_a_commented_config(tmp_path, monkeypatch):
-    """opencode.jsonc may hold comments, which json cannot parse: say what to add."""
+    """opencode.jsonc may hold comments, which json cannot parse: it is left
+    alone and the entry goes into opencode.json beside it (#516)."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     monkeypatch.setenv("HOME", str(tmp_path))      # the host variable applies to the real home
     root = tmp_path / "cfg" / "opencode"
@@ -147,7 +148,50 @@ def test_install_opencode_does_not_corrupt_a_commented_config(tmp_path, monkeypa
     (root / "opencode.jsonc").write_text(original)
     lines = install("opencode")
     assert _read(root / "opencode.jsonc") == original      # untouched
-    assert any(l.startswith("NOTE:") and "mcp" in l for l in lines), lines
+    assert any(l.startswith("NOTE:") and "opencode.json " in l for l in lines), lines
+    cfg = json.loads(_read(root / "opencode.json"))
+    assert cfg["mcp"]["agentdescent"] == {"type": "local",
+                                          "command": [*mcp_launcher(), "mcp"]}
+
+
+def test_install_opencode_merges_into_an_existing_opencode_json(tmp_path):
+    """#516: a commented opencode.jsonc plus a plain opencode.json of the user's."""
+    root = tmp_path / ".config" / "opencode"
+    root.mkdir(parents=True)
+    (root / "opencode.jsonc").write_text('{\n  // c\n  "model": "x",\n}\n')
+    (root / "opencode.json").write_text(json.dumps({"mcp": {"other": {"type": "local",
+                                                                    "command": ["o"]}}}))
+    install("opencode", home=str(tmp_path))
+    cfg = json.loads(_read(root / "opencode.json"))
+    assert set(cfg["mcp"]) == {"other", "agentdescent"}
+    assert "$schema" not in cfg                 # the user's file gets only our entry
+
+
+def test_install_opencode_fails_loudly_when_neither_file_parses(tmp_path):
+    import subprocess
+    import sys
+    root = tmp_path / ".config" / "opencode"
+    root.mkdir(parents=True)
+    (root / "opencode.jsonc").write_text('{\n  // c\n}\n')
+    (root / "opencode.json").write_text('{ nope')
+    lines = install("opencode", home=str(tmp_path))
+    assert any(l.startswith("FAILED:") for l in lines), lines
+    proc = subprocess.run([sys.executable, "-m", "agentdescent.cli", "install", "opencode",
+                           "--home", str(tmp_path), "--json"],
+                          capture_output=True, text=True)
+    assert proc.returncode == 1, proc.stderr
+    out = json.loads(proc.stdout)
+    assert out["ok"] is False and any(l.startswith("FAILED:") for l in out["lines"])
+
+
+def test_install_opencode_leaves_a_commented_config_that_names_us(tmp_path):
+    root = tmp_path / ".config" / "opencode"
+    root.mkdir(parents=True)
+    hand = '{\n  // mine\n  "mcp": {"agentdescent": {"type": "local", "command": ["a"]}},\n}\n'
+    (root / "opencode.jsonc").write_text(hand)
+    install("opencode", home=str(tmp_path))
+    assert _read(root / "opencode.jsonc") == hand
+    assert not (root / "opencode.json").exists()
 
 
 def test_dry_run_writes_nothing(tmp_path):
