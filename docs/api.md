@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-486 public names across 89 modules.
+490 public names across 90 modules.
 
 ---
 
@@ -4177,6 +4177,10 @@ Somewhere to keep evaluations. In one process, across many, or on disk.
 
 A mutable per-call max_tokens, set by the engine before each expansion.
 
+### `CanaryResult`
+
+The paired sign test and the deployment verdict.
+
 ### `CapabilityGuard`
 
 Reject a self-modification that regresses a protected capability.
@@ -4304,6 +4308,10 @@ What a `joint_meta_run` decided, per slot and jointly.
 ### `KeyedRules`
 
 One entry per *category*: competing proposals contradict and are resolved.
+
+### `KillSwitch`
+
+A file-based global stop for further self-improvement sessions.
 
 ### `LAYOUTS`
 
@@ -4653,6 +4661,10 @@ The control every efficiency number in this repository is missing.
 
 Wrap a `max_tokens -> Completion` factory into an adaptive Completion.
 
+### `canary`
+
+Compare candidate vs incumbent per task and recommend promote/hold/rollback.
+
 ### `chain_audit`
 
 Trace one archived adoption through its evidence rings.
@@ -4816,6 +4828,10 @@ Attack `value` by mutating the seed tasks outward and scoring each mutation. Ret
 ### `red_team_evolve`
 
 Evolve, attack the result, retrain on the failures it found.
+
+### `rollback_plan`
+
+Files to restore/delete to return `current` to `previous`.
 
 ### `rule_id`
 
