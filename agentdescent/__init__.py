@@ -340,6 +340,7 @@ from .self_improve import (
     self_improve,
 )
 from .stopping import MarginalGainStop
+from .variance_sampler import VarianceSampler
 from .safety import SafetyCheck, SafetyReport, safety_report
 from .recursive import (
     RecursiveRound,
@@ -757,6 +758,7 @@ __all__ = [
     "SelfImproveTick",
     "self_improve",
     "MarginalGainStop",
+    "VarianceSampler",
     "SafetyCheck",
     "SafetyReport",
     "safety_report",
