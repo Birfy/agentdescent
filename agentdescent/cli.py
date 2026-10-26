@@ -2154,9 +2154,16 @@ def cmd_install(a: argparse.Namespace) -> int:
         written = install(a.host, dry_run=a.dry_run, home=a.home)
     except ValueError as e:        # e.g. an empty --home (#412)
         raise SpecError(f"install: {e}") from None
-    for line in written:
-        print(line)
-    return 0
+    # A `FAILED:` line is a step `install` could not take: the host is not
+    # wired, so say so in the exit code too (#516).
+    ok = not any(line.startswith("FAILED:") for line in written)
+    if getattr(a, "json", False):
+        _out({"ok": ok, "host": a.host, "dry_run": a.dry_run, "lines": written},
+             as_json=True)
+    else:
+        for line in written:
+            print(line)
+    return 0 if ok else 1
 
 
 def cmd_uninstall(a: argparse.Namespace) -> int:
@@ -2166,11 +2173,16 @@ def cmd_uninstall(a: argparse.Namespace) -> int:
         lines = uninstall(a.host, dry_run=a.dry_run, home=a.home)
     except ValueError as e:        # e.g. an empty --home (#412)
         raise SpecError(f"uninstall: {e}") from None
-    for line in lines:
-        print(line)
     # 1 when something was kept and so is still wired: a script or an agent can
     # tell "fully removed" from "needs a manual step". Nothing installed is 0.
-    return 1 if any(line.startswith("kept ") for line in lines) else 0
+    kept = any(line.startswith("kept ") for line in lines)
+    if getattr(a, "json", False):
+        _out({"ok": not kept, "host": a.host, "dry_run": a.dry_run, "lines": lines},
+             as_json=True)
+    else:
+        for line in lines:
+            print(line)
+    return 1 if kept else 0
 
 
 def cmd_serve(a: argparse.Namespace) -> int:
