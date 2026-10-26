@@ -339,6 +339,7 @@ from .self_improve import (
     SelfImproveTick,
     self_improve,
 )
+from .campaign import CampaignReport, CampaignSession, estimate_campaign, run_campaign
 from .safety import SafetyCheck, SafetyReport, safety_report
 from .recursive import (
     RecursiveRound,
@@ -755,6 +756,10 @@ __all__ = [
     "SelfImproveReport",
     "SelfImproveTick",
     "self_improve",
+    "CampaignReport",
+    "CampaignSession",
+    "estimate_campaign",
+    "run_campaign",
     "SafetyCheck",
     "SafetyReport",
     "safety_report",
