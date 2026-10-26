@@ -341,6 +341,7 @@ from .self_improve import (
 )
 from .variance_sampler import VarianceSampler
 from .safety import SafetyCheck, SafetyReport, safety_report
+from .evaluation import EvaluationReport, EvaluationRow, evaluate
 from .risk_policy import RiskContext, RiskDecision, RiskPolicy, RiskRule
 from .manifest import (RunManifest, build_manifest, diff_manifest,
                        verify_manifest)
@@ -763,6 +764,9 @@ __all__ = [
     "SafetyCheck",
     "SafetyReport",
     "safety_report",
+    "EvaluationReport",
+    "EvaluationRow",
+    "evaluate",
     "RiskContext",
     "RiskDecision",
     "RiskPolicy",
