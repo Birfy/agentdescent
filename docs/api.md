@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-486 public names across 89 modules.
+491 public names across 90 modules.
 
 ---
 
@@ -4213,6 +4213,14 @@ One curriculum step: the selected tasks, the bias before/after.
 
 Which of a batch of mutually contradictory changes survive.
 
+### `ControllerConfig`
+
+Bounds and hooks for the multi-session loop.
+
+### `ControllerReport`
+
+The sessions run, the best reward and why the loop stopped.
+
 ### `CuriousReplayReport`
 
 What `curious_replay_evolve` did: the weights, the gains on the still-curious vs mastered past, and the value produced.
@@ -4553,6 +4561,14 @@ What `improve_source` accepted: the patch, its tests, its gain.
 
 What a `self_rewarding_meta_run` did: the evolved value, the judge's measured agreement with the oracle on validation outcomes, whether the judge actually fitted (or fell back to `auc`), how many oracle labels it trained on, and the value's oracle quality vs the seed's on the held-out problems.
 
+### `SessionOutcome`
+
+What one session produced.
+
+### `SessionRecord`
+
+One session's outcome inside the controller report.
+
 ### `SharedSandboxPool`
 
 A pool whose ceiling is the machine's, not this process's.
@@ -4824,6 +4840,10 @@ Content-address a proposal so identical proposals dedupe automatically.
 ### `rule_tournament`
 
 Run a round-robin between the rules, rated by Elo.
+
+### `run_controller`
+
+Run sessions until budget, a kill switch, an error or stagnation.
 
 ### `safety_report`
 

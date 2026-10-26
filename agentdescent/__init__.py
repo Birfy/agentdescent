@@ -340,6 +340,8 @@ from .self_improve import (
     self_improve,
 )
 from .safety import SafetyCheck, SafetyReport, safety_report
+from .controller import (ControllerConfig, ControllerReport, SessionOutcome,
+                         SessionRecord, run_controller)
 from .recursive import (
     RecursiveRound,
     RecursiveSelfImproveReport,
@@ -758,6 +760,11 @@ __all__ = [
     "SafetyCheck",
     "SafetyReport",
     "safety_report",
+    "ControllerConfig",
+    "ControllerReport",
+    "SessionOutcome",
+    "SessionRecord",
+    "run_controller",
     "RecursiveRound",
     "RecursiveSelfImproveReport",
     "recursive_self_improve",
