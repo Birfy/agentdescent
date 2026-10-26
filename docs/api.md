@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-493 public names across 92 modules.
+505 public names across 95 modules.
 
 ---
 
@@ -4213,6 +4213,14 @@ One curriculum step: the selected tasks, the bias before/after.
 
 Which of a batch of mutually contradictory changes survive.
 
+### `ControllerConfig`
+
+Bounds and hooks for the multi-session loop.
+
+### `ControllerReport`
+
+The sessions run, the best reward and why the loop stopped.
+
 ### `CuriousReplayReport`
 
 What `curious_replay_evolve` did: the weights, the gains on the still-curious vs mastered past, and the value produced.
@@ -4240,6 +4248,14 @@ The multi-file proposal format a `FileTree` reflector is told to emit.
 ### `EloRating`
 
 A minimal Elo rating over pairwise matches (K-factor 32).
+
+### `EvaluationReport`
+
+The verifier/oracle comparison for one artifact.
+
+### `EvaluationRow`
+
+One audited task's verifier and oracle scores.
 
 ### `EvidenceSnapshot`
 
@@ -4485,6 +4501,22 @@ One replayed past example: the task it came from, its recorded outcome, and the 
 
 What one rollout produced, or why it did not.
 
+### `RiskContext`
+
+The facts a policy may match on.
+
+### `RiskDecision`
+
+The action a policy chose and the rule that produced it.
+
+### `RiskPolicy`
+
+First-match risk rules with a fail-closed default.
+
+### `RiskRule`
+
+One ordered rule; every supplied condition must match.
+
 ### `RolloutSpec`
 
 One rollout, described completely enough to run somewhere else.
@@ -4564,6 +4596,14 @@ What `improve_source` accepted: the patch, its tests, its gain.
 ### `SelfRewardingReport`
 
 What a `self_rewarding_meta_run` did: the evolved value, the judge's measured agreement with the oracle on validation outcomes, whether the judge actually fitted (or fell back to `auc`), how many oracle labels it trained on, and the value's oracle quality vs the seed's on the held-out problems.
+
+### `SessionOutcome`
+
+What one session produced.
+
+### `SessionRecord`
+
+One session's outcome inside the controller report.
 
 ### `SharedSandboxPool`
 
@@ -4709,6 +4749,10 @@ Field-level differences between two manifests (empty when identical).
 
 The rationales the artifact will carry: deduped rules from the rollouts, near-miss rationales included -- they are the artifact's own notes about what it still needs. Dedup is on the **exact rationale text**, so the output value stays semantic content (`-1` and `1`, `A` and `a` are different rules, not formatting to normalise away).
 
+### `evaluate`
+
+Compare `verifier` with `oracle` on a deterministic sample.
+
 ### `evaluate_source`
 
 Run the candidate against the tests and the benchmark.
@@ -4848,6 +4892,10 @@ Content-address a proposal so identical proposals dedupe automatically.
 ### `rule_tournament`
 
 Run a round-robin between the rules, rated by Elo.
+
+### `run_controller`
+
+Run sessions until budget, a kill switch, an error or stagnation.
 
 ### `safety_report`
 
