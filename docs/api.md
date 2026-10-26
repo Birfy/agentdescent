@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-494 public names across 92 modules.
+498 public names across 93 modules.
 
 ---
 
@@ -4484,6 +4484,22 @@ One replayed past example: the task it came from, its recorded outcome, and the 
 ### `Result`
 
 What one rollout produced, or why it did not.
+
+### `RiskContext`
+
+The facts a policy may match on.
+
+### `RiskDecision`
+
+The action a policy chose and the rule that produced it.
+
+### `RiskPolicy`
+
+First-match risk rules with a fail-closed default.
+
+### `RiskRule`
+
+One ordered rule; every supplied condition must match.
 
 ### `RolloutSpec`
 

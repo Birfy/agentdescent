@@ -105,6 +105,7 @@ nav:
     - Conflict policies: conflict-policies.md
     - Fusion policies: fusion-policies.md
     - Acceptance policies: acceptance-policies.md
+    - Risk policy: risk-policy.md
     - Promotion policies: promotion-policies.md
     - Staleness policies: staleness.md
     - The aggregator_factory exit: aggregator-factory.md
