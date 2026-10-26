@@ -246,10 +246,16 @@ turn the correction on.
 
 ## When the user asks about an archive
 
-Meta runs adopt rules into a consolidation archive (default
-`$AGENTDESCENT_HOME/archive`). Three read-only tools answer questions about it;
-none of them writes anything, and a missing archive comes back as an `error`
-rather than being created:
+A consolidation archive (default `$AGENTDESCENT_HOME/archive`) holds rules that
+**Python meta sessions** adopted — `continuous_meta_run` and friends; see
+`docs/consolidation.md`. `evolve`, `start`, and every plugin / MCP run write
+**no** archive. There is no CLI or MCP verb that creates one.
+
+Three read-only tools answer questions about an existing archive; none of them
+writes anything, and a missing archive comes back as an `error` (naming the
+meta API) rather than being created. When the archive is missing, tell the user
+that honestly — do **not** invent a "run a consolidation" or similar step that
+does not exist on the CLI/MCP path.
 
 - **`safety`** — "is this archive safe to keep seeding from?" Relay `verdict`
   (safe / caution / unsafe) and every check that is not `ok`. Pass `audit` (a

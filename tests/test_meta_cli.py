@@ -137,9 +137,27 @@ def test_missing_archive_fails_without_creating_it(tmp_path, capsys, argv):
     missing = tmp_path / "typo"
     code = cli.main([x.format(missing=missing) for x in argv])
     assert code == 2
-    assert capsys.readouterr().err.strip() == (
-        f"error: archive {str(missing)!r} does not exist")
+    err = capsys.readouterr().err.strip()
+    assert err.startswith(f"error: archive {str(missing)!r} does not exist")
+    assert "continuous_meta_run" in err
+    assert "evolve / plugin runs do not write" in err
     assert not missing.exists()
+
+
+@pytest.mark.parametrize("argv", [
+    ["safety", "--archive", "{empty}"],
+    ["portfolio", "{empty}"],
+    ["audit", "run-0", "--archive", "{empty}"],
+])
+def test_readonly_verbs_do_not_create_runs_under_empty_archive(tmp_path, argv):
+    """An existing but empty archive must stay empty after a read (#512)."""
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    before = sorted(p.relative_to(empty) for p in empty.rglob("*"))
+    code = cli.main([x.format(empty=empty) for x in argv])
+    assert code in (1, 2)  # empty portfolio -> 1; audit unknown -> 2; safety caution/warn path
+    after = sorted(p.relative_to(empty) for p in empty.rglob("*"))
+    assert after == before == []
 
 
 @pytest.mark.parametrize("flag", ["--meta-audit", "--inner-audit"])

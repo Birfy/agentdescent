@@ -225,7 +225,11 @@ doctor  →  write a spec  →  plan (show the user)  →  start  →  status (o
   seeding from?), `portfolio` (layer ranking and a suggested budget split) and
   `audit_trace` (one adoption's evidence rings) return the same JSON as the
   CLI's `safety` / `portfolio` / `audit <run_id>` verbs and write nothing.
-  `exam` runs an oracle module, so it stays CLI-only.
+  A missing archive is an error that names the Python meta API
+  (`continuous_meta_run`; see [consolidation](consolidation.md)) — `evolve` /
+  plugin runs never write one, and there is no CLI/MCP verb that does. Tell
+  the user that; do not invent a "consolidation" step. `exam` runs an oracle
+  module, so it stays CLI-only.
 
 **The tool names differ by how the server was added**, which matters when you
 allowlist them or write a probe that greps for one (verified against Claude Code
