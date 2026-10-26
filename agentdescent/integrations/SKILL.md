@@ -100,7 +100,9 @@ written back until the user says so.
    a `phase` means alive. Judge liveness from `status`, not from `ps`: the
    busiest process on the machine is usually your own host. If you wait with a
    shell `sleep`, keep it under a minute -- host shell tools time out near two.
-5. When done, **`show`** with `diff=true`. Explain what changed and why using
+5. When done, **`show`** with `diff=true`. If the run learned little, call
+   `diagnose` first: it names the failure mode (agent failures, reflector
+   error, gate rejection, scoring mismatch) and the next step. Explain what changed and why using
    the `outcomes` histogram (`committed`, `below-threshold`, `oracle-rejected`
    ...). Do not paste the whole tree. If `final_reward` is low (or every outcome
    is a rejection), read `samples` (the worst rollouts, output vs gold) and
