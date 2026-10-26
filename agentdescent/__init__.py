@@ -340,6 +340,7 @@ from .self_improve import (
     self_improve,
 )
 from .runtime import GuardedRun, run_guarded
+from .variance_sampler import VarianceSampler
 from .safety import SafetyCheck, SafetyReport, safety_report
 from .recursive import (
     RecursiveRound,
@@ -758,6 +759,7 @@ __all__ = [
     "self_improve",
     "GuardedRun",
     "run_guarded",
+    "VarianceSampler",
     "SafetyCheck",
     "SafetyReport",
     "safety_report",
