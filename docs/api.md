@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-500 public names across 93 modules.
+503 public names across 94 modules.
 
 ---
 
@@ -4241,6 +4241,14 @@ The multi-file proposal format a `FileTree` reflector is told to emit.
 
 A minimal Elo rating over pairwise matches (K-factor 32).
 
+### `EvaluationReport`
+
+The verifier/oracle comparison for one artifact.
+
+### `EvaluationRow`
+
+One audited task's verifier and oracle scores.
+
 ### `EvidenceSnapshot`
 
 The reconciled view: slots, ports, and the archive's health counters.
@@ -4732,6 +4740,10 @@ Field-level differences between two manifests (empty when identical).
 ### `distill`
 
 The rationales the artifact will carry: deduped rules from the rollouts, near-miss rationales included -- they are the artifact's own notes about what it still needs. Dedup is on the **exact rationale text**, so the output value stays semantic content (`-1` and `1`, `A` and `a` are different rules, not formatting to normalise away).
+
+### `evaluate`
+
+Compare `verifier` with `oracle` on a deterministic sample.
 
 ### `evaluate_source`
 

@@ -83,6 +83,7 @@ nav:
     - Sparse audit (cheap verifier vs truth): audit.md
     - Session controller — when to stop: controller.md
     - Run manifest — reproducibility: manifest.md
+    - Evaluation service — budgeted oracle: evaluation.md
     - Safety case — is this archive seedable?: safety.md
     - JEV — a distilled verifier student: jev.md
     - Verifier–curriculum co-evolution: verifier-curriculum.md
