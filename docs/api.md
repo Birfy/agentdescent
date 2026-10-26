@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-489 public names across 91 modules.
+493 public names across 92 modules.
 
 ---
 
@@ -4489,6 +4489,10 @@ What one rollout produced, or why it did not.
 
 One rollout, described completely enough to run somewhere else.
 
+### `RunManifest`
+
+The hashed inputs of one run and the resulting stable id.
+
 ### `SCHEMA_VERSION`
 
 Bumped when the on-disk shape of a record changes incompatibly. A reader that meets a record it does not understand must say so rather than guess -- see `load`. Version 2 adds optional `scorer_version`; this build still migrates version-1 lines. Stamp the new marker whenever the persisted shape is one an older v1-only reader cannot decode, so that reader hits its explicit unsupported-version path instead of treating a valid line as corrupt and silently skipping pending work (#315).
@@ -4665,6 +4669,10 @@ The control every efficiency number in this repository is missing.
 
 Wrap a `max_tokens -> Completion` factory into an adaptive Completion.
 
+### `build_manifest`
+
+Hash a spec, its data files/directories, model config and code version.
+
 ### `chain_audit`
 
 Trace one archived adoption through its evidence rings.
@@ -4692,6 +4700,10 @@ Evolve a decision slot against a problem distribution the meta loop generates.
 ### `dataloader`
 
 Dependency-free dataset loading -- the *data layer* for examples/experiments.
+
+### `diff_manifest`
+
+Field-level differences between two manifests (empty when identical).
 
 ### `distill`
 
@@ -4904,6 +4916,10 @@ The RL signal: `1.0` when the outcome's output exactly matches its `gold`, `0.0`
 ### `verified_rules`
 
 The archive's seedable rule records, gated by trust.
+
+### `verify_manifest`
+
+Rebuild the manifest from current inputs; return changed field names.
 
 ### `windows_from_archive`
 
