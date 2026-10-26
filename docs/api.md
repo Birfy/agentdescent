@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-490 public names across 91 modules.
+506 public names across 95 modules.
 
 ---
 
@@ -4227,6 +4227,14 @@ One curriculum step: the selected tasks, the bias before/after.
 
 Which of a batch of mutually contradictory changes survive.
 
+### `ControllerConfig`
+
+Bounds and hooks for the multi-session loop.
+
+### `ControllerReport`
+
+The sessions run, the best reward and why the loop stopped.
+
 ### `CuriousReplayReport`
 
 What `curious_replay_evolve` did: the weights, the gains on the still-curious vs mastered past, and the value produced.
@@ -4246,6 +4254,14 @@ The multi-file proposal format a `FileTree` reflector is told to emit.
 ### `EloRating`
 
 A minimal Elo rating over pairwise matches (K-factor 32).
+
+### `EvaluationReport`
+
+The verifier/oracle comparison for one artifact.
+
+### `EvaluationRow`
+
+One audited task's verifier and oracle scores.
 
 ### `EvidenceSnapshot`
 
@@ -4491,9 +4507,29 @@ One replayed past example: the task it came from, its recorded outcome, and the 
 
 What one rollout produced, or why it did not.
 
+### `RiskContext`
+
+The facts a policy may match on.
+
+### `RiskDecision`
+
+The action a policy chose and the rule that produced it.
+
+### `RiskPolicy`
+
+First-match risk rules with a fail-closed default.
+
+### `RiskRule`
+
+One ordered rule; every supplied condition must match.
+
 ### `RolloutSpec`
 
 One rollout, described completely enough to run somewhere else.
+
+### `RunManifest`
+
+The hashed inputs of one run and the resulting stable id.
 
 ### `SCHEMA_VERSION`
 
@@ -4566,6 +4602,14 @@ What `improve_source` accepted: the patch, its tests, its gain.
 ### `SelfRewardingReport`
 
 What a `self_rewarding_meta_run` did: the evolved value, the judge's measured agreement with the oracle on validation outcomes, whether the judge actually fitted (or fell back to `auc`), how many oracle labels it trained on, and the value's oracle quality vs the seed's on the held-out problems.
+
+### `SessionOutcome`
+
+What one session produced.
+
+### `SessionRecord`
+
+One session's outcome inside the controller report.
 
 ### `SharedSandboxPool`
 
@@ -4671,6 +4715,10 @@ The control every efficiency number in this repository is missing.
 
 Wrap a `max_tokens -> Completion` factory into an adaptive Completion.
 
+### `build_manifest`
+
+Hash a spec, its data files/directories, model config and code version.
+
 ### `chain_audit`
 
 Trace one archived adoption through its evidence rings.
@@ -4699,9 +4747,17 @@ Evolve a decision slot against a problem distribution the meta loop generates.
 
 Dependency-free dataset loading -- the *data layer* for examples/experiments.
 
+### `diff_manifest`
+
+Field-level differences between two manifests (empty when identical).
+
 ### `distill`
 
 The rationales the artifact will carry: deduped rules from the rollouts, near-miss rationales included -- they are the artifact's own notes about what it still needs. Dedup is on the **exact rationale text**, so the output value stays semantic content (`-1` and `1`, `A` and `a` are different rules, not formatting to normalise away).
+
+### `evaluate`
+
+Compare `verifier` with `oracle` on a deterministic sample.
 
 ### `evaluate_source`
 
@@ -4843,6 +4899,10 @@ Content-address a proposal so identical proposals dedupe automatically.
 
 Run a round-robin between the rules, rated by Elo.
 
+### `run_controller`
+
+Run sessions until budget, a kill switch, an error or stagnation.
+
 ### `safety_report`
 
 Check whether the archive is safe to keep seeding from.
@@ -4910,6 +4970,10 @@ The RL signal: `1.0` when the outcome's output exactly matches its `gold`, `0.0`
 ### `verified_rules`
 
 The archive's seedable rule records, gated by trust.
+
+### `verify_manifest`
+
+Rebuild the manifest from current inputs; return changed field names.
 
 ### `windows_from_archive`
 
