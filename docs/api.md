@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-486 public names across 89 modules.
+489 public names across 90 modules.
 
 ---
 
@@ -4272,6 +4272,18 @@ How complementary diffs become one candidate.
 ### `FusionTrial`
 
 One tournament: what the fused candidate scored against the best single.
+
+### `GuardDecision`
+
+One guard's name and decision.
+
+### `GuardPipeline`
+
+Run guards in order; the first refusal is the pipeline's decision.
+
+### `GuardPipelineResult`
+
+The full ordered trail, including the first refusal when there is one.
 
 ### `Harness`
 
