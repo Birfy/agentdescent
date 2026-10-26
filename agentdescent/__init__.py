@@ -340,6 +340,8 @@ from .self_improve import (
     self_improve,
 )
 from .safety import SafetyCheck, SafetyReport, safety_report
+from .manifest import (RunManifest, build_manifest, diff_manifest,
+                       verify_manifest)
 from .recursive import (
     RecursiveRound,
     RecursiveSelfImproveReport,
@@ -758,6 +760,10 @@ __all__ = [
     "SafetyCheck",
     "SafetyReport",
     "safety_report",
+    "RunManifest",
+    "build_manifest",
+    "diff_manifest",
+    "verify_manifest",
     "RecursiveRound",
     "RecursiveSelfImproveReport",
     "recursive_self_improve",
