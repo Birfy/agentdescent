@@ -551,6 +551,43 @@ def _parse_json_object(raw: str) -> Optional[Dict[str, object]]:
     return data if isinstance(data, dict) else None
 
 
+def _strip_jsonc_comments(raw: str) -> str:
+    """``raw`` with ``//`` and ``/* */`` comments blanked out, strings left alone.
+
+    Only used to ask whether a JSONC file *really* names agentdescent: a
+    commented-out ``// "agentdescent": ...`` line is not an entry OpenCode reads.
+    """
+    out: List[str] = []
+    i, n = 0, len(raw)
+    in_str = False
+    while i < n:
+        c = raw[i]
+        if in_str:
+            out.append(c)
+            if c == "\\" and i + 1 < n:
+                out.append(raw[i + 1])
+                i += 2
+                continue
+            if c == '"':
+                in_str = False
+            i += 1
+        elif c == '"':
+            in_str = True
+            out.append(c)
+            i += 1
+        elif raw.startswith("//", i):
+            j = raw.find("\n", i)
+            i = n if j == -1 else j
+        elif raw.startswith("/*", i):
+            j = raw.find("*/", i + 2)
+            i = n if j == -1 else j + 2
+            out.append(" ")
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
 def install_opencode(home: str, w: _Writer) -> None:
     config_home = _host_root("XDG_CONFIG_HOME", os.path.join(home, ".config"), w.honour_env)
     root = os.path.join(config_home, "opencode")
@@ -564,7 +601,7 @@ def install_opencode(home: str, w: _Writer) -> None:
     if raw is not None and _parse_json_object(raw) is None:
         # JSONC allows comments and trailing commas, which json cannot read, and
         # merging by hand would corrupt the file -- so it is never rewritten.
-        if '"agentdescent"' in raw:
+        if '"agentdescent"' in _strip_jsonc_comments(raw):
             w.note(f"NOTE: {path} has comments and already names agentdescent, so it "
                    "was left as it is; check the entry with `opencode mcp list`")
             return
@@ -951,7 +988,7 @@ def _opencode_mcp_state(root: str) -> str:
         if data is None:
             # A file json cannot read that never names us holds no entry of ours
             # (JSONC keys are quoted strings), so only one that does is a maybe.
-            unreadable = unreadable or '"agentdescent"' in raw
+            unreadable = unreadable or '"agentdescent"' in _strip_jsonc_comments(raw)
             continue
         if (data.get("mcp") or {}).get("agentdescent"):
             return "ok"

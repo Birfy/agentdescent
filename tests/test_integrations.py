@@ -194,6 +194,28 @@ def test_install_opencode_leaves_a_commented_config_that_names_us(tmp_path):
     assert not (root / "opencode.json").exists()
 
 
+def test_install_opencode_ignores_a_commented_out_mention(tmp_path):
+    # A `// "agentdescent": ...` line is not an entry OpenCode reads, so the
+    # install still wires the sibling opencode.json and doctor reports it ok.
+    from agentdescent.integrations import _opencode_mcp_state as state
+    root = tmp_path / ".config" / "opencode"
+    root.mkdir(parents=True)
+    hand = '{\n  // "agentdescent": {"type": "local"},\n  /* "agentdescent" */\n  "theme": "x",\n}\n'
+    (root / "opencode.jsonc").write_text(hand)
+    assert state(str(root)) == "missing"
+    install("opencode", home=str(tmp_path))
+    assert _read(root / "opencode.jsonc") == hand
+    data = json.loads(_read(root / "opencode.json"))
+    assert "agentdescent" in data["mcp"]
+    assert state(str(root)) == "ok"
+
+
+def test_strip_jsonc_comments_keeps_strings():
+    from agentdescent.integrations import _strip_jsonc_comments
+    raw = '{"u": "http://x/*y*/", // c\n "a": 1 /* d */}'
+    assert json.loads(_strip_jsonc_comments(raw)) == {"u": "http://x/*y*/", "a": 1}
+
+
 def test_dry_run_writes_nothing(tmp_path):
     for host in HOSTS:
         lines = install(host, dry_run=True, home=str(tmp_path))
