@@ -5,6 +5,12 @@ retrieves it for the next run — gated. This is the difference between
 self-improvement (one run) and *continuing* self-improvement (skills that seed
 the next run).
 
+> **CLI / plugin path.** `agentdescent evolve`, `start`, and the host plugins
+> never write a consolidation archive. Only the Python meta API
+> (`continuous_meta_run` and friends; see also [meta-cli](meta-cli.md) for the
+> read-only verbs that *inspect* one) produces `$AGENTDESCENT_HOME/archive`. A
+> missing archive is not fixed by inventing a "consolidation" CLI step.
+
 ## Why
 
 An evolution run starts from an empty artifact, learns, and then the skill dies

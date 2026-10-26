@@ -275,3 +275,16 @@ def test_legacy_sanitized_filename_looks_up_only_matching_identity(tmp_path):
     digest = hashlib.sha256(b"a/b").hexdigest()
     assert (tmp_path / "runs" / f"{digest}.json").is_file()
     assert (tmp_path / "runs" / "ab.json").is_file()
+
+
+def test_create_false_does_not_mkdir_runs(tmp_path):
+    """Read-only openers must not dirty an empty archive with runs/ (#512)."""
+    root = tmp_path / "archive"
+    root.mkdir()
+    store = ConsolidationStore(str(root), create=False)
+    assert store.count() == 0
+    assert list(store.iter_archive()) == []
+    assert store.find("nope") is None
+    assert list(root.iterdir()) == []
+
+

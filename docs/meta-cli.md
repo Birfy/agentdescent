@@ -10,7 +10,12 @@ agentdescent audit    <run_id> --archive PATH              trace an adoption's e
 ```
 
 `archive` defaults to `$AGENTDESCENT_HOME/archive` (or `~/.agentdescent/archive`).
-Every command accepts `--json` for machine-readable output.
+Every command accepts `--json` for machine-readable output. An `archive` that
+does not exist is an error (exit `2`) that names `continuous_meta_run` and
+[consolidation](consolidation.md) — `evolve` / plugin runs do not write one —
+and is never silently created, so a typo'd path cannot pass for an empty
+archive. The read-only verbs also leave an existing empty archive untouched
+(no `runs/` directory is created as a side effect).
 
 ## `portfolio` — rank the layers, reallocate the next window
 
@@ -24,7 +29,7 @@ agentdescent portfolio ~/.agentdescent/archive
 #     held: 2/3 measurements, not enough to move budget on
 ```
 
-An empty archive exits `1` with a pointer to run a meta session first — the
+An existing but empty archive exits `1` with a pointer to run a meta session first — the
 portfolio needs rule records to rank.
 
 ## `exam` — re-judge adoptions with an oracle
@@ -55,5 +60,6 @@ agentdescent audit run-1 --archive ~/.agentdescent/archive \
 #   ...
 ```
 
-An unknown run or a bad `--domain` / `--harness` ref fails with a one-line error
+An unknown run, a `--meta-audit` / `--inner-audit` file that does not exist, or
+a bad `--domain` / `--harness` ref fails with a one-line error
 and a non-zero exit, never a traceback.

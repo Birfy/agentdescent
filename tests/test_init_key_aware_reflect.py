@@ -78,9 +78,11 @@ def test_filled_in_values_plan_cleanly(tmp_path, monkeypatch, capsys):
     assert spec["reflect"] == {"ref": "openai_compatible", "model": "doubao-seed-code",
                                "api_key_env": "ARK_API_KEY",
                                "default_base_url": "https://ark.example/api/v3"}
-    # Reflect is filled in; the bare opencode *worker* still needs OPENCODE_CONFIG (#455).
     assert "reflect." not in out or "placeholder" not in out
-    assert "OPENCODE_CONFIG" in out  # worker warning, not a reflect problem
+    # With --model and --base-url the opencode worker gets them too (#485), so
+    # no bare-opencode warning is left.
+    assert cli._opencode_configured(spec["agent"])
+    assert "is bare `opencode`" not in out
     payload = _plan(tmp_path)
     assert payload["ok"] is True, payload.get("error")
     assert not [w for w in payload["warnings"] if w.startswith("reflect:")]

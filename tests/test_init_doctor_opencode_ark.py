@@ -140,3 +140,55 @@ def test_init_and_doctor_agree_when_openai_and_ark_are_both_set(
     init_warns = "bare `opencode`" in out
     assert doctor_warns and init_warns
     assert "ark/deepseek-v4-flash" in out
+
+
+_ARK = "https://ark.cn-beijing.volces.com/api/coding/v3"
+
+
+def test_init_wires_model_and_base_url_into_opencode_worker(tmp_path, monkeypatch, capsys):
+    """#485: with --model/--base-url given, the worker gets the Coding recipe too."""
+    _with_opencode(monkeypatch)
+    monkeypatch.setenv("ARK_API_KEY", "secret-value")
+    spec, out = _init(tmp_path, monkeypatch, capsys, "--model", "deepseek-v4-flash",
+                      "--base-url", _ARK, "--key-env", "ARK_API_KEY")
+    agent = spec["agent"]
+    assert agent["extra_args"] == ["-m", "ark/deepseek-v4-flash"]
+    cfg_path = agent["env"]["OPENCODE_CONFIG"]
+    assert cfg_path == str(tmp_path / "spec.opencode-providers.json")
+    cfg = json.loads(open(cfg_path).read())
+    ark = cfg["provider"]["ark"]
+    assert ark["options"] == {"baseURL": _ARK, "apiKey": "{env:ARK_API_KEY}"}
+    assert "deepseek-v4-flash" in ark["models"]
+    assert "secret-value" not in open(cfg_path).read()
+    assert cli._opencode_configured(agent)
+    assert "is bare `opencode`" not in out
+    assert spec["reflect"]["model"] == "deepseek-v4-flash"
+
+
+def test_init_opencode_recipe_infers_key_env_from_environment(tmp_path, monkeypatch, capsys):
+    _with_opencode(monkeypatch)
+    monkeypatch.setenv("ARK_API_KEY", "k")
+    spec, _ = _init(tmp_path, monkeypatch, capsys, "--model", "m", "--base-url", _ARK)
+    cfg = json.loads(open(spec["agent"]["env"]["OPENCODE_CONFIG"]).read())
+    assert cfg["provider"]["ark"]["options"]["apiKey"] == "{env:ARK_API_KEY}"
+
+
+def test_init_opencode_recipe_uses_custom_provider_for_other_endpoints(
+        tmp_path, monkeypatch, capsys):
+    _with_opencode(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    spec, _ = _init(tmp_path, monkeypatch, capsys, "--model", "m",
+                    "--base-url", "http://localhost:8000/v1")
+    assert spec["agent"]["extra_args"] == ["-m", "custom/m"]
+    cfg = json.loads(open(spec["agent"]["env"]["OPENCODE_CONFIG"]).read())
+    assert cfg["provider"]["custom"]["options"]["apiKey"] == "{env:OPENAI_API_KEY}"
+
+
+@pytest.mark.parametrize("extra", [(), ("--model", "m"), ("--base-url", _ARK)])
+def test_init_keeps_bare_opencode_without_both_flags(tmp_path, monkeypatch, capsys, extra):
+    _with_opencode(monkeypatch)
+    monkeypatch.setenv("ARK_API_KEY", "k")
+    spec, out = _init(tmp_path, monkeypatch, capsys, *extra)
+    assert spec["agent"] == {"ref": "opencode"}
+    assert not (tmp_path / "spec.opencode-providers.json").exists()
+    assert "OPENCODE_CONFIG" in out

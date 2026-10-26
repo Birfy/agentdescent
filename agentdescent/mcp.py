@@ -66,7 +66,8 @@ def rescan_allow_from_env(environ: Optional[Dict[str, str]] = None
 #: Written for the calling model: what the tool is for and what to do around it.
 TOOL_DESCRIPTIONS: Dict[str, str] = {
     "doctor": (
-        "Check what this machine can run: which worker agent CLIs (claude, codex, dsh) "
+        "Check what this machine can run: which worker agent CLIs (claude, codex, dsh, "
+        "opencode) "
         "are on PATH, which provider keys are set, whether a container engine and the "
         "git ledger are available, and which AgentDescent version and Python interpreter "
         "this server runs (compare with the shell's `agentdescent doctor` when results "
@@ -163,6 +164,28 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
         "whatever prefixes the operator set in AGENTDESCENT_RESCAN_ALLOW can be named. "
         "That list is not something this tool can widen: if the reference you need is "
         "refused, tell the user which prefix to add and why."),
+    "safety": (
+        "Read-only: is a consolidation archive (the rules meta runs adopted) safe to "
+        "keep seeding new runs from? Returns `verdict` (safe / caution / unsafe), a "
+        "one-line `reason`, counts of rules, unexamined, flagged and demoted ones, and "
+        "every `check` with its status. Pass `audit` (a MetaAuditStore JSONL) to check "
+        "verifier bias -- without it that check is a warning, not a pass. `archive` "
+        "defaults to $AGENTDESCENT_HOME/archive; a missing one is an error and is never "
+        "created. Same data as `agentdescent safety --json`. Relay the verdict and "
+        "every non-ok check before the user seeds from the archive."),
+    "portfolio": (
+        "Read-only: rank a consolidation archive's layers by return per cost and "
+        "propose how to split the next budget window between them (`reallocated`, "
+        "with a `reasons` line per layer). Only reports the suggestion; nothing is "
+        "written or applied. `archive` defaults to $AGENTDESCENT_HOME/archive; a missing "
+        "or empty one is an error. Same data as `agentdescent portfolio --json`."),
+    "audit_trace": (
+        "Read-only: trace one archived adoption (`run_id`) through its evidence rings "
+        "-- archive record, meta-gain audit, inner-reward audit -- and say whether the "
+        "chain is `verified`, with each link's status and reason. Pass `meta_audit` / "
+        "`inner_audit` store paths for those rings; a ring with no store is reported as "
+        "missing evidence, not as passing. Same data as `agentdescent audit <run_id> "
+        "--json` (the CLI's --harness ring needs a module reference and is CLI-only)."),
     "audit_drift": (
         "Chart the correction across verifier versions with an EWMA control chart. A "
         "`bias-up` signal means the loop is finding answers the verifier likes and the "
@@ -224,6 +247,9 @@ class Tools:
             return {"error": f"unknown kind {kind!r}; choose from {list(KINDS)}"}
         payload: Dict[str, Any] = {
             "algorithms": [a.describe() for a in algorithms.listing(kind)]}
+        errors = algorithms.external_errors()
+        if errors:
+            payload["load_errors"] = errors
         if kind == "policy_slot" and not payload["algorithms"]:
             payload["note"] = ("no algorithm applies to kind 'policy_slot': that "
                                "kind evolves a policy slot, and `plan` refuses an "
@@ -433,6 +459,48 @@ class Tools:
 
         return service.audit_drift(path, versions)
 
+    # -- the meta stack (read-only) ---------------------------------------------
+    #
+    # The bodies are the CLI's own (`cli.*_payload`), so a tool and the
+    # `--json` verb cannot drift apart. None of them writes: a missing archive
+    # is an error, never a directory created on the way (#502).
+
+    def safety(self, archive: Optional[str] = None, audit: Optional[str] = None,
+               bias_threshold: float = 0.1,
+               min_exam: str = "passed") -> Dict[str, Any]:
+        from .cli import MetaCommandError, safety_payload
+
+        try:
+            return safety_payload(archive, audit=audit,
+                                  bias_threshold=bias_threshold, min_exam=min_exam)
+        except MetaCommandError as e:
+            return {"error": str(e)}
+
+    def portfolio(self, archive: Optional[str] = None, floor: float = 0.05,
+                  min_samples: int = 3, grow: float = 0.5, shrink: float = 0.5,
+                  cap: Optional[float] = None) -> Dict[str, Any]:
+        from .cli import MetaCommandError, portfolio_payload
+
+        try:
+            return portfolio_payload(archive, floor=floor, min_samples=min_samples,
+                                     grow=grow, shrink=shrink, cap=cap)
+        except (MetaCommandError, ValueError) as e:
+            return {"error": str(e)}
+
+    def audit_trace(self, run_id: str, archive: Optional[str] = None,
+                    meta_audit: Optional[str] = None,
+                    inner_audit: Optional[str] = None,
+                    bias_threshold: float = 0.1) -> Dict[str, Any]:
+        from .cli import MetaCommandError, audit_trace_payload
+
+        try:
+            return audit_trace_payload(run_id, archive=archive,
+                                       meta_audit=meta_audit,
+                                       inner_audit=inner_audit,
+                                       bias_threshold=bias_threshold)
+        except MetaCommandError as e:
+            return {"error": str(e)}
+
 
 def _context_class():
     """The SDK's ``Context``, whose *annotation* is how a tool asks for a session.
@@ -635,6 +703,23 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent",
     @server.tool(description=TOOL_DESCRIPTIONS["audit_drift"])
     def audit_drift(path: str, versions: Optional[list] = None) -> Dict[str, Any]:
         return t.audit_drift(path, versions)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["safety"])
+    def safety(archive: Optional[str] = None, audit: Optional[str] = None,
+               bias_threshold: float = 0.1, min_exam: str = "passed") -> Dict[str, Any]:
+        return t.safety(archive, audit, bias_threshold, min_exam)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["portfolio"])
+    def portfolio(archive: Optional[str] = None, floor: float = 0.05,
+                  min_samples: int = 3, grow: float = 0.5, shrink: float = 0.5,
+                  cap: Optional[float] = None) -> Dict[str, Any]:
+        return t.portfolio(archive, floor, min_samples, grow, shrink, cap)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["audit_trace"])
+    def audit_trace(run_id: str, archive: Optional[str] = None,
+                    meta_audit: Optional[str] = None, inner_audit: Optional[str] = None,
+                    bias_threshold: float = 0.1) -> Dict[str, Any]:
+        return t.audit_trace(run_id, archive, meta_audit, inner_audit, bias_threshold)
 
     @server.resource("agentdescent://runs", mime_type="application/json",
                      description="Every run in the store, newest first, with its status.")

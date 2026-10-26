@@ -175,6 +175,43 @@ def starter_model_block(*, model: Optional[str] = None, base_url: Optional[str] 
     return block
 
 
+def _opencode_provider_id(base_url: str) -> str:
+    """The provider id an ``init``-written OpenCode config uses for ``base_url``.
+
+    ``ark`` for Volcengine Ark, matching docs/plugins.md; ``custom`` otherwise.
+    It is only a local name inside the file ``init`` writes, so nothing about
+    the endpoint is guessed from it.
+    """
+    from urllib.parse import urlparse
+
+    host = (urlparse(base_url).hostname or "").lower()
+    return "ark" if host.endswith("volces.com") else "custom"
+
+
+def opencode_coding_recipe(*, model: str, base_url: str, key_env: str,
+                           config_path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """The ``agent`` block and provider-only config for an isolated OpenCode worker (#485).
+
+    The documented Coding recipe (docs/plugins.md): ``-m <provider>/<model>`` plus
+    ``env.OPENCODE_CONFIG`` naming a file that holds only a ``provider`` block,
+    with the key as ``{env:VAR}`` -- never inline. Returns ``(agent, config)``;
+    the caller writes ``config`` to ``config_path`` (an absolute path).
+    """
+    provider = _opencode_provider_id(base_url)
+    agent = {"ref": "opencode", "extra_args": ["-m", f"{provider}/{model}"],
+             "env": {"OPENCODE_CONFIG": config_path}}
+    config = {
+        "$schema": "https://opencode.ai/config.json",
+        "provider": {provider: {
+            "npm": "@ai-sdk/openai-compatible",
+            "name": "Ark" if provider == "ark" else "Custom",
+            "options": {"baseURL": base_url, "apiKey": "{env:%s}" % key_env},
+            "models": {model: {"name": model}},
+        }},
+    }
+    return agent, config
+
+
 def parse_cli_params(pairs: Optional[Sequence[str]]) -> Dict[str, Any]:
     """``--param k=v`` -> a JSON-typed dict (bare strings when JSON cannot parse).
 
@@ -617,9 +654,30 @@ def cmd_init(a: argparse.Namespace) -> int:
             return 2
     out = a.out or os.path.join(".agentdescent", f"{os.path.basename(a.path.rstrip('/')) or 'spec'}.evolve.json")
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    providers_out = None
+    if spec.get("agent") == {"ref": "opencode"} and a.model and a.base_url:
+        # The user named the model and endpoint, so wire them into the worker
+        # too, not only the reflector: a bare `opencode` would ignore both and
+        # fall back on OpenCode's own default (#485). Without both flags the
+        # bare ref and the #455 warning stay -- nothing is guessed.
+        llm = next((b for b in (spec.get("reflect"), spec.get("agent"))
+                    if isinstance(b, dict) and b.get("ref") == "openai_compatible"), {})
+        key_env = llm.get("api_key_env") or a.key_env or "OPENAI_API_KEY"
+        stem = os.path.splitext(os.path.basename(out))[0]
+        providers_out = os.path.join(os.path.dirname(os.path.abspath(out)),
+                                     f"{stem}.opencode-providers.json")
+        agent_block, providers = opencode_coding_recipe(
+            model=a.model, base_url=a.base_url, key_env=key_env,
+            config_path=providers_out)
+        spec["agent"] = agent_block
+        with open(providers_out, "w", encoding="utf-8") as fh:
+            json.dump(providers, fh, indent=2)
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(spec, fh, indent=2)
     print(f"wrote {out}")
+    if providers_out:
+        print(f"wrote {providers_out} (OpenCode provider-only config for the worker; "
+              f"key read from ${key_env}, never inline)")
     if not found and spec["kind"] not in ("text", "policy_slot"):
         print(f"warning: no worker CLI (claude, codex, dsh, opencode) is on PATH; "
               f"wrote the placeholder agent `{agent}`. Run `agentdescent doctor`, "
@@ -1052,6 +1110,28 @@ def _unusable_refs(spec: EvolveSpec) -> List[str]:
     return out
 
 
+def _merge_policies_replaced(comp) -> Optional[str]:
+    """Say so when the spec's merge policies will be ignored by a custom aggregator.
+
+    An ``aggregator_factory`` -- the one ``gepa``, ``skillopt`` and ``dgm`` bring --
+    replaces the shipped merge pipeline, so ``conflict``/``fusion`` the spec
+    names never run. ``evolve()`` warns about it at run time; ``plan`` is where
+    that belongs, before a detached run buries it in ``log.txt`` (#504).
+    """
+    if comp.kwargs.get("aggregator_factory") is None:
+        return None
+    installed = comp.kwargs.get("policies")
+    dropped = sorted(name for name in ("conflict", "fusion")
+                     if installed is not None and getattr(installed, name, None) is not None)
+    if not dropped:
+        return None
+    who = (f"algorithm {comp.algorithm['name']!r}" if comp.algorithm
+           else "aggregator_factory")
+    return (f"policies {dropped} are replaced by {who}'s own aggregator and will not "
+            "run; drop them from `policies` (or the algorithm) to silence evolve's "
+            "RuntimeWarning.")
+
+
 def _selection_not_merging(comp) -> Optional[str]:
     """Say so when `n_workers` buys selection rather than the merge it looks like.
 
@@ -1092,6 +1172,9 @@ def plan_payload(spec: EvolveSpec, *, usd_per_call: Optional[float] = None) -> D
     selection = _selection_not_merging(comp)
     if selection:
         warnings.append(selection)
+    replaced = _merge_policies_replaced(comp)
+    if replaced:
+        warnings.append(replaced)
     audit = None
     if comp.audit is not None:
         audit = {"store": comp.audit.store.path,
@@ -1750,6 +1833,20 @@ def _archive_root(archive: Optional[str]) -> str:
     return os.path.join(os.path.abspath(os.path.expanduser(home)), "archive")
 
 
+def _missing_archive(root: str) -> bool:
+    """Report a missing archive the way ``safety`` does and return True.
+
+    The read-only archive commands must not create ``root`` as a side effect
+    of opening it: ``ConsolidationStore`` makes its directory, so a typo'd path
+    used to come back as an empty-but-valid archive (#502). The message names
+    the only writer (#512)."""
+    if os.path.isdir(root):
+        return False
+    from .consolidation import missing_archive_message
+    print(f"error: {missing_archive_message(root)}", file=sys.stderr)
+    return True
+
+
 def _load_ref(ref: str) -> Any:
     """Resolve ``module:attribute`` to the object it names."""
     if ":" not in ref:
@@ -1762,43 +1859,92 @@ def _load_ref(ref: str) -> Any:
         raise SpecError(f"cannot resolve {ref!r}: {error}") from error
 
 
-def cmd_portfolio(a: argparse.Namespace) -> int:
-    """``agentdescent portfolio [archive]`` -- rank the archive's layers and
-    reallocate the next budget window."""
+class MetaCommandError(Exception):
+    """A read-only meta command (portfolio / safety / audit trace) cannot answer.
+
+    ``code`` is the CLI exit status: 2 for a missing archive or store, an
+    unknown run or a bad argument; 1 when the archive exists but holds nothing
+    to report on. The MCP tools return the message as ``{"error": ...}``.
+    """
+
+    def __init__(self, message: str, code: int = 2) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _require_archive(root: str) -> None:
+    """Refuse a missing archive *before* anything opens it (#502 / #512).
+
+    ``ConsolidationStore`` makes its directory by default, so a typo'd path
+    would come back as an empty-but-valid archive. The message names the only
+    writer so a plugin host does not invent a nonexistent next step."""
+    if not os.path.isdir(root):
+        from .consolidation import missing_archive_message
+        raise MetaCommandError(missing_archive_message(root))
+
+
+def _require_file(flag: str, path: str) -> None:
+    if not os.path.isfile(os.path.expanduser(path)):
+        raise MetaCommandError(f"{flag} store {path!r} does not exist")
+
+
+def _meta_error(error: MetaCommandError) -> int:
+    print(f"error: {error}" if error.code == 2 else str(error), file=sys.stderr)
+    return error.code
+
+
+def portfolio_payload(archive: Optional[str] = None, *, floor: float = 0.05,
+                      min_samples: int = 3, grow: float = 0.5,
+                      shrink: float = 0.5,
+                      cap: Optional[float] = None) -> Dict[str, Any]:
+    """What ``agentdescent portfolio --json`` prints, for the CLI and the MCP
+    ``portfolio`` tool alike. Reports a reallocation; writes nothing."""
     from .consolidation import ConsolidationStore
     from .portfolio import layers_from_archive, portfolio_report
 
-    root = _archive_root(getattr(a, "archive", None))
-    store = ConsolidationStore(root)
-    layers = layers_from_archive(store)
+    root = _archive_root(archive)
+    _require_archive(root)
+    layers = layers_from_archive(ConsolidationStore(root, create=False))
     if not layers:
-        print(f"no rule records under {root} to build layers from; "
-              f"run continuous_meta_run (or a meta session) first",
-              file=sys.stderr)
-        return 1
-    report = portfolio_report(
-        layers, floor=a.floor, min_samples=a.min_samples, grow=a.grow,
-        shrink=a.shrink, cap=a.cap)
+        raise MetaCommandError(
+            f"no rule records under {root} to build layers from; "
+            f"run continuous_meta_run (or a meta session) first", code=1)
+    report = portfolio_report(layers, floor=floor, min_samples=min_samples,
+                              grow=grow, shrink=shrink, cap=cap)
+    return {
+        "archive": root,
+        "total_budget": report.total_budget,
+        "layers": [{"name": l.name, "budget": l.budget, "spent": l.spent,
+                    "return_": l.return_, "samples": l.samples,
+                    "return_sd": l.return_sd,
+                    "diminishing": l.diminishing} for l in report.layers],
+        "reallocated": report.reallocated,
+        "reasons": report.reasons,
+    }
+
+
+def cmd_portfolio(a: argparse.Namespace) -> int:
+    """``agentdescent portfolio [archive]`` -- rank the archive's layers and
+    reallocate the next budget window."""
+    try:
+        payload = portfolio_payload(
+            getattr(a, "archive", None), floor=a.floor,
+            min_samples=a.min_samples, grow=a.grow, shrink=a.shrink, cap=a.cap)
+    except MetaCommandError as error:
+        return _meta_error(error)
     if a.json:
-        _out({
-            "archive": root,
-            "total_budget": report.total_budget,
-            "layers": [{**({"name": l.name, "budget": l.budget, "spent": l.spent,
-                            "return_": l.return_, "samples": l.samples,
-                            "return_sd": l.return_sd,
-                            "diminishing": l.diminishing})} for l in report.layers],
-            "reallocated": report.reallocated,
-            "reasons": report.reasons,
-        }, as_json=True)
+        _out(payload, as_json=True)
         return 0
-    for layer in report.layers:
-        rpc = (layer.return_ / layer.spent) if layer.spent > 0 else 0.0
-        new = report.reallocated[layer.name]
-        print(f"{layer.name}: return-per-cost {rpc:.3f} "
-              f"(return {layer.return_:.3f} / spend {layer.spent:.1f}, "
-              f"{layer.samples} measurements) -> budget {new:.1f}")
-        print(f"    {report.reasons[layer.name]}")
-    print(f"archive: {root}  (total budget {report.total_budget:.1f})")
+    for layer in payload["layers"]:
+        spent = layer["spent"]
+        rpc = (layer["return_"] / spent) if spent > 0 else 0.0
+        new = payload["reallocated"][layer["name"]]
+        print(f"{layer['name']}: return-per-cost {rpc:.3f} "
+              f"(return {layer['return_']:.3f} / spend {spent:.1f}, "
+              f"{layer['samples']} measurements) -> budget {new:.1f}")
+        print(f"    {payload['reasons'][layer['name']]}")
+    print(f"archive: {payload['archive']}  "
+          f"(total budget {payload['total_budget']:.1f})")
     return 0
 
 
@@ -1809,13 +1955,15 @@ def cmd_exam(a: argparse.Namespace) -> int:
     from .meta_exam import exam_archive
 
     root = _archive_root(getattr(a, "archive", None))
+    if _missing_archive(root):
+        return 2
     domain = _load_ref(a.domain)
     built = domain() if callable(domain) and not isinstance(domain, dict) else domain
     if not isinstance(built, Mapping):
         raise SpecError("--domain must resolve to a builder that returns a dict "
                         "with keys: oracle, tasks_for, run, reward, propose, "
                         "strategy (and optionally slot, spec)")
-    store = ConsolidationStore(root)
+    store = ConsolidationStore(root, create=False)
     config = None
     if getattr(a, "config", None) is not None:
         try:
@@ -1857,51 +2005,81 @@ def _slot_spec(slot: str) -> Any:
     return policy_source(slot)
 
 
-def cmd_audit(a: argparse.Namespace) -> int:
-    """``agentdescent audit <run_id> --archive PATH`` -- trace one adoption
-    through its evidence rings."""
+def audit_trace_payload(run_id: str, *, archive: Optional[str] = None,
+                        meta_audit: Optional[str] = None,
+                        inner_audit: Optional[str] = None,
+                        harness: Any = None,
+                        bias_threshold: float = 0.1) -> Dict[str, Any]:
+    """What ``agentdescent audit <run_id> --json`` prints, for the CLI and the
+    MCP ``audit_trace`` tool alike. ``harness`` is an already-resolved
+    callable: resolving a ``module:attr`` runs code, so only the CLI does it."""
     from .chain_audit import chain_audit
     from .consolidation import ConsolidationStore
     from .meta_audit import MetaAuditStore
 
-    store = ConsolidationStore(_archive_root(a.archive))
-    meta = MetaAuditStore(a.meta_audit) if a.meta_audit else None
+    root = _archive_root(archive)
+    _require_archive(root)
+    if meta_audit:
+        _require_file("--meta-audit", meta_audit)
+    if inner_audit:
+        _require_file("--inner-audit", inner_audit)
+    store = ConsolidationStore(root, create=False)
+    meta = MetaAuditStore(meta_audit) if meta_audit else None
     inner = None
-    if a.inner_audit:
+    if inner_audit:
         from .audit import AuditStore
-        inner = AuditStore(a.inner_audit)
-    harness = None
-    if a.harness:
-        fn = _load_ref(a.harness)
-        if not callable(fn):
-            raise SpecError(f"--harness {a.harness!r} does not resolve to a "
-                            f"callable ({type(fn).__name__})")
-        harness = fn
+        inner = AuditStore(inner_audit)
     try:
-        report = chain_audit(store, a.run_id, meta_audit=meta, inner_audit=inner,
+        report = chain_audit(store, run_id, meta_audit=meta, inner_audit=inner,
                              harness_evidence=harness,
-                             bias_threshold=a.bias_threshold)
+                             bias_threshold=bias_threshold)
     except KeyError as error:
-        # str(KeyError) wraps the message in quotes; print the message itself,
-        # and exit 2 like every other unknown-run error (#481).
-        print(f"error: {error.args[0] if error.args else error}", file=sys.stderr)
-        return 2
+        # str(KeyError) wraps the message in quotes; report the message
+        # itself, as an unknown-run error like every other (#481).
+        raise MetaCommandError(
+            str(error.args[0] if error.args else error)) from None
+    return {"run_id": run_id, "verified": report.verified, "reason": report.reason,
+            "links": [{"layer": l.layer, "status": l.status,
+                       "evidence": l.evidence, "reason": l.reason}
+                      for l in report.links]}
+
+
+def cmd_audit(a: argparse.Namespace) -> int:
+    """``agentdescent audit <run_id> --archive PATH`` -- trace one adoption
+    through its evidence rings."""
+    try:
+        root = _archive_root(a.archive)
+        _require_archive(root)
+        harness = None
+        if a.harness:
+            fn = _load_ref(a.harness)
+            if not callable(fn):
+                raise SpecError(f"--harness {a.harness!r} does not resolve to a "
+                                f"callable ({type(fn).__name__})")
+            harness = fn
+        payload = audit_trace_payload(
+            a.run_id, archive=a.archive, meta_audit=a.meta_audit,
+            inner_audit=a.inner_audit, harness=harness,
+            bias_threshold=a.bias_threshold)
+    except MetaCommandError as error:
+        return _meta_error(error)
     if a.json:
-        _out({"run_id": a.run_id, "verified": report.verified, "reason": report.reason,
-              "links": [{**({"layer": l.layer, "status": l.status,
-                             "evidence": l.evidence, "reason": l.reason})}
-                        for l in report.links]}, as_json=True)
+        _out(payload, as_json=True)
         return 0
-    print(f"run {report.run_id}: {'VERIFIED' if report.verified else 'NOT VERIFIED'}")
-    print(f"  {report.reason}")
-    for link in report.links:
-        print(f"  {link.layer}: {link.status}  {link.reason}")
+    print(f"run {payload['run_id']}: "
+          f"{'VERIFIED' if payload['verified'] else 'NOT VERIFIED'}")
+    print(f"  {payload['reason']}")
+    for link in payload["links"]:
+        print(f"  {link['layer']}: {link['status']}  {link['reason']}")
     return 0
 
 
 def cmd_algorithms(a: argparse.Namespace) -> int:
     from . import algorithms
 
+    for name, error in sorted(algorithms.external_errors().items()):
+        print(f"warning: algorithm plugin {name!r} failed to load: {error}",
+              file=sys.stderr)
     as_json = a.json
     if a.action == "list":
         if a.kind is not None and a.kind not in KINDS:
@@ -1924,6 +2102,51 @@ def cmd_algorithms(a: argparse.Namespace) -> int:
     return 0
 
 
+def safety_payload(archive: Optional[str] = None, *,
+                   audit: Optional[str] = None, bias_threshold: float = 0.1,
+                   min_exam: Optional[str] = "passed") -> Dict[str, Any]:
+    """What ``agentdescent safety --json`` prints, for the CLI and the MCP
+    ``safety`` tool alike. ``min_exam`` is ``passed``, ``flagged``, or
+    ``none`` / None for every non-demoted rule. Reads only."""
+    from .meta_audit import MetaAuditStore
+    from .safety import safety_report
+
+    root = _archive_root(archive)
+    store = None
+    if audit:
+        if not os.path.isfile(os.path.expanduser(audit)):
+            raise MetaCommandError(f"audit store {audit!r} does not exist")
+        store = MetaAuditStore(audit)
+    try:
+        report = safety_report(
+            root, audit=store, bias_threshold=bias_threshold,
+            min_exam=None if min_exam in (None, "none") else min_exam)
+    except (FileNotFoundError, ValueError) as error:
+        raise MetaCommandError(str(error)) from None
+    return {"archive": root, **report.to_dict()}
+
+
+def cmd_safety(a: argparse.Namespace) -> int:
+    """``agentdescent safety`` -- is this archive safe to keep seeding from?"""
+    try:
+        payload = safety_payload(
+            getattr(a, "archive", None), audit=getattr(a, "audit", None),
+            bias_threshold=getattr(a, "bias_threshold", 0.1),
+            min_exam=getattr(a, "min_exam", "passed"))
+    except MetaCommandError as error:
+        return _meta_error(error)
+    if a.json:
+        _out(payload, as_json=True)
+    else:
+        print(f"verdict: {payload['verdict']}  ({payload['reason']})")
+        print(f"archive: {payload['archive']}  rules: {payload['rules']}  "
+              f"unexamined: {payload['unexamined']}  "
+              f"flagged: {payload['flagged']}  demoted: {payload['demoted']}")
+        for check in payload["checks"]:
+            print(f"  [{check['status']:<4}] {check['name']:<14} {check['detail']}")
+    return {"safe": 0, "caution": 1, "unsafe": 3}.get(payload["verdict"], 1)
+
+
 def cmd_install(a: argparse.Namespace) -> int:
     from .integrations import install
 
@@ -1931,9 +2154,16 @@ def cmd_install(a: argparse.Namespace) -> int:
         written = install(a.host, dry_run=a.dry_run, home=a.home)
     except ValueError as e:        # e.g. an empty --home (#412)
         raise SpecError(f"install: {e}") from None
-    for line in written:
-        print(line)
-    return 0
+    # A `FAILED:` line is a step `install` could not take: the host is not
+    # wired, so say so in the exit code too (#516).
+    ok = not any(line.startswith("FAILED:") for line in written)
+    if getattr(a, "json", False):
+        _out({"ok": ok, "host": a.host, "dry_run": a.dry_run, "lines": written},
+             as_json=True)
+    else:
+        for line in written:
+            print(line)
+    return 0 if ok else 1
 
 
 def cmd_uninstall(a: argparse.Namespace) -> int:
@@ -1943,11 +2173,16 @@ def cmd_uninstall(a: argparse.Namespace) -> int:
         lines = uninstall(a.host, dry_run=a.dry_run, home=a.home)
     except ValueError as e:        # e.g. an empty --home (#412)
         raise SpecError(f"uninstall: {e}") from None
-    for line in lines:
-        print(line)
     # 1 when something was kept and so is still wired: a script or an agent can
     # tell "fully removed" from "needs a manual step". Nothing installed is 0.
-    return 1 if any(line.startswith("kept ") for line in lines) else 0
+    kept = any(line.startswith("kept ") for line in lines)
+    if getattr(a, "json", False):
+        _out({"ok": not kept, "host": a.host, "dry_run": a.dry_run, "lines": lines},
+             as_json=True)
+    else:
+        for line in lines:
+            print(line)
+    return 1 if kept else 0
 
 
 def cmd_serve(a: argparse.Namespace) -> int:
@@ -2048,7 +2283,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="worker agent short name (default: the first of claude_code, "
                         "codex, dsh, opencode whose CLI is on PATH; claude_code if none)")
     s.add_argument("--model", default=None,
-                   help="model name for the openai_compatible reflector/agent "
+                   help="model name for the openai_compatible reflector/agent; with "
+                        "--base-url and an `opencode` worker it is also pinned into "
+                        "the worker (-m plus a provider-only OPENCODE_CONFIG) "
                         "(default: a placeholder plan refuses -- never guessed)")
     s.add_argument("--base-url", dest="base_url", default=None,
                    help="endpoint URL for that model (written as default_base_url)")
@@ -2200,6 +2437,19 @@ def build_parser() -> argparse.ArgumentParser:
                     help="machine-readable output")
     s2.set_defaults(fn=cmd_algorithms)
 
+    s = sub.add_parser("safety", help="is this archive safe to keep seeding from?")
+    s.add_argument("--archive", help="consolidation archive (default: $AGENTDESCENT_HOME/archive)")
+    s.add_argument("--audit", help="MetaAuditStore JSONL to check verifier bias")
+    s.add_argument("--bias-threshold", type=float, default=0.1,
+                   dest="bias_threshold",
+                   help="worst |gain bias| allowed by the audit check")
+    s.add_argument("--min-exam", choices=("passed", "flagged", "none"),
+                   default="passed", dest="min_exam",
+                   help="seeding bar to check (default: passed)")
+    s.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                   help="machine-readable output")
+    s.set_defaults(fn=cmd_safety)
+
     s = sub.add_parser("serve", help="serve a read-only run panel on loopback, for a host UI")
     s.add_argument("--host", default=runstore.DEFAULT_HTTP_HOST)
     s.add_argument("--port", type=int, default=runstore.DEFAULT_HTTP_PORT)
@@ -2209,7 +2459,29 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_mcp)
 
     sub.metavar = "{" + ",".join(n for n in sub.choices if n not in _INTERNAL_COMMANDS) + "}"
+    _accept_json_after_verb(sub)
     return p
+
+
+def _accept_json_after_verb(sub: "argparse._SubParsersAction") -> None:
+    """Let ``--json`` follow the verb as well as precede it (#513).
+
+    The top-level parser owns ``--json``; each leaf subcommand also gets one
+    whose default is SUPPRESS, so a flag written after the verb sets the same
+    ``json`` attribute and a missing one leaves the top-level value alone.
+    Subcommands that already declare ``--json`` keep their own definition.
+    """
+    for parser in dict.fromkeys(sub.choices.values()):
+        nested = [a for a in parser._actions
+                  if isinstance(a, argparse._SubParsersAction)]
+        if nested:
+            for n in nested:
+                _accept_json_after_verb(n)
+            continue
+        if "--json" in parser._option_string_actions:
+            continue
+        parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                            help="machine-readable output")
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

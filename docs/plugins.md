@@ -11,10 +11,10 @@ The design record — why it is shaped this way and what was considered — is
 
 ## Install
 
-Install **0.6.0** from PyPI:
+Install **0.7.0** from PyPI:
 
 ```bash
-pip install "agentdescent[mcp]>=0.6.0"                 # the MCP server needs this extra (and Python >= 3.10)
+pip install "agentdescent[mcp]>=0.7.0"                 # the MCP server needs this extra (and Python >= 3.10)
 agentdescent demo                      # a complete evolution, offline, no key
 agentdescent doctor                    # which agent CLIs, keys and optional pieces are here
 agentdescent install dsh               # or: claude-code, codex, opencode
@@ -49,7 +49,7 @@ commands](plugin-quickstart.md) walks the whole path.
 | `dsh` | `~/.dsh/skills/agentdescent/SKILL.md` + `hooks.json`; an `@deepseek-ai/dsh-mcp-client` entry and the `hooks-claude-code` bridge appended to `~/.dsh/cordis.patch.yml` | restart `dsh`; check with `dsh --profile web --dump-config \| grep agentdescent` |
 | `claude-code` | a plugin directory at `~/.agentdescent/plugins/claude-code/` (`plugin.json`, skill, `/agentdescent:evolve`, `.mcp.json`, a `SessionStart` hook) | `claude --plugin-dir ~/.agentdescent/plugins/claude-code`, or `/plugin marketplace add Birfy/agentdescent` then `/plugin install agentdescent@agentdescent` |
 | `codex` | `~/.codex/skills/agentdescent/SKILL.md`; an `[mcp_servers.agentdescent]` block appended to `~/.codex/config.toml` | restart Codex; check with `codex mcp list`. **Or skip `install` entirely** and use the plugin — see below |
-| `opencode` | `~/.config/opencode/skill/agentdescent/SKILL.md`; an `mcp.agentdescent` entry merged into `~/.config/opencode/opencode.jsonc` | restart OpenCode; check with `opencode mcp list` |
+| `opencode` | `~/.config/opencode/skill/agentdescent/SKILL.md`; an `mcp.agentdescent` entry merged into `~/.config/opencode/opencode.jsonc` (into `opencode.json` beside it when your `opencode.jsonc` has comments; OpenCode merges the two) | restart OpenCode; check with `opencode mcp list` |
 
 `agentdescent doctor` also reads what `install` left behind, without writing
 anything: one `host <name>: ok | stale | partial | missing` line per host (the
@@ -60,9 +60,11 @@ the MCP entry is absent; both are problems (exit code 1) and the fix is to re-ru
 `agentdescent install <host>`. A host CLI on `PATH` with nothing installed is a
 hint, not a problem, because `pip install` wires nothing and not every host on a
 machine should be touched. An OpenCode config with comments (`opencode.jsonc`, or an
-`opencode.json` you keep by hand) that cannot be parsed reports its MCP entry as
-`unknown` rather than guessing; `unknown` alone never makes a host `partial`, so
-a user who never installed anything is `missing`. An install made through a
+`opencode.json` you keep by hand) that cannot be parsed but names `agentdescent`
+reports its MCP entry as `unknown` rather than guessing; one that never names it
+holds no entry of ours, so with the skill installed the host is `partial`.
+`unknown` alone never makes a host `partial`, so a user who never installed
+anything is `missing`. An install made through a
 host's own marketplace (`codex plugin add`, Claude Code's `/plugin install`)
 leaves no files here, so it reads `missing` and the hint names that route too.
 Only presence is checked: a launcher pinned to an interpreter that has since
@@ -74,7 +76,7 @@ been deleted still reads `ok`.
 `install`) takes back what the table above says `install` wrote: the skill
 files, the Claude Code plugin directory, the `cordis.patch.yml` block, the
 `[mcp_servers.agentdescent]` table in `config.toml`, the `mcp.agentdescent`
-entry in `opencode.jsonc`. Everything around them is left as it was, and so is
+entry in `opencode.jsonc` or `opencode.json`. Everything around them is left as it was, and so is
 the run store in `~/.agentdescent`.
 
 What counts as "ours" differs by file:
@@ -91,9 +93,12 @@ What counts as "ours" differs by file:
   yourself, is kept.
 * **OpenCode**: only the pinned launcher `install` writes. The bare
   `["agentdescent", "mcp"]` entry (what `opencode mcp add` writes) is treated
-  as yours. A `$schema` key that `install` added to `opencode.jsonc` is left
-  behind (it is harmless and cannot be told from one you wrote), and so is an
-  empty `mcp` object you had. A file with comments is never rewritten.
+  as yours. `install` adds a `$schema` key only to a file it creates, and
+  `uninstall` deletes such a file once our entry was all it held; an empty
+  `mcp` object you had is left behind. A file with comments is never
+  rewritten: `install` writes the entry into `opencode.json` beside it instead,
+  and if that file cannot be parsed either it prints a `FAILED:` line with the
+  entry to add by hand and exits 1 (`--json` reports `"ok": false`).
 
 Anything kept is printed as `kept ... (...)` and makes the command exit 1, so a
 script can tell "fully removed" from "one step is yours"; nothing to remove
@@ -221,6 +226,15 @@ doctor  →  write a spec  →  plan (show the user)  →  start  →  status (o
 * **`apply` is its own tool and says it is destructive.** The evolved artifact
   reaches your real directory only through it, after `show` has displayed the
   diff and the plan (`write_to(dry_run=True)`), and it backs up first.
+* **Questions about an archive are read-only tools.** `safety` (safe to keep
+  seeding from?), `portfolio` (layer ranking and a suggested budget split) and
+  `audit_trace` (one adoption's evidence rings) return the same JSON as the
+  CLI's `safety` / `portfolio` / `audit <run_id>` verbs and write nothing.
+  A missing archive is an error that names the Python meta API
+  (`continuous_meta_run`; see [consolidation](consolidation.md)) — `evolve` /
+  plugin runs never write one, and there is no CLI/MCP verb that does. Tell
+  the user that; do not invent a "consolidation" step. `exam` runs an oracle
+  module, so it stays CLI-only.
 
 **The tool names differ by how the server was added**, which matters when you
 allowlist them or write a probe that greps for one (verified against Claude Code
@@ -286,7 +300,18 @@ The other fields:
   name, an unknown parameter, a wrong type or a kind the method does not support
   before any run starts. A host can discover the same cards with the
   `list_algorithms` / `describe_algorithm` MCP tools, or write the field with
-  `agentdescent init --algorithm NAME --param KEY=VALUE`.
+  `agentdescent init --algorithm NAME --param KEY=VALUE`. Third-party packages
+  can add a name by exposing an `Algorithm` under the
+  `agentdescent.algorithms` entry-point group; a plugin that fails to load is
+  skipped, printed as a warning by `agentdescent algorithms list`, and reported
+  by `agentdescent.algorithms.external_errors()` rather than taking the shipped
+  registry down. The value loads to an `Algorithm` (or a zero-argument factory
+  returning one), and its `name` must equal the entry-point name:
+
+  ```toml
+  [project.entry-points."agentdescent.algorithms"]
+  my_method = "my_pkg:ALGORITHM"
+  ```
 * **`data`**: one of `path` (`.json` / `.jsonl` / `.csv`), `hf`
   (`{"dataset", "split", "config", "limit"}`, through
   [the data layer](dataloader.md)) or `inline` (a list of rows); `prompt` and

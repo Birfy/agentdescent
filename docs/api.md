@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-475 public names across 86 modules.
+487 public names across 90 modules.
 
 ---
 
@@ -3182,7 +3182,7 @@ ConsolidationRecord(
 ) -> None
 ```
 
-### `ConsolidationStore(root: str) -> None`
+### `ConsolidationStore(root: str, *, create: bool = True) -> None`
 
 A durable archive of what runs learned.
 
@@ -4177,6 +4177,18 @@ Somewhere to keep evaluations. In one process, across many, or on disk.
 
 A mutable per-call max_tokens, set by the engine before each expansion.
 
+### `CapabilityGuard`
+
+Reject a self-modification that regresses a protected capability.
+
+### `CapabilityReport`
+
+What the protected suites measured for one candidate.
+
+### `CapabilitySuite`
+
+Tasks a self-modification must not regress, and the bar it must clear.
+
 ### `ChainAuditReport`
 
 What a `chain_audit` pass found, ring by ring.
@@ -4184,6 +4196,14 @@ What a `chain_audit` pass found, ring by ring.
 ### `ChainLink`
 
 One ring of an adoption's evidence chain.
+
+### `CoevolutionReport`
+
+The curriculum's effect on verifier/oracle agreement.
+
+### `CoevolutionRound`
+
+One curriculum step: the selected tasks, the bias before/after.
 
 ### `Completion`
 
@@ -4272,6 +4292,10 @@ One harness's measured outcome in a `compose_run`.
 ### `ImagineReport`
 
 What `imagine_then_evolve` did: the verified value, its real gain over the seed, the simulator's trust score, and how much of the budget was spent dreaming vs waking.
+
+### `JEVModel`
+
+A linear student verifier trained on oracle labels.
 
 ### `JointMetaReport`
 
@@ -4389,6 +4413,10 @@ One island of a `meta_population_run`: a rule's search, and how it went.
 
 What a `portfolio_report` pass saw, and decided.
 
+### `ProbeRow`
+
+One task's verifier and oracle scores, and how far apart they are.
+
 ### `ProcessExecutor`
 
 Persistent worker processes, with re-dispatch when one dies.
@@ -4476,6 +4504,14 @@ Reward at or above which a task counts as solved (`0.999`). Lower it for a grade
 ### `STALE_INFLATION`
 
 Variance multiplier the acceptance gate applies while a rectification is stale. Not a correction -- a stale rectifier has no number to correct *with* -- but a widening, so a gate that cannot be told how biased its verifier is commits less rather than the same amount with more confidence.
+
+### `SafetyCheck`
+
+One named check and why it passed, warned or failed.
+
+### `SafetyReport`
+
+The archive's trust posture, with every check that produced it.
 
 ### `Sandbox`
 
@@ -4568,6 +4604,14 @@ What `policy_improve` did: the per-round held-out verifiable reward curve (the t
 ### `VerifiedSeed`
 
 The archive's rule records that clear the trust bar, and the reasons the rest were excluded.
+
+### `VerifierAgreement`
+
+Reject a commit whose gain the verifier claims and the oracle denies.
+
+### `VerifierCurriculum`
+
+Select the tasks where the verifier disagrees most with the oracle.
 
 ### `VerifierProtocol`
 
@@ -4784,6 +4828,10 @@ Content-address a proposal so identical proposals dedupe automatically.
 ### `rule_tournament`
 
 Run a round-robin between the rules, rated by Elo.
+
+### `safety_report`
+
+Check whether the archive is safe to keep seeding from.
 
 ### `search_evolve`
 

@@ -327,3 +327,31 @@ def test_cli_exit_status_says_whether_anything_needs_a_manual_step(tmp_path, cap
 def test_cli_uninstall_rejects_an_unknown_host():
     with pytest.raises(SystemExit):
         cli.main(["uninstall", "vim"])
+
+
+def test_opencode_uninstall_undoes_the_opencode_json_fallback(tmp_path):
+    """#516: install beside a commented opencode.jsonc, then uninstall: the
+    commented file is byte for byte the same and opencode.json is gone again."""
+    from agentdescent.integrations import install
+    home = str(tmp_path)
+    root = os.path.join(home, ".config", "opencode")
+    commented = '{\n  // mine\n  "model": "x",\n}\n'
+    _write(os.path.join(root, "opencode.jsonc"), commented)
+    install("opencode", home=home)
+    assert os.path.exists(os.path.join(root, "opencode.json"))
+    lines = uninstall("opencode", home=home)
+    assert not any(line.startswith("kept ") for line in lines), lines
+    assert _snapshot(home) == {os.path.join(".config", "opencode", "opencode.jsonc"): commented}
+
+
+def test_opencode_uninstall_restores_a_users_opencode_json(tmp_path):
+    from agentdescent.integrations import install
+    home = str(tmp_path)
+    root = os.path.join(home, ".config", "opencode")
+    _write(os.path.join(root, "opencode.jsonc"), '{\n  // mine\n}\n')
+    theirs = {"mcp": {"other": {"type": "local", "command": ["o"]}}}
+    _write(os.path.join(root, "opencode.json"), json.dumps(theirs))
+    install("opencode", home=home)
+    uninstall("opencode", home=home)
+    with open(os.path.join(root, "opencode.json"), encoding="utf-8") as fh:
+        assert json.load(fh) == theirs

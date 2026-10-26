@@ -44,6 +44,15 @@ from .advantage import (
     TrustRegion,
     state_distance,
 )
+from .jev import JEVModel
+from .verifier_curriculum import (
+    CoevolutionReport,
+    CoevolutionRound,
+    ProbeRow,
+    VerifierAgreement,
+    VerifierCurriculum,
+)
+from .capability_guard import CapabilityGuard, CapabilityReport, CapabilitySuite
 from .defaults import DefaultConflict, DefaultFusion
 from .invariants import (
     BUILTIN_INVARIANTS,
@@ -331,6 +340,7 @@ from .self_improve import (
     self_improve,
 )
 from .variance_sampler import VarianceSampler
+from .safety import SafetyCheck, SafetyReport, safety_report
 from .recursive import (
     RecursiveRound,
     RecursiveSelfImproveReport,
@@ -419,7 +429,7 @@ from .parallel import (
     shard_round_robin,
 )
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 __all__ = [
     "Contract",
@@ -461,6 +471,15 @@ __all__ = [
     "TrustRegion",
     "StableDistanceAcceptance",
     "state_distance",
+    "JEVModel",
+    "CoevolutionReport",
+    "CoevolutionRound",
+    "ProbeRow",
+    "VerifierAgreement",
+    "VerifierCurriculum",
+    "CapabilityGuard",
+    "CapabilityReport",
+    "CapabilitySuite",
     "SelectionPolicy",
     "SelectionContext",
     "Candidate",
@@ -738,6 +757,9 @@ __all__ = [
     "SelfImproveTick",
     "self_improve",
     "VarianceSampler",
+    "SafetyCheck",
+    "SafetyReport",
+    "safety_report",
     "RecursiveRound",
     "RecursiveSelfImproveReport",
     "recursive_self_improve",

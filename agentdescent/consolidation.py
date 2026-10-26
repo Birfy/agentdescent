@@ -43,7 +43,7 @@ from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 from .evolution import EvolutionResult, Task
 
 __all__ = ["ConsolidationRecord", "ConsolidationStore", "SeedReport",
-           "config_fingerprint", "seed_from_archive"]
+           "config_fingerprint", "missing_archive_message", "seed_from_archive"]
 
 
 def config_fingerprint(config: Optional[Dict[str, Any]]) -> str:
@@ -147,6 +147,21 @@ class ConsolidationRecord:
         )
 
 
+
+def missing_archive_message(root: str) -> str:
+    """Actionable text for a path that is not a consolidation archive (#512).
+
+    Plugin / ``evolve`` paths never write one; only the Python meta API
+    (``continuous_meta_run`` and friends) does. Host agents that only see
+    the CLI/MCP otherwise invent a nonexistent "run a consolidation" step.
+    """
+    return (
+        f"archive {root!r} does not exist; write one with continuous_meta_run "
+        f"(see docs/consolidation.md) — evolve / plugin runs do not write an "
+        f"archive"
+    )
+
+
 class ConsolidationStore:
     """A durable archive of what runs learned.
 
@@ -160,10 +175,13 @@ class ConsolidationStore:
     not take the next run down.
     """
 
-    def __init__(self, root: str) -> None:
+    def __init__(self, root: str, *, create: bool = True) -> None:
         self.root = root
         self._runs_dir = os.path.join(root, "runs")
-        os.makedirs(self._runs_dir, exist_ok=True)
+        # Read-only callers (CLI/MCP safety/portfolio/audit) pass create=False
+        # so an empty existing archive is not dirtied with a fresh runs/ (#512).
+        if create:
+            os.makedirs(self._runs_dir, exist_ok=True)
         self._lock = threading.RLock()
 
     @staticmethod
