@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-489 public names across 90 modules.
+490 public names across 91 modules.
 
 ---
 
@@ -4606,6 +4606,10 @@ The ratings a tournament produced, and the matches that moved them.
 ### `ValueBudgetAllocator`
 
 Learn which candidates are worth the expensive evaluation.
+
+### `VarianceSampler`
+
+UCB over the recent reward variance of each task.
 
 ### `VerifiableReport`
 

@@ -340,6 +340,7 @@ from .self_improve import (
     self_improve,
 )
 from .approval import ApprovalGate, ApprovalRequest, ApprovalStore
+from .variance_sampler import VarianceSampler
 from .safety import SafetyCheck, SafetyReport, safety_report
 from .recursive import (
     RecursiveRound,
@@ -759,6 +760,7 @@ __all__ = [
     "ApprovalGate",
     "ApprovalRequest",
     "ApprovalStore",
+    "VarianceSampler",
     "SafetyCheck",
     "SafetyReport",
     "safety_report",
