@@ -330,6 +330,7 @@ from .self_improve import (
     SelfImproveTick,
     self_improve,
 )
+from .variance_sampler import VarianceSampler
 from .recursive import (
     RecursiveRound,
     RecursiveSelfImproveReport,
@@ -736,6 +737,7 @@ __all__ = [
     "SelfImproveReport",
     "SelfImproveTick",
     "self_improve",
+    "VarianceSampler",
     "RecursiveRound",
     "RecursiveSelfImproveReport",
     "recursive_self_improve",
