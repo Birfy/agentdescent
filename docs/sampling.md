@@ -166,3 +166,19 @@ given; `record` reports what that rollout scored.
     With `max_concurrency > 1` the workers share a single sampler instance and
     call both methods concurrently. `DifficultyWeighted` guards its statistics
     with a lock; a custom sampler that keeps mutable state must do the same.
+
+### Recent variance
+
+`DifficultyWeighted` uses the lifetime pass rate, which is right for a
+stationary solver and stale when the artifact is changing. `VarianceSampler`
+keeps a short per-task window and prefers the task whose recent outcomes are
+still moving, with the same UCB bonus so untried tasks are explored:
+
+```python
+from agentdescent import VarianceSampler
+evolve(tasks, reward, agent=agent, task_sampler=VarianceSampler(window=5))
+```
+
+A task that flipped 0/1 in the last few attempts is exactly the one the next diff
+can teach; a task that has settled carries no usable gradient. Ties rotate by
+round index, and the sampler locks internally because workers share it.

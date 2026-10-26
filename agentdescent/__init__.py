@@ -340,6 +340,7 @@ from .self_improve import (
     self_improve,
 )
 from .safety_controller import CanaryResult, KillSwitch, canary, rollback_plan
+from .variance_sampler import VarianceSampler
 from .safety import SafetyCheck, SafetyReport, safety_report
 from .recursive import (
     RecursiveRound,
@@ -760,6 +761,7 @@ __all__ = [
     "KillSwitch",
     "canary",
     "rollback_plan",
+    "VarianceSampler",
     "SafetyCheck",
     "SafetyReport",
     "safety_report",
