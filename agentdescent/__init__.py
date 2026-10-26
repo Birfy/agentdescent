@@ -342,6 +342,10 @@ from .self_improve import (
 from .safety_controller import CanaryResult, KillSwitch, canary, rollback_plan
 from .variance_sampler import VarianceSampler
 from .safety import SafetyCheck, SafetyReport, safety_report
+from .controller import (ControllerConfig, ControllerReport, SessionOutcome,
+                         SessionRecord, run_controller)
+from .evaluation import EvaluationReport, EvaluationRow, evaluate
+from .risk_policy import RiskContext, RiskDecision, RiskPolicy, RiskRule
 from .manifest import (RunManifest, build_manifest, diff_manifest,
                        verify_manifest)
 from .recursive import (
@@ -767,6 +771,18 @@ __all__ = [
     "SafetyCheck",
     "SafetyReport",
     "safety_report",
+    "ControllerConfig",
+    "ControllerReport",
+    "SessionOutcome",
+    "SessionRecord",
+    "run_controller",
+    "EvaluationReport",
+    "EvaluationRow",
+    "evaluate",
+    "RiskContext",
+    "RiskDecision",
+    "RiskPolicy",
+    "RiskRule",
     "RunManifest",
     "build_manifest",
     "diff_manifest",
