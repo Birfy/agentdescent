@@ -97,3 +97,40 @@ def test_apply_from_argument_errors(tmp_path, capsys):
     assert cli.main(["apply", "--from", str(tmp_path / "missing"), "--to",
                      str(tmp_path / "y.md")]) != 0
     assert "does not exist" in capsys.readouterr().err
+
+def test_apply_from_refuses_symlinks_in_directory_artifact(tmp_path, capsys):
+    """Directory artifacts must not dereference links into --to (#538 review).
+
+    A campaign workspace is written by CLI workers; a planted ``abs ->
+    /etc/hostname`` (or ``~/.ssh/id_ed25519``) used to become a regular file
+    under the user's skill/plugin dir via ``shutil.copy2``. ``apply <run_id>``
+    never materialises symlinks (FileTree skips them at load), so ``--from``
+    refuses them instead of following.
+    """
+    src, dest = tmp_path / "final", tmp_path / "skill"
+    src.mkdir(); dest.mkdir()
+    (src / "SKILL.md").write_text("ok\n")
+    (dest / "SKILL.md").write_text("old\n")
+    link = src / "abs"
+    link.symlink_to("/etc/hostname")
+    assert link.is_symlink()
+
+    assert cli.main(["apply", "--from", str(src), "--to", str(dest)]) != 0
+    err = capsys.readouterr().err
+    assert "symlink" in err and "abs" in err
+    # Must not have materialised /etc/hostname into the destination.
+    assert not (dest / "abs").exists()
+    assert (dest / "SKILL.md").read_text() == "old\n"
+    assert not list(tmp_path.glob("skill.bak-*"))
+
+    # --from itself as a symlink is also refused (isfile would follow it).
+    file_src = tmp_path / "evolved.md"
+    file_src.write_text("new\n")
+    alias = tmp_path / "alias.md"
+    alias.symlink_to(file_src)
+    target = tmp_path / "prompt.md"
+    target.write_text("old\n")
+    assert cli.main(["apply", "--from", str(alias), "--to", str(target)]) != 0
+    assert "symlink" in capsys.readouterr().err
+    assert target.read_text() == "old\n"
+

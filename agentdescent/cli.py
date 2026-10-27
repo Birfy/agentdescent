@@ -1765,11 +1765,20 @@ def apply_from_payload(source: str, *, to: str, dry_run: bool = False,
     a ``.bak-N`` backup of whatever ``to`` held, and a no-op when ``to`` already
     matches. Files in ``to`` that the artifact does not have are reported as
     ``extra`` and left alone.
+
+    Symlinks are refused (never dereferenced into real files). ``apply
+    <run_id>`` materialises from FileTree state, which already skips symlinks
+    at load time; a campaign workspace written by worker CLIs must not be able
+    to smuggle ``~/.ssh`` / ``/etc/hostname`` content into ``--to`` via a link.
     """
     src = os.path.abspath(os.path.expanduser(source))
     dest = os.path.abspath(os.path.expanduser(to))
     if src == dest:
         raise runstore.RunStoreError(f"--from and --to are the same path: {src}")
+    # ``isfile`` / ``isdir`` follow the final link; catch the source itself first.
+    if os.path.islink(src):
+        raise runstore.RunStoreError(
+            f"--from {src} is a symlink; refuse to apply (would dereference)")
     if os.path.isfile(src):
         if os.path.isdir(dest):
             raise runstore.RunStoreError(
@@ -1803,18 +1812,46 @@ def apply_from_payload(source: str, *, to: str, dry_run: bool = False,
         raise runstore.RunStoreError(
             f"{src} is a directory but --to {dest} is a file")
 
-    def _files(root: str) -> List[str]:
+    def _files(root: str, *, refuse_symlinks: bool = False) -> List[str]:
+        """Real files only. With ``refuse_symlinks``, raise if any link is under root.
+
+        ``os.walk`` lists symlink-to-file names in ``filenames`` and, with the
+        default ``followlinks=False``, leaves symlink dirs in ``dirnames``
+        without descending. Either form used to be fed to ``shutil.copy2``,
+        which follows the link and wrote the target's bytes into ``--to``.
+        Dest walks keep ``refuse_symlinks=False`` so a pre-existing link in
+        ``--to`` is left alone (and not listed as ``extra``).
+        """
         out: List[str] = []
+        links: List[str] = []
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames[:] = sorted(d for d in dirnames if d not in (".git", "__pycache__"))
+            for d in list(dirnames):
+                full_d = os.path.join(dirpath, d)
+                if os.path.islink(full_d):
+                    rel_d = os.path.relpath(full_d, root).replace(os.sep, "/")
+                    links.append(rel_d + "/")
+                    dirnames.remove(d)
             for fname in sorted(filenames):
-                rel = os.path.relpath(os.path.join(dirpath, fname), root)
-                out.append(rel.replace(os.sep, "/"))
+                full = os.path.join(dirpath, fname)
+                rel = os.path.relpath(full, root).replace(os.sep, "/")
+                if os.path.islink(full):
+                    links.append(rel)
+                else:
+                    out.append(rel)
+        if refuse_symlinks and links:
+            shown = ", ".join(links[:5]) + ("…" if len(links) > 5 else "")
+            raise runstore.RunStoreError(
+                f"--from {root} contains symlink(s) ({shown}); refuse to apply "
+                "(would dereference into real files). Remove the links or replace "
+                "them with real files, matching apply <run_id> which never "
+                "materialises symlinks.")
         return out
 
     def _same(a_path: str, b_path: str) -> bool:
         try:
-            if not os.path.isfile(b_path):
+            # Do not treat a dest symlink as "already matches" via its target.
+            if os.path.islink(b_path) or not os.path.isfile(b_path):
                 return False
             with open(a_path, "rb") as fa, open(b_path, "rb") as fb:
                 if fa.read() != fb.read():
@@ -1823,11 +1860,13 @@ def apply_from_payload(source: str, *, to: str, dry_run: bool = False,
         except OSError:
             return False
 
-    planned = _files(src)
+    planned = _files(src, refuse_symlinks=True)
     unchanged = [rel for rel in planned
                  if _same(os.path.join(src, rel), os.path.join(dest, rel))]
     changed = [rel for rel in planned if rel not in set(unchanged)]
-    extra = sorted(set(_files(dest)) - set(planned)) if os.path.isdir(dest) else []
+    # Dest extras: real files only; a stray symlink in --to is left alone.
+    extra = (sorted(set(_files(dest)) - set(planned))
+             if os.path.isdir(dest) else [])
     plan: Dict[str, Any] = {"written": changed, "unchanged": unchanged, "extra": extra,
                             "deleted": [], "backup": [], "noop": not changed,
                             "source": src, "dest": dest}
@@ -1840,7 +1879,14 @@ def apply_from_payload(source: str, *, to: str, dry_run: bool = False,
     for rel in changed:
         out = os.path.join(dest, rel.replace("/", os.sep))
         os.makedirs(os.path.dirname(out), exist_ok=True)
-        shutil.copy2(os.path.join(src, rel.replace("/", os.sep)), out)
+        # Source entries are guaranteed non-links by `_files`; still refuse to
+        # follow if the tree changed under us.
+        src_path = os.path.join(src, rel.replace("/", os.sep))
+        if os.path.islink(src_path):
+            raise runstore.RunStoreError(
+                f"--from {src} contains symlink(s) ({rel}); refuse to apply "
+                "(would dereference into real files)")
+        shutil.copy2(src_path, out)
     return plan
 
 
