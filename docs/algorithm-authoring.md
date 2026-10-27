@@ -8,7 +8,7 @@ Usability pillar 2: **quickly implement a new algorithm**.
 
 This page is the short path for someone who only wants to ship **one named
 card** that `plan` / `init` / hosts can call — without reading the whole
-[porting checklist](porting-checklist.md) or
+[porting checklist](porting-checklist.md) (kept ≤20 lines on purpose) or
 [MethodPolicy checklist](porting-methodpolicy.md).
 
 | You want… | Use… |

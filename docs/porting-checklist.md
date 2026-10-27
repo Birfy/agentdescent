@@ -2,8 +2,6 @@
 
 Use this before calling an algorithm example a **benchmark-faithful** port;
 microports/analogues follow the [MethodPolicy checklist](porting-methodpolicy.md).
-To ship only a named card for `plan` / `init` / hosts — without a full
-`examples/` port — see [Register a named Algorithm card](algorithm-authoring.md).
 
 - [ ] Give the port its own directory: `examples/<name>/` with `__init__.py`, a `README.md`, the entry point, and any helper only this port uses.
 - [ ] Start from **released code**, not only the paper; follow code on conflicts and document each conflict in `docs/algo-<name>.md`.
