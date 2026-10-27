@@ -73,7 +73,7 @@ def test_uninstall_with_home_touches_only_that_home(worlds, host):
     assert _tree(real) == {}
 
 
-@pytest.mark.parametrize("host", sorted(set(HOSTS) - {"claude-code"}))
+@pytest.mark.parametrize("host", sorted(set(HOSTS) - {"claude-code", "grok-bot"}))
 def test_without_home_the_host_variable_still_applies(worlds, host):
     real, probe = worlds
     install(host)

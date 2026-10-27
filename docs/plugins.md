@@ -50,6 +50,7 @@ commands](plugin-quickstart.md) walks the whole path.
 | `claude-code` | a plugin directory at `~/.agentdescent/plugins/claude-code/` (`plugin.json`, skill, `/agentdescent:evolve`, `.mcp.json`, a `SessionStart` hook) | `claude --plugin-dir ~/.agentdescent/plugins/claude-code`, or `/plugin marketplace add Birfy/agentdescent` then `/plugin install agentdescent@agentdescent` |
 | `codex` | `~/.codex/skills/agentdescent/SKILL.md`; `/prompts:evolve` as `~/.codex/prompts/evolve.md` (same body as Claude `/agentdescent:evolve`); an `[mcp_servers.agentdescent]` block appended to `~/.codex/config.toml` | restart Codex; check with `codex mcp list`. **Or skip `install` entirely** and use the plugin — see below |
 | `opencode` | `~/.config/opencode/skill/agentdescent/SKILL.md`; `/agentdescent/evolve` as `~/.config/opencode/command/agentdescent/evolve.md` (legacy singular `command/`, nested to mirror Claude's namespaced slash); an `mcp.agentdescent` entry merged into `~/.config/opencode/opencode.jsonc` (into `opencode.json` beside it when your `opencode.jsonc` has comments; OpenCode merges the two) | restart OpenCode; check with `opencode mcp list` |
+| `grok-bot` | scaffold under `~/.agentdescent/plugins/grok-bot/` (`SKILL.md`, `HOST.md`, `mcp.example.json`) — **not** a one-click wire-up: Grok Bot has no public plugin API for local skill+stdio MCP | read `HOST.md`; ask Grok Bot to save the skill as a user skill; drive runs with the CLI (or a public HTTPS MCP gateway). `doctor` reports `mcp n/a` when the scaffold is current |
 
 `agentdescent doctor` also reads what `install` left behind, without writing
 anything: one `host <name>: ok | stale | partial | missing` line per host, and
@@ -67,21 +68,28 @@ every host on a machine should be touched. An OpenCode config with comments (`op
 reports its MCP entry as `unknown` rather than guessing; one that never names it
 holds no entry of ours, so with the skill installed the host is `partial`.
 `unknown` alone never makes a host `partial`, so a user who never installed
-anything is `missing`. An install made through a
+anything is `missing`. Grok Bot's scaffold reports `mcp n/a` (no host-native
+MCP config to check); with a current skill that is still `ok`, not `partial`. An install made through a
 host's own marketplace (`codex plugin add`, Claude Code's `/plugin install`)
 leaves no files here, so it reads `missing` and the hint names that route too.
 Only presence is checked: a launcher pinned to an interpreter that has since
 been deleted still reads `ok`.
 
-Supported hosts today are DeepSeek Harness (`dsh`), Claude Code, Codex and
-OpenCode. **Grok Bot** is a planned next host target; there is no
-`agentdescent install grok-bot` (or similar) path yet.
+Supported hosts today are DeepSeek Harness (`dsh`), Claude Code, Codex,
+OpenCode, and a **Grok Bot scaffold** (`agentdescent install grok-bot`). The
+Grok Bot path writes the shared skill plus `HOST.md` / `mcp.example.json`
+under `~/.agentdescent/plugins/grok-bot/`; it does **not** edit a host config,
+because Grok Bot has no public one-click plugin API for local skill directories
+or stdio MCP (custom connectors need public HTTPS). `doctor` reports
+`mcp n/a` for that host when the scaffold is current. A future one-click route
+(if/when a host-native API appears) is still tracked on #165.
 
 ### Uninstall
 
 `agentdescent uninstall <host>` (`--dry-run` to preview, `--home` as for
 `install`) takes back what the table above says `install` wrote: the skill
-files, the Claude Code plugin directory, the OpenCode `command/agentdescent/evolve.md`
+files, the Claude Code plugin directory, the Grok Bot scaffold under
+`~/.agentdescent/plugins/grok-bot/`, the OpenCode `command/agentdescent/evolve.md`
 slash entry and the Codex `prompts/evolve.md` slash entry (only while still
 byte-for-byte stock), the `cordis.patch.yml` block, the
 `[mcp_servers.agentdescent]` table in `config.toml`, the `mcp.agentdescent`
