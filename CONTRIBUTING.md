@@ -71,10 +71,7 @@ mkdocs build --strict   # must pass with no warnings (CI enforces this)
 - **Faithful ports stay faithful.** The algorithm examples follow each source
   repo's *released code* (not just the paper). If code and paper disagree, follow
   the code and note it. Start from the [porting checklist](docs/porting-checklist.md)
-  and `examples/_TEMPLATE.py`. To register only a named Algorithm card for
-  `plan` / `init` / hosts, see
-  [docs/algorithm-authoring.md](docs/algorithm-authoring.md) and
-  `agentdescent/algorithms/_TEMPLATE.py`.
+  and `examples/_TEMPLATE.py`.
 - **One algorithm, one folder.** Each faithful port lives in
   `examples/<algorithm>/` — entry point, `README.md`, and any helper only that
   port uses. The framework demos (`run_demo`, `efficiency`, `parallelism`, …)
