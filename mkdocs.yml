@@ -142,6 +142,7 @@ nav:
     - Solver-challenger self-play: selfplay.md
   - Self-evolution algorithms:
     - Named algorithms (spec / plugin): algorithms.md
+    - Algorithm tournament: tournament.md
     - Campaign — iterate a spec: campaign.md
     - Overview: self-evolution-examples.md
     - Porting checklist: porting-checklist.md
