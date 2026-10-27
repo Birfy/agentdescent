@@ -339,6 +339,8 @@ from .self_improve import (
     SelfImproveTick,
     self_improve,
 )
+from .stats_eval import (BootstrapResult, ContaminationReport, bootstrap_ci,
+                         contamination_overlap, is_significant, paired_gain)
 from .campaign import CampaignReport, CampaignSession, estimate_campaign, run_campaign
 from .variance_sampler import VarianceSampler
 from .safety import SafetyCheck, SafetyReport, safety_report
@@ -763,6 +765,12 @@ __all__ = [
     "SelfImproveReport",
     "SelfImproveTick",
     "self_improve",
+    "BootstrapResult",
+    "ContaminationReport",
+    "bootstrap_ci",
+    "contamination_overlap",
+    "is_significant",
+    "paired_gain",
     "CampaignReport",
     "CampaignSession",
     "estimate_campaign",
