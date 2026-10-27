@@ -106,8 +106,16 @@ Pass `--dir ./somewhere` to keep the demo's files around and poke at them.
 ## 3. Put it in your agent
 
 ```bash
-agentdescent install claude-code    # or: dsh, codex, opencode
+agentdescent install claude-code    # or: dsh, codex, opencode, grok-bot
 ```
+
+#### Grok Bot
+
+`agentdescent install grok-bot` writes a scaffold under
+`~/.agentdescent/plugins/grok-bot/` (skill + `HOST.md` + example MCP JSON).
+There is no one-click host wire-up yet — read `HOST.md` for the current
+best path (save the skill in the Bot; drive runs with the CLI). See
+[Use it from your agent](plugins.md).
 
 Then load it, and check it is actually there:
 

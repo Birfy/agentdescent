@@ -972,13 +972,136 @@ def render_dsh_plugin(dest: str, w: Optional["_Writer"] = None) -> List[str]:
 
 
 #: The binary each host is driven through, by ``install`` target.
-HOST_CLI = {"dsh": "dsh", "claude-code": "claude", "codex": "codex", "opencode": "opencode"}
+
+# ---------------------------------------------------------------------------
+# Grok Bot (scaffold — no public one-click plugin API yet)
+# ---------------------------------------------------------------------------
+
+#: Host id accepted by ``install`` / ``uninstall`` / ``doctor``.
+GROK_BOT_HOST = "grok-bot"
+
+#: Relative paths under ``~/.agentdescent/plugins/grok-bot/``.
+GROK_BOT_SKILL_REL = ("skills", "agentdescent", "SKILL.md")
+GROK_BOT_HOST_MD = "HOST.md"
+GROK_BOT_MCP_EXAMPLE = "mcp.example.json"
+
+
+def grok_bot_plugin_root(home: str) -> str:
+    return os.path.join(home, ".agentdescent", "plugins", "grok-bot")
+
+
+def grok_bot_host_md() -> str:
+    """How to load the scaffold into Grok Bot today (honest limits).
+
+    Grok Bot has no documented file drop for skills or a local stdio MCP
+    config that ``install`` can edit the way Claude Code / Codex / OpenCode /
+    dsh do. Custom MCP connectors need a public HTTPS endpoint; catalog
+    plugins go through Connect apps. So this host's install writes the shared
+    skill plus these notes — usable artifacts — and does **not** claim the
+    Bot is fully wired.
+    """
+    return """# AgentDescent × Grok Bot
+
+`agentdescent install grok-bot` wrote a **scaffold**, not a one-click host
+wire-up. There is no public Grok Bot plugin API that accepts a local skill
+directory and a stdio MCP server the way Claude Code / Codex / OpenCode / dsh
+do. Custom MCP connectors on Grok Bot need a **public HTTPS** endpoint
+(Connect apps / ask the Bot to add a custom MCP server). A localhost stdio
+launcher will not reach the Bot from Cursor's backend.
+
+## What this directory holds
+
+| path | purpose |
+|---|---|
+| `skills/agentdescent/SKILL.md` | the same procedure every other host gets |
+| `HOST.md` | this file — current best path |
+| `mcp.example.json` | example MCP argv shape for docs / a future host API |
+
+## Best path today
+
+1. **Skill.** Open `skills/agentdescent/SKILL.md`. In a Grok Bot chat, ask the
+   Bot to save it as a user skill (skill authoring / `UpdateSkill`), or paste
+   the body when you want a one-off run. The Bot loads user skills by name;
+   dropping this folder into the Bot's managed-skills tree by hand is not a
+   supported install route.
+2. **Drive AgentDescent.** Prefer the CLI on the Bot's computer (the shared
+   box): `agentdescent doctor`, `plan`, `evolve`, `status`, `apply`. The skill
+   falls back to those verbs when MCP tools are absent.
+3. **MCP (optional, not auto-wired).** If you publish `agentdescent mcp`
+   behind a public HTTPS Streamable-HTTP/SSE gateway, ask the Bot to add that
+   URL as a custom MCP server. Do **not** expect `mcp.example.json` to be
+   picked up automatically — it is documentation.
+4. **Bot template.** To share a Bot that already knows the procedure, use
+   Grok Bot's template export (skills + getting-started), not this installer.
+
+## Doctor / uninstall
+
+- `agentdescent doctor` reports `host grok-bot: ok (skill ok, mcp n/a; …)`
+  when this scaffold is current. `mcp n/a` means there is no host-native MCP
+  config file to check — not that a server is running.
+- `agentdescent uninstall grok-bot` removes only the files this install wrote.
+
+See also [docs/plugins.md](https://birfy.github.io/agentdescent/docs/plugins/).
+"""
+
+
+def grok_bot_mcp_example(launcher=None) -> dict:
+    """Document-only MCP shape (stdio). Not loaded by Grok Bot today."""
+    launcher = launcher or [MCP_COMMAND]
+    return {
+        "_comment": (
+            "Example only — Grok Bot does not read this file. Custom MCP on "
+            "Grok Bot needs a public HTTPS endpoint; local stdio is for hosts "
+            "that spawn a subprocess (Claude Code, Codex, OpenCode, dsh)."
+        ),
+        "mcpServers": {
+            "agentdescent": {
+                "command": launcher[0],
+                "args": list(launcher[1:]) + list(MCP_ARGS),
+            }
+        },
+    }
+
+
+def install_grok_bot(home: str, w: "_Writer") -> None:
+    """Write the Grok Bot scaffold under ``~/.agentdescent/plugins/grok-bot/``.
+
+    Skill + notes + example MCP JSON. No host config is edited, because none
+    exists for this host yet.
+    """
+    root = grok_bot_plugin_root(home)
+    w.write(os.path.join(root, *GROK_BOT_SKILL_REL), skill_text())
+    w.write(os.path.join(root, GROK_BOT_HOST_MD), grok_bot_host_md())
+    w.write(os.path.join(root, GROK_BOT_MCP_EXAMPLE),
+            json.dumps(grok_bot_mcp_example(w.launcher), indent=2) + "\n")
+    w.note("NOTE: Grok Bot has no public one-click plugin API yet: this is a "
+           "scaffold (skill + HOST.md + mcp.example.json), not a full host wire-up.")
+    w.note(f"load it:   read {os.path.join(root, GROK_BOT_HOST_MD)}")
+    w.note("NOTE: ask Grok Bot to save skills/agentdescent/SKILL.md as a "
+           "user skill; drive runs with the CLI (or a public HTTPS MCP gateway)")
+
+
+def _uninstall_grok_bot(home: str, e: "_Eraser") -> None:
+    dest = grok_bot_plugin_root(home)
+    for rel in (GROK_BOT_SKILL_REL, (GROK_BOT_HOST_MD,), (GROK_BOT_MCP_EXAMPLE,)):
+        path = os.path.join(dest, *rel)
+        e.remove_file(path)
+        e.prune_dirs(os.path.dirname(path), os.path.join(home, ".agentdescent"))
+    if os.path.isdir(dest) and not e.dry_run and os.listdir(dest):
+        e.kept(dest, "holds files this install did not write")
+
+
+
+HOST_CLI = {"dsh": "dsh", "claude-code": "claude", "codex": "codex", "opencode": "opencode",
+            # No desktop CLI binary; doctor still lists the scaffold host.
+            "grok-bot": None}
 
 HOSTS: Dict[str, Callable[[str, _Writer], None]] = {
     "dsh": install_dsh,
     "claude-code": install_claude_code,
     "codex": install_codex,
     "opencode": install_opencode,
+    "grok-bot": install_grok_bot,
 }
 
 
@@ -1064,8 +1187,9 @@ def host_status(host: str, *, home: Optional[str] = None) -> Dict[str, str]:
     is what it holds still what this package would write?
 
     ``skill`` is ``ok`` / ``stale`` / ``missing``; ``mcp`` is ``ok`` /
-    ``missing`` / ``unknown`` (an OpenCode config with comments cannot be read
-    safely; it is also what ``doctor`` reports if reading a host's files raises).
+    ``missing`` / ``unknown`` / ``n/a`` (``n/a`` is Grok Bot: no host-native MCP
+    config file exists; an OpenCode config with comments cannot be read safely;
+    ``unknown`` is also what ``doctor`` reports if reading a host's files raises).
     Two limits: a launcher pinned to an interpreter that has since been deleted
     still reads ``ok`` (only presence is checked), and an install made through a
     host's own marketplace (``/plugin install``, ``codex plugin add``) leaves no
@@ -1101,6 +1225,12 @@ def host_status(host: str, *, home: Optional[str] = None) -> Dict[str, str]:
         # Our own block from before #404 has no `env_vars`: Codex starts that
         # server without the provider keys. Re-running `install` repairs it.
         legacy_block = mcp == "ok" and _is_legacy_codex_block(cfg)
+    elif host == "grok-bot":
+        root = grok_bot_plugin_root(home)
+        skill = os.path.join(root, *GROK_BOT_SKILL_REL)
+        # No host-native MCP config path. Presence of HOST.md means the scaffold
+        # install ran; `n/a` is honest (not a running server).
+        mcp = "n/a" if _read(os.path.join(root, GROK_BOT_HOST_MD)) is not None else "missing"
     else:
         root = os.path.join(_host_root("XDG_CONFIG_HOME", os.path.join(home, ".config"),
                                        honour_env), "opencode")
@@ -1114,7 +1244,7 @@ def host_status(host: str, *, home: Optional[str] = None) -> Dict[str, str]:
     elif skill_state == "stale" or (host == "codex" and legacy_block) or (
             host == "dsh" and stale_env):
         state = "stale"
-    elif skill_state == "ok" and mcp in ("ok", "unknown"):
+    elif skill_state == "ok" and mcp in ("ok", "unknown", "n/a"):
         state = "ok"
     else:
         state = "partial"
@@ -1485,6 +1615,7 @@ _UNINSTALL: Dict[str, Callable[[str, _Eraser], None]] = {
     "claude-code": _uninstall_claude_code,
     "codex": _uninstall_codex,
     "opencode": _uninstall_opencode,
+    "grok-bot": _uninstall_grok_bot,
 }
 
 

@@ -61,7 +61,9 @@ def test_a_host_nobody_installed_into_is_missing(home, host):
 def test_install_makes_the_host_ok(home, host):
     install(host, home=str(home))
     info = host_status(host, home=str(home))
-    assert (info["state"], info["skill"], info["mcp"]) == ("ok", "ok", "ok"), info
+    # Grok Bot has no host-native MCP config; scaffold reports mcp n/a.
+    expect_mcp = "n/a" if host == "grok-bot" else "ok"
+    assert (info["state"], info["skill"], info["mcp"]) == ("ok", "ok", expect_mcp), info
 
 
 @pytest.mark.parametrize("host", HOST_NAMES)
@@ -86,6 +88,10 @@ def test_a_skill_without_its_mcp_entry_is_partial(home, host):
         os.remove(os.path.join(_root(home, host), "config.toml"))
     elif host == "dsh":
         os.remove(os.path.join(_root(home, host), "cordis.patch.yml"))
+    elif host == "grok-bot":
+        # HOST.md is the scaffold marker that makes mcp n/a; without it, skill-only
+        # is partial (honest: incomplete scaffold).
+        os.remove(os.path.join(_root(home, host), "HOST.md"))
     else:                                          # claude-code: .mcp.json in the plugin
         os.remove(os.path.join(_root(home, host), ".mcp.json"))
     assert host_status(host, home=str(home))["state"] == "partial"

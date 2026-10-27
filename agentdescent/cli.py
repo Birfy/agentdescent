@@ -22,8 +22,8 @@ commands on a host with no MCP.
     agentdescent audit    <run_id> --archive PATH              trace an adoption's evidence rings
     agentdescent doctor                                             what is installed
     agentdescent --version                                          which AgentDescent this is
-    agentdescent install <dsh|claude-code|codex|opencode>           wire a host
-    agentdescent uninstall <dsh|claude-code|codex|opencode>         undo `install`
+    agentdescent install <dsh|claude-code|codex|opencode|grok-bot>  wire a host
+    agentdescent uninstall <dsh|claude-code|codex|opencode|grok-bot> undo `install`
     agentdescent algorithms list [--kind K] | show <name>           named algorithms for a spec
     agentdescent mcp                                                serve over stdio
     agentdescent serve   [--port N]                                 read-only run panel
@@ -471,7 +471,8 @@ def _host_integrations(clis: Dict[str, Any]):
             info: Dict[str, Any] = dict(host_status(name))
         except Exception:  # noqa: BLE001 - reading a config must never fail doctor
             info = {"state": "unknown", "skill": "unknown", "mcp": "unknown", "path": ""}
-        info["cli"] = clis.get(binary)
+        # ``None`` binary: scaffold-only hosts (Grok Bot) have no desktop CLI.
+        info["cli"] = clis.get(binary) if binary else None
         hosts[name] = info
         if info["cli"] and info["state"] == "missing":
             # Installed through the host's own marketplace leaves no files here.
@@ -1960,7 +1961,13 @@ def cmd_doctor(a: argparse.Namespace) -> int:
                       f" -> agentdescent install {name}")
                 unwired.append(name)
             elif info["state"] == "missing":
-                print(f"host {name}: no cli on PATH")
+                # Grok Bot has no desktop CLI; "no cli on PATH" would always be true
+                # and hide the install path (#165 grok-bot scaffold).
+                if name == "grok-bot":
+                    print(f"host {name}: not installed "
+                          f"-> agentdescent install {name}")
+                else:
+                    print(f"host {name}: no cli on PATH")
             else:
                 # skill/mcp on the host line itself so stale vs MCP-missing is
                 # inspectable without reading the problems section (#165).
@@ -2759,13 +2766,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_doctor)
 
     s = sub.add_parser("install", help="wire the skill and MCP server into a host")
-    s.add_argument("host", choices=("dsh", "claude-code", "codex", "opencode"))
+    s.add_argument("host", choices=("dsh", "claude-code", "codex", "opencode", "grok-bot"))
     s.add_argument("--dry-run", action="store_true", dest="dry_run")
     s.add_argument("--home", help="the host's home directory (default: the real one)")
     s.set_defaults(fn=cmd_install)
 
     s = sub.add_parser("uninstall", help="undo `install` for a host")
-    s.add_argument("host", choices=("dsh", "claude-code", "codex", "opencode"))
+    s.add_argument("host", choices=("dsh", "claude-code", "codex", "opencode", "grok-bot"))
     s.add_argument("--dry-run", action="store_true", dest="dry_run")
     s.add_argument("--home", help="the host's home directory (default: the real one)")
     s.set_defaults(fn=cmd_uninstall)
