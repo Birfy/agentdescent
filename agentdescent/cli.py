@@ -2183,6 +2183,49 @@ def cmd_campaign(a: argparse.Namespace) -> int:
     print(f"workspace: {report.workspace}")
     return 0 if report.stopped_reason != "error" else 1
 
+def cmd_tournament(a: argparse.Namespace) -> int:
+    """``agentdescent tournament`` -- run one spec under several algorithms."""
+    from .tournament import estimate_tournament, run_tournament
+
+    try:
+        spec = load_spec(a.spec)
+        if a.dry_run:
+            est = estimate_tournament(
+                spec, a.algorithm, seeds=a.seed or [0], rounds=a.rounds,
+                max_seconds=a.max_seconds)
+            if a.json:
+                _out(est, as_json=True)
+            else:
+                print(f"kind: {est['kind']}  total calls <= {est['total_calls']}")
+                for row in est["arms"]:
+                    print(f"  {row['algorithm']:<20} {row['tasks']:<4} tasks  "
+                          f"{row['calls_per_arm']:<6} calls/arm x "
+                          f"{row['seeds']} seed(s) = {row['total_calls']}")
+            return 0
+        report = run_tournament(
+            spec, a.algorithm, seeds=a.seed or [0], rounds=a.rounds,
+            max_seconds=a.max_seconds, repo_root=a.repo_root,
+            keep_repos=a.keep)
+    except (SpecError, ValueError) as e:
+        print(f"spec error: {e}", file=sys.stderr)
+        return 2
+    if a.json:
+        _out(report.to_dict(), as_json=True)
+        return 0 if report.winner is not None else 1
+    print(f"kind: {report.kind}  winner: {report.winner or '-'}  "
+          f"({report.reason})")
+    print(f"{'algorithm':<20} {'mean':<8} {'range':<15} {'calls':<7} "
+          f"seeds errors")
+    for score in report.algorithms:
+        print(f"{score.algorithm:<20} {score.mean_reward:<8.3f} "
+              f"{score.min_reward:.3f}-{score.max_reward:.3f}      "
+              f"{score.mean_calls:<7.0f} {score.seeds:<5} {score.errors}")
+    if report.tied:
+        print(f"tied: {', '.join(report.tied)}")
+    for arm in report.arms:
+        if arm.error:
+            print(f"  {arm.algorithm} seed {arm.seed}: {arm.error[:160]}")
+    return 0 if report.winner is not None else 1
 
 def safety_payload(archive: Optional[str] = None, *,
                    audit: Optional[str] = None, bias_threshold: float = 0.1,
@@ -2544,6 +2587,27 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
                    help="machine-readable output")
     s.set_defaults(fn=cmd_campaign)
+    s = sub.add_parser("tournament",
+                       help="run one spec under several named algorithms")
+    s.add_argument("spec")
+    s.add_argument("--algorithm", action="append", required=True,
+                   metavar="NAME",
+                   help="algorithm to run; use 'default' for the spec's own recipe "
+                        "(repeatable)")
+    s.add_argument("--seed", action="append", type=int, default=None,
+                   help="seed to repeat each arm on (repeatable; default 0)")
+    s.add_argument("--rounds", type=int, help="override evolve.rounds for every arm")
+    s.add_argument("--max-seconds", type=float, dest="max_seconds",
+                   help="override evolve.max_seconds for every arm")
+    s.add_argument("--repo-root", dest="repo_root",
+                   help="where the temporary ledgers live")
+    s.add_argument("--keep", action="store_true",
+                   help="keep the per-arm ledgers for diagnosis")
+    s.add_argument("--dry-run", action="store_true", dest="dry_run",
+                   help="show the per-arm plan estimate without running")
+    s.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                   help="machine-readable output")
+    s.set_defaults(fn=cmd_tournament)
     s = sub.add_parser("safety", help="is this archive safe to keep seeding from?")
     s.add_argument("--archive", help="consolidation archive (default: $AGENTDESCENT_HOME/archive)")
     s.add_argument("--audit", help="MetaAuditStore JSONL to check verifier bias")

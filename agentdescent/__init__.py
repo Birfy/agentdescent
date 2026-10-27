@@ -349,6 +349,8 @@ from .decisions import DecisionLog, DecisionRecord
 from .safety_controller import CanaryResult, KillSwitch, canary, rollback_plan
 from .runtime import GuardedRun, run_guarded
 from .diagnose import DiagnosisReport, diagnose_payload
+from .tournament import (AlgorithmArm, AlgorithmScore, AlgorithmTournamentReport,
+                         estimate_tournament, run_tournament)
 from .campaign import CampaignReport, CampaignSession, estimate_campaign, run_campaign
 from .variance_sampler import VarianceSampler
 from .safety import SafetyCheck, SafetyReport, safety_report
@@ -801,6 +803,11 @@ __all__ = [
     "run_guarded",
     "DiagnosisReport",
     "diagnose_payload",
+    "AlgorithmArm",
+    "AlgorithmScore",
+    "AlgorithmTournamentReport",
+    "estimate_tournament",
+    "run_tournament",
     "CampaignReport",
     "CampaignSession",
     "estimate_campaign",
