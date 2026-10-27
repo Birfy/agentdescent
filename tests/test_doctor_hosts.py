@@ -159,7 +159,8 @@ def test_doctor_text_output_names_the_hosts(home, monkeypatch, capsys):
     monkeypatch.setattr(cli.shutil, "which", lambda name, *a, **k: None)
     code = cli.main(["doctor"])
     out = capsys.readouterr().out
-    assert "host opencode: ok" in out and "host dsh: no cli on PATH" in out
+    assert "host opencode: ok (skill ok, mcp ok; cli not on PATH)" in out
+    assert "host dsh: no cli on PATH" in out
     assert code == 1                                    # no agent CLI on PATH: unchanged
 
 
@@ -178,6 +179,30 @@ def test_doctor_does_not_call_an_unwired_cli_missing(home, monkeypatch, capsys):
     if not rep["problems"]:
         assert "ok: no blocking problems (1 host can be wired: opencode)" in out
         assert code == 0
+
+
+def test_doctor_host_line_names_skill_and_mcp_for_partial(home, monkeypatch, capsys):
+    """#165: stale vs MCP-missing must be readable on the host line itself."""
+    install("opencode", home=str(home))
+    with open(os.path.join(_root(home, "opencode"), "opencode.jsonc"), "w",
+              encoding="utf-8") as fh:
+        json.dump({"mcp": {}}, fh)
+    rep = _report(monkeypatch, present=("opencode",))
+    monkeypatch.setattr(cli, "doctor_report", lambda: rep)
+    cli.main(["doctor"])
+    out = capsys.readouterr().out
+    assert "host opencode: partial (skill ok, mcp missing; cli /fake/bin/opencode)" in out
+
+
+def test_doctor_host_line_names_skill_and_mcp_for_stale(home, monkeypatch, capsys):
+    install("opencode", home=str(home))
+    with open(_skill_path(home, "opencode"), "w", encoding="utf-8") as fh:
+        fh.write("an older procedure\n")
+    rep = _report(monkeypatch, present=("opencode",))
+    monkeypatch.setattr(cli, "doctor_report", lambda: rep)
+    cli.main(["doctor"])
+    out = capsys.readouterr().out
+    assert "host opencode: stale (skill stale, mcp ok; cli /fake/bin/opencode)" in out
 
 
 # -- review of #383 -----------------------------------------------------------

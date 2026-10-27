@@ -1962,8 +1962,11 @@ def cmd_doctor(a: argparse.Namespace) -> int:
             elif info["state"] == "missing":
                 print(f"host {name}: no cli on PATH")
             else:
-                print(f"host {name}: {info['state']}"
-                      + (f" (cli {info['cli']})" if info["cli"] else " (cli not on PATH)"))
+                # skill/mcp on the host line itself so stale vs MCP-missing is
+                # inspectable without reading the problems section (#165).
+                cli_bit = (f"cli {info['cli']}" if info["cli"] else "cli not on PATH")
+                print(f"host {name}: {info['state']} "
+                      f"(skill {info['skill']}, mcp {info['mcp']}; {cli_bit})")
         for h in rep["hints"]:
             print(f"- {h}")
         for p in rep["problems"]:
