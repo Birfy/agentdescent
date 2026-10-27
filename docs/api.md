@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-511 public names across 97 modules.
+516 public names across 98 modules.
 
 ---
 
@@ -4157,6 +4157,10 @@ Decide, per candidate, whether the expensive part of a merge is worth it.
 
 Accumulate a deduped list of rules/lessons (append-only, content-addressed).
 
+### `BootstrapResult`
+
+A paired bootstrap of per-task gains.
+
 ### `BudgetGovernor`
 
 Tracks token spend against a cap and decides what to degrade.
@@ -4220,6 +4224,10 @@ One curriculum step: the selected tasks, the bias before/after.
 ### `ConflictPolicy`
 
 Which of a batch of mutually contradictory changes survive.
+
+### `ContaminationReport`
+
+How much of the validation text appears in the training text.
 
 ### `ControllerConfig`
 
@@ -4733,6 +4741,10 @@ Trace one archived adoption through its evidence rings.
 
 Run the harness(es) for a domain, record the outcomes, pick a winner.
 
+### `contamination_overlap`
+
+Fraction of validation n-grams that also occur in the training text.
+
 ### `cost_adjusted_reward`
 
 `quality - lam * (cost / baseline)`, clipped to `[0, 1]`.
@@ -4817,6 +4829,10 @@ Evolve against the simulator, verify the result on the real problem.
 
 Evolve the source of one function under its own tests and benchmark.
 
+### `is_significant`
+
+Whether the lower bound clears `min_effect` and the interval is usable.
+
 ### `joint_archive_rule`
 
 Write an adopted bundle to the archive as one `meta-rule` per slot.
@@ -4848,6 +4864,10 @@ Run a population of meta sessions from the archive's best rules, promote the win
 ### `outcome_features`
 
 The features a judge learns quality from: mean best-so-far, the final reward, and a constant intercept term. Sweep counts / rollouts are deliberately dropped: raw counts dwarf a `[0, 1]` quality in a linear fit and had the old judge saturating its clip at 1.0 for every outcome. The judge must learn quality from the curve's *shape*, not be handed the answer.
+
+### `paired_gain`
+
+Per-task `after - before` over the keys present in both sides.
 
 ### `patch_source`
 
