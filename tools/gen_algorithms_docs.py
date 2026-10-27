@@ -76,6 +76,12 @@ def render() -> str:
         "agentdescent init PATH --algorithm NAME --param KEY=VALUE",
         "```",
         "",
+        "To **register one named card in a single PR**, follow",
+        "[Register a named Algorithm card](algorithm-authoring.md).",
+        "Full research ports still use the",
+        "[porting checklist](porting-checklist.md); MethodPolicy microports use",
+        "[porting-methodpolicy.md](porting-methodpolicy.md).",
+        "",
     ]
     for algorithm in algorithms.listing(builtin_only=True):
         lines += _card(algorithm)

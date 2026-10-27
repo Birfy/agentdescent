@@ -314,7 +314,8 @@ The other fields:
 
 * **`algorithm`** (optional): a named method from `agentdescent algorithms list`
   (`rrsi` and `archive_selection` today; the catalog is
-  [named algorithms](algorithms.md)). A name or `{"name": ..., "params": {...}}`
+  [named algorithms](algorithms.md); to add one card see
+  [Register a named Algorithm card](algorithm-authoring.md)). A name or `{"name": ..., "params": {...}}`
   replaces the kind's default recipe with that method's policy/knob defaults;
   explicit `policies` / `evolve` fields in the same spec still win. `plan` echoes
   the resolved card, its parameters and its extra cost, and rejects an unknown

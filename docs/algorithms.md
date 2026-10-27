@@ -14,6 +14,12 @@ agentdescent algorithms show NAME
 agentdescent init PATH --algorithm NAME --param KEY=VALUE
 ```
 
+To **register one named card in a single PR**, follow
+[Register a named Algorithm card](algorithm-authoring.md).
+Full research ports still use the
+[porting checklist](porting-checklist.md); MethodPolicy microports use
+[porting-methodpolicy.md](porting-methodpolicy.md).
+
 ## `ace`
 
 ACE's sectioned playbook: append content-addressed lessons, refuse near-duplicates, and grow-and-refine instead of gating each bullet on held-out reward.
