@@ -340,6 +340,7 @@ from .self_improve import (
     self_improve,
 )
 from .approval import ApprovalGate, ApprovalRequest, ApprovalStore
+from .campaign import CampaignReport, CampaignSession, estimate_campaign, run_campaign
 from .variance_sampler import VarianceSampler
 from .safety import SafetyCheck, SafetyReport, safety_report
 from .controller import (ControllerConfig, ControllerReport, SessionOutcome,
@@ -766,6 +767,10 @@ __all__ = [
     "ApprovalGate",
     "ApprovalRequest",
     "ApprovalStore",
+    "CampaignReport",
+    "CampaignSession",
+    "estimate_campaign",
+    "run_campaign",
     "VarianceSampler",
     "SafetyCheck",
     "SafetyReport",
