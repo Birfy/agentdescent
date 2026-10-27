@@ -135,6 +135,7 @@ nav:
     - Portfolio governance: portfolio.md
     - Portfolio evolution — evolve the spend rule: portfolio-evolve.md
     - Self-improvement loop: self-improve.md
+    - Longitudinal RSI report: rsi.md
     - The meta stack on the CLI: meta-cli.md
     - Self-evolution bench — every rung, end to end: self-evolution-bench.md
     - Verified seeding — gate on trust: verified-seed.md

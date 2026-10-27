@@ -2143,6 +2143,44 @@ def cmd_diagnose(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_rsi(a: argparse.Namespace) -> int:
+    """``agentdescent rsi`` -- is the archive still getting better over time?"""
+    from .rsi import rsi_report
+
+    root = _archive_root(getattr(a, "archive", None))
+    if _missing_archive(root):
+        return 2
+    try:
+        report = rsi_report(
+            root, slot=getattr(a, "slot", None),
+            stagnation_window=getattr(a, "stagnation_window", 3))
+    except (FileNotFoundError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    if a.json:
+        _out(report.to_dict(), as_json=True)
+        return 0
+    print(f"{report.verdict}: {report.summary}")
+    if report.evidence:
+        print("evidence:", json.dumps(report.evidence, default=str)[:1200])
+    for line in report.recommendations:
+        print(f"  next: {line}")
+    return 0
+
+
+    print(f"verdict: {report.verdict}  ({report.reason})")
+    print(f"archive: {root}  rules: {report.total_rules}")
+    if not report.slots:
+        print("no adopted rules with a slot descriptor yet; run more sessions")
+        return 0
+    width = max(len(name) for name in report.slots)
+    print(f"{'slot':<{width}}  {'verdict':<10}  {'records':<7}  "
+          f"{'first':<7}  {'best':<7}  {'gain':<7}  since best")
+    for name, row in report.slots.items():
+        print(f"{name:<{width}}  {row.verdict:<10}  {row.records:<7}  "
+              f"{row.first_reward:<7.3f}  {row.best_reward:<7.3f}  "
+              f"{row.gain:<+7.3f}  {row.records_since_best}")
+    return 0
 def cmd_campaign(a: argparse.Namespace) -> int:
     """``agentdescent campaign`` -- iterate a spec, carrying the artifact forward."""
     from .campaign import estimate_campaign, run_campaign
@@ -2568,6 +2606,15 @@ def build_parser() -> argparse.ArgumentParser:
                    help="machine-readable output")
     s.set_defaults(fn=cmd_diagnose)
 
+    s = sub.add_parser("rsi", help="the archive's longitudinal self-improvement trend")
+    s.add_argument("--archive", help="consolidation archive (default: $AGENTDESCENT_HOME/archive)")
+    s.add_argument("--slot", help="only this decision slot")
+    s.add_argument("--stagnation-window", type=int, default=3,
+                   dest="stagnation_window",
+                   help="adoptions without a new best before a slot is stagnant")
+    s.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                   help="machine-readable output")
+    s.set_defaults(fn=cmd_rsi)
     s = sub.add_parser("campaign",
                        help="iterate a spec, carrying the evolved artifact forward")
     s.add_argument("spec")
