@@ -382,6 +382,25 @@ or archive_selection), set `algorithm` in the spec (or pass `--algorithm` to
 if I did not, use the kind's default recipe.
 """
 
+# OpenCode discovers legacy singular ``command/`` next to ``skill/`` (plural
+# ``commands/`` also works; install matches the sibling dirs this package uses).
+# Nested ``agentdescent/evolve.md`` → ``/agentdescent/evolve``.
+OPENCODE_EVOLVE_REL = ("command", "agentdescent", "evolve.md")
+# Codex custom prompts → ``/prompts:evolve`` (same markdown as Claude/OpenCode).
+CODEX_EVOLVE_REL = ("prompts", "evolve.md")
+
+
+def _remove_stock_text_file(e: "_Eraser", path: str, stock: str, *, stop: str) -> None:
+    """Remove ``path`` only when it is still exactly what ``install`` wrote."""
+    current = _read(path)
+    if current is None:
+        return
+    if current != stock:
+        e.kept(path, "edited; not the stock evolve slash entry")
+        return
+    e.remove_file(path)
+    e.prune_dirs(os.path.dirname(path), stop)
+
 
 def render_claude_plugin(dest: str, w: Optional[_Writer] = None) -> List[str]:
     """Materialise the Claude Code plugin directory at ``dest``."""
@@ -509,6 +528,11 @@ def _add_env_vars_in_place(path: str, w: "_Writer") -> bool:
 def install_codex(home: str, w: _Writer) -> None:
     codex_home = _host_root("CODEX_HOME", os.path.join(home, ".codex"), w.honour_env)
     w.write(os.path.join(codex_home, "skills", "agentdescent", "SKILL.md"), skill_text())
+    # Same body as Claude's ``/agentdescent:evolve``; Codex loads it as
+    # ``/prompts:evolve`` from ``~/.codex/prompts/`` (custom prompts are the
+    # slash entry ``install`` can write; the marketplace Claude-format plugin
+    # is the other route — see the note below).
+    w.write(os.path.join(codex_home, *CODEX_EVOLVE_REL), EVOLVE_COMMAND)
     cfg_path = os.path.join(codex_home, "config.toml")
     if not _add_env_vars_in_place(cfg_path, w):
         w.append_unless(cfg_path, "[mcp_servers.agentdescent]",
@@ -519,6 +543,8 @@ def install_codex(home: str, w: _Writer) -> None:
     w.note("verify: codex mcp list   (the Env column names them)")
     w.note("Codex has no hooks; add `run agentdescent status --brief at the start of a "
            "session` to AGENTS.md if you want in-progress runs surfaced.")
+    w.note("slash: /prompts:evolve <path> [cases.jsonl]  (same prompt as Claude "
+           "/agentdescent:evolve)")
     # Codex reads the same plugin format as Claude Code, and installing the
     # plugin brings the MCP server with it -- one command instead of the two
     # edits above. Verified against codex-cli 0.153.4.
@@ -594,6 +620,11 @@ def install_opencode(home: str, w: _Writer) -> None:
     # `{skill,skills}/**/SKILL.md` -- both spellings are accepted; `skill` is
     # what the sibling `agent` / `command` directories are named.
     w.write(os.path.join(root, "skill", "agentdescent", "SKILL.md"), skill_text())
+    # Slash parity with Claude's ``/agentdescent:evolve``: nested under legacy
+    # singular ``command/`` (also discovered; plural ``commands/`` is the newer
+    # spelling). OpenCode runs it as ``/agentdescent/evolve``.
+    w.write(os.path.join(root, *OPENCODE_EVOLVE_REL), EVOLVE_COMMAND)
+    w.note("slash: /agentdescent/evolve <path> [cases.jsonl]")
 
     path = os.path.join(root, "opencode.jsonc")
     entry = json.dumps({"agentdescent": opencode_mcp_entry(w.launcher)})
@@ -1381,6 +1412,8 @@ def _uninstall_codex(home: str, e: _Eraser) -> None:
     skill_dir = os.path.join(root, "skills", "agentdescent")
     e.remove_file(os.path.join(skill_dir, "SKILL.md"))
     e.prune_dirs(skill_dir, root)
+    _remove_stock_text_file(e, os.path.join(root, *CODEX_EVOLVE_REL), EVOLVE_COMMAND,
+                            stop=root)
     path = os.path.join(root, "config.toml")
     current = _read(path)
     if current is None or "[mcp_servers.agentdescent]" not in current:
@@ -1403,6 +1436,8 @@ def _uninstall_opencode(home: str, e: _Eraser) -> None:
     skill_dir = os.path.join(root, "skill", "agentdescent")
     e.remove_file(os.path.join(skill_dir, "SKILL.md"))
     e.prune_dirs(skill_dir, root)
+    _remove_stock_text_file(e, os.path.join(root, *OPENCODE_EVOLVE_REL), EVOLVE_COMMAND,
+                            stop=root)
     # Both files: `install` falls back to opencode.json when opencode.jsonc has
     # comments (#516).
     for name in ("opencode.jsonc", "opencode.json"):

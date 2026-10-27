@@ -48,8 +48,8 @@ commands](plugin-quickstart.md) walks the whole path.
 |---|---|---|
 | `dsh` | `~/.dsh/skills/agentdescent/SKILL.md` + `hooks.json`; an `@deepseek-ai/dsh-mcp-client` entry and the `hooks-claude-code` bridge appended to `~/.dsh/cordis.patch.yml` | restart `dsh`; check with `dsh --profile web --dump-config \| grep agentdescent` |
 | `claude-code` | a plugin directory at `~/.agentdescent/plugins/claude-code/` (`plugin.json`, skill, `/agentdescent:evolve`, `.mcp.json`, a `SessionStart` hook) | `claude --plugin-dir ~/.agentdescent/plugins/claude-code`, or `/plugin marketplace add Birfy/agentdescent` then `/plugin install agentdescent@agentdescent` |
-| `codex` | `~/.codex/skills/agentdescent/SKILL.md`; an `[mcp_servers.agentdescent]` block appended to `~/.codex/config.toml` | restart Codex; check with `codex mcp list`. **Or skip `install` entirely** and use the plugin — see below |
-| `opencode` | `~/.config/opencode/skill/agentdescent/SKILL.md`; an `mcp.agentdescent` entry merged into `~/.config/opencode/opencode.jsonc` (into `opencode.json` beside it when your `opencode.jsonc` has comments; OpenCode merges the two) | restart OpenCode; check with `opencode mcp list` |
+| `codex` | `~/.codex/skills/agentdescent/SKILL.md`; `/prompts:evolve` as `~/.codex/prompts/evolve.md` (same body as Claude `/agentdescent:evolve`); an `[mcp_servers.agentdescent]` block appended to `~/.codex/config.toml` | restart Codex; check with `codex mcp list`. **Or skip `install` entirely** and use the plugin — see below |
+| `opencode` | `~/.config/opencode/skill/agentdescent/SKILL.md`; `/agentdescent/evolve` as `~/.config/opencode/command/agentdescent/evolve.md` (legacy singular `command/`, nested to mirror Claude's namespaced slash); an `mcp.agentdescent` entry merged into `~/.config/opencode/opencode.jsonc` (into `opencode.json` beside it when your `opencode.jsonc` has comments; OpenCode merges the two) | restart OpenCode; check with `opencode mcp list` |
 
 `agentdescent doctor` also reads what `install` left behind, without writing
 anything: one `host <name>: ok | stale | partial | missing` line per host, and
@@ -81,7 +81,9 @@ OpenCode. **Grok Bot** is a planned next host target; there is no
 
 `agentdescent uninstall <host>` (`--dry-run` to preview, `--home` as for
 `install`) takes back what the table above says `install` wrote: the skill
-files, the Claude Code plugin directory, the `cordis.patch.yml` block, the
+files, the Claude Code plugin directory, the OpenCode `command/agentdescent/evolve.md`
+slash entry and the Codex `prompts/evolve.md` slash entry (only while still
+byte-for-byte stock), the `cordis.patch.yml` block, the
 `[mcp_servers.agentdescent]` table in `config.toml`, the `mcp.agentdescent`
 entry in `opencode.jsonc` or `opencode.json`. Everything around them is left as it was, and so is
 the run store in `~/.agentdescent`.
@@ -105,7 +107,11 @@ What counts as "ours" differs by file:
   `mcp` object you had is left behind. A file with comments is never
   rewritten: `install` writes the entry into `opencode.json` beside it instead,
   and if that file cannot be parsed either it prints a `FAILED:` line with the
-  entry to add by hand and exits 1 (`--json` reports `"ok": false`).
+  entry to add by hand and exits 1 (`--json` reports `"ok": false`). The
+  `command/agentdescent/evolve.md` slash file is removed only while it still
+  matches the stock Claude evolve prompt; an edit is kept.
+* **Codex slash file**: `prompts/evolve.md` is removed only while stock; an edit
+  is kept. (The skill and MCP table rules above still apply.)
 
 Anything kept is printed as `kept ... (...)` and makes the command exit 1, so a
 script can tell "fully removed" from "one step is yours"; nothing to remove
