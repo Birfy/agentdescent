@@ -82,6 +82,7 @@ nav:
     - The verifier: verifier.md
     - Sparse audit (cheap verifier vs truth): audit.md
     - Statistical evidence: stats-eval.md
+    - Decision log: decisions.md
     - Session controller — when to stop: controller.md
     - Run manifest — reproducibility: manifest.md
     - Evaluation service — budgeted oracle: evaluation.md

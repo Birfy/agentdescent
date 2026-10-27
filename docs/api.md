@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-522 public names across 100 modules.
+524 public names across 101 modules.
 
 ---
 
@@ -4254,6 +4254,14 @@ The sessions run, the best reward and why the loop stopped.
 ### `CuriousReplayReport`
 
 What `curious_replay_evolve` did: the weights, the gains on the still-curious vs mastered past, and the value produced.
+
+### `DecisionLog`
+
+Append-only JSONL decisions.
+
+### `DecisionRecord`
+
+One immutable adoption/session decision.
 
 ### `DefaultConflict`
 
