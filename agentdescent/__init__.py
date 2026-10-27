@@ -339,6 +339,7 @@ from .self_improve import (
     SelfImproveTick,
     self_improve,
 )
+from .leakage import LeakageGuard, LeakageReport, find_leakage
 from .stopping import MarginalGainStop
 from .campaign import CampaignReport, CampaignSession, estimate_campaign, run_campaign
 from .variance_sampler import VarianceSampler
@@ -764,6 +765,9 @@ __all__ = [
     "SelfImproveReport",
     "SelfImproveTick",
     "self_improve",
+    "LeakageGuard",
+    "LeakageReport",
+    "find_leakage",
     "MarginalGainStop",
     "CampaignReport",
     "CampaignSession",
