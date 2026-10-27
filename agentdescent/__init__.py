@@ -339,6 +339,8 @@ from .self_improve import (
     SelfImproveTick,
     self_improve,
 )
+from .tournament import (AlgorithmArm, AlgorithmScore, AlgorithmTournamentReport,
+                         estimate_tournament, run_tournament)
 from .campaign import CampaignReport, CampaignSession, estimate_campaign, run_campaign
 from .variance_sampler import VarianceSampler
 from .safety import SafetyCheck, SafetyReport, safety_report
@@ -763,6 +765,11 @@ __all__ = [
     "SelfImproveReport",
     "SelfImproveTick",
     "self_improve",
+    "AlgorithmArm",
+    "AlgorithmScore",
+    "AlgorithmTournamentReport",
+    "estimate_tournament",
+    "run_tournament",
     "CampaignReport",
     "CampaignSession",
     "estimate_campaign",

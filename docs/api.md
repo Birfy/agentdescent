@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-507 public names across 95 modules.
+512 public names across 96 modules.
 
 ---
 
@@ -4145,6 +4145,18 @@ One node of a society: a name, an instruction (a callable), and a budget (how ma
 
 `(ledger, verifier, audit, config, policy) -> AggregatorProtocol` — how a custom optimizer is installed.
 
+### `AlgorithmArm`
+
+One algorithm/seed arm of a tournament.
+
+### `AlgorithmScore`
+
+One algorithm's aggregate over its seeds.
+
+### `AlgorithmTournamentReport`
+
+Every arm, the per-algorithm aggregate, the winner and any tie.
+
 ### `AllocatorContext`
 
 One candidate, as the allocator sees it.
@@ -4753,6 +4765,10 @@ The rationales the artifact will carry: deduped rules from the rollouts, near-mi
 
 Price a campaign without running it (one composed arm per session).
 
+### `estimate_tournament`
+
+The per-arm plan estimate without running anything.
+
 ### `evaluate`
 
 Compare `verifier` with `oracle` on a deterministic sample.
@@ -4904,6 +4920,10 @@ Run up to `sessions` sessions, keeping the best artifact.
 ### `run_controller`
 
 Run sessions until budget, a kill switch, an error or stagnation.
+
+### `run_tournament`
+
+Run every `(algorithm, seed)` arm and return the measured ranking.
 
 ### `safety_report`
 
