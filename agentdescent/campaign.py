@@ -160,6 +160,8 @@ def run_campaign(spec: EvolveSpec, *, sessions: int = 3,
     A session is ``compose()`` + ``run()`` on a copy of the current target. An
     improving session's artifact is written back to that copy; a non-improving
     one is discarded and the campaign stops after ``patience`` such sessions.
+    A session whose run stopped on ``target_reward`` ends the campaign at once
+    (``stopped_reason="target_reward"``).
     ``workdir`` is created when omitted and always returned.
     """
     if sessions < 1:
@@ -227,6 +229,12 @@ def run_campaign(spec: EvolveSpec, *, sessions: int = 3,
                 improved=improved, error=result.error))
             if result.error:
                 stopped = "error"
+                break
+            if str(result.stop_reason) == "target_reward":
+                # The session already reached the spec's target_reward (the
+                # same threshold evolve() stops on); another session cannot
+                # beat it and would only spend more calls.
+                stopped = "target_reward"
                 break
         except Exception as e:  # noqa: BLE001 - a session is one attempt
             history.append(CampaignSession(
