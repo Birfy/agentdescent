@@ -14,6 +14,7 @@ commands on a host with no MCP.
     agentdescent watch   <run_id>                                   follow rounds
     agentdescent show    <run_id> [--diff]                          the evolved tree
     agentdescent apply   <run_id> [--to PATH] [--dry-run]           install it, backed up
+    agentdescent apply   --from PATH --to PATH [--dry-run]          install an on-disk artifact
     agentdescent cancel  <run_id>
     agentdescent resume  <run_id>
     agentdescent portfolio [archive]                          rank layers, reallocate budget
@@ -37,6 +38,7 @@ from collections import deque
 import difflib
 import json
 import os
+import shlex
 import shutil
 import sys
 import time
@@ -1746,14 +1748,174 @@ def apply_payload(run_id: str, *, to: Optional[str] = None, store: Optional[str]
     return plan
 
 
+def _backup_slot(dest: str) -> str:
+    n = 0
+    while os.path.exists(f"{dest}.bak-{n}"):
+        n += 1
+    return f"{dest}.bak-{n}"
+
+
+def apply_from_payload(source: str, *, to: str, dry_run: bool = False,
+                       backup: bool = True) -> Dict[str, Any]:
+    """Install an artifact that lives on disk, not in the run store (#533).
+
+    ``agentdescent campaign`` leaves its best artifact in a workspace copy and
+    keeps no run id, so ``apply <run_id>`` has nothing to point at. This takes
+    the artifact path itself and gives it the same guarantees: a dry-run plan,
+    a ``.bak-N`` backup of whatever ``to`` held, and a no-op when ``to`` already
+    matches. Files in ``to`` that the artifact does not have are reported as
+    ``extra`` and left alone.
+
+    Symlinks are refused (never dereferenced into real files). ``apply
+    <run_id>`` materialises from FileTree state, which already skips symlinks
+    at load time; a campaign workspace written by worker CLIs must not be able
+    to smuggle ``~/.ssh`` / ``/etc/hostname`` content into ``--to`` via a link.
+    """
+    src = os.path.abspath(os.path.expanduser(source))
+    dest = os.path.abspath(os.path.expanduser(to))
+    if src == dest:
+        raise runstore.RunStoreError(f"--from and --to are the same path: {src}")
+    # ``isfile`` / ``isdir`` follow the final link; catch the source itself first.
+    if os.path.islink(src):
+        raise runstore.RunStoreError(
+            f"--from {src} is a symlink; refuse to apply (would dereference)")
+    if os.path.isfile(src):
+        if os.path.isdir(dest):
+            raise runstore.RunStoreError(
+                f"{src} is a file but --to {dest} is a directory; name the file")
+        try:
+            with open(src, encoding="utf-8", newline="") as fh:
+                rendered = fh.read()
+        except (OSError, UnicodeDecodeError) as e:
+            raise runstore.RunStoreError(f"cannot read {src}: {e}") from None
+        plan = _text_plan(dest, rendered)
+        if dry_run:
+            return {**plan, "source": src, "dest": dest}
+        if plan["noop"]:
+            return {"written": [], "unchanged": [dest], "backup": [], "noop": True,
+                    "source": src, "dest": dest}
+        saved = []
+        if backup and os.path.exists(dest):
+            slot = _backup_slot(dest)
+            shutil.copy2(dest, slot)
+            saved = [slot]
+        parent = os.path.dirname(dest)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(dest, "w", encoding="utf-8", newline="") as fh:
+            fh.write(rendered)
+        return {"written": [dest], "unchanged": [], "backup": saved, "noop": False,
+                "source": src, "dest": dest}
+    if not os.path.isdir(src):
+        raise runstore.RunStoreError(f"--from {src} does not exist")
+    if os.path.isfile(dest):
+        raise runstore.RunStoreError(
+            f"{src} is a directory but --to {dest} is a file")
+
+    def _files(root: str, *, refuse_symlinks: bool = False) -> List[str]:
+        """Real files only. With ``refuse_symlinks``, raise if any link is under root.
+
+        ``os.walk`` lists symlink-to-file names in ``filenames`` and, with the
+        default ``followlinks=False``, leaves symlink dirs in ``dirnames``
+        without descending. Either form used to be fed to ``shutil.copy2``,
+        which follows the link and wrote the target's bytes into ``--to``.
+        Dest walks keep ``refuse_symlinks=False`` so a pre-existing link in
+        ``--to`` is left alone (and not listed as ``extra``).
+        """
+        out: List[str] = []
+        links: List[str] = []
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = sorted(d for d in dirnames if d not in (".git", "__pycache__"))
+            for d in list(dirnames):
+                full_d = os.path.join(dirpath, d)
+                if os.path.islink(full_d):
+                    rel_d = os.path.relpath(full_d, root).replace(os.sep, "/")
+                    links.append(rel_d + "/")
+                    dirnames.remove(d)
+            for fname in sorted(filenames):
+                full = os.path.join(dirpath, fname)
+                rel = os.path.relpath(full, root).replace(os.sep, "/")
+                if os.path.islink(full):
+                    links.append(rel)
+                else:
+                    out.append(rel)
+        if refuse_symlinks and links:
+            shown = ", ".join(links[:5]) + ("…" if len(links) > 5 else "")
+            raise runstore.RunStoreError(
+                f"--from {root} contains symlink(s) ({shown}); refuse to apply "
+                "(would dereference into real files). Remove the links or replace "
+                "them with real files, matching apply <run_id> which never "
+                "materialises symlinks.")
+        return out
+
+    def _same(a_path: str, b_path: str) -> bool:
+        try:
+            # Do not treat a dest symlink as "already matches" via its target.
+            if os.path.islink(b_path) or not os.path.isfile(b_path):
+                return False
+            with open(a_path, "rb") as fa, open(b_path, "rb") as fb:
+                if fa.read() != fb.read():
+                    return False
+            return (os.stat(a_path).st_mode & 0o111) == (os.stat(b_path).st_mode & 0o111)
+        except OSError:
+            return False
+
+    planned = _files(src, refuse_symlinks=True)
+    unchanged = [rel for rel in planned
+                 if _same(os.path.join(src, rel), os.path.join(dest, rel))]
+    changed = [rel for rel in planned if rel not in set(unchanged)]
+    # Dest extras: real files only; a stray symlink in --to is left alone.
+    extra = (sorted(set(_files(dest)) - set(planned))
+             if os.path.isdir(dest) else [])
+    plan: Dict[str, Any] = {"written": changed, "unchanged": unchanged, "extra": extra,
+                            "deleted": [], "backup": [], "noop": not changed,
+                            "source": src, "dest": dest}
+    if dry_run or plan["noop"]:
+        return plan
+    if backup and os.path.isdir(dest):
+        slot = _backup_slot(dest)
+        shutil.copytree(dest, slot, symlinks=True)
+        plan["backup"] = [slot]
+    for rel in changed:
+        out = os.path.join(dest, rel.replace("/", os.sep))
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        # Source entries are guaranteed non-links by `_files`; still refuse to
+        # follow if the tree changed under us.
+        src_path = os.path.join(src, rel.replace("/", os.sep))
+        if os.path.islink(src_path):
+            raise runstore.RunStoreError(
+                f"--from {src} contains symlink(s) ({rel}); refuse to apply "
+                "(would dereference into real files)")
+        shutil.copy2(src_path, out)
+    return plan
+
+
 def cmd_apply(a: argparse.Namespace) -> int:
-    payload = apply_payload(a.run_id, to=a.to, store=a.store, dry_run=a.dry_run,
-                            backup=not a.no_backup)
+    source = getattr(a, "source", None)
+    if source:
+        if a.run_id:
+            print("error: pass a run_id or --from PATH, not both", file=sys.stderr)
+            return 2
+        if not a.to:
+            print("error: --from needs --to PATH (where to install the artifact)",
+                  file=sys.stderr)
+            return 2
+        payload = apply_from_payload(source, to=a.to, dry_run=a.dry_run,
+                                     backup=not a.no_backup)
+        what = source
+    else:
+        if not a.run_id:
+            print("error: apply needs a run_id, or --from PATH --to PATH",
+                  file=sys.stderr)
+            return 2
+        payload = apply_payload(a.run_id, to=a.to, store=a.store, dry_run=a.dry_run,
+                                backup=not a.no_backup)
+        what = f"run {a.run_id}"
     _out(payload, as_json=True)
     if payload.get("noop"):
         # After the JSON, on stderr: stdout stays one machine-readable document.
         print(f"nothing to apply: {payload.get('dest') or '(target)'} already matches "
-              f"run {a.run_id}", file=sys.stderr)
+              f"{what}", file=sys.stderr)
     return 0
 
 
@@ -2205,8 +2367,14 @@ def cmd_campaign(a: argparse.Namespace) -> int:
     except (SpecError, ValueError) as e:
         print(f"spec error: {e}", file=sys.stderr)
         return 2
+    # The campaign keeps no run id, so the way back to the user's file is
+    # `apply --from` (#533). Print it ready to copy, dry-run first.
+    original = os.path.abspath(os.path.expanduser(str(spec.target)))
+    apply_cmd = (f"agentdescent apply --from {shlex.quote(report.final_target)} "
+                 f"--to {shlex.quote(original)}")
     if a.json:
-        _out(report.to_dict(), as_json=True)
+        _out({**report.to_dict(), "target": original,
+              "next": [f"{apply_cmd} --dry-run", apply_cmd]}, as_json=True)
         return 0 if report.stopped_reason != "error" else 1
     print(f"kind: {report.kind}  stopped: {report.stopped_reason}  "
           f"best: {report.best_reward:.3f}")
@@ -2219,6 +2387,14 @@ def cmd_campaign(a: argparse.Namespace) -> int:
               + (f"  {session.error[:120]}" if session.error else ""))
     print(f"artifact: {report.final_target}")
     print(f"workspace: {report.workspace}")
+    if report.stopped_reason != "error":
+        print("\nnext:")
+        print(f"  diff -ru {shlex.quote(original)} {shlex.quote(report.final_target)}"
+              "   what changed")
+        print(f"  {apply_cmd} --dry-run   what apply would write")
+        print(f"  {apply_cmd}   install it (backs up {os.path.basename(original)} "
+              "to .bak-N first)")
+        print(f"  rm -rf {shlex.quote(report.workspace)}   when you are done")
     return 0 if report.stopped_reason != "error" else 1
 
 def cmd_tournament(a: argparse.Namespace) -> int:
@@ -2516,8 +2692,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_show)
 
     s = sub.add_parser("apply", help="write the evolved artifact back, backing up first")
-    s.add_argument("run_id")
-    s.add_argument("--to", help="a different destination than the spec's target")
+    s.add_argument("run_id", nargs="?")
+    s.add_argument("--to", help="a different destination than the spec's target "
+                   "(required with --from)")
+    s.add_argument("--from", dest="source", metavar="PATH",
+                   help="install an artifact from disk (e.g. a campaign's "
+                   "final_target) instead of a run's result")
     s.add_argument("--dry-run", action="store_true", dest="dry_run")
     s.add_argument("--no-backup", action="store_true", dest="no_backup")
     s.set_defaults(fn=cmd_apply)

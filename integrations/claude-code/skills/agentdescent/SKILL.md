@@ -93,7 +93,9 @@ written back until the user says so.
    not seen is the one thing this procedure exists to prevent.
    To keep improving across sessions, offer `agentdescent campaign <spec>
    --sessions N`; it works on a copy, reports the workspace/final target and
-   never touches the live target. Run its `--dry-run` first.
+   never touches the live target. Run its `--dry-run` first. A campaign has no
+   run id: install its result with `agentdescent apply --from <final_target>
+   --to <target> --dry-run`, then (after asking) without `--dry-run`.
 4. **`start`**. It replies with `host_model_route` when the spec uses
    `host_model` -- report the route it actually got (`sampling`, or a CLI name)
    rather than assuming; only the sampling route dies with this session.
