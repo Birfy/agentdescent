@@ -114,6 +114,7 @@ nav:
     - Marginal-gain stopping: stopping.md
     - Approval gate — high-risk changes: approval.md
     - Guard pipeline: guards.md
+    - Guarded runtime: runtime.md
     - Risk policy: risk-policy.md
     - Promotion policies: promotion-policies.md
     - Staleness policies: staleness.md
