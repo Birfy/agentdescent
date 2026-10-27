@@ -1250,6 +1250,11 @@ def cmd_plan(a: argparse.Namespace) -> int:
         else:
             print(f"error: {e}", file=sys.stderr)
         return 2
+    if not a.json and not payload.get("ok", True):
+        # A hard check failed (too few tasks, missing CLI, placeholder): same
+        # human `error: ...` line on stderr as a spec that does not compile (#553).
+        print(f"error: {payload.get('error', 'plan failed')}", file=sys.stderr)
+        return 2
     _out(payload, as_json=a.json)
     return 0 if payload.get("ok", True) else 2
 
