@@ -340,6 +340,7 @@ from .self_improve import (
     self_improve,
 )
 from .runtime import GuardedRun, run_guarded
+from .campaign import CampaignReport, CampaignSession, estimate_campaign, run_campaign
 from .variance_sampler import VarianceSampler
 from .safety import SafetyCheck, SafetyReport, safety_report
 from .controller import (ControllerConfig, ControllerReport, SessionOutcome,
@@ -765,6 +766,10 @@ __all__ = [
     "self_improve",
     "GuardedRun",
     "run_guarded",
+    "CampaignReport",
+    "CampaignSession",
+    "estimate_campaign",
+    "run_campaign",
     "VarianceSampler",
     "SafetyCheck",
     "SafetyReport",
