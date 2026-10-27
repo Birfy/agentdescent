@@ -220,7 +220,7 @@ def test_dry_run_writes_nothing(tmp_path):
     for host in HOSTS:
         lines = install(host, dry_run=True, home=str(tmp_path))
         assert lines and all(l.startswith(("would", "kept", "forwarded", "verify", "load",
-                                           "or,", "Codex", "NOTE", "WARNING"))
+                                           "or,", "Codex", "NOTE", "WARNING", "slash"))
                              for l in lines), lines
     assert not any(p.name.startswith(".") for p in tmp_path.iterdir())
 
