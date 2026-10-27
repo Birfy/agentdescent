@@ -339,6 +339,7 @@ from .self_improve import (
     SelfImproveTick,
     self_improve,
 )
+from .campaign import CampaignReport, CampaignSession, estimate_campaign, run_campaign
 from .variance_sampler import VarianceSampler
 from .safety import SafetyCheck, SafetyReport, safety_report
 from .rsi_metrics import (RSIMetrics, alerts, metrics_from_log,
@@ -764,6 +765,10 @@ __all__ = [
     "SelfImproveReport",
     "SelfImproveTick",
     "self_improve",
+    "CampaignReport",
+    "CampaignSession",
+    "estimate_campaign",
+    "run_campaign",
     "VarianceSampler",
     "SafetyCheck",
     "SafetyReport",
