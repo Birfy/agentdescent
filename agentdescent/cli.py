@@ -1243,7 +1243,12 @@ def cmd_plan(a: argparse.Namespace) -> int:
         _apply_algorithm_flag(spec, a)
         payload = plan_payload(spec, usd_per_call=a.usd_per_call)
     except (SpecError, ValueError) as e:
-        _out({"ok": False, "error": str(e)}, as_json=a.json)
+        # JSON only on request; otherwise the same `error: ...` line on stderr
+        # that an unreadable spec file already gets (#551).
+        if a.json:
+            _out({"ok": False, "error": str(e)}, as_json=True)
+        else:
+            print(f"error: {e}", file=sys.stderr)
         return 2
     _out(payload, as_json=a.json)
     return 0 if payload.get("ok", True) else 2
