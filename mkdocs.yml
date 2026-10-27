@@ -84,6 +84,7 @@ nav:
     - Statistical evidence: stats-eval.md
     - Decision log: decisions.md
     - Deployment safety — kill/canary/rollback: safety-controller.md
+    - RSI metrics — acceptance and cost: metrics.md
     - Session controller — when to stop: controller.md
     - Run manifest — reproducibility: manifest.md
     - Evaluation service — budgeted oracle: evaluation.md
@@ -113,6 +114,7 @@ nav:
     - Marginal-gain stopping: stopping.md
     - Approval gate — high-risk changes: approval.md
     - Guard pipeline: guards.md
+    - Guarded runtime: runtime.md
     - Risk policy: risk-policy.md
     - Promotion policies: promotion-policies.md
     - Staleness policies: staleness.md

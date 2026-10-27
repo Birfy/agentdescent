@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-528 public names across 102 modules.
+535 public names across 104 modules.
 
 ---
 
@@ -4343,6 +4343,10 @@ Run guards in order; the first refusal is the pipeline's decision.
 
 The full ordered trail, including the first refusal when there is one.
 
+### `GuardedRun`
+
+The evolution result, the recorded decision and the acceptance chain.
+
 ### `Harness`
 
 One algorithm port, named and runnable.
@@ -4526,6 +4530,10 @@ How a rollout becomes candidate changes.
 ### `ROUTE_SEED`
 
 The shipped route rule: answer directly unless the task is hard and the budget allows a search. Deliberately conservative -- it refuses to search when the budget is low, which is exactly the decision an evolved rule can improve on (searching hard tasks pays more than the budget it costs).
+
+### `RSIMetrics`
+
+Aggregate counts and cost for a stream of decisions.
 
 ### `RationaleReport`
 
@@ -4747,6 +4755,10 @@ Compose the ring statuses into one verdict.
 
 Admit an archived rule using its own `exam` stamp plus any ring statuses.
 
+### `alerts`
+
+Human-readable alert conditions; empty means no alert.
+
 ### `apply_patch`
 
 Apply a `patch_source` diff back to a source. `ValueError` when the patch does not apply cleanly -- a patch whose context does not match `source` is refused, never half-applied. Untouched lines outside a hunk's context are preserved, so a middle-of-file edit keeps the rest of the file.
@@ -4907,6 +4919,14 @@ Run a population of meta sessions from the archive's best rules, promote the win
 
 `meta_run` with an audited validation: sample, oracle, persist, decide.
 
+### `metrics_from_log`
+
+Aggregate any iterable log (a JSONL-backed log, list, or generator).
+
+### `metrics_from_records`
+
+Aggregate decision records.
+
 ### `outcome_features`
 
 The features a judge learns quality from: mean best-so-far, the final reward, and a constant intercept term. Sweep counts / rollouts are deliberately dropped: raw counts dwarf a `[0, 1]` quality in a linear fit and had the old judge saturating its clip at 1.0 for every outcome. The judge must learn quality from the curve's *shape*, not be handed the answer.
@@ -4991,6 +5011,10 @@ Run up to `sessions` sessions, keeping the best artifact.
 
 Run sessions until budget, a kill switch, an error or stagnation.
 
+### `run_guarded`
+
+Run one spec with an injected acceptance policy and optional records.
+
 ### `safety_report`
 
 Check whether the archive is safe to keep seeding from.
@@ -5038,6 +5062,10 @@ The evolvable spec: the value is a gated `society()` source compiled into a `Soc
 ### `source_ops`
 
 The deterministic cost of a candidate rule: arithmetic/call nodes in its source, counted from the AST. An attributable unit of work -- evaluating a rule costs what its expression tree costs, and counting it from the source is reproducible where wallclock is not.
+
+### `to_prometheus`
+
+A deterministic Prometheus text exposition (no timestamps).
 
 ### `tournament_promote`
 
