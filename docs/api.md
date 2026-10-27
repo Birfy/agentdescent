@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-507 public names across 95 modules.
+508 public names across 96 modules.
 
 ---
 
@@ -4372,6 +4372,10 @@ Labels the heaviest stratum needs before the reported interval means what it say
 ### `MIN_UNSEEN`
 
 Below this estimated probability of a new mode, more improvement labels are buying the flat part of the rarefaction curve. Not a law -- the point at which a one-in-twenty chance of learning something stops being worth an oracle call is a budget question -- but it is where the Phase 0 curve had flattened.
+
+### `MarginalGainStop`
+
+Stop when reward gained per additional call falls below a bar.
 
 ### `MatchResult`
 

@@ -339,6 +339,7 @@ from .self_improve import (
     SelfImproveTick,
     self_improve,
 )
+from .stopping import MarginalGainStop
 from .campaign import CampaignReport, CampaignSession, estimate_campaign, run_campaign
 from .variance_sampler import VarianceSampler
 from .safety import SafetyCheck, SafetyReport, safety_report
@@ -763,6 +764,7 @@ __all__ = [
     "SelfImproveReport",
     "SelfImproveTick",
     "self_improve",
+    "MarginalGainStop",
     "CampaignReport",
     "CampaignSession",
     "estimate_campaign",
