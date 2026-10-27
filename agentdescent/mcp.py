@@ -31,12 +31,12 @@ from __future__ import annotations
 import inspect
 import json
 import os
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Annotated, Any, Dict, Optional, Sequence, Tuple
 
 from . import __version__, runstore
-from .cli import (NESTED_ENV, apply_payload, doctor_report, plan_payload,
-                 require_cli_on_path, require_resume_host_on_path, show_payload,
-                 status_payload)
+from .cli import (NESTED_ENV, apply_from_payload, apply_payload, doctor_report,
+                 plan_payload, require_cli_on_path, require_resume_host_on_path,
+                 show_payload, status_payload)
 from .evolvespec import EvolveSpec, SpecError, compose
 
 __all__ = ["RESCAN_ALLOW_ENV", "Tools", "TOOL_DESCRIPTIONS", "build_server",
@@ -124,12 +124,15 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
         "step. Call this after `show` when the run learned little, instead of guessing "
         "from the outcome histogram."),
     "apply": (
-        "DESTRUCTIVE: write the evolved artifact back over the target directory (or `to`). "
-        "Backs the original up first unless backup=false. Ask the user explicitly before "
-        "calling this, after they have seen `show`; use dry_run=true to preview. Returns "
-        "written / unchanged / backup; `noop: true` means the target already matched the "
-        "run, so nothing was written and no backup exists -- tell the user nothing "
-        "changed. Otherwise tell them the backup path afterwards."),
+        "DESTRUCTIVE: write an evolved artifact back over a target. Pass `run_id` to "
+        "install a finished run's result (optional `to` overrides the run's target), OR "
+        "pass `from` + `to` to install an on-disk artifact such as a campaign "
+        "`final_target` -- same rules as CLI `apply --from` (from requires to; mutually "
+        "exclusive with run_id; symlinks refused). Backs the original up first unless "
+        "backup=false. Ask the user explicitly before calling this; use dry_run=true to "
+        "preview. Returns written / unchanged / backup; `noop: true` means the target "
+        "already matched, so nothing was written and no backup exists -- tell the user "
+        "nothing changed. Otherwise tell them the backup path afterwards."),
     "cancel": (
         "Stop a running evolution and every worker agent it started. The run keeps its "
         "ledger and can be resumed."),
@@ -380,10 +383,28 @@ class Tools:
                 **({} if (self.bridge or self.host_cli)
                    else {"host_model_unavailable": self.bridge_error})}
 
-    def apply(self, run_id: str, to: Optional[str] = None, dry_run: bool = False,
-              backup: bool = True) -> Dict[str, Any]:
+    def apply(self, run_id: Optional[str] = None, to: Optional[str] = None,
+              dry_run: bool = False, backup: bool = True, *,
+              source: Optional[str] = None) -> Dict[str, Any]:
+        """Install a run result (`run_id`) or an on-disk artifact (`source` + `to`).
+
+        ``source`` is the MCP/`CLI` ``from`` path (campaign ``final_target``, etc.).
+        ``run_id`` and ``source`` are mutually exclusive; ``source`` requires ``to``.
+        """
         try:
-            return apply_payload(run_id, to=to, store=self.store, dry_run=dry_run, backup=backup)
+            if source:
+                if run_id:
+                    raise runstore.RunStoreError(
+                        "pass a run_id or from PATH, not both")
+                if not to:
+                    raise runstore.RunStoreError(
+                        "from needs to PATH (where to install the artifact)")
+                return apply_from_payload(source, to=to, dry_run=dry_run, backup=backup)
+            if not run_id:
+                raise runstore.RunStoreError(
+                    "apply needs a run_id, or from PATH and to PATH")
+            return apply_payload(run_id, to=to, store=self.store, dry_run=dry_run,
+                                backup=backup)
         except (runstore.RunStoreError, OSError, ValueError) as e:
             return {"error": str(e)}
 
@@ -687,10 +708,22 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent",
     def diagnose(run_id: str) -> Dict[str, Any]:
         return t.diagnose(run_id)
 
-    @server.tool(description=TOOL_DESCRIPTIONS["apply"])
-    def apply(run_id: str, to: Optional[str] = None, dry_run: bool = False,
-              backup: bool = True) -> Dict[str, Any]:
-        return t.apply(run_id, to, dry_run, backup)
+    # `from` is a Python keyword; expose it as the MCP arg name via pydantic
+    # validation_alias so hosts pass `{"from": ..., "to": ...}` like the CLI.
+    # Annotation is set after the def (like Context on start/resume) because
+    # `from __future__ import annotations` would stringify a local Field import
+    # and fail when the SDK evaluates it.
+    from pydantic import Field as _Field
+
+    def apply(run_id: Optional[str] = None, to: Optional[str] = None,
+              dry_run: bool = False, backup: bool = True,
+              from_: Optional[str] = None) -> Dict[str, Any]:
+        return t.apply(run_id, to, dry_run, backup, source=from_)
+
+    apply.__annotations__["from_"] = Annotated[
+        Optional[str],
+        _Field(validation_alias="from", serialization_alias="from")]
+    server.tool(description=TOOL_DESCRIPTIONS["apply"])(apply)
 
     @server.tool(description=TOOL_DESCRIPTIONS["cancel"])
     def cancel(run_id: str) -> Dict[str, Any]:

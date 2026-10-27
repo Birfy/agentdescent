@@ -94,8 +94,9 @@ written back until the user says so.
    To keep improving across sessions, offer `agentdescent campaign <spec>
    --sessions N`; it works on a copy, reports the workspace/final target and
    never touches the live target. Run its `--dry-run` first. A campaign has no
-   run id: install its result with `agentdescent apply --from <final_target>
-   --to <target> --dry-run`, then (after asking) without `--dry-run`.
+   run id: install its result with the MCP `apply` tool using `from`=<final_target>
+   and `to`=<target> (dry_run=true first, then after asking without), or the CLI
+   form `agentdescent apply --from <final_target> --to <target> --dry-run`.
 4. **`start`**. It replies with `host_model_route` when the spec uses
    `host_model` -- report the route it actually got (`sampling`, or a CLI name)
    rather than assuming; only the sampling route dies with this session.
