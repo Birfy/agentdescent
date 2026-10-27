@@ -350,6 +350,8 @@ from .safety_controller import CanaryResult, KillSwitch, canary, rollback_plan
 from .campaign import CampaignReport, CampaignSession, estimate_campaign, run_campaign
 from .variance_sampler import VarianceSampler
 from .safety import SafetyCheck, SafetyReport, safety_report
+from .rsi_metrics import (RSIMetrics, alerts, metrics_from_log,
+                          metrics_from_records, to_prometheus)
 from .controller import (ControllerConfig, ControllerReport, SessionOutcome,
                          SessionRecord, run_controller)
 from .evaluation import EvaluationReport, EvaluationRow, evaluate
@@ -801,6 +803,11 @@ __all__ = [
     "SafetyCheck",
     "SafetyReport",
     "safety_report",
+    "RSIMetrics",
+    "alerts",
+    "metrics_from_log",
+    "metrics_from_records",
+    "to_prometheus",
     "ControllerConfig",
     "ControllerReport",
     "SessionOutcome",
