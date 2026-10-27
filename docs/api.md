@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-507 public names across 95 modules.
+511 public names across 96 modules.
 
 ---
 
@@ -4177,6 +4177,14 @@ Somewhere to keep evaluations. In one process, across many, or on disk.
 
 A mutable per-call max_tokens, set by the engine before each expansion.
 
+### `CampaignReport`
+
+Every session, the best artifact and where it lives.
+
+### `CampaignSession`
+
+One evolution session inside a campaign.
+
 ### `CanaryResult`
 
 The paired sign test and the deployment verdict.
@@ -4753,6 +4761,10 @@ Field-level differences between two manifests (empty when identical).
 
 The rationales the artifact will carry: deduped rules from the rollouts, near-miss rationales included -- they are the artifact's own notes about what it still needs. Dedup is on the **exact rationale text**, so the output value stays semantic content (`-1` and `1`, `A` and `a` are different rules, not formatting to normalise away).
 
+### `estimate_campaign`
+
+Price a campaign without running it (one composed arm per session).
+
 ### `evaluate`
 
 Compare `verifier` with `oracle` on a deterministic sample.
@@ -4900,6 +4912,10 @@ Content-address a proposal so identical proposals dedupe automatically.
 ### `rule_tournament`
 
 Run a round-robin between the rules, rated by Elo.
+
+### `run_campaign`
+
+Run up to `sessions` sessions, keeping the best artifact.
 
 ### `run_controller`
 
