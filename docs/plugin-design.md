@@ -314,6 +314,8 @@ small script so they cannot drift.
 skills/agentdescent/SKILL.md    the shared skill
 commands/evolve.md              /agentdescent:evolve <path> — a slash-command shortcut that
                                 invokes the skill with the argument prefilled
+commands/algorithms.md          /agentdescent:algorithms list|show|run — same cards as
+                                `algorithms list`/`show` and MCP list/describe
 .mcp.json                       {"mcpServers": {"agentdescent": {"command": "agentdescent", "args": ["mcp"],
                                 "env_vars": [...]}}}   (env_vars: what Codex forwards; see plugins.md)
 hooks/hooks.json                SessionStart: `agentdescent status --brief` so an in-progress run

@@ -39,7 +39,10 @@ written back until the user says so.
      too few it has both committed a worse rule and committed nothing at all.
    - `algorithm` (optional): a named method. Call `list_algorithms` (or
      `describe_algorithm` for one) before naming one; the same data is in
-     `agentdescent algorithms list` / `show`. To compare methods on the user's
+     `agentdescent algorithms list` / `show`. Hosts that expose slash
+     commands also ship `/algorithms` (Claude `/agentdescent:algorithms`,
+     OpenCode `/agentdescent/algorithms`, Codex `/prompts:algorithms`) for
+     list / show / run. To compare methods on the user's
      own spec, offer `agentdescent tournament <spec> --algorithm default
      --algorithm NAME` (same budget per arm; the winner is the best mean over
      seeds, and a tie is reported as a tie). Run its `--dry-run` first and quote
