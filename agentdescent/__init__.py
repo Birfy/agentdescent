@@ -351,6 +351,7 @@ from .runtime import GuardedRun, run_guarded
 from .diagnose import DiagnosisReport, diagnose_payload
 from .tournament import (AlgorithmArm, AlgorithmScore, AlgorithmTournamentReport,
                          estimate_tournament, run_tournament)
+from .rsi import RSIReport, SlotRSI, rsi_report
 from .campaign import CampaignReport, CampaignSession, estimate_campaign, run_campaign
 from .variance_sampler import VarianceSampler
 from .safety import SafetyCheck, SafetyReport, safety_report
@@ -808,6 +809,9 @@ __all__ = [
     "AlgorithmTournamentReport",
     "estimate_tournament",
     "run_tournament",
+    "RSIReport",
+    "SlotRSI",
+    "rsi_report",
     "CampaignReport",
     "CampaignSession",
     "estimate_campaign",
