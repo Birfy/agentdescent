@@ -325,3 +325,69 @@ def test_non_nested_start_still_refuses_missing_cli(
     assert create_calls == [] and launch_calls == []
     after = set(os.listdir(store)) if os.path.isdir(store) else set()
     assert after == before
+
+
+def test_apply_from_installs_an_on_disk_artifact(store, tmp_path):
+    """MCP apply(from=..., to=...) matches CLI apply --from (#540)."""
+    t = Tools(store)
+    src = tmp_path / "evolved.md"
+    src.write_text("new prompt\n")
+    dest = tmp_path / "prompt.md"
+    dest.write_text("old prompt\n")
+
+    plan = t.apply(source=str(src), to=str(dest), dry_run=True)
+    assert plan["written"] == [str(dest)] and plan.get("noop") is False
+    assert dest.read_text() == "old prompt\n"
+
+    done = t.apply(source=str(src), to=str(dest))
+    assert dest.read_text() == "new prompt\n"
+    assert done["backup"] == [str(dest) + ".bak-0"]
+    assert (tmp_path / "prompt.md.bak-0").read_text() == "old prompt\n"
+
+    again = t.apply(source=str(src), to=str(dest))
+    assert again["noop"] is True
+
+
+def test_apply_from_argument_errors_are_payloads(store, tmp_path):
+    t = Tools(store)
+    src = tmp_path / "x.md"
+    src.write_text("x")
+    assert "from needs to" in t.apply(source=str(src))["error"]
+    assert "not both" in t.apply("someid", to=str(tmp_path / "y.md"),
+                                 source=str(src))["error"]
+    assert "run_id" in t.apply()["error"] or "from PATH" in t.apply()["error"]
+    missing = t.apply(source=str(tmp_path / "missing"), to=str(tmp_path / "y.md"))
+    assert "does not exist" in missing["error"]
+
+
+def test_apply_from_refuses_symlinks(store, tmp_path):
+    t = Tools(store)
+    src, dest = tmp_path / "final", tmp_path / "skill"
+    src.mkdir(); dest.mkdir()
+    (src / "SKILL.md").write_text("ok\n")
+    (dest / "SKILL.md").write_text("old\n")
+    (src / "abs").symlink_to("/etc/hostname")
+    err = t.apply(source=str(src), to=str(dest))
+    assert "symlink" in err["error"] and "abs" in err["error"]
+    assert not (dest / "abs").exists()
+    assert (dest / "SKILL.md").read_text() == "old\n"
+
+
+def test_apply_tool_schema_exposes_from_not_from_underscore(store):
+    """Hosts must see the MCP arg as `from` (CLI parity), not `from_` (#540)."""
+    pytest.importorskip("mcp")
+    import asyncio
+    server = build_server(store)
+
+    async def _schema():
+        tools = await server.list_tools()
+        apply = next(t for t in tools if t.name == "apply")
+        schema = getattr(apply, "input_schema", None) or getattr(apply, "inputSchema")
+        props = schema["properties"]
+        assert "from" in props and "from_" not in props
+        assert "run_id" in props and "to" in props
+        # run_id is optional now (from+to is the other mode)
+        required = schema.get("required") or []
+        assert "run_id" not in required
+
+    asyncio.run(_schema())
