@@ -38,8 +38,19 @@ def test_patience_stops_a_plateau(tmp_path):
                           workdir=str(tmp_path / "c"))
     # the stub run reaches its target in the first session, so one non-improving
     # session is enough to stop well before five
-    assert report.stopped_reason in ("patience", "sessions")
+    assert report.stopped_reason in ("patience", "sessions", "target_reward")
     assert len(report.sessions) <= 5
+
+
+def test_reaching_target_reward_stops_the_campaign(tmp_path):
+    spec = _dir_spec(str(tmp_path))
+    report = run_campaign(spec, sessions=3, rounds=1, patience=2,
+                          workdir=str(tmp_path / "c"))
+    first = report.sessions[0]
+    if first.stop_reason != "target_reward":
+        pytest.skip("stub spec did not reach its target in session 0")
+    assert len(report.sessions) == 1
+    assert report.stopped_reason == "target_reward"
 
 
 def test_policy_slot_and_bad_arguments_are_refused(tmp_path):

@@ -19,6 +19,9 @@ copying it yourself.
 - A **non-improving** session is discarded and, after `--patience` such sessions
   (default 1), the campaign stops; the workspace keeps the best artifact, not
   the last one.
+- A session whose run reaches the spec's `target_reward` (its `stop_reason` is
+  `target_reward`) ends the campaign right away with
+  `stopped_reason="target_reward"`; a further session could not do better.
 - The split's seed stays the spec's seed across sessions. With `shuffle: true`
   the held-out split is derived from that seed, so changing it per session
   would make the rewards incomparable; sessions differ because the artifact
