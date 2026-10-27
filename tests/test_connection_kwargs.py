@@ -118,7 +118,7 @@ def test_plan_refuses_a_base_url_on_the_cli(tmp_path, capsys, ref, field):
     spec = _spec_dict(tmp_path, **{field: {"ref": ref, "model": "m", "base_url": "https://x"}})
     path = tmp_path / "spec.json"
     path.write_text(json.dumps(spec))
-    assert cli.main(["plan", str(path)]) == 2
+    assert cli.main(["plan", str(path), "--json"]) == 2
     out = json.loads(capsys.readouterr().out)
     assert out["ok"] is False
     assert field in out["error"] and "`base_url`" in out["error"]

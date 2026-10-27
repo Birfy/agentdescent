@@ -98,10 +98,10 @@ def test_cli_plan_bad_file_has_no_traceback(tmp_path, source):
     assert "Traceback" not in output
     assert str(path if source != "data" else data) in output
     if source == "data":
-        assert json.loads(result.stdout)["ok"] is False
         assert "line 2, column" in output
-    else:
-        assert result.stderr.startswith("error: ")
+    # Every plan error is one human line on stderr without --json (#551).
+    assert result.stderr.startswith("error: ")
+    assert result.stdout == ""
 
 
 @pytest.mark.parametrize("ext", ["json", "jsonl", "csv", "tsv"])
