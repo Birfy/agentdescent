@@ -9,6 +9,7 @@ The default recipe for a `kind` is used when no algorithm is named, and
 `plan` always echoes what was resolved.
 
 ```bash
+agentdescent algorithms [--json]                 # same as `algorithms list`
 agentdescent algorithms list [--kind K] [--json]
 agentdescent algorithms show NAME
 agentdescent init PATH --algorithm NAME --param KEY=VALUE
