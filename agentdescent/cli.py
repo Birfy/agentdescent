@@ -1469,8 +1469,12 @@ def show_samples(rd: "runstore.RunDir", spec: EvolveSpec, rendered: Optional[str
         if r.task_id in seen:
             continue
         seen.add(r.task_id)
+        raw_gold = gold.get(r.task_id)
         out.append({"task_id": r.task_id, "reward": r.reward,
-                    "output": _head(r.output), "gold": _head(gold.get(r.task_id)),
+                    "output": _head(r.output), "gold": _head(raw_gold),
+                    "output_truncated": len(str(r.output)) > SHOW_SAMPLE_CHARS,
+                    "gold_truncated": (raw_gold is not None
+                                       and len(str(raw_gold)) > SHOW_SAMPLE_CHARS),
                     "purpose": r.purpose,
                     "of": "final" if own else "any"})
         if len(out) >= n:
@@ -2119,6 +2123,26 @@ def cmd_algorithms(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_diagnose(a: argparse.Namespace) -> int:
+    """``agentdescent diagnose`` -- why did this run end where it did?"""
+    from .diagnose import diagnose_payload
+
+    try:
+        report = diagnose_payload(a.run_id, store=a.store)
+    except runstore.RunStoreError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    if a.json:
+        _out(report.to_dict(), as_json=True)
+        return 0
+    print(f"{report.verdict}: {report.summary}")
+    if report.evidence:
+        print("evidence:", json.dumps(report.evidence, default=str)[:1200])
+    for line in report.recommendations:
+        print(f"  next: {line}")
+    return 0
+
+
 def cmd_campaign(a: argparse.Namespace) -> int:
     """``agentdescent campaign`` -- iterate a spec, carrying the artifact forward."""
     from .campaign import estimate_campaign, run_campaign
@@ -2158,6 +2182,8 @@ def cmd_campaign(a: argparse.Namespace) -> int:
     print(f"artifact: {report.final_target}")
     print(f"workspace: {report.workspace}")
     return 0 if report.stopped_reason != "error" else 1
+
+
 def safety_payload(archive: Optional[str] = None, *,
                    audit: Optional[str] = None, bias_threshold: float = 0.1,
                    min_exam: Optional[str] = "passed") -> Dict[str, Any]:
@@ -2492,6 +2518,12 @@ def build_parser() -> argparse.ArgumentParser:
     s2.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
                     help="machine-readable output")
     s2.set_defaults(fn=cmd_algorithms)
+
+    s = sub.add_parser("diagnose", help="why a run learned nothing (or stopped)")
+    s.add_argument("run_id")
+    s.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                   help="machine-readable output")
+    s.set_defaults(fn=cmd_diagnose)
 
     s = sub.add_parser("campaign",
                        help="iterate a spec, carrying the evolved artifact forward")
