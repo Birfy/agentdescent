@@ -2274,7 +2274,7 @@ def cmd_algorithms(a: argparse.Namespace) -> int:
         print(f"warning: algorithm plugin {name!r} failed to load: {error}",
               file=sys.stderr)
     as_json = a.json
-    if a.action == "list":
+    if a.action in (None, "list"):
         if a.kind is not None and a.kind not in KINDS:
             raise SpecError(f"--kind must be one of {list(KINDS)}, got {a.kind!r}")
         found = algorithms.listing(a.kind)
@@ -2778,7 +2778,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_uninstall)
 
     s = sub.add_parser("algorithms", help="the named algorithms a spec can ask for")
-    algo_sub = s.add_subparsers(dest="action", required=True)
+    # A bare `agentdescent algorithms` lists them, like `algorithms list`.
+    s.set_defaults(fn=cmd_algorithms, kind=None)
+    s.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                   help="machine-readable output")
+    algo_sub = s.add_subparsers(dest="action")
     s2 = algo_sub.add_parser("list", help="every algorithm, or those that apply to a kind")
     s2.add_argument("--kind", help="only algorithms for this spec kind")
     s2.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
