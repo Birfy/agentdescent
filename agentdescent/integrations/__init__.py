@@ -382,21 +382,50 @@ or archive_selection), set `algorithm` in the spec (or pass `--algorithm` to
 if I did not, use the kind's default recipe.
 """
 
+ALGORITHMS_COMMAND = """---
+description: List, show, or run a named AgentDescent algorithm (same cards as algorithms list/show)
+argument-hint: "[list [--kind K] | show <name> | run <name> <path> [cases.jsonl] [--param k=v...]]"
+---
+
+Use the agentdescent skill / MCP tools. `$ARGUMENTS` chooses the verb; the data
+is the same as `agentdescent algorithms list` / `show` and the MCP tools
+`list_algorithms` / `describe_algorithm`. Never invent a name.
+
+Parse `$ARGUMENTS` (trim; empty means `list`):
+
+- **`list`** [optional `--kind K`]: call `list_algorithms` (or
+  `agentdescent algorithms list [--kind K] [--json]`). Show each name, one-line
+  summary, kinds, and fidelity. If the user named a kind, filter to it.
+- **`show <name>`**: call `describe_algorithm` (or
+  `agentdescent algorithms show <name>`). Show the full card (params, defaults,
+  extra cost, what it changes). Stop here unless they ask to run it.
+- **`run <name> <path>`** [optional `cases.jsonl`] [optional `--param k=v`]:
+  build a spec for the path with `algorithm` set to that name (and only the
+  params they gave — validate with `describe_algorithm` / `show` first). Run
+  `doctor`, `plan`, show the resolved algorithm card and estimate, and wait for
+  my yes before `start`. Same apply/cancel/resume rules as `/evolve`.
+
+If they only named a method with no path, `show` it and ask whether to `run`.
+"""
+
 # OpenCode discovers legacy singular ``command/`` next to ``skill/`` (plural
 # ``commands/`` also works; install matches the sibling dirs this package uses).
 # Nested ``agentdescent/evolve.md`` → ``/agentdescent/evolve``.
 OPENCODE_EVOLVE_REL = ("command", "agentdescent", "evolve.md")
+OPENCODE_ALGORITHMS_REL = ("command", "agentdescent", "algorithms.md")
 # Codex custom prompts → ``/prompts:evolve`` (same markdown as Claude/OpenCode).
 CODEX_EVOLVE_REL = ("prompts", "evolve.md")
+CODEX_ALGORITHMS_REL = ("prompts", "algorithms.md")
 
 
-def _remove_stock_text_file(e: "_Eraser", path: str, stock: str, *, stop: str) -> None:
+def _remove_stock_text_file(e: "_Eraser", path: str, stock: str, *, stop: str,
+                            label: str = "slash") -> None:
     """Remove ``path`` only when it is still exactly what ``install`` wrote."""
     current = _read(path)
     if current is None:
         return
     if current != stock:
-        e.kept(path, "edited; not the stock evolve slash entry")
+        e.kept(path, f"edited; not the stock {label} entry")
         return
     e.remove_file(path)
     e.prune_dirs(os.path.dirname(path), stop)
@@ -409,6 +438,7 @@ def render_claude_plugin(dest: str, w: Optional[_Writer] = None) -> List[str]:
             json.dumps(plugin_manifest(), indent=2) + "\n")
     w.write(os.path.join(dest, "skills", "agentdescent", "SKILL.md"), skill_text())
     w.write(os.path.join(dest, "commands", "evolve.md"), EVOLVE_COMMAND)
+    w.write(os.path.join(dest, "commands", "algorithms.md"), ALGORITHMS_COMMAND)
     w.write(os.path.join(dest, ".mcp.json"), json.dumps(mcp_manifest(w.launcher), indent=2) + "\n")
     w.write(os.path.join(dest, "hooks", "hooks.json"),
             hooks_text(w.launcher) if w.launcher != [MCP_COMMAND] else hooks_text())
@@ -419,6 +449,8 @@ def install_claude_code(home: str, w: _Writer) -> None:
     dest = os.path.join(home, ".agentdescent", "plugins", "claude-code")
     render_claude_plugin(dest, w)
     w.note(f"load it:   claude --plugin-dir {dest}")
+    w.note("slash: /agentdescent:evolve <path> [cases.jsonl]")
+    w.note("slash: /agentdescent:algorithms list|show|run …")
     w.note("or, from the repository's marketplace: /plugin marketplace add Birfy/agentdescent "
            "&& /plugin install agentdescent@agentdescent")
 
@@ -533,6 +565,7 @@ def install_codex(home: str, w: _Writer) -> None:
     # slash entry ``install`` can write; the marketplace Claude-format plugin
     # is the other route — see the note below).
     w.write(os.path.join(codex_home, *CODEX_EVOLVE_REL), EVOLVE_COMMAND)
+    w.write(os.path.join(codex_home, *CODEX_ALGORITHMS_REL), ALGORITHMS_COMMAND)
     cfg_path = os.path.join(codex_home, "config.toml")
     if not _add_env_vars_in_place(cfg_path, w):
         w.append_unless(cfg_path, "[mcp_servers.agentdescent]",
@@ -545,6 +578,8 @@ def install_codex(home: str, w: _Writer) -> None:
            "session` to AGENTS.md if you want in-progress runs surfaced.")
     w.note("slash: /prompts:evolve <path> [cases.jsonl]  (same prompt as Claude "
            "/agentdescent:evolve)")
+    w.note("slash: /prompts:algorithms list|show|run …  (same prompt as Claude "
+           "/agentdescent:algorithms)")
     # Codex reads the same plugin format as Claude Code, and installing the
     # plugin brings the MCP server with it -- one command instead of the two
     # edits above. Verified against codex-cli 0.153.4.
@@ -624,7 +659,9 @@ def install_opencode(home: str, w: _Writer) -> None:
     # singular ``command/`` (also discovered; plural ``commands/`` is the newer
     # spelling). OpenCode runs it as ``/agentdescent/evolve``.
     w.write(os.path.join(root, *OPENCODE_EVOLVE_REL), EVOLVE_COMMAND)
+    w.write(os.path.join(root, *OPENCODE_ALGORITHMS_REL), ALGORITHMS_COMMAND)
     w.note("slash: /agentdescent/evolve <path> [cases.jsonl]")
+    w.note("slash: /agentdescent/algorithms list|show|run …")
 
     path = os.path.join(root, "opencode.jsonc")
     entry = json.dumps({"agentdescent": opencode_mcp_entry(w.launcher)})
@@ -943,7 +980,10 @@ dsh plugin --profile web add link:/path/to/dsh-agentdescent
 The plugin registers the `agentdescent` skill at runtime -- no file to install,
 and it cannot drift from the package -- and its `cordis.patch.yml` adds the
 `agentdescent mcp` server, so the model gets `mcp__agentdescent__plan`,
-`__start`, `__status`, `__show`, `__apply` and the rest.
+`__start`, `__status`, `__show`, `__apply`, `__list_algorithms`,
+`__describe_algorithm` and the rest. Named methods match
+`agentdescent algorithms list` / `show` (dsh has no slash surface; use the
+skill or those tools).
 
 Check it composed:
 
@@ -1025,7 +1065,10 @@ launcher will not reach the Bot from Cursor's backend.
    dropping this folder into the Bot's managed-skills tree by hand is not a
    supported install route.
 2. **Drive AgentDescent.** Prefer the CLI on the Bot's computer (the shared
-   box): `agentdescent doctor`, `plan`, `evolve`, `status`, `apply`. The skill
+   box): `agentdescent doctor`, `plan`, `evolve`, `status`, `apply`. Named
+   methods: `agentdescent algorithms list` / `show <name>`, then
+   `plan`/`evolve --algorithm NAME` (or MCP `list_algorithms` /
+   `describe_algorithm` when a public HTTPS MCP gateway is wired). The skill
    falls back to those verbs when MCP tools are absent.
 3. **MCP (optional, not auto-wired).** If you publish `agentdescent mcp`
    behind a public HTTPS Streamable-HTTP/SSE gateway, ask the Bot to add that
@@ -1479,7 +1522,8 @@ def _uninstall_dsh(home: str, e: _Eraser) -> None:
 def _uninstall_claude_code(home: str, e: _Eraser) -> None:
     dest = os.path.join(home, ".agentdescent", "plugins", "claude-code")
     for rel in ((".claude-plugin", "plugin.json"), ("skills", "agentdescent", "SKILL.md"),
-                ("commands", "evolve.md"), (".mcp.json",), ("hooks", "hooks.json")):
+                ("commands", "evolve.md"), ("commands", "algorithms.md"),
+                (".mcp.json",), ("hooks", "hooks.json")):
         path = os.path.join(dest, *rel)
         e.remove_file(path)
         e.prune_dirs(os.path.dirname(path), os.path.join(home, ".agentdescent"))
@@ -1543,7 +1587,9 @@ def _uninstall_codex(home: str, e: _Eraser) -> None:
     e.remove_file(os.path.join(skill_dir, "SKILL.md"))
     e.prune_dirs(skill_dir, root)
     _remove_stock_text_file(e, os.path.join(root, *CODEX_EVOLVE_REL), EVOLVE_COMMAND,
-                            stop=root)
+                            stop=root, label="evolve slash")
+    _remove_stock_text_file(e, os.path.join(root, *CODEX_ALGORITHMS_REL),
+                            ALGORITHMS_COMMAND, stop=root, label="algorithms slash")
     path = os.path.join(root, "config.toml")
     current = _read(path)
     if current is None or "[mcp_servers.agentdescent]" not in current:
@@ -1567,7 +1613,9 @@ def _uninstall_opencode(home: str, e: _Eraser) -> None:
     e.remove_file(os.path.join(skill_dir, "SKILL.md"))
     e.prune_dirs(skill_dir, root)
     _remove_stock_text_file(e, os.path.join(root, *OPENCODE_EVOLVE_REL), EVOLVE_COMMAND,
-                            stop=root)
+                            stop=root, label="evolve slash")
+    _remove_stock_text_file(e, os.path.join(root, *OPENCODE_ALGORITHMS_REL),
+                            ALGORITHMS_COMMAND, stop=root, label="algorithms slash")
     # Both files: `install` falls back to opencode.json when opencode.jsonc has
     # comments (#516).
     for name in ("opencode.jsonc", "opencode.json"):

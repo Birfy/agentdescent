@@ -47,10 +47,10 @@ commands](plugin-quickstart.md) walks the whole path.
 | host | what it writes | how to load it |
 |---|---|---|
 | `dsh` | `~/.dsh/skills/agentdescent/SKILL.md` + `hooks.json`; an `@deepseek-ai/dsh-mcp-client` entry and the `hooks-claude-code` bridge appended to `~/.dsh/cordis.patch.yml` | restart `dsh`; check with `dsh --profile web --dump-config \| grep agentdescent` |
-| `claude-code` | a plugin directory at `~/.agentdescent/plugins/claude-code/` (`plugin.json`, skill, `/agentdescent:evolve`, `.mcp.json`, a `SessionStart` hook) | `claude --plugin-dir ~/.agentdescent/plugins/claude-code`, or `/plugin marketplace add Birfy/agentdescent` then `/plugin install agentdescent@agentdescent` |
-| `codex` | `~/.codex/skills/agentdescent/SKILL.md`; `/prompts:evolve` as `~/.codex/prompts/evolve.md` (same body as Claude `/agentdescent:evolve`); an `[mcp_servers.agentdescent]` block appended to `~/.codex/config.toml` | restart Codex; check with `codex mcp list`. **Or skip `install` entirely** and use the plugin — see below |
-| `opencode` | `~/.config/opencode/skill/agentdescent/SKILL.md`; `/agentdescent/evolve` as `~/.config/opencode/command/agentdescent/evolve.md` (legacy singular `command/`, nested to mirror Claude's namespaced slash); an `mcp.agentdescent` entry merged into `~/.config/opencode/opencode.jsonc` (into `opencode.json` beside it when your `opencode.jsonc` has comments; OpenCode merges the two) | restart OpenCode; check with `opencode mcp list` |
-| `grok-bot` | scaffold under `~/.agentdescent/plugins/grok-bot/` (`SKILL.md`, `HOST.md`, `mcp.example.json`) — **not** a one-click wire-up: Grok Bot has no public plugin API for local skill+stdio MCP | read `HOST.md`; ask Grok Bot to save the skill as a user skill; drive runs with the CLI (or a public HTTPS MCP gateway). `doctor` reports `mcp n/a` when the scaffold is current |
+| `claude-code` | a plugin directory at `~/.agentdescent/plugins/claude-code/` (`plugin.json`, skill, `/agentdescent:evolve`, `/agentdescent:algorithms`, `.mcp.json`, a `SessionStart` hook) | `claude --plugin-dir ~/.agentdescent/plugins/claude-code`, or `/plugin marketplace add Birfy/agentdescent` then `/plugin install agentdescent@agentdescent` |
+| `codex` | `~/.codex/skills/agentdescent/SKILL.md`; `/prompts:evolve` and `/prompts:algorithms` as `~/.codex/prompts/{evolve,algorithms}.md` (same bodies as Claude `/agentdescent:evolve` / `/agentdescent:algorithms`); an `[mcp_servers.agentdescent]` block appended to `~/.codex/config.toml` | restart Codex; check with `codex mcp list`. **Or skip `install` entirely** and use the plugin — see below |
+| `opencode` | `~/.config/opencode/skill/agentdescent/SKILL.md`; `/agentdescent/evolve` and `/agentdescent/algorithms` under `~/.config/opencode/command/agentdescent/` (legacy singular `command/`, nested to mirror Claude's namespaced slash); an `mcp.agentdescent` entry merged into `~/.config/opencode/opencode.jsonc` (into `opencode.json` beside it when your `opencode.jsonc` has comments; OpenCode merges the two) | restart OpenCode; check with `opencode mcp list` |
+| `grok-bot` | scaffold under `~/.agentdescent/plugins/grok-bot/` (`SKILL.md`, `HOST.md`, `mcp.example.json`) — **not** a one-click wire-up: Grok Bot has no public plugin API for local skill+stdio MCP; `HOST.md` names `algorithms list`/`show` and MCP discovery | read `HOST.md`; ask Grok Bot to save the skill as a user skill; drive runs with the CLI (or a public HTTPS MCP gateway). `doctor` reports `mcp n/a` when the scaffold is current |
 
 `agentdescent doctor` also reads what `install` left behind, without writing
 anything: one `host <name>: ok | stale | partial | missing` line per host, and
@@ -89,8 +89,9 @@ or stdio MCP (custom connectors need public HTTPS). `doctor` reports
 `agentdescent uninstall <host>` (`--dry-run` to preview, `--home` as for
 `install`) takes back what the table above says `install` wrote: the skill
 files, the Claude Code plugin directory, the Grok Bot scaffold under
-`~/.agentdescent/plugins/grok-bot/`, the OpenCode `command/agentdescent/evolve.md`
-slash entry and the Codex `prompts/evolve.md` slash entry (only while still
+`~/.agentdescent/plugins/grok-bot/`, the OpenCode
+`command/agentdescent/{evolve,algorithms}.md` slash entries and the Codex
+`prompts/{evolve,algorithms}.md` slash entries (only while still
 byte-for-byte stock), the `cordis.patch.yml` block, the
 `[mcp_servers.agentdescent]` table in `config.toml`, the `mcp.agentdescent`
 entry in `opencode.jsonc` or `opencode.json`. Everything around them is left as it was, and so is
@@ -116,10 +117,11 @@ What counts as "ours" differs by file:
   rewritten: `install` writes the entry into `opencode.json` beside it instead,
   and if that file cannot be parsed either it prints a `FAILED:` line with the
   entry to add by hand and exits 1 (`--json` reports `"ok": false`). The
-  `command/agentdescent/evolve.md` slash file is removed only while it still
-  matches the stock Claude evolve prompt; an edit is kept.
-* **Codex slash file**: `prompts/evolve.md` is removed only while stock; an edit
-  is kept. (The skill and MCP table rules above still apply.)
+  `command/agentdescent/evolve.md` and `algorithms.md` slash files are removed
+  only while each still matches the stock Claude prompt; an edit is kept.
+* **Codex slash files**: `prompts/evolve.md` and `prompts/algorithms.md` are
+  removed only while stock; an edit is kept. (The skill and MCP table rules
+  above still apply.)
 
 Anything kept is printed as `kept ... (...)` and makes the command exit 1, so a
 script can tell "fully removed" from "one step is yours"; nothing to remove
