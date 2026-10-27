@@ -12,8 +12,20 @@ agentdescent campaign spec.json --sessions 3 --rounds 2 --algorithm rrsi
 
 The campaign works on a **copy** of the target in a temporary workspace, so the
 user's file/directory is never touched. The report returns the workspace and
-`final_target`; apply that deliberately with `agentdescent apply --to ...` or by
-copying it yourself.
+`final_target`, and ends with the commands to look at and install it. A campaign
+keeps no run id, so `apply` takes the artifact path:
+
+```bash
+diff -ru ~/prompt.md /tmp/agentdescent-campaign-XXXX/prompt.md
+agentdescent apply --from /tmp/agentdescent-campaign-XXXX/prompt.md --to ~/prompt.md --dry-run
+agentdescent apply --from /tmp/agentdescent-campaign-XXXX/prompt.md --to ~/prompt.md
+rm -rf /tmp/agentdescent-campaign-XXXX
+```
+
+`apply --from` backs up what `--to` held to `<to>.bak-N` first, does nothing
+when it already matches, and for a directory leaves files the artifact does not
+have alone (listed as `extra`). `--json` output carries the same commands under
+`next`.
 
 - An **improving** session's artifact is written back to the workspace copy.
 - A **non-improving** session is discarded and, after `--patience` such sessions
