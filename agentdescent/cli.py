@@ -1789,15 +1789,32 @@ def cmd_doctor(a: argparse.Namespace) -> int:
         for k, v in rep.items():
             if k not in ("problems", "hosts", "hints"):
                 print(f"{k}: {v}")
+        unwired: List[str] = []
         for name, info in rep["hosts"].items():
-            print(f"host {name}: {info['state']}"
-                  + (f" (cli {info['cli']})" if info["cli"] else " (cli not on PATH)"))
+            if info["state"] == "missing" and info["cli"]:
+                # The CLI is here; only the integration is not. Calling that
+                # "missing" read like the CLI was absent (#535).
+                print(f"host {name}: not installed (cli {info['cli']})"
+                      f" -> agentdescent install {name}")
+                unwired.append(name)
+            elif info["state"] == "missing":
+                print(f"host {name}: no cli on PATH")
+            else:
+                print(f"host {name}: {info['state']}"
+                      + (f" (cli {info['cli']})" if info["cli"] else " (cli not on PATH)"))
         for h in rep["hints"]:
             print(f"- {h}")
         for p in rep["problems"]:
             print(f"! {p}")
         if not rep["problems"]:
-            print("ok: nothing missing")
+            # "nothing missing" contradicted the host lines above whenever a
+            # CLI was present but unwired (#535).
+            summary = "ok: no blocking problems"
+            if len(unwired) == 1:
+                summary += f" (1 host can be wired: {unwired[0]})"
+            elif unwired:
+                summary += f" ({len(unwired)} hosts can be wired: {', '.join(unwired)})"
+            print(summary)
     return 0 if not rep["problems"] else 1
 
 
