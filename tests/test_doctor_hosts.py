@@ -159,8 +159,25 @@ def test_doctor_text_output_names_the_hosts(home, monkeypatch, capsys):
     monkeypatch.setattr(cli.shutil, "which", lambda name, *a, **k: None)
     code = cli.main(["doctor"])
     out = capsys.readouterr().out
-    assert "host opencode: ok" in out and "host dsh: missing" in out
+    assert "host opencode: ok" in out and "host dsh: no cli on PATH" in out
     assert code == 1                                    # no agent CLI on PATH: unchanged
+
+
+def test_doctor_does_not_call_an_unwired_cli_missing(home, monkeypatch, capsys):
+    """#535: a CLI on PATH with no integration is "not installed", not "missing",
+    and the summary must not claim nothing is missing."""
+    rep = _report(monkeypatch, present=("opencode",))
+    monkeypatch.setattr(cli, "doctor_report", lambda: rep)
+    code = cli.main(["doctor"])
+    out = capsys.readouterr().out
+    assert "host opencode: not installed (cli /fake/bin/opencode)" in out
+    assert "agentdescent install opencode" in out
+    assert "host opencode: missing" not in out
+    assert "host codex: no cli on PATH" in out
+    assert "nothing missing" not in out
+    if not rep["problems"]:
+        assert "ok: no blocking problems (1 host can be wired: opencode)" in out
+        assert code == 0
 
 
 # -- review of #383 -----------------------------------------------------------
