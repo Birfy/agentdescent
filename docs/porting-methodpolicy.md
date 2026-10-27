@@ -4,6 +4,8 @@ Use this for mechanism microports and analogues — declarative
 [`MethodPolicy`](policies.md) definitions measured in the
 [runtime matrix](matrix-overview.md). Benchmark-faithful ports follow the
 [main checklist](porting-checklist.md).
+A named registry card alone (no MethodPolicy / matrix row) is
+[Register a named Algorithm card](algorithm-authoring.md).
 
 - [ ] Declare the fidelity class up front (`mechanism_microport`,
   `environment_analogue`, `inference_analogue`, `self_edit_analogue`) and pin
