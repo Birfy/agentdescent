@@ -85,6 +85,7 @@ nav:
     - Decision log: decisions.md
     - Deployment safety — kill/canary/rollback: safety-controller.md
     - RSI metrics — acceptance and cost: metrics.md
+    - Diagnose a run: diagnose.md
     - Session controller — when to stop: controller.md
     - Run manifest — reproducibility: manifest.md
     - Evaluation service — budgeted oracle: evaluation.md

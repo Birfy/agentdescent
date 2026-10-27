@@ -348,6 +348,7 @@ from .guards import GuardDecision, GuardPipeline, GuardPipelineResult
 from .decisions import DecisionLog, DecisionRecord
 from .safety_controller import CanaryResult, KillSwitch, canary, rollback_plan
 from .runtime import GuardedRun, run_guarded
+from .diagnose import DiagnosisReport, diagnose_payload
 from .campaign import CampaignReport, CampaignSession, estimate_campaign, run_campaign
 from .variance_sampler import VarianceSampler
 from .safety import SafetyCheck, SafetyReport, safety_report
@@ -798,6 +799,8 @@ __all__ = [
     "rollback_plan",
     "GuardedRun",
     "run_guarded",
+    "DiagnosisReport",
+    "diagnose_payload",
     "CampaignReport",
     "CampaignSession",
     "estimate_campaign",

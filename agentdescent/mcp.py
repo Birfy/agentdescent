@@ -110,6 +110,12 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
         "written, extra files, backups); for text, the evolved instruction. Also the "
         "outcomes() histogram that says why proposals were committed or refused. Explain "
         "what changed and why; do not paste the whole tree."),
+    "diagnose": (
+        "Explain why a run ended where it did: solved, partial-improvement, running, "
+        "cancelled, run-failed, reflector-error, scoring-mismatch, agent-failures, "
+        "gate-rejected, no-improvement or unknown, with bounded evidence and the next "
+        "step. Call this after `show` when the run learned little, instead of guessing "
+        "from the outcome histogram."),
     "apply": (
         "DESTRUCTIVE: write the evolved artifact back over the target directory (or `to`). "
         "Backs the original up first unless backup=false. Ask the user explicitly before "
@@ -290,6 +296,14 @@ class Tools:
     def show(self, run_id: str, diff: bool = True) -> Dict[str, Any]:
         try:
             return show_payload(run_id, store=self.store, diff=diff)
+        except runstore.RunStoreError as e:
+            return {"error": str(e)}
+
+    def diagnose(self, run_id: str) -> Dict[str, Any]:
+        from .diagnose import diagnose_payload
+
+        try:
+            return diagnose_payload(run_id, store=self.store).to_dict()
         except runstore.RunStoreError as e:
             return {"error": str(e)}
 
@@ -645,6 +659,10 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent",
     @server.tool(description=TOOL_DESCRIPTIONS["show"])
     def show(run_id: str, diff: bool = True) -> Dict[str, Any]:
         return t.show(run_id, diff)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["diagnose"])
+    def diagnose(run_id: str) -> Dict[str, Any]:
+        return t.diagnose(run_id)
 
     @server.tool(description=TOOL_DESCRIPTIONS["apply"])
     def apply(run_id: str, to: Optional[str] = None, dry_run: bool = False,
