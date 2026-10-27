@@ -2113,6 +2113,19 @@ def cmd_diagnose(a: argparse.Namespace) -> int:
     try:
         report = diagnose_payload(a.run_id, store=a.store)
     except runstore.RunStoreError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    if a.json:
+        _out(report.to_dict(), as_json=True)
+        return 0
+    print(f"{report.verdict}: {report.summary}")
+    if report.evidence:
+        print("evidence:", json.dumps(report.evidence, default=str)[:1200])
+    for line in report.recommendations:
+        print(f"  next: {line}")
+    return 0
+
+
 def cmd_rsi(a: argparse.Namespace) -> int:
     """``agentdescent rsi`` -- is the archive still getting better over time?"""
     from .rsi import rsi_report
