@@ -110,6 +110,9 @@ written back until the user says so.
    `rejected` (the diffs the gate measured and refused) and say what went wrong
    -- the agent answered wrongly, the reflector proposed nothing useful, or the
    score is too strict -- before suggesting more rounds.
+   When the user asks whether the system is still getting better over time,
+   call `rsi` (it reads the consolidation archive, not a run store) rather than
+   extrapolating from one run.
 6. **Ask before `apply`.** It overwrites the target (`show` names it); it backs
    up first. Tell the user the backup path afterwards. If the result has
    `noop: true` (also visible in `show`'s `apply_plan` and `--dry-run`), the target

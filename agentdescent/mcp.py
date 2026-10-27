@@ -79,6 +79,13 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
         "the user names a method (GEPA, ACE, RRSI, ...) or asks what methods exist; if "
         "they named none, the default recipe for the kind is usually right. Do not "
         "invent a name -- an unknown one fails in plan."),
+    "rsi": (
+        "The archive's longitudinal self-improvement trend: per decision slot, "
+        "the first and best adopted reward, the gain, the adoption that set the "
+        "best, and how many adoptions have happened since. Use it when the user "
+        "asks whether the system is still getting better or has plateaued; it is "
+        "read-only and costs no model calls. `--archive` is the consolidation "
+        "archive, not a run store."),
     "describe_algorithm": (
         "One algorithm's card: summary, kinds, fidelity, source, extra cost and every "
         "parameter with its type, default and bounds. Call this before setting "
@@ -255,6 +262,17 @@ class Tools:
                                "kind evolves a policy slot, and `plan` refuses an "
                                "algorithm for it")
         return payload
+
+    def rsi(self, archive: Optional[str] = None, slot: Optional[str] = None,
+            stagnation_window: int = 3) -> Dict[str, Any]:
+        from .cli import _archive_root
+        from .rsi import rsi_report
+
+        try:
+            return rsi_report(_archive_root(archive), slot=slot,
+                              stagnation_window=stagnation_window).to_dict()
+        except Exception as e:  # noqa: BLE001 - a bad archive is a report, not a crash
+            return {"error": str(e)}
 
     def describe_algorithm(self, name: str) -> Dict[str, Any]:
         from . import algorithms
@@ -613,6 +631,11 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent",
     @server.tool(description=TOOL_DESCRIPTIONS["describe_algorithm"])
     def describe_algorithm(name: str) -> Dict[str, Any]:
         return t.describe_algorithm(name)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["rsi"])
+    def rsi(archive: Optional[str] = None, slot: Optional[str] = None,
+            stagnation_window: int = 3) -> Dict[str, Any]:
+        return t.rsi(archive, slot, stagnation_window)
 
     @server.tool(description=TOOL_DESCRIPTIONS["plan"])
     def plan(spec: Dict[str, Any], usd_per_call: Optional[float] = None) -> Dict[str, Any]:

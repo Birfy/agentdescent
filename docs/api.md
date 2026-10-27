@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-507 public names across 95 modules.
+510 public names across 96 modules.
 
 ---
 
@@ -4465,6 +4465,10 @@ How a rollout becomes candidate changes.
 
 The shipped route rule: answer directly unless the task is hard and the budget allows a search. Deliberately conservative -- it refuses to search when the budget is low, which is exactly the decision an evolved rule can improve on (searching hard tasks pays more than the budget it costs).
 
+### `RSIReport`
+
+The archive's longitudinal view, plus the current portfolio health.
+
 ### `RationaleReport`
 
 What `rationale_evolve` distilled: how many rationales the skill now carries, and the skill itself.
@@ -4616,6 +4620,10 @@ The artifact **is one value**, and each accepted proposal replaces it.
 ### `SlotEvidence`
 
 What the archive says about one decision slot's evolution.
+
+### `SlotRSI`
+
+One decision slot's adoption history and whether it is still rising.
 
 ### `SocietyGraph`
 
@@ -4888,6 +4896,10 @@ Attack `value` by mutating the seed tasks outward and scoring each mutation. Ret
 ### `red_team_evolve`
 
 Evolve, attack the result, retrain on the failures it found.
+
+### `rsi_report`
+
+The archive's per-slot adoption history and a longitudinal verdict.
 
 ### `rule_id`
 
