@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-533 public names across 103 modules.
+535 public names across 104 modules.
 
 ---
 
@@ -4343,6 +4343,10 @@ Run guards in order; the first refusal is the pipeline's decision.
 
 The full ordered trail, including the first refusal when there is one.
 
+### `GuardedRun`
+
+The evolution result, the recorded decision and the acceptance chain.
+
 ### `Harness`
 
 One algorithm port, named and runnable.
@@ -5006,6 +5010,10 @@ Run up to `sessions` sessions, keeping the best artifact.
 ### `run_controller`
 
 Run sessions until budget, a kill switch, an error or stagnation.
+
+### `run_guarded`
+
+Run one spec with an injected acceptance policy and optional records.
 
 ### `safety_report`
 
