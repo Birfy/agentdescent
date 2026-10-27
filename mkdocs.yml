@@ -110,6 +110,7 @@ nav:
     - Leakage guard: leakage.md
     - Marginal-gain stopping: stopping.md
     - Approval gate — high-risk changes: approval.md
+    - Guard pipeline: guards.md
     - Risk policy: risk-policy.md
     - Promotion policies: promotion-policies.md
     - Staleness policies: staleness.md
