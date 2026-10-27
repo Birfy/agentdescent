@@ -149,6 +149,17 @@ class _Writer:
         self.lines: List[str] = []
 
     def write(self, path: str, text: str) -> None:
+        # Same bytes already on disk: say kept, do not rewrite (mtime / "updated"
+        # on a no-op re-install was misleading; #555).
+        if os.path.exists(path):
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    same = fh.read() == text
+            except OSError:
+                same = False
+            if same:
+                self.lines.append(f"kept {path} (unchanged)")
+                return
         exists = os.path.exists(path)
         verb = "would write" if self.dry_run else ("updated" if exists else "wrote")
         if not self.dry_run:
