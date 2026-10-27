@@ -2287,6 +2287,10 @@ def cmd_algorithms(a: argparse.Namespace) -> int:
             for x in found:
                 print(f"{x.name:<{width}}  {x.fidelity:<19}  {','.join(x.kinds):<42}  {x.summary}")
         return 0
+    if a.kind is not None:
+        # The group accepts --kind for the bare listing; `show` names one
+        # algorithm, so a filter there would be silently ignored (#549).
+        raise SpecError("--kind filters `algorithms list`; `algorithms show` takes only a name")
     try:
         card = algorithms.get(a.name, where="show").describe()
     except algorithms.AlgorithmError as e:
@@ -2782,9 +2786,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_algorithms, kind=None)
     s.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
                    help="machine-readable output")
+    # SUPPRESS on both: a subparser default would overwrite the group's value,
+    # so `algorithms --kind text list` must not lose `text` (#549).
+    s.add_argument("--kind", default=argparse.SUPPRESS,
+                   help="only algorithms for this spec kind (as `algorithms list --kind`)")
     algo_sub = s.add_subparsers(dest="action")
     s2 = algo_sub.add_parser("list", help="every algorithm, or those that apply to a kind")
-    s2.add_argument("--kind", help="only algorithms for this spec kind")
+    s2.add_argument("--kind", default=argparse.SUPPRESS,
+                    help="only algorithms for this spec kind")
     s2.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
                     help="machine-readable output")
     s2.set_defaults(fn=cmd_algorithms)
