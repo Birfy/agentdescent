@@ -33,3 +33,30 @@ def test_plan_error_stays_json_with_json(tmp_path, capsys, flags):
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is False
     assert payload["error"]
+
+
+def _few_tasks_spec(tmp_path, n=3):
+    data = tmp_path / "few.jsonl"
+    data.write_text("".join(json.dumps({"prompt": f"q{i}", "gold": "a"}) + "\n"
+                            for i in range(n)))
+    path = tmp_path / "few.json"
+    path.write_text(json.dumps({"kind": "text", "target": "instruction",
+                                "data": {"path": str(data)}, "score": "contains",
+                                "agent": "echo", "reflect": "echo"}))
+    return str(path)
+
+
+def test_plan_hard_check_is_a_stderr_line_without_json(tmp_path, capsys):
+    # A spec that compiles but fails a hard check (#343 too few tasks) (#553).
+    assert cli.main(["plan", _few_tasks_spec(tmp_path)]) == 2
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err.startswith("error: ")
+    assert "plan saw 3" in err
+
+
+def test_plan_hard_check_stays_json_with_json(tmp_path, capsys):
+    assert cli.main(["plan", _few_tasks_spec(tmp_path), "--json"]) == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert "plan saw 3" in payload["error"]
