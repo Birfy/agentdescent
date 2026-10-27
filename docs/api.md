@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-516 public names across 98 modules.
+519 public names across 99 modules.
 
 ---
 
@@ -1401,6 +1401,8 @@ The vocabulary of `category`.
 | `VIOLATES_INVARIANT` | `'violates-invariant'` |
 | `MISSING_ADAPTERS` | `'missing-adapters'` |
 | `CRITIC_REJECTED` | `'critic-rejected'` |
+| `NEEDS_APPROVAL` | `'needs-approval'` |
+| `APPROVAL_REJECTED` | `'approval-rejected'` |
 | `NOISE_FLOOR` | `'noise-floor'` |
 | `COST_RULE` | `'cost-rule'` |
 
@@ -4156,6 +4158,18 @@ Decide, per candidate, whether the expensive part of a merge is worth it.
 ### `AppendRules`
 
 Accumulate a deduped list of rules/lessons (append-only, content-addressed).
+
+### `ApprovalGate`
+
+Require a human decision for changes above a risk/size threshold.
+
+### `ApprovalRequest`
+
+One high-risk candidate's approval request and its latest decision.
+
+### `ApprovalStore`
+
+Append-only JSONL decisions for high-risk candidates.
 
 ### `BootstrapResult`
 
