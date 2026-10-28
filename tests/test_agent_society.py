@@ -51,6 +51,23 @@ def test_a_chain_routes_and_costs():
     assert out1 == 2 and used1 == 1      # single node: misses the +1 step
 
 
+def test_is_literal_emits_no_nameconstant_deprecation():
+    # #591: naming ast.NameConstant in isinstance fired DeprecationWarning on
+    # 3.12/3.13 and will AttributeError on 3.14; True/False/None are Constant.
+    import ast
+    import warnings
+
+    from agentdescent.agent_society import _is_literal
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        assert _is_literal(ast.parse("True", mode="eval").body)
+        assert _is_literal(ast.parse("False", mode="eval").body)
+        assert _is_literal(ast.parse("None", mode="eval").body)
+        assert _is_literal(ast.parse("{'ok': True, 'n': None}", mode="eval").body)
+    assert not any("NameConstant" in str(w.message) for w in caught)
+
+
 def test_the_gate_refuses_unsafe_societies():
     spec = society_spec()
     with pytest.raises(ValueError):
