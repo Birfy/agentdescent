@@ -2649,10 +2649,30 @@ def cmd_mcp(a: argparse.Namespace) -> int:
     # "CONNECTION_CLOSED" when it dies, so the one thing that can go wrong
     # before the protocol starts -- the SDK not being installed -- has to say so
     # in one line on stderr rather than as a traceback nobody will see.
+    transport = getattr(a, "transport", "stdio")
+    host = getattr(a, "host", "127.0.0.1")
+    port = getattr(a, "port", 8000)
+    if transport != "stdio":
+        from .mcp import is_loopback_host
+        if not is_loopback_host(host):
+            if not getattr(a, "allow_remote", False):
+                print(f"agentdescent mcp: refusing to listen on non-loopback host {host!r}: "
+                      "the tools can start runs and write files (`start`, `apply`). Keep "
+                      "--host 127.0.0.1 and expose it with a tunnel, or pass --allow-remote "
+                      "if you really mean to serve the network.", file=sys.stderr)
+                return 2
+            print(f"agentdescent mcp: WARNING: serving on {host}:{port} with no "
+                  "authentication; anyone who can reach it can start runs and write files.",
+                  file=sys.stderr)
+        print(f"agentdescent mcp: streamable-http on http://{host}:{port}/mcp",
+              file=sys.stderr)
     try:
         from .mcp import serve
 
-        serve(store=a.store)
+        if transport == "stdio":
+            serve(store=a.store)
+        else:
+            serve(store=a.store, transport=transport, host=host, port=port)
     except ImportError as e:
         print(f"agentdescent mcp: cannot start the MCP server -- {_mcp_import_failure(e)}",
               file=sys.stderr)
@@ -2935,7 +2955,16 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--port", type=int, default=runstore.DEFAULT_HTTP_PORT)
     s.set_defaults(fn=cmd_serve)
 
-    s = sub.add_parser("mcp", help="serve the tools over stdio (needs agentdescent[mcp])")
+    s = sub.add_parser("mcp", help="serve the tools over MCP (stdio by default; needs agentdescent[mcp])")
+    s.add_argument("--transport", choices=("stdio", "streamable-http"), default="stdio",
+                   help="stdio for hosts that spawn a subprocess (default); streamable-http "
+                        "for URL-only hosts such as Grok Bot, behind a tunnel")
+    s.add_argument("--host", default="127.0.0.1",
+                   help="streamable-http bind address (default 127.0.0.1)")
+    s.add_argument("--port", type=int, default=8000,
+                   help="streamable-http port (default 8000)")
+    s.add_argument("--allow-remote", action="store_true",
+                   help="allow a non-loopback --host (the tools can start runs and write files)")
     s.set_defaults(fn=cmd_mcp)
 
     sub.metavar = "{" + ",".join(n for n in sub.choices if n not in _INTERNAL_COMMANDS) + "}"

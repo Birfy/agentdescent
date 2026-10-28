@@ -114,7 +114,16 @@ agentdescent install claude-code    # or: dsh, codex, opencode, grok-bot
 `agentdescent install grok-bot` writes a scaffold under
 `~/.agentdescent/plugins/grok-bot/` (skill + `HOST.md` + example MCP JSON).
 There is no one-click host wire-up yet — read `HOST.md` for the current
-best path (save the skill in the Bot; drive runs with the CLI). See
+best path (save the skill in the Bot; drive runs with the CLI). To give the
+Bot the MCP tools, serve them over HTTP and expose them with a tunnel, then add
+the tunnel URL (ending in `/mcp`) as a custom MCP server:
+
+```bash
+agentdescent mcp --transport streamable-http --port 8000
+cloudflared tunnel --url http://127.0.0.1:8000 --http-host-header 127.0.0.1:8000
+```
+
+The HTTP server has no authentication, so keep the URL private. See
 [Use it from your agent](plugins.md).
 
 Then load it, and check it is actually there:

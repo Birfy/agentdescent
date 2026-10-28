@@ -50,7 +50,7 @@ commands](plugin-quickstart.md) walks the whole path.
 | `claude-code` | a plugin directory at `~/.agentdescent/plugins/claude-code/` (`plugin.json`, skill, `/agentdescent:evolve`, `/agentdescent:algorithms`, `.mcp.json`, a `SessionStart` hook) | `claude --plugin-dir ~/.agentdescent/plugins/claude-code`, or `/plugin marketplace add Birfy/agentdescent` then `/plugin install agentdescent@agentdescent` |
 | `codex` | `~/.codex/skills/agentdescent/SKILL.md`; `/prompts:evolve` and `/prompts:algorithms` as `~/.codex/prompts/{evolve,algorithms}.md` (same bodies as Claude `/agentdescent:evolve` / `/agentdescent:algorithms`); an `[mcp_servers.agentdescent]` block appended to `~/.codex/config.toml` | restart Codex; check with `codex mcp list`. **Or skip `install` entirely** and use the plugin — see below |
 | `opencode` | `~/.config/opencode/skill/agentdescent/SKILL.md`; `/agentdescent/evolve` and `/agentdescent/algorithms` under `~/.config/opencode/command/agentdescent/` (legacy singular `command/`, nested to mirror Claude's namespaced slash); an `mcp.agentdescent` entry merged into `~/.config/opencode/opencode.jsonc` (into `opencode.json` beside it when your `opencode.jsonc` has comments; OpenCode merges the two) | restart OpenCode; check with `opencode mcp list` |
-| `grok-bot` | scaffold under `~/.agentdescent/plugins/grok-bot/` (`SKILL.md`, `HOST.md`, `mcp.example.json`) — **not** a one-click wire-up: Grok Bot has no public plugin API for local skill+stdio MCP; `HOST.md` names `algorithms list`/`show` and MCP discovery | read `HOST.md`; ask Grok Bot to save the skill as a user skill; drive runs with the CLI (or a public HTTPS MCP gateway). `doctor` reports `mcp n/a` when the scaffold is current |
+| `grok-bot` | scaffold under `~/.agentdescent/plugins/grok-bot/` (`SKILL.md`, `HOST.md`, `mcp.example.json`) — **not** a one-click wire-up: Grok Bot has no public plugin API for local skill+stdio MCP; `HOST.md` names `algorithms list`/`show` and MCP discovery | read `HOST.md`; ask Grok Bot to save the skill as a user skill; drive runs with the CLI, or run `agentdescent mcp --transport streamable-http` behind an HTTPS tunnel and add the URL as a custom MCP server. `doctor` reports `mcp n/a` when the scaffold is current |
 
 `agentdescent doctor` also reads what `install` left behind, without writing
 anything: one `host <name>: ok | stale | partial | missing` line per host, and
@@ -80,7 +80,10 @@ OpenCode, and a **Grok Bot scaffold** (`agentdescent install grok-bot`). The
 Grok Bot path writes the shared skill plus `HOST.md` / `mcp.example.json`
 under `~/.agentdescent/plugins/grok-bot/`; it does **not** edit a host config,
 because Grok Bot has no public one-click plugin API for local skill directories
-or stdio MCP (custom connectors need public HTTPS). `doctor` reports
+or stdio MCP (custom connectors need public HTTPS). For those, run
+`agentdescent mcp --transport streamable-http` (loopback, port 8000, path
+`/mcp`) and expose it through an HTTPS tunnel; the server has no auth, and a
+non-loopback `--host` needs `--allow-remote`. `doctor` reports
 `mcp n/a` for that host when the scaffold is current. A future one-click route
 (if/when a host-native API appears) is still tracked on #165.
 
