@@ -1079,12 +1079,25 @@ launcher will not reach the Bot from Cursor's backend.
    box): `agentdescent doctor`, `plan`, `evolve`, `status`, `apply`. Named
    methods: `agentdescent algorithms list` / `show <name>`, then
    `plan`/`evolve --algorithm NAME` (or MCP `list_algorithms` /
-   `describe_algorithm` when a public HTTPS MCP gateway is wired). The skill
+   `describe_algorithm` when the HTTP MCP below is wired). The skill
    falls back to those verbs when MCP tools are absent.
-3. **MCP (optional, not auto-wired).** If you publish `agentdescent mcp`
-   behind a public HTTPS Streamable-HTTP/SSE gateway, ask the Bot to add that
-   URL as a custom MCP server. Do **not** expect `mcp.example.json` to be
-   picked up automatically — it is documentation.
+3. **MCP (optional, not auto-wired).** Serve the tools over HTTP on loopback
+   and expose them through any HTTPS tunnel, then ask the Bot to add the
+   tunnel URL (ending in `/mcp`) as a custom MCP server:
+
+   ```bash
+   agentdescent mcp --transport streamable-http --port 8000
+   # in another shell -- the Host header must stay 127.0.0.1:8000, because the
+   # server rejects unknown Host headers (DNS-rebinding protection):
+   cloudflared tunnel --url http://127.0.0.1:8000 --http-host-header 127.0.0.1:8000
+   # or: ngrok http 8000 --host-header=127.0.0.1:8000
+   ```
+
+   The server has **no authentication**: anyone holding the tunnel URL can
+   start runs and `apply` files, so keep the URL private and stop the tunnel
+   when done. A non-loopback `--host` is refused unless you pass
+   `--allow-remote`. Do **not** expect `mcp.example.json` to be picked up
+   automatically — it is documentation.
 4. **Bot template.** To share a Bot that already knows the procedure, use
    Grok Bot's template export (skills + getting-started), not this installer.
 
@@ -1105,8 +1118,10 @@ def grok_bot_mcp_example(launcher=None) -> dict:
     return {
         "_comment": (
             "Example only — Grok Bot does not read this file. Custom MCP on "
-            "Grok Bot needs a public HTTPS endpoint; local stdio is for hosts "
-            "that spawn a subprocess (Claude Code, Codex, OpenCode, dsh)."
+            "Grok Bot needs a public HTTPS endpoint: run `agentdescent mcp "
+            "--transport streamable-http` and expose it with a tunnel (see "
+            "HOST.md); local stdio is for hosts that spawn a subprocess "
+            "(Claude Code, Codex, OpenCode, dsh)."
         ),
         "mcpServers": {
             "agentdescent": {
@@ -1132,7 +1147,8 @@ def install_grok_bot(home: str, w: "_Writer") -> None:
            "scaffold (skill + HOST.md + mcp.example.json), not a full host wire-up.")
     w.note(f"load it:   read {os.path.join(root, GROK_BOT_HOST_MD)}")
     w.note("NOTE: ask Grok Bot to save skills/agentdescent/SKILL.md as a "
-           "user skill; drive runs with the CLI (or a public HTTPS MCP gateway)")
+           "user skill; drive runs with the CLI (or `agentdescent mcp --transport "
+           "streamable-http` behind an HTTPS tunnel)")
 
 
 def _uninstall_grok_bot(home: str, e: "_Eraser") -> None:

@@ -1,6 +1,7 @@
 """The MCP server: the CLI's verbs as tools a host agent can call.
 
-``agentdescent mcp`` serves over stdio. DeepSeek Harness, Claude Code, Codex and
+``agentdescent mcp`` serves over stdio (or, with ``--transport streamable-http``,
+over HTTP for URL-only hosts). DeepSeek Harness, Claude Code, Codex and
 the other hosts all speak MCP, so this one server is the whole runtime
 integration; the per-host material in ``integrations/`` is only manifests and a
 skill file telling the host *when* to call these.
@@ -39,7 +40,8 @@ from .cli import (NESTED_ENV, apply_from_payload, apply_payload, doctor_report,
                  show_payload, status_payload)
 from .evolvespec import EvolveSpec, SpecError, compose
 
-__all__ = ["RESCAN_ALLOW_ENV", "Tools", "TOOL_DESCRIPTIONS", "build_server",
+__all__ = ["DEFAULT_HTTP_HOST", "DEFAULT_HTTP_PORT", "RESCAN_ALLOW_ENV", "TRANSPORTS",
+           "Tools", "TOOL_DESCRIPTIONS", "build_server", "is_loopback_host",
            "rescan_allow_from_env", "serve"]
 
 #: Comma-separated import prefixes `audit_rescan` may resolve beyond this
@@ -808,6 +810,47 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent",
     return server
 
 
-def serve(store: Optional[str] = None) -> None:
-    """Serve over stdio until the host closes the pipe."""
-    build_server(store).run("stdio")
+#: Transports ``agentdescent mcp --transport`` accepts. stdio is what hosts that
+#: spawn a subprocess speak; streamable-http is for hosts that only take a URL
+#: (Grok Bot's custom MCP connectors, other remote hosts) behind a tunnel.
+TRANSPORTS = ("stdio", "streamable-http")
+DEFAULT_HTTP_HOST = "127.0.0.1"
+DEFAULT_HTTP_PORT = 8000
+
+
+def is_loopback_host(host: str) -> bool:
+    """True when ``host`` only accepts connections from this machine."""
+    h = (host or "").strip().strip("[]").lower()
+    if h == "localhost":
+        return True
+    try:
+        import ipaddress
+        return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
+
+
+def serve(store: Optional[str] = None, *, transport: str = "stdio",
+          host: str = DEFAULT_HTTP_HOST, port: int = DEFAULT_HTTP_PORT) -> None:
+    """Serve until the host closes the pipe (stdio) or the process is stopped.
+
+    ``streamable-http`` listens on ``host:port`` at ``/mcp``. The host/port go
+    where each SDK generation reads them: mcp 2.x takes them as keywords to
+    ``run``; mcp 1.x's ``FastMCP`` reads them from ``server.settings``. Callers
+    are responsible for the loopback check (the CLI refuses a non-loopback host
+    without ``--allow-remote``): ``start`` and ``apply`` write to disk.
+    """
+    if transport not in TRANSPORTS:
+        raise ValueError(f"unknown transport {transport!r}; expected one of {TRANSPORTS}")
+    server = build_server(store)
+    if transport == "stdio":
+        server.run("stdio")
+        return
+    runner = getattr(server, "run_streamable_http_async", None)
+    params = inspect.signature(runner).parameters if runner is not None else {}
+    if "host" in params and "port" in params:  # mcp >= 2
+        server.run("streamable-http", host=host, port=port)
+    else:  # mcp 1.x FastMCP
+        server.settings.host = host
+        server.settings.port = port
+        server.run("streamable-http")
