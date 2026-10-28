@@ -95,13 +95,20 @@ def test_clade_counts_match_hand_computation_and_do_not_accumulate():
         (0.0, 0.0),
         (1.0, 0.0),
     ]
-    assert clade_counts(tree) == pytest.approx(expected)
+    # pytest 9.2 rejects approx() over a sequence of tuples; compare pairs.
+    got_counts = clade_counts(tree)
+    assert len(got_counts) == len(expected)
+    assert all(got == pytest.approx(want)
+               for got, want in zip(got_counts, expected))
     policy = CladeThompson(seed=1)
     for r in range(5):
         policy.select(_ctx(*tree, round=r), 3)
     # Upstream main grows a node's measures on every expand(); the paper's
     # formula -- and this port -- does not.
-    assert clade_counts(tree) == pytest.approx(expected)
+    got_counts = clade_counts(tree)
+    assert len(got_counts) == len(expected)
+    assert all(got == pytest.approx(want)
+               for got, want in zip(got_counts, expected))
 
 
 def test_cool_down_concentrates_on_highest_cmp_as_budget_runs_out():
