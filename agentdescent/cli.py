@@ -634,6 +634,49 @@ def init_agent_mismatch(kind: str, ref: str) -> Optional[str]:
     return None
 
 
+#: Common column names ``init --data`` maps onto ``data.prompt`` / ``data.gold``
+#: when the cases file does not use the defaults (#561).
+_PROMPT_ALIASES = ("input", "question", "query", "problem")
+_GOLD_ALIASES = ("expected", "answer", "output", "target")
+
+
+def detect_data_columns(path: Optional[str]) -> Tuple[Dict[str, str], List[str]]:
+    """Read the first row of ``path`` and pick ``prompt``/``gold`` columns (#561).
+
+    Returns ``(mapping, notes)``: ``mapping`` holds only the fields to change
+    from the ``prompt``/``gold`` defaults, ``notes`` the lines to print (prefixed
+    ``warning:`` when nothing matched). A missing or unreadable file returns
+    nothing -- ``init`` already says what to create, and ``plan`` reports bad files.
+    """
+    if not path or not os.path.isfile(os.path.expanduser(path)):
+        return {}, []
+    try:
+        from .evolvespec import _read_rows_file
+        rows = _read_rows_file(path)
+    except Exception:            # plan reports a malformed file with line numbers
+        return {}, []
+    if not rows or not isinstance(rows[0], dict):
+        return {}, []
+    cols = [str(c) for c in rows[0]]
+    mapping: Dict[str, str] = {}
+    notes: List[str] = []
+    for field, default, aliases in (("prompt", "prompt", _PROMPT_ALIASES),
+                                    ("gold", "gold", _GOLD_ALIASES)):
+        if default in cols:
+            continue
+        hits = [c for c in aliases if c in cols]
+        if len(hits) == 1:
+            mapping[field] = hits[0]
+            notes.append(f"data.{field}: using column {hits[0]!r} from {path}")
+        else:
+            why = (f"several candidates ({', '.join(hits)})" if hits
+                   else "no known alias")
+            notes.append(f"warning: data.{field}: {path} has no {default!r} column "
+                         f"and {why}; columns: {', '.join(cols)}. Set "
+                         f'"data": {{"{field}": "<column>"}} in the spec before `plan`')
+    return mapping, notes
+
+
 def cmd_init(a: argparse.Namespace) -> int:
     agent, found = (a.agent, True) if a.agent else default_agent_ref()
     try:
@@ -655,6 +698,10 @@ def cmd_init(a: argparse.Namespace) -> int:
                   "(see `agentdescent doctor`) or omit --agent for the default",
                   file=sys.stderr)
             return 2
+    column_notes: List[str] = []
+    if spec["kind"] != "policy_slot" and isinstance(spec.get("data"), dict):
+        columns, column_notes = detect_data_columns(a.data)
+        spec["data"].update(columns)
     out = a.out or os.path.join(".agentdescent", f"{os.path.basename(a.path.rstrip('/')) or 'spec'}.evolve.json")
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     providers_out = None
@@ -678,6 +725,8 @@ def cmd_init(a: argparse.Namespace) -> int:
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(spec, fh, indent=2)
     print(f"wrote {out}")
+    for line in column_notes:
+        print(line)
     if providers_out:
         print(f"wrote {providers_out} (OpenCode provider-only config for the worker; "
               f"key read from ${key_env}, never inline)")

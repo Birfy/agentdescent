@@ -59,7 +59,7 @@ from .filetree import TreeSpec, load_tree
 from .fusion import reflective_merge
 from .governance import HARNESS_BLAST_RADIUS, SKILL_BLAST_RADIUS
 from .policies import Policies
-from .rewards import command_scorer, scorer
+from .rewards import SCORERS, command_scorer, scorer
 from .runners import code_runner, gated_reward, tree_runner
 from .skillspec import SKILL_FILE, SkillTreeValidator, parse_skill_frontmatter, validate_skill_tree
 from .staleness import get_policy
@@ -480,6 +480,23 @@ def build_tasks(spec: EvolveSpec) -> List[Task]:
     extra: Dict[str, str] = {}
     if rows and isinstance(rows[0], Mapping) and "fixtures" in rows[0]:
         extra["fixtures"] = "fixtures"       # staged into the workspace by the runners
+    for i, row in enumerate(rows):
+        if isinstance(row, Mapping) and prompt not in row:
+            # Say which spec field to change, not which Python argument (#561).
+            raise SpecError(
+                f"data.prompt: no column {prompt!r} in row {i} (columns: "
+                f"{', '.join(sorted(map(str, row)))}); set "
+                f'"data": {{"prompt": "<column>"}} in the spec')
+    if (isinstance(spec.score, str) and spec.score in SCORERS and rows
+            and all(isinstance(r, Mapping) for r in rows)
+            and not any(gold in r for r in rows)):
+        # A gold-comparing scorer with no gold column scores every answer 0.0
+        # and the run spends money learning nothing (#561).
+        cols = sorted({str(k) for r in rows for k in r})
+        raise SpecError(
+            f"data.gold: score {spec.score!r} compares answers to a gold column, "
+            f"but no row has column {gold!r} (columns: {', '.join(cols)}); set "
+            f'"data": {{"gold": "<column>"}} in the spec')
     try:
         return tasks_from(rows, prompt=prompt, gold=gold,
                           id=spec.data.get("id"), **extra)
