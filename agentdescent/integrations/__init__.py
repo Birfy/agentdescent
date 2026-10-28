@@ -153,8 +153,8 @@ class _Writer:
         # on a no-op re-install was misleading; #555).
         if os.path.exists(path):
             try:
-                with open(path, encoding="utf-8") as fh:
-                    same = fh.read() == text
+                with open(path, "rb") as fh:
+                    same = fh.read() == text.encode("utf-8")
             except OSError:
                 same = False
             if same:

@@ -52,3 +52,12 @@ def test_install_rerun_keeps_unchanged_scaffold_files(tmp_path):
     updated = [line for line in second if line.startswith("updated ")]
     assert len(kept) >= 3, second
     assert updated == [], second
+
+
+def test_writer_overwrites_existing_non_utf8_file(tmp_path):
+    path = tmp_path / "skill.md"
+    path.write_bytes(b"\xff\xfe")
+    w = _Writer(dry_run=False)
+    w.write(str(path), "x")
+    assert w.lines == [f"updated {path}"]
+    assert path.read_text(encoding="utf-8") == "x"
