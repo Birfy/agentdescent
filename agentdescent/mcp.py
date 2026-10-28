@@ -40,7 +40,7 @@ from .cli import (NESTED_ENV, apply_from_payload, apply_payload, doctor_report,
                  show_payload, status_payload)
 from .evolvespec import EvolveSpec, SpecError, compose
 
-__all__ = ["DEFAULT_HTTP_HOST", "DEFAULT_HTTP_PORT", "RESCAN_ALLOW_ENV", "TRANSPORTS",
+__all__ = ["DEFAULT_HTTP_HOST", "DEFAULT_HTTP_PORT", "RESCAN_ALLOW_ENV", "STREAMABLE_HTTP_REQUIRES", "TRANSPORTS",
            "Tools", "TOOL_DESCRIPTIONS", "build_server", "is_loopback_host",
            "rescan_allow_from_env", "serve"]
 
@@ -816,6 +816,11 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent",
 TRANSPORTS = ("stdio", "streamable-http")
 DEFAULT_HTTP_HOST = "127.0.0.1"
 DEFAULT_HTTP_PORT = 8000
+#: One-line reason when the installed SDK predates streamable-http (mcp < 1.8).
+STREAMABLE_HTTP_REQUIRES = (
+    'streamable-http needs mcp>=1.8; this install cannot serve it. '
+    'Upgrade with: pip install -U "mcp>=1.8", or use --transport stdio.'
+)
 
 
 def is_loopback_host(host: str) -> bool:
@@ -846,11 +851,15 @@ def serve(store: Optional[str] = None, *, transport: str = "stdio",
     if transport == "stdio":
         server.run("stdio")
         return
+    # mcp 1.2–1.7 accept only stdio/sse; ``run("streamable-http")`` raises an
+    # opaque SDK ValueError. ``run_streamable_http_async`` appears in 1.8.0.
     runner = getattr(server, "run_streamable_http_async", None)
-    params = inspect.signature(runner).parameters if runner is not None else {}
+    if runner is None:
+        raise RuntimeError(STREAMABLE_HTTP_REQUIRES)
+    params = inspect.signature(runner).parameters
     if "host" in params and "port" in params:  # mcp >= 2
         server.run("streamable-http", host=host, port=port)
-    else:  # mcp 1.x FastMCP
+    else:  # mcp 1.x FastMCP (>= 1.8)
         server.settings.host = host
         server.settings.port = port
         # mcp 1.x decides DNS-rebinding protection in the constructor, from the

@@ -2647,19 +2647,22 @@ def _mcp_import_failure(e: BaseException) -> str:
 def cmd_mcp(a: argparse.Namespace) -> int:
     # A host starts this as a subprocess and shows the user nothing but
     # "CONNECTION_CLOSED" when it dies, so the one thing that can go wrong
-    # before the protocol starts -- the SDK not being installed -- has to say so
-    # in one line on stderr rather than as a traceback nobody will see.
+    # before the protocol starts -- the SDK not being installed, or being too
+    # old for streamable-http -- has to say so in one line on stderr rather than
+    # as a traceback nobody will see.
+    from .mcp import (DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT, STREAMABLE_HTTP_REQUIRES,
+                      is_loopback_host, serve)
     transport = getattr(a, "transport", "stdio")
-    host = getattr(a, "host", "127.0.0.1")
-    port = getattr(a, "port", 8000)
+    host = getattr(a, "host", DEFAULT_HTTP_HOST)
+    port = getattr(a, "port", DEFAULT_HTTP_PORT)
     if transport != "stdio":
-        from .mcp import is_loopback_host
         if not is_loopback_host(host):
             if not getattr(a, "allow_remote", False):
                 print(f"agentdescent mcp: refusing to listen on non-loopback host {host!r}: "
                       "the tools can start runs and write files (`start`, `apply`). Keep "
-                      "--host 127.0.0.1 and expose it with a tunnel, or pass --allow-remote "
-                      "if you really mean to serve the network.", file=sys.stderr)
+                      f"--host {DEFAULT_HTTP_HOST} and expose it with a tunnel, or pass "
+                      "--allow-remote if you really mean to serve the network.",
+                      file=sys.stderr)
                 return 2
             print(f"agentdescent mcp: WARNING: serving on {host}:{port} with no "
                   "authentication; anyone who can reach it can start runs and write files.",
@@ -2667,8 +2670,6 @@ def cmd_mcp(a: argparse.Namespace) -> int:
         print(f"agentdescent mcp: streamable-http on http://{host}:{port}/mcp",
               file=sys.stderr)
     try:
-        from .mcp import serve
-
         if transport == "stdio":
             serve(store=a.store)
         else:
@@ -2677,6 +2678,14 @@ def cmd_mcp(a: argparse.Namespace) -> int:
         print(f"agentdescent mcp: cannot start the MCP server -- {_mcp_import_failure(e)}",
               file=sys.stderr)
         return 3
+    except RuntimeError as e:
+        # mcp < 1.8: serve() raises STREAMABLE_HTTP_REQUIRES instead of the SDK's
+        # opaque "Unknown transport" ValueError (#589).
+        if str(e) == STREAMABLE_HTTP_REQUIRES:
+            print(f"agentdescent mcp: cannot start the MCP server -- {e}",
+                  file=sys.stderr)
+            return 3
+        raise
     return 0
 
 
@@ -2958,7 +2967,9 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("mcp", help="serve the tools over MCP (stdio by default; needs agentdescent[mcp])")
     s.add_argument("--transport", choices=("stdio", "streamable-http"), default="stdio",
                    help="stdio for hosts that spawn a subprocess (default); streamable-http "
-                        "for URL-only hosts such as Grok Bot, behind a tunnel")
+                        "for URL-only hosts such as Grok Bot, behind a tunnel (needs mcp>=1.8)")
+    # Host/port literals must match mcp.DEFAULT_HTTP_*; locked by
+    # test_cli_mcp_defaults_match_module. Cannot import mcp.py here (it imports cli).
     s.add_argument("--host", default="127.0.0.1",
                    help="streamable-http bind address (default 127.0.0.1)")
     s.add_argument("--port", type=int, default=8000,

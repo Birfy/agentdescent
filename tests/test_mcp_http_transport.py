@@ -82,7 +82,7 @@ def test_streamable_http_initialize_and_list_tools(tmp_path):
     proc = subprocess.Popen(
         [sys.executable, "-m", "agentdescent", "--store", str(tmp_path / "runs"),
          "mcp", "--transport", "streamable-http", "--port", str(port)],
-        cwd=str(tmp_path), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        cwd=str(tmp_path), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     url = f"http://127.0.0.1:{port}/mcp"
     try:
         deadline = time.time() + 30
@@ -146,3 +146,43 @@ def test_mcp1x_non_loopback_drops_loopback_host_pin(monkeypatch, host, keeps_pin
     assert fake.ran == "streamable-http"
     assert fake.settings.host == host and fake.settings.port == 9
     assert (fake.settings.transport_security is not None) is keeps_pin
+
+
+def test_cli_mcp_defaults_match_module():
+    """Argparse cannot import mcp.py (circular); keep the literals locked (#589)."""
+    from agentdescent import mcp as m
+    a = build_parser().parse_args(["mcp"])
+    assert a.host == m.DEFAULT_HTTP_HOST and a.port == m.DEFAULT_HTTP_PORT
+
+
+class _FakePre18Server:
+    """mcp 1.2–1.7 shape: no run_streamable_http_async, run only accepts stdio/sse."""
+
+    def __init__(self):
+        self.settings = _Fake1xSettings()
+        self.ran = None
+
+    def run(self, transport):  # pragma: no cover - must not be reached
+        self.ran = transport
+        raise AssertionError(f"run({transport!r}) should not be called without streamable-http")
+
+
+def test_serve_rejects_streamable_http_on_pre_1_8_sdk(monkeypatch):
+    import agentdescent.mcp as m
+
+    fake = _FakePre18Server()
+    monkeypatch.setattr(m, "build_server", lambda store=None: fake)
+    with pytest.raises(RuntimeError, match=r"streamable-http needs mcp>=1\.8"):
+        m.serve(transport="streamable-http", host="127.0.0.1", port=9)
+    assert fake.ran is None
+
+
+def test_cmd_mcp_streamable_http_on_pre_1_8_exits_with_actionable_message(monkeypatch, capsys):
+    import agentdescent.mcp as m
+
+    fake = _FakePre18Server()
+    monkeypatch.setattr(m, "build_server", lambda store=None: fake)
+    rc = main(["mcp", "--transport", "streamable-http", "--port", "9"])
+    assert rc == 3
+    err = capsys.readouterr().err
+    assert "mcp>=1.8" in err and "streamable-http" in err
