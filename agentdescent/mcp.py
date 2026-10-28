@@ -853,4 +853,12 @@ def serve(store: Optional[str] = None, *, transport: str = "stdio",
     else:  # mcp 1.x FastMCP
         server.settings.host = host
         server.settings.port = port
+        # mcp 1.x decides DNS-rebinding protection in the constructor, from the
+        # host it was built with (loopback by default): it pins allowed Host
+        # headers to 127.0.0.1/localhost/[::1]. Changing settings.host later does
+        # not undo that, so a non-loopback bind (``--allow-remote``) would answer
+        # every remote request 421. Mirror what the constructor itself does for a
+        # non-loopback host and drop the loopback-only pin.
+        if not is_loopback_host(host) and getattr(server.settings, "transport_security", None):
+            server.settings.transport_security = None
         server.run("streamable-http")
