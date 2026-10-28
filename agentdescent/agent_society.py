@@ -123,7 +123,7 @@ def _gate_society(source: str) -> ast.Module:
 def _is_literal(node: ast.AST) -> bool:
     """A structure ``ast.literal_eval`` can evaluate: constants and
     dict/list/tuple/set literals of those, with string keys."""
-    if isinstance(node, (ast.Constant, ast.NameConstant)):
+    if isinstance(node, ast.Constant):
         return True
     if isinstance(node, ast.Dict):
         return all(isinstance(k, ast.Constant) and _is_literal(v)
