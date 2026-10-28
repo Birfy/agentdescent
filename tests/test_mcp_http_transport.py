@@ -112,3 +112,37 @@ def test_streamable_http_initialize_and_list_tools(tmp_path):
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             proc.kill()
+
+
+class _Fake1xSettings:
+    def __init__(self):
+        self.host, self.port = "127.0.0.1", 8000
+        self.transport_security = object()  # the loopback-only pin mcp 1.x sets
+
+
+class _Fake1xServer:
+    """mcp 1.x FastMCP shape: no host/port on run_streamable_http_async."""
+
+    def __init__(self):
+        self.settings = _Fake1xSettings()
+        self.ran = None
+
+    async def run_streamable_http_async(self):  # pragma: no cover - not awaited
+        pass
+
+    def run(self, transport):
+        self.ran = transport
+
+
+@pytest.mark.parametrize("host,keeps_pin", [("127.0.0.1", True), ("0.0.0.0", False)])
+def test_mcp1x_non_loopback_drops_loopback_host_pin(monkeypatch, host, keeps_pin):
+    """mcp 1.x pins allowed Host headers to loopback at construction; a remote
+    bind must drop it or every non-loopback request is answered 421."""
+    import agentdescent.mcp as m
+
+    fake = _Fake1xServer()
+    monkeypatch.setattr(m, "build_server", lambda store=None: fake)
+    m.serve(transport="streamable-http", host=host, port=9)
+    assert fake.ran == "streamable-http"
+    assert fake.settings.host == host and fake.settings.port == 9
+    assert (fake.settings.transport_security is not None) is keeps_pin
