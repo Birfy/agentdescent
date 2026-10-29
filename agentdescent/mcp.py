@@ -71,10 +71,12 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
         "Check what this machine can run: which worker agent CLIs (claude, codex, dsh, "
         "opencode) "
         "are on PATH, which provider keys are set, whether a container engine and the "
-        "git ledger are available, and which AgentDescent version and Python interpreter "
-        "this server runs (compare with the shell's `agentdescent doctor` when results "
-        "differ). Call this FIRST, before planning a run, and tell the "
-        "user what is missing instead of starting a run that fails on round one."),
+        "git ledger are available, host skill/MCP install state, and which AgentDescent "
+        "version and Python interpreter this server runs (compare with the shell's "
+        "`agentdescent doctor` when results differ). Optional `home` is the same probe "
+        "directory as `agentdescent doctor --home` / `install --home`. Call this FIRST, "
+        "before planning a run, and tell the user what is missing instead of starting a "
+        "run that fails on round one."),
     "list_algorithms": (
         "List the named algorithms a spec can ask for (`algorithm` field), with a "
         "one-line summary, the kinds each applies to and its fidelity. Call this when "
@@ -254,8 +256,8 @@ class Tools:
 
     # -- read-only -------------------------------------------------------------
 
-    def doctor(self) -> Dict[str, Any]:
-        return doctor_report()
+    def doctor(self, home: Optional[str] = None) -> Dict[str, Any]:
+        return doctor_report(home=home) if home is not None else doctor_report()
 
     def list_algorithms(self, kind: Optional[str] = None) -> Dict[str, Any]:
         from . import algorithms
@@ -658,8 +660,8 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent",
             t.bridge, t.bridge_error = None, f"{type(e).__name__}: {e}"
 
     @server.tool(description=TOOL_DESCRIPTIONS["doctor"])
-    def doctor() -> Dict[str, Any]:
-        return t.doctor()
+    def doctor(home: Optional[str] = None) -> Dict[str, Any]:
+        return t.doctor(home)
 
     @server.tool(description=TOOL_DESCRIPTIONS["list_algorithms"])
     def list_algorithms(kind: Optional[str] = None) -> Dict[str, Any]:

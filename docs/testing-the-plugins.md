@@ -100,6 +100,7 @@ nothing outside it is read or written.
 
 ```bash
 agentdescent install dsh --dry-run --home /tmp/probe
+agentdescent doctor --home /tmp/probe   # same --home: host lines are not forever missing
 ```
 
 ### Claude Code
