@@ -122,9 +122,19 @@ def _gate_society(source: str) -> ast.Module:
 
 def _is_literal(node: ast.AST) -> bool:
     """A structure ``ast.literal_eval`` can evaluate: constants and
-    dict/list/tuple/set literals of those, with string keys."""
+    dict/list/tuple/set literals of those, with string keys.
+
+    Unary ``+`` / ``-`` on a numeric constant are literals too (``-1`` is an
+    ``ast.UnaryOp`` on 3.9+, not ``ast.Constant``); match ``literal_eval`` so
+    the society gate does not call a signed number "computed code" (#593).
+    """
     if isinstance(node, ast.Constant):
         return True
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        # literal_eval allows only one UAdd/USub over int/float/complex; type()
+        # rejects bool (a subclass of int) and nested unaries like ``--1``.
+        return (isinstance(node.operand, ast.Constant)
+                and type(node.operand.value) in (int, float, complex))
     if isinstance(node, ast.Dict):
         return all(isinstance(k, ast.Constant) and _is_literal(v)
                    for k, v in zip(node.keys, node.values))
