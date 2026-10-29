@@ -174,7 +174,7 @@ def test_doctor_does_not_call_an_unwired_cli_missing(home, monkeypatch, capsys):
     """#535: a CLI on PATH with no integration is "not installed", not "missing",
     and the summary must not claim nothing is missing."""
     rep = _report(monkeypatch, present=("opencode",))
-    monkeypatch.setattr(cli, "doctor_report", lambda: rep)
+    monkeypatch.setattr(cli, "doctor_report", lambda **_kw: rep)
     code = cli.main(["doctor"])
     out = capsys.readouterr().out
     assert "host opencode: not installed (cli /fake/bin/opencode)" in out
@@ -194,7 +194,7 @@ def test_doctor_host_line_names_skill_and_mcp_for_partial(home, monkeypatch, cap
               encoding="utf-8") as fh:
         json.dump({"mcp": {}}, fh)
     rep = _report(monkeypatch, present=("opencode",))
-    monkeypatch.setattr(cli, "doctor_report", lambda: rep)
+    monkeypatch.setattr(cli, "doctor_report", lambda **_kw: rep)
     cli.main(["doctor"])
     out = capsys.readouterr().out
     assert "host opencode: partial (skill ok, mcp missing; cli /fake/bin/opencode)" in out
@@ -205,10 +205,101 @@ def test_doctor_host_line_names_skill_and_mcp_for_stale(home, monkeypatch, capsy
     with open(_skill_path(home, "opencode"), "w", encoding="utf-8") as fh:
         fh.write("an older procedure\n")
     rep = _report(monkeypatch, present=("opencode",))
-    monkeypatch.setattr(cli, "doctor_report", lambda: rep)
+    monkeypatch.setattr(cli, "doctor_report", lambda **_kw: rep)
     cli.main(["doctor"])
     out = capsys.readouterr().out
     assert "host opencode: stale (skill stale, mcp ok; cli /fake/bin/opencode)" in out
+
+
+# -- #605: doctor --home -----------------------------------------------------
+
+
+def test_doctor_help_lists_home():
+    ns = cli.build_parser().parse_args(["doctor", "--home", "/tmp/probe"])
+    assert ns.home == "/tmp/probe"
+    for action in cli.build_parser()._actions:
+        choices = getattr(action, "choices", None) or {}
+        if "doctor" in choices:
+            assert "--home" in choices["doctor"].format_help()
+            break
+    else:
+        raise AssertionError("doctor subparser not found")
+
+
+def test_doctor_home_sees_an_install_into_a_probe(tmp_path, monkeypatch, capsys):
+    """install --home then doctor --home: host is not missing (the #605 bug)."""
+    real = tmp_path / "real"
+    probe = tmp_path / "probe"
+    real.mkdir(); probe.mkdir()
+    for var in ("DSH_HOME", "CODEX_HOME", "XDG_CONFIG_HOME"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("HOME", str(real))
+    monkeypatch.setattr(cli, "mcp_unavailable", lambda: None)
+    monkeypatch.setattr(cli.shutil, "which", lambda name, *a, **k: (
+        "/usr/bin/git" if name == "git" else None))
+    install("claude-code", home=str(probe))
+    install("grok-bot", home=str(probe))
+    # Without --home, doctor still reads the real home → missing.
+    code = cli.main(["doctor", "--json"])
+    without = json.loads(capsys.readouterr().out)
+    assert without["hosts"]["claude-code"]["state"] == "missing"
+    assert without["hosts"]["grok-bot"]["state"] == "missing"
+    # With --home, same probe install reads ok.
+    code = cli.main(["doctor", "--json", "--home", str(probe)])
+    with_home = json.loads(capsys.readouterr().out)
+    assert with_home["hosts"]["claude-code"]["state"] == "ok", with_home["hosts"]["claude-code"]
+    assert with_home["hosts"]["grok-bot"]["state"] == "ok", with_home["hosts"]["grok-bot"]
+    assert str(probe) in with_home["hosts"]["claude-code"]["path"]
+    assert code in (0, 1)  # may still flag missing agent CLIs
+
+
+def test_doctor_home_wins_over_host_env_variables(tmp_path, monkeypatch):
+    """Same #410 rule as install: explicit --home ignores CODEX_HOME etc."""
+    real = tmp_path / "real"
+    probe = tmp_path / "probe"
+    elsewhere = tmp_path / "elsewhere"
+    for d in (real, probe, elsewhere):
+        d.mkdir()
+    monkeypatch.setenv("HOME", str(real))
+    monkeypatch.setenv("CODEX_HOME", str(elsewhere / "codex"))
+    monkeypatch.setenv("DSH_HOME", str(elsewhere / "dsh"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(elsewhere / "xdg"))
+    monkeypatch.setattr(cli, "mcp_unavailable", lambda: None)
+    install("codex", home=str(probe))
+    install("dsh", home=str(probe))
+    install("opencode", home=str(probe))
+    rep = cli.doctor_report(home=str(probe))
+    for host in ("codex", "dsh", "opencode"):
+        info = rep["hosts"][host]
+        assert info["state"] == "ok", info
+        assert str(probe) in info["path"], info
+        assert str(elsewhere) not in info["path"], info
+    # Without home, the exported directories apply — and they are empty.
+    bare = cli.doctor_report()
+    for host in ("codex", "dsh", "opencode"):
+        assert bare["hosts"][host]["state"] == "missing"
+
+
+def test_doctor_empty_home_is_refused(capsys):
+    code = cli.main(["doctor", "--home", ""])
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "home=" in err and "empty" in err
+
+
+def test_mcp_doctor_forwards_home(tmp_path, monkeypatch):
+    from agentdescent.mcp import Tools
+    real = tmp_path / "real"
+    probe = tmp_path / "probe"
+    real.mkdir(); probe.mkdir()
+    for var in ("DSH_HOME", "CODEX_HOME", "XDG_CONFIG_HOME"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("HOME", str(real))
+    monkeypatch.setenv("AGENTDESCENT_HOME", str(tmp_path / "ad-home"))
+    install("claude-code", home=str(probe))
+    t = Tools(str(tmp_path / "runs"))
+    assert t.doctor()["hosts"]["claude-code"]["state"] == "missing"
+    assert t.doctor(home=str(probe))["hosts"]["claude-code"]["state"] == "ok"
 
 
 # -- review of #383 -----------------------------------------------------------

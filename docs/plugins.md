@@ -53,7 +53,9 @@ commands](plugin-quickstart.md) walks the whole path.
 | `grok-bot` | scaffold under `~/.agentdescent/plugins/grok-bot/` (`SKILL.md`, `HOST.md`, `mcp.example.json`) — **not** a one-click wire-up: Grok Bot has no public plugin API for local skill+stdio MCP; `HOST.md` names `algorithms list`/`show` and MCP discovery | read `HOST.md`; ask Grok Bot to save the skill as a user skill; drive runs with the CLI, or run `agentdescent mcp --transport streamable-http` behind an HTTPS tunnel and add the URL as a custom MCP server. `doctor` reports `mcp n/a` when the scaffold is current |
 
 `agentdescent doctor` also reads what `install` left behind, without writing
-anything: one `host <name>: ok | stale | partial | missing` line per host, and
+anything (`--home <dir>` uses the same probe directory as `install --home` /
+`uninstall --home`, and likewise wins over `CODEX_HOME` / `DSH_HOME` /
+`XDG_CONFIG_HOME`): one `host <name>: ok | stale | partial | missing` line per host, and
 for any installed host the line names `skill` and `mcp` too (for example
 `host opencode: partial (skill ok, mcp missing; cli …)`), so a stale skill after
 `pip install -U` or a missing MCP entry is visible without reading the problems
@@ -202,7 +204,7 @@ because a patch file otherwise **overrides** rows by id.
 It is idempotent (`--dry-run` shows what it would do) and honours `DSH_HOME`,
 `CODEX_HOME` and `XDG_CONFIG_HOME`, unless you pass `--home <dir>`: an explicit
 `--home` is the host's whole world, so those variables are ignored and nothing
-outside `<dir>` is read or written (also for `uninstall`). Every manifest here was verified by writing
+outside `<dir>` is read or written (also for `uninstall` and `doctor`). Every manifest here was verified by writing
 it and having the host read it back (dsh 0.1.2-rc.1, Claude Code 2.1.261,
 codex-cli 0.153.4, opencode 1.18.29).
 

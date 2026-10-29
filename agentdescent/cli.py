@@ -361,8 +361,19 @@ def mcp_unavailable() -> Optional[str]:
     return None
 
 
-def doctor_report() -> Dict[str, Any]:
-    """What this machine can run: agent CLIs, provider keys, optional pieces."""
+def doctor_report(*, home: Optional[str] = None) -> Dict[str, Any]:
+    """What this machine can run: agent CLIs, provider keys, optional pieces.
+
+    ``home`` is the same probe directory ``install --home`` / ``uninstall --home``
+    take (#605): host skill/MCP status is read under that tree, and an explicit
+    home wins over ``CODEX_HOME`` / ``DSH_HOME`` / ``XDG_CONFIG_HOME``. Omit it
+    to keep reading the real home (and those variables).
+    """
+    # Refuse an empty home before the per-host try/except can turn it into
+    # ``state: unknown`` (#412 / #605). Same helper install/uninstall use.
+    if home is not None:
+        from .integrations import _resolve_home
+        _resolve_home(home)
     clis = {name: shutil.which(name)
             for name in ("claude", "codex", "dsh", "opencode", "git", "node", "pnpm")}
     from .integrations import provider_key_names
@@ -411,7 +422,7 @@ def doctor_report() -> Dict[str, Any]:
     why = mcp_unavailable()
     if why:
         problems.append(why)
-    hosts, hints = _host_integrations(clis)
+    hosts, hints = _host_integrations(clis, home=home)
     other = [n for n in present_keys if n not in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY")]
     if other and len(other) == len(present_keys):
         # `openai_compatible` reads OPENAI_API_KEY and talks to api.openai.com unless
@@ -454,21 +465,23 @@ def doctor_report() -> Dict[str, Any]:
     }
 
 
-def _host_integrations(clis: Dict[str, Any]):
+def _host_integrations(clis: Dict[str, Any], *, home: Optional[str] = None):
     """Per-host install state for :func:`doctor_report`, plus the hints.
 
     A host whose CLI is on ``PATH`` but has no integration gets a *hint*, not a
     problem: ``pip install`` does not wire anything, and nobody wants every
     host on the machine touched, so the exit code stays about what is broken.
     A stale or half-written integration is a problem, because it is installed
-    and teaching the host a procedure the package no longer has."""
+    and teaching the host a procedure the package no longer has.
+    ``home`` is forwarded to :func:`host_status` so ``doctor --home`` matches
+    ``install --home`` (#605)."""
     from .integrations import HOST_CLI, host_status
 
     hosts: Dict[str, Dict[str, Any]] = {}
     hints: List[str] = []
     for name, binary in HOST_CLI.items():
         try:
-            info: Dict[str, Any] = dict(host_status(name))
+            info: Dict[str, Any] = dict(host_status(name, home=home))
         except Exception:  # noqa: BLE001 - reading a config must never fail doctor
             info = {"state": "unknown", "skill": "unknown", "mcp": "unknown", "path": ""}
         # ``None`` binary: scaffold-only hosts (Grok Bot) have no desktop CLI.
@@ -2004,7 +2017,11 @@ def cmd_resume(a: argparse.Namespace) -> int:
 
 
 def cmd_doctor(a: argparse.Namespace) -> int:
-    rep = doctor_report()
+    home = getattr(a, "home", None)
+    try:
+        rep = doctor_report(home=home) if home is not None else doctor_report()
+    except ValueError as e:        # e.g. an empty --home (#412 / #605)
+        raise SpecError(f"doctor: {e}") from None
     if a.json:
         _out(rep, as_json=True)
     else:
@@ -2865,6 +2882,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_audit)
 
     s = sub.add_parser("doctor", help="which agents, keys and optional pieces are available")
+    s.add_argument("--home", help="the host's home directory (default: the real one)")
     s.set_defaults(fn=cmd_doctor)
 
     s = sub.add_parser("install", help="wire the skill and MCP server into a host")
