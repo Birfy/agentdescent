@@ -117,3 +117,13 @@ def test_init_then_plan_agrees_on_the_cli_gate(tmp_path, monkeypatch, capsys):
 
     assert cli._missing_cli_messages(load_spec(str(tmp_path / "spec.json"))) == []
     assert os.path.exists(tmp_path / "spec.json") and spec["agent"]["ref"] == "opencode"
+
+
+def test_init_skill_dir_accepts_evoskill(tmp_path, monkeypatch, capsys):
+    # #604: the evoskill card promised `kind: skill_dir` but only listed
+    # agent_dir, so `init --kind skill_dir --algorithm evoskill` exited 2.
+    _path_has(monkeypatch, "opencode")
+    spec, _ = _run_init(tmp_path, monkeypatch, capsys,
+                        "--kind", "skill_dir", "--algorithm", "evoskill")
+    assert spec["kind"] == "skill_dir"
+    assert spec["algorithm"] == "evoskill" or spec["algorithm"]["name"] == "evoskill"

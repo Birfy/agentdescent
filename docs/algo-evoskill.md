@@ -11,8 +11,9 @@ description: A runnable reproduction of EvoSkill automated skill discovery: lear
 
 > **Spec form:** the mechanism ships in
 > `agentdescent/algorithms/evoskill.py`; a spec can name
-> `"algorithm": "evoskill"` (`kind: agent_dir`; `max_frontier`, `batch_size`,
-> `eval_concurrency`) over its own skill directory. Registry fidelity
+> `"algorithm": "evoskill"` (`kind: skill_dir`, `agent_dir` or `plugin`; `max_frontier`, `batch_size`,
+> `eval_concurrency`) over its own skill directory: the target directory is
+> the initial skill library. Registry fidelity
 > is `mechanism_microport`; the OfficeQA reproduction below is the
 > `benchmark_faithful` one.
 

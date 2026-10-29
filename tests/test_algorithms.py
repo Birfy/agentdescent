@@ -46,7 +46,8 @@ def test_builtin_algorithms_are_registered_with_declared_fidelity():
 
 def test_listing_filters_by_kind():
     assert [a.name for a in algorithms.listing("text")] == ["ace", "archive_selection", "dgm", "gepa", "rrsi", "skillopt"]
-    assert [a.name for a in algorithms.listing("skill_dir")] == ["archive_selection"]
+    assert [a.name for a in algorithms.listing("skill_dir")] == ["archive_selection", "evoskill"]
+    assert [a.name for a in algorithms.listing("plugin")] == ["archive_selection", "evoskill"]
     assert [a.name for a in algorithms.listing("agent_dir")] == ["archive_selection", "evoskill"]
     assert algorithms.listing("policy_slot") == []
 
@@ -178,7 +179,7 @@ def test_an_algorithm_that_does_not_apply_to_the_kind_names_the_ones_that_do(tmp
                  algorithm="rrsi")
     with pytest.raises(SpecError,
                        match=r"'rrsi' applies to kind \['text'\], not 'skill_dir'; "
-                             r"for kind 'skill_dir': \['archive_selection'\]"):
+                             r"for kind 'skill_dir': \['archive_selection', 'evoskill'\]"):
         compose(spec)
 
 
@@ -327,7 +328,7 @@ def test_cli_list_text_and_json(capsys):
 
 def test_cli_list_filters_by_kind_and_rejects_an_unknown_one(capsys):
     assert cli.main(["algorithms", "list", "--kind", "plugin", "--json"]) == 0
-    assert [r["name"] for r in json.loads(capsys.readouterr().out)] == ["archive_selection"]
+    assert [r["name"] for r in json.loads(capsys.readouterr().out)] == ["archive_selection", "evoskill"]
     assert cli.main(["algorithms", "list", "--kind", "bogus"]) == 2
     assert "--kind must be one of" in capsys.readouterr().err
 
@@ -433,7 +434,7 @@ def test_mcp_lists_and_describes_the_registry():
     listed = t.list_algorithms()
     assert [a["name"] for a in listed["algorithms"]] == algorithms.names()
     assert [a["name"] for a in t.list_algorithms("skill_dir")["algorithms"]] == \
-        ["archive_selection"]
+        ["archive_selection", "evoskill"]
     assert [a["name"] for a in t.list_algorithms("agent_dir")["algorithms"]] == \
         ["archive_selection", "evoskill"]
     assert "unknown kind" in t.list_algorithms("nope")["error"]

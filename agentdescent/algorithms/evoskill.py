@@ -6,8 +6,8 @@ frontier keeps the best skill libraries (parent = the best member, committed to
 dev so the next round extends it). The example keeps its OfficeQA domain, prompts
 and CLI and imports this implementation.
 
-Use it from a spec as ``"algorithm": "evoskill"`` (``kind: skill_dir`` or
-``agent_dir``). The spec's target directory is the initial skill library and its
+Use it from a spec as ``"algorithm": "evoskill"`` (``kind: skill_dir``,
+``agent_dir`` or ``plugin``). The spec's target directory is the initial skill library and its
 ``reflect`` model drives the Proposer/Generator.
 """
 
@@ -394,7 +394,7 @@ register(Algorithm(
     summary="EvoSkill's two-role skill induction: Proposer analyses a failure "
             "batch, Generator writes one SKILL.md, and a bounded top-K frontier "
             "keeps the best skill libraries.",
-    kinds=("agent_dir",),
+    kinds=("skill_dir", "agent_dir", "plugin"),
     fidelity="mechanism_microport",
     params=(
         Param("max_frontier", "int", 5, "frontier size", minimum=1),
