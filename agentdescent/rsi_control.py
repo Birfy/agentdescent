@@ -271,6 +271,45 @@ class RSIController:
         self._stopped = None
         return self
 
+    # -- replay --------------------------------------------------------------
+
+    def restore(self, decision: ControlDecision, *,
+                stopped_reason: str = "", stop_reason: str = "") -> None:
+        """Restore state from a recorded decision without calling the gates.
+
+        Durable loops persist the decision that was actually taken. Replaying
+        it must not re-run ``gate`` / ``risk_gate``: those can be LLM judges,
+        verifier ensembles, human queues or anything else that is not
+        deterministic, byte-for-byte, across processes. ``restore`` applies the
+        recorded action, gain, cost and stop flag to the same in-memory state
+        ``observe`` would have produced.
+        """
+        if not isinstance(decision, ControlDecision):
+            raise TypeError(
+                f"restore() expects ControlDecision, got {type(decision).__name__}")
+        if self._stopped is not None:
+            raise ValueError("controller is already stopped")
+        if decision.index != len(self._decisions):
+            raise ValueError(
+                f"decision index {decision.index} does not follow "
+                f"{len(self._decisions) - 1}")
+        if decision.reward is None:
+            raise ValueError("a recorded decision must carry its reward")
+        if decision.action == ControlAction.ACCEPT:
+            self._accepted_rewards.append(float(decision.reward))
+            self._best = float(decision.reward)
+            self._accepted += 1
+            self._stagnant = 0
+        elif decision.action == ControlAction.REJECT:
+            self._stagnant += 1
+        elif decision.action == ControlAction.ROLLBACK:
+            self._rollback_best()
+        self._total_cost += float(decision.cost)
+        self._decisions.append(decision)
+        if decision.stop:
+            self._stopped = (stopped_reason or "stop",
+                             stop_reason or decision.reason)
+
     # -- one observation -----------------------------------------------------
 
     def _state(self, result: SessionResult, gain: Optional[float]) -> Dict[str, Any]:
