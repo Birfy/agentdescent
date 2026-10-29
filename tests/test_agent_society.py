@@ -68,6 +68,30 @@ def test_is_literal_emits_no_nameconstant_deprecation():
     assert not any("NameConstant" in str(w.message) for w in caught)
 
 
+def test_is_literal_accepts_unary_signed_numbers():
+    # #593: -1 / +2 are UnaryOp on 3.9+, and literal_eval accepts them; the
+    # gate used to call them "computed code".
+    import ast
+
+    from agentdescent.agent_society import _gate_society, _is_literal
+
+    assert _is_literal(ast.parse("-1", mode="eval").body)
+    assert _is_literal(ast.parse("+2", mode="eval").body)
+    assert _is_literal(ast.parse("-0.5", mode="eval").body)
+    assert _is_literal(ast.parse("-1j", mode="eval").body)
+    assert _is_literal(ast.parse("{'budget': -1, 'xs': [-2, +3]}", mode="eval").body)
+    # Still refuse what literal_eval refuses.
+    assert not _is_literal(ast.parse("~1", mode="eval").body)
+    assert not _is_literal(ast.parse("--1", mode="eval").body)
+    assert not _is_literal(ast.parse("-True", mode="eval").body)
+    signed = (
+        "def society():\n"
+        "    return {'nodes': {'n': {'budget': -1, 'code': 'lambda x: x'}}, "
+        "'edges': [], 'root': 'n'}\n"
+    )
+    _gate_society(signed)  # must not raise "not computed code"
+
+
 def test_the_gate_refuses_unsafe_societies():
     spec = society_spec()
     with pytest.raises(ValueError):
