@@ -122,3 +122,20 @@ def test_unknown_status_is_refused_and_rejected_children_are_not_parents():
     fabric.record(report, tenant="t", workspace="w")
     assert fabric.lineage.parents("bad") == ("a0",)
     assert fabric.lineage.parents("a2") == ("a0",)
+
+
+@pytest.mark.parametrize("status,span_status", [
+    ("completed", "ok"), ("failed", "error"), ("cancelled", "cancelled"),
+    ("running", "unset"), ("rolled_back", "unset"),
+])
+def test_span_status_follows_run_status(status, span_status):
+    telemetry = RSITelemetry()
+    fabric = OpsFabric(OperationsConsole(), telemetry=telemetry)
+    report = LoopReport(
+        run_id="r", status=status, generations=(_gen(0, "a0"),),
+        best_reward=0.5, total_cost=1.0, accepted=1, stopped_reason="",
+        reason="", detail="")
+    record = fabric.record(report, tenant="t", workspace="w")
+    span = next(s for s in telemetry.spans if s.span_id == record.span_id)
+    assert span.status == span_status
+    assert telemetry.summary().errors == (1 if status == "failed" else 0)
