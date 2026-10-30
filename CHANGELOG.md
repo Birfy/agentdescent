@@ -393,6 +393,39 @@ All notable changes to AgentDescent are documented here. The format follows
   test asserting each layer's decision. It is the end-to-end demonstration of the
   five integration features rather than another primitive.
 
+- `TrustEvidence` + `build_trust_evidence`: one paired evaluation becomes the
+  eval/bootstrap, canary, conformal, sequential, Goodhart, metamorphic, verifier
+  and calibration reports in one bundle, ready for `to_promotion_request()`.
+
+  Changed
+  `promotion` now accepts `goodhart`, `metamorphic`, `verifier` and `calibration`
+  evidence and has matching `require_*` rules: gaming/failed relations/failed
+  panel/overconfidence reject, suspicious/incomplete evidence defers, and a green
+  bundle still promotes. The evidence hash covers the new reports. The builder
+  leaves `risk`/`contaminated` as `None` when not supplied (so the fail-closed
+  gates defer), and computes eval means/CI/per-task over paired keys only.
+
+- `TaskPipeline` + `TaskPipelineConfig` / `TaskPipelineReport`: production
+  `TraceSample`s are mined by `DataFlywheel`, accepted failures become seeds, and
+  `TaskFoundry` validates, deduplicates, checks contamination and splits them into
+  train and holdout. The pipeline respects the foundry's own verdict (`insufficient`,
+  `filtered`, `no-train`) instead of turning it into `ready`; only an empty seed
+  set maps to `empty`, and `no-holdout` is explicit.
+
+- `SearchFabric`: a process reward model (and optional verifier ensemble) as the
+  value function for `MCTSPlanner`, plus PRM ranking/selection for candidates
+  outside the planner. `MCTSPlanner` now returns the chosen child state in
+  `PlanResult.state`, so the fabric reports that state without stepping a
+  possibly side-effecting simulator twice. An incomplete verifier panel is
+  exposed as `verifier_complete=False` and can never report a pass.
+
+- `OpsFabric`: one finished `LoopReport` is written into the operations console,
+  the lineage graph, the telemetry trace and an optional QD snapshot. Generations
+  become lineage nodes (chained from the last *accepted* artifact) and telemetry
+  events. Re-recording the same `(run_id, generation count, status)` is a no-op;
+  a later terminal report updates the run and appends new generations. Unknown
+  statuses are refused, and a caller-supplied empty `LineageGraph` is preserved.
+
 ### Changed
 
 - `agentdescent doctor` prints `skill` and `mcp` on each installed host line
