@@ -11,10 +11,10 @@ The design record — why it is shaped this way and what was considered — is
 
 ## Install
 
-Install **0.7.0** from PyPI:
+Install **0.8.0** from PyPI:
 
 ```bash
-pip install "agentdescent[mcp]>=0.7.0"                 # the MCP server needs this extra (and Python >= 3.10)
+pip install "agentdescent[mcp]>=0.8.0"                 # the MCP server needs this extra (and Python >= 3.10)
 agentdescent demo                      # a complete evolution, offline, no key
 agentdescent doctor                    # which agent CLIs, keys and optional pieces are here
 agentdescent install dsh               # or: claude-code, codex, opencode
