@@ -156,6 +156,10 @@ SECTIONS: List[Tuple[str, str, str, str]] = [
      "Which strategy deserves this task's compute: direct, PRM, search or "
      "ensemble.",
      "compute-policy.md"),
+    ("agentdescent.trust_evidence", "Trusted evidence",
+     "Build the evaluation, canary, statistical, Goodhart, metamorphic, "
+     "verifier and calibration reports from one paired run.",
+     "trust-evidence.md"),
     ("agentdescent.capability_foundry", "Capability foundry",
      "Admit a synthesized tool only after validation, review, safety, proof "
      "and a holdout gain.",
