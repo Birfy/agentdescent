@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-580 public names across 113 modules.
+582 public names across 114 modules.
 
 ---
 
@@ -3400,6 +3400,10 @@ PromotionRequest(
     admission: Optional[AdmissionResult] = None,
     risk: Optional[float] = None,
     approved: Optional[bool] = None,
+    goodhart: Optional[GoodhartReport] = None,
+    metamorphic: Optional[MetamorphicReport] = None,
+    verifier: Optional[EnsembleReport] = None,
+    calibration: Optional[CalibrationReport] = None,
     metadata: Mapping[str, Any] = <factory>
 ) -> None
 ```
@@ -3419,6 +3423,10 @@ PromotionRules(
     require_proof: bool = False,
     require_admission: bool = False,
     require_approval: bool = False,
+    require_goodhart: bool = False,
+    require_metamorphic: bool = False,
+    require_verifier: bool = False,
+    require_calibration: bool = False,
     allow_contaminated: bool = False,
     min_effect: float = 0.0,
     min_tasks: int = 2,
@@ -3538,6 +3546,68 @@ OptionReport(
     posterior_mean: float,
     detail: str = ''
 ) -> None
+```
+
+---
+
+## Trusted evidence
+
+Build the evaluation, canary, statistical, Goodhart, metamorphic, verifier and calibration reports from one paired run. &nbsp;·&nbsp; `agentdescent.trust_evidence` &nbsp;·&nbsp; [guide](trust-evidence.md)
+
+### `TrustEvidence(...)`
+
+The reports one paired evaluation produced, ready for `promote()`.
+
+```python
+TrustEvidence(
+    eval_result: EvalResult,
+    canary: CanaryResult,
+    conformal: ConformalReport,
+    sequential: SequentialReport,
+    goodhart: Optional[GoodhartReport] = None,
+    metamorphic: Optional[MetamorphicReport] = None,
+    verifier: Optional[EnsembleReport] = None,
+    calibration: Optional[CalibrationReport] = None,
+    contaminated: Optional[bool] = None,
+    risk: Optional[float] = None,
+    approved: Optional[bool] = None,
+    metadata: Mapping[str, Any] = <factory>
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `to_promotion_request(...)` | A `PromotionRequest` carrying every report this bundle has. |
+
+### `build_trust_evidence(...)`
+
+Compute every report from paired task scores and optional side data.
+
+```python
+build_trust_evidence(
+    before: Mapping[str, float],
+    after: Mapping[str, float],
+    *,
+    eval_id: str = 'paired',
+    dataset_id: str = 'paired',
+    version: int = 1,
+    verifier: Optional[VerifierEnsemble] = None,
+    candidate: Any = None,
+    calibration: Optional[Tuple[Iterable[float], Iterable[float]]] = None,
+    sequential_deltas: Optional[Iterable[float]] = None,
+    sequential_max_n: Optional[int] = None,
+    proxy_gains: Optional[Sequence[float]] = None,
+    oracle_gains: Optional[Sequence[float]] = None,
+    metamorphic: Optional[MetamorphicSuite] = None,
+    metamorphic_run: Optional[Callable[[Any], Any]] = None,
+    metamorphic_tasks: Iterable[Any] = (),
+    contaminated: Optional[bool] = None,
+    risk: Optional[float] = None,
+    approved: Optional[bool] = None,
+    alpha: float = 0.05,
+    seed: int = 0,
+    min_effect: float = 0.0
+) -> TrustEvidence
 ```
 
 ---

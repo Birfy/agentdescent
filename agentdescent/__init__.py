@@ -376,6 +376,7 @@ from .promotion import (
     PromotionDecision,
     promote,
 )
+from .trust_evidence import TrustEvidence, build_trust_evidence
 from .compute_policy import (
     ComputeAction,
     ComputeOption,
@@ -889,6 +890,8 @@ __all__ = [
     "PromotionRequest",
     "PromotionDecision",
     "promote",
+    "TrustEvidence",
+    "build_trust_evidence",
     "ComputeAction",
     "ComputeOption",
     "ComputeContext",

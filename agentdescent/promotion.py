@@ -42,10 +42,14 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 
 from .conformal import ConformalReport
 from .evalops import EvalResult
+from .goodhart import GoodhartReport
+from .metamorphic import MetamorphicReport
 from .policy_release import AdmissionResult
 from .proofs import ProofCertificate, ProofVerification
 from .safety_controller import CanaryResult
+from .self_model import CalibrationReport
 from .sequential import SequentialReport
+from .verifier_ensemble import EnsembleReport
 
 __all__ = [
     "PromotionAction",
@@ -105,6 +109,10 @@ class PromotionRules:
     require_proof: bool = False
     require_admission: bool = False
     require_approval: bool = False
+    require_goodhart: bool = False
+    require_metamorphic: bool = False
+    require_verifier: bool = False
+    require_calibration: bool = False
     allow_contaminated: bool = False
     min_effect: float = 0.0
     min_tasks: int = 2
@@ -114,7 +122,9 @@ class PromotionRules:
         for name in ("require_eval", "require_contamination", "require_risk",
                      "require_conformal", "require_sequential",
                      "require_canary", "require_proof", "require_admission",
-                     "require_approval", "allow_contaminated"):
+                     "require_approval", "require_goodhart",
+                     "require_metamorphic", "require_verifier",
+                     "require_calibration", "allow_contaminated"):
             if not isinstance(getattr(self, name), bool):
                 raise TypeError(f"{name} must be a bool")
         if _finite(self.min_effect, "min_effect") < 0:
@@ -156,6 +166,10 @@ class PromotionRequest:
     admission: Optional[AdmissionResult] = None
     risk: Optional[float] = None
     approved: Optional[bool] = None
+    goodhart: Optional[GoodhartReport] = None
+    metamorphic: Optional[MetamorphicReport] = None
+    verifier: Optional[EnsembleReport] = None
+    calibration: Optional[CalibrationReport] = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -233,6 +247,14 @@ def _evidence(request: PromotionRequest) -> Dict[str, Any]:
         }
     if request.admission is not None:
         evidence["admission"] = request.admission.to_dict()
+    if request.goodhart is not None:
+        evidence["goodhart"] = asdict(request.goodhart)
+    if request.metamorphic is not None:
+        evidence["metamorphic"] = asdict(request.metamorphic)
+    if request.verifier is not None:
+        evidence["verifier"] = request.verifier.to_dict()
+    if request.calibration is not None:
+        evidence["calibration"] = asdict(request.calibration)
     return _safe(evidence)
 
 
@@ -350,6 +372,51 @@ def promote(request: PromotionRequest,
                 admission.manifest_hash != request.artifact_hash):
             hard_fail = True
             reasons.append("admission manifest hash does not match the request")
+
+    report = request.goodhart
+    if report is None:
+        if policy.require_goodhart:
+            missing.append("goodhart")
+    elif report.verdict == "gaming":
+        hard_fail = True
+        reasons.append(f"goodhart gaming: {report.detail}")
+    elif report.verdict in ("suspicious", "insufficient"):
+        deferred.append(f"goodhart {report.verdict}: {report.detail}")
+
+    report = request.metamorphic
+    if report is None:
+        if policy.require_metamorphic:
+            missing.append("metamorphic")
+    elif report.verdict == "fail":
+        hard_fail = True
+        reasons.append(f"metamorphic relations failed: {report.detail}")
+    elif report.verdict == "insufficient":
+        deferred.append("metamorphic evidence is insufficient")
+
+    report = request.verifier
+    if report is None:
+        if policy.require_verifier:
+            missing.append("verifier")
+    elif report.errors:
+        hard_fail = True
+        reasons.append(f"verifier ensemble had {report.errors} error(s)")
+    elif not report.complete:
+        deferred.append("verifier ensemble is incomplete")
+    elif not report.passed:
+        hard_fail = True
+        reasons.append(
+            f"verifier ensemble rejected the candidate "
+            f"(score {report.score:.3g})")
+
+    report = request.calibration
+    if report is None:
+        if policy.require_calibration:
+            missing.append("calibration")
+    elif report.anti_correlated or report.verdict == "overconfident":
+        hard_fail = True
+        reasons.append(f"calibration {report.verdict}: {report.detail}")
+    elif report.verdict in ("insufficient", "miscalibrated"):
+        deferred.append(f"calibration {report.verdict}: {report.detail}")
 
     if policy.require_risk and request.risk is None:
         missing.append("risk")
