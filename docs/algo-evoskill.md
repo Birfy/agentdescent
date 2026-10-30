@@ -11,10 +11,24 @@ description: A runnable reproduction of EvoSkill automated skill discovery: lear
 
 > **Spec form:** the mechanism ships in
 > `agentdescent/algorithms/evoskill.py`; a spec can name
-> `"algorithm": "evoskill"` (`kind: agent_dir`; `max_frontier`, `batch_size`,
-> `eval_concurrency`) over its own skill directory. Registry fidelity
+> `"algorithm": "evoskill"` (`kind: skill_dir`, `agent_dir` or `plugin`; `max_frontier`, `batch_size`,
+> `eval_concurrency`) over its own skill directory: the target directory is
+> the initial skill library. Registry fidelity
 > is `mechanism_microport`; the OfficeQA reproduction below is the
 > `benchmark_faithful` one.
+>
+> The strategy is built over the `FileTree` that `compose` resolves for the
+> kind, so the kind's rails still hold: a plugin host's frozen paths
+> (`PLUGIN_FROZEN`, e.g. `hooks/**` for `claude_code`) stay unwritable, the
+> plugin's `.ts`/`.js` code stays in the evolved state, and `skill_dir`'s
+> SKILL.md gate (`SkillTreeValidator`) still rejects a candidate that breaks the
+> skill. Where an induced skill lands depends on the kind:
+> `agent_dir` / `plugin` write `skills/<slug>/SKILL.md` (a skill library, the
+> layout a plugin host discovers); `skill_dir` is *one* skill, so a nested
+> `SKILL.md` would not load -- the induced rule is written to
+> `references/<slug>.md` and linked from a managed
+> `<!-- evoskill:index -->` block in the root `SKILL.md` body (frontmatter
+> untouched). Freezing `SKILL.md` therefore stops induction on a `skill_dir`.
 
 | | |
 |---|---|

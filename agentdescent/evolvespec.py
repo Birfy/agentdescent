@@ -1083,6 +1083,9 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
     kwargs: Dict[str, Any] = {"artifact_id": aid}
     tree: Optional[Dict[str, str]] = None
 
+    if spec.kind == "text" and ov is not None and ov.strategy_from is not None:
+        raise SpecError(f"algorithm {chosen[0].name!r} derives its strategy from a "
+                        "directory tree and cannot run on kind='text'")
     if spec.kind == "text":
         # Mirror of the skill_dir / agent_dir WorkspaceAgent *requirement*:
         # kind=text is a one-shot Completion per case. A CLI coding agent is also
@@ -1173,6 +1176,10 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
                             max_files_per_diff=spec.max_files_per_diff,
                             max_file_bytes=tspec.max_file_bytes,
                             validators=validators)
+        if ov is not None and ov.strategy_from is not None:
+            # The algorithm's strategy class, built over *this* FileTree so the
+            # kind's frozen paths, include list and validators survive (#615).
+            strategy = ov.strategy_from(strategy)
         overlay = strategy.frozen_files(tree)
         runner_common = dict(name=aid, overlay=overlay, workspace_root=workspace_root,
                              sandbox_pool=sandbox_pool)

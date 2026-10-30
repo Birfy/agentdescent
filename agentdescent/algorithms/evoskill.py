@@ -6,14 +6,26 @@ frontier keeps the best skill libraries (parent = the best member, committed to
 dev so the next round extends it). The example keeps its OfficeQA domain, prompts
 and CLI and imports this implementation.
 
-Use it from a spec as ``"algorithm": "evoskill"`` (``kind: skill_dir`` or
-``agent_dir``). The spec's target directory is the initial skill library and its
-``reflect`` model drives the Proposer/Generator.
+Use it from a spec as ``"algorithm": "evoskill"`` (``kind: skill_dir``,
+``agent_dir`` or ``plugin``). The spec's target directory is the initial skill
+library and its ``reflect`` model drives the Proposer/Generator. The strategy is
+derived from the ``FileTree`` that ``compose`` builds for the kind, so the kind's
+frozen paths (a plugin host's ``PLUGIN_FROZEN``), loader includes (a plugin's
+``.ts``/``.js``) and validators (``skill_dir``'s SKILL.md gate) all still apply.
+
+Where an induced skill lands depends on the kind (#604):
+
+* ``agent_dir`` / ``plugin`` -- ``skills/<slug>/SKILL.md``, a library of skills
+  (the layout a plugin host discovers skills in).
+* ``skill_dir`` -- the target *is* one Agent Skill, so a nested ``SKILL.md``
+  would not be loaded by a host. The induced rule is written as a reference file
+  ``references/<slug>.md`` and linked from a managed index block in the root
+  ``SKILL.md`` body (frontmatter untouched), so the agent reading the skill is
+  pointed at it -- the Agent Skills progressive-disclosure layout.
 """
 
 from __future__ import annotations
 
-import os
 import re
 import threading
 from dataclasses import dataclass, field
@@ -22,17 +34,19 @@ from typing import Dict, List, Optional, Tuple
 from ..agents import Completion
 from ..aggregator import AggregatorProtocol, MergeReport
 from ..evolvable import Diff, EvidenceCard
-from ..filetree import load_tree, parse_tree
+from ..filetree import parse_tree
 from ..ledger import CASConflict, Ledger
 from ..selection import Candidate, SelectionContext
+from ..skillspec import SKILL_FILE
 from ..treestrategy import FileTree
 from . import Algorithm, BuildContext, Overrides, Param, register
 
 #: Only genuine failures induce a skill.
 PASS_THRESHOLD = 0.8
 
-__all__ = ["EvoSkillContext", "Frontier", "FrontierBest", "SkillLibraryTree",
-           "TopKFrontierAggregator", "frontier_aggregator_factory", "make_propose",
+__all__ = ["EvoSkillContext", "Frontier", "FrontierBest", "LIBRARY", "SINGLE_SKILL",
+           "SkillLibraryTree", "TopKFrontierAggregator", "frontier_aggregator_factory",
+           "make_propose",
            "propose_and_generate", "render_skills", "skill_name", "skill_path",
            "skills_from_rendered", "skills_of"]
 
@@ -154,15 +168,46 @@ class EvoSkillContext:
 #: by *path* it is a real directory, which is what lets a tool-using agent read
 #: one skill at a time instead of carrying the whole library in every prompt.
 SKILL_ROOT = "skills"
+#: Where an induced rule lives when the target is ONE skill (``kind: skill_dir``).
+REFERENCE_ROOT = "references"
+#: The managed block in a single skill's root ``SKILL.md`` that links them.
+INDEX_BEGIN = "<!-- evoskill:index -->"
+INDEX_END = "<!-- /evoskill:index -->"
+#: ``SkillLibraryTree.layout`` values.
+LIBRARY = "library"
+SINGLE_SKILL = "single_skill"
 
 
-def skill_path(name: str) -> str:
+def skill_path(name: str, layout: str = LIBRARY) -> str:
+    if layout == SINGLE_SKILL:
+        return f"{REFERENCE_ROOT}/{_slug(name)}.md"
     return f"{SKILL_ROOT}/{_slug(name)}/SKILL.md"
 
 
 def skill_name(path: str) -> str:
     parts = path.split("/")
-    return parts[1] if len(parts) >= 3 and parts[0] == SKILL_ROOT else path
+    if len(parts) >= 3 and parts[0] == SKILL_ROOT:
+        return parts[1]
+    if len(parts) == 2 and parts[0] == REFERENCE_ROOT and parts[1].endswith(".md"):
+        return parts[1][:-3]
+    return path
+
+
+def _with_index(skill_md: str, state: Dict[str, str], new_path: str) -> str:
+    """``skill_md`` with its managed index listing every ``references/*.md``
+    (``state`` plus ``new_path``). Only the block between the markers is
+    rewritten -- the frontmatter and the author's body are left as they are."""
+    paths = sorted({p for p in state if skill_name(p) != p
+                    and p.startswith(REFERENCE_ROOT + "/")} | {new_path})
+    lines = [INDEX_BEGIN, "## Learned rules", "",
+             "Read the matching file before answering when it applies:", ""]
+    lines += [f"- [{skill_name(p)}]({p})" for p in paths]
+    lines.append(INDEX_END)
+    block = "\n".join(lines)
+    start, end = skill_md.find(INDEX_BEGIN), skill_md.find(INDEX_END)
+    if start != -1 and end > start:
+        return skill_md[:start] + block + skill_md[end + len(INDEX_END):]
+    return skill_md.rstrip("\n") + "\n\n" + block + "\n"
 
 
 def skills_of(state: Dict[str, str]) -> Dict[str, str]:
@@ -195,23 +240,56 @@ class SkillLibraryTree(FileTree):
 
     def __init__(self, initial_files: Optional[Dict[str, str]] = None,
                  editable: Tuple[str, ...] = ("**",),
-                 frozen: Tuple[str, ...] = ()) -> None:
+                 frozen: Tuple[str, ...] = (), *,
+                 validators: Tuple[object, ...] = (),
+                 max_file_bytes: Optional[int] = None,
+                 layout: str = LIBRARY) -> None:
+        if layout not in (LIBRARY, SINGLE_SKILL):
+            raise ValueError(f"layout must be {LIBRARY!r} or {SINGLE_SKILL!r}, "
+                             f"got {layout!r}")
+        extra = {} if max_file_bytes is None else {"max_file_bytes": int(max_file_bytes)}
+        # A single skill writes the reference file AND the root SKILL.md index.
         super().__init__(initial_files=dict(initial_files or {}),
                          editable=tuple(editable), frozen=tuple(frozen),
-                         max_files_per_diff=1)
+                         max_files_per_diff=2 if layout == SINGLE_SKILL else 1,
+                         validators=tuple(validators), **extra)
+        self.layout = layout
+
+    @classmethod
+    def from_base(cls, base: FileTree, *, layout: str = LIBRARY) -> "SkillLibraryTree":
+        """Adopt the ``FileTree`` ``compose`` built for the kind: its loaded tree
+        (with the kind's include list), editable/frozen globs (a plugin host's
+        ``PLUGIN_FROZEN`` included), size cap and validators (``skill_dir``'s
+        ``SkillTreeValidator``). Dropping any of them is dropping a safety rail."""
+        return cls(initial_files=dict(base.initial_files),
+                   editable=tuple(base.editable), frozen=tuple(base.frozen),
+                   validators=tuple(base.validators),
+                   max_file_bytes=base.max_file_bytes, layout=layout)
 
     def to_diff(self, state, proposal, author, base_version, target):
         name, _, body = proposal.partition(" :: ")
         name, body = name.strip(), body.strip()
         if not (name and body):
             return None
-        path = skill_path(name)
-        if not self.writable(path):
+        path = skill_path(name, self.layout)
+        if not self.writable(path) or len(body) > self.max_file_bytes:
             return None
         if state.get(path) == body:
             return None
+        ops: Dict[str, Optional[str]] = {path: body}
+        if self.layout == SINGLE_SKILL:
+            # The root SKILL.md is what the host loads; without the link the
+            # reference file is never read. Both or neither.
+            root = state.get(SKILL_FILE)
+            if root is None or not self.writable(SKILL_FILE):
+                return None
+            indexed = _with_index(root, state, path)
+            if indexed != root:
+                ops[SKILL_FILE] = indexed
+        if self.validators and self.check_candidate(state, ops) is not None:
+            return None
         return Diff(diff_id=f"{author}:{name}:{base_version}", target=target,
-                    ops={path: body}, author=author)
+                    ops=ops, author=author)
 
 
 def make_propose(ctx: EvoSkillContext, complete: Completion, generate=None):
@@ -363,30 +441,29 @@ def frontier_aggregator_factory(ctx: EvoSkillContext, *,
 
 
 def _build(ctx: BuildContext, p: Dict[str, object]) -> Overrides:
-    try:
-        initial = load_tree(os.path.abspath(os.path.expanduser(ctx.spec.target)))
-    except Exception:  # noqa: BLE001 - compose reports an unreadable target first
-        initial = {}
     context = EvoSkillContext(docs={}, frontier=Frontier(),
                               batch_size=int(p["batch_size"]))
     factory = frontier_aggregator_factory(
         context, artifact_id=ctx.spec.artifact_id(),
         max_frontier=int(p["max_frontier"]),
         eval_concurrency=int(p["eval_concurrency"]))
-    knobs: Dict[str, object] = {
-        "strategy": SkillLibraryTree(
-            initial_files=initial,
-            editable=tuple(getattr(ctx.spec, "editable", ()) or ("**",)),
-            frozen=tuple(getattr(ctx.spec, "frozen", ()) or ())),
-        "aggregator_factory": factory,
-    }
+    layout = SINGLE_SKILL if getattr(ctx.spec, "kind", None) == "skill_dir" else LIBRARY
+    knobs: Dict[str, object] = {"aggregator_factory": factory}
     if callable(ctx.reflect):
         knobs["propose"] = make_propose(context, ctx.reflect)
+    # No `strategy` knob: that would replace the kind's FileTree and with it the
+    # kind's frozen paths, include list and validators (#615 review). compose
+    # hands its FileTree to `strategy_from` instead.
     return Overrides(
         knobs=knobs,
+        strategy_from=lambda base: SkillLibraryTree.from_base(base, layout=layout),
         notes=["algorithm evoskill: a bounded top-K frontier over skill libraries; "
                "each admitted change is re-scored on the full held-out set and the "
-               "best member becomes the next parent."])
+               "best member becomes the next parent."]
+              + (["algorithm evoskill on kind='skill_dir': induced rules are written "
+                  "to references/<slug>.md and linked from a managed index block in "
+                  "SKILL.md, since a nested skills/<slug>/SKILL.md would not be loaded "
+                  "as a skill."] if layout == SINGLE_SKILL else []))
 
 
 register(Algorithm(
@@ -394,7 +471,7 @@ register(Algorithm(
     summary="EvoSkill's two-role skill induction: Proposer analyses a failure "
             "batch, Generator writes one SKILL.md, and a bounded top-K frontier "
             "keeps the best skill libraries.",
-    kinds=("agent_dir",),
+    kinds=("skill_dir", "agent_dir", "plugin"),
     fidelity="mechanism_microport",
     params=(
         Param("max_frontier", "int", 5, "frontier size", minimum=1),

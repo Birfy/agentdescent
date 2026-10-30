@@ -74,7 +74,7 @@ Darwin Gödel Machine's open-ended archive: keep every capability self-modificat
 
 EvoSkill's two-role skill induction: Proposer analyses a failure batch, Generator writes one SKILL.md, and a bounded top-K frontier keeps the best skill libraries.
 
-- **Kinds:** `agent_dir`
+- **Kinds:** `skill_dir`, `agent_dir`, `plugin`
 - **Fidelity:** `mechanism_microport`
 - **Cost:** two model calls per induced skill; one full held-out re-eval per admitted candidate
 - **Source:** EvoSkill: skill discovery (see docs/algo-evoskill.md)

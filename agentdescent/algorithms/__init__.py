@@ -133,12 +133,19 @@ class Overrides:
     ``policies`` maps a ``Policies`` slot name to the built object, ``knobs`` are
     ``evolve()`` keyword defaults and ``agg_config`` are ``AggregatorConfig``
     fields. ``notes`` are shown by ``plan``.
+
+    ``strategy_from`` is for an algorithm over a directory kind that needs its
+    own strategy *class*: ``compose`` calls it with the ``FileTree`` it built for
+    the kind (loaded with the kind's include list, carrying the kind's frozen
+    globs and validators) and uses the result. Prefer it to a ``strategy`` knob,
+    which replaces that ``FileTree`` and silently drops its safety rails.
     """
 
     policies: Dict[str, Any] = field(default_factory=dict)
     knobs: Dict[str, Any] = field(default_factory=dict)
     agg_config: Dict[str, Any] = field(default_factory=dict)
     notes: List[str] = field(default_factory=list)
+    strategy_from: Optional[Callable[[Any], Any]] = None
 
 
 @dataclass(frozen=True)
