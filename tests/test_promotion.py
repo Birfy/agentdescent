@@ -180,6 +180,11 @@ def test_risk_and_human_approval_are_explicit_gates():
     assert promote(_request(approved=True),
                    PromotionRules(require_approval=True)).action \
         == PromotionAction.PROMOTE
+    assert promote(_request(approved=False),
+                   PromotionRules(require_eval=False,
+                                  require_contamination=False,
+                                  require_canary=False)).action \
+        == PromotionAction.REJECT
 
 
 def test_evidence_must_be_bound_to_the_candidate():

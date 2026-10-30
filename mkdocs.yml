@@ -102,6 +102,9 @@ nav:
     - Async — no round barrier: async.md
     - Duration-aware scheduling: duration-scheduling.md
     - Budget allocation: budget.md
+    - The RSI loop kernel: loop-kernel.md
+    - Trusted promotion: trusted-promotion.md
+    - Adaptive compute: compute-policy.md
   - The decision plane (policies):
     - Choosing policies: policies.md
     - Using the slots — a guide: policy-guide.md

@@ -358,12 +358,13 @@ def promote(request: PromotionRequest,
         reasons.append(
             f"risk {request.risk:.3f} > max_risk {policy.max_risk:.3f}")
 
-    if policy.require_approval:
-        if request.approved is False:
-            hard_fail = True
-            reasons.append("human approval was explicitly denied")
-        elif request.approved is not True:
-            deferred.append("human approval is required")
+    if request.approved is False:
+        # An explicit "no" is a hard failure even when approval is not required:
+        # a caller that supplies it is not asking for the default behaviour.
+        hard_fail = True
+        reasons.append("human approval was explicitly denied")
+    elif policy.require_approval and request.approved is not True:
+        deferred.append("human approval is required")
 
     if rollback:
         action = PromotionAction.ROLLBACK
