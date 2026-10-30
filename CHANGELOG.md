@@ -6,6 +6,552 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-10-30
+
+### Added
+
+- `agentdescent install grok-bot` / `uninstall grok-bot` scaffold a skill +
+  `HOST.md` + `mcp.example.json` under `~/.agentdescent/plugins/grok-bot/`
+  (#165). Grok Bot has no public one-click plugin API for local skill+stdio
+  MCP yet, so `doctor` reports `mcp n/a` when the scaffold is current rather
+  than pretending a host config was wired. Docs: `plugins.md`,
+  `plugin-quickstart.md`.
+
+- `agentdescent install opencode` writes `/agentdescent/evolve` under
+  `~/.config/opencode/command/agentdescent/evolve.md`, and `install codex` writes
+  `/prompts:evolve` as `~/.codex/prompts/evolve.md` — the same prompt body as
+  Claude Code's `/agentdescent:evolve`. `uninstall` removes each only while still
+  stock (#165).
+
+- `agentdescent install` writes an `/algorithms` slash entry beside `/evolve` on
+  Claude Code (`commands/algorithms.md` → `/agentdescent:algorithms`), OpenCode
+  (`command/agentdescent/algorithms.md` → `/agentdescent/algorithms`), and Codex
+  (`prompts/algorithms.md` → `/prompts:algorithms`). The body lists, shows, or
+  runs a named method through the same cards as `agentdescent algorithms
+  list|show` and MCP `list_algorithms` / `describe_algorithm`. Grok Bot's
+  `HOST.md` names the CLI/MCP discovery path; `uninstall` removes each slash
+  file only while still stock (#384).
+
+- `rsi_report` / `agentdescent rsi` / MCP `rsi`: a read-only longitudinal view of
+  the consolidation archive. Per decision slot it reports the first and best
+  adopted reward, the adoption that set the best, the gain, adoptions since that
+  best, and the exam counts, and returns an overall `improving` / `stagnant` /
+  `mixed` / `insufficient` verdict with the current portfolio reallocation.
+
+- `run_tournament` / `agentdescent tournament`: run the same spec under several
+  registered algorithms (and seeds) with the same evolve budget, then report the
+  measured ranking and winner. The winner is aggregated per algorithm over seeds
+  (mean reward, fewer mean calls on a tie); a tie is reported as a tie. An errored seed counts as
+  reward 0 and is reported under `errors`, so a crash cannot win by shrinking the
+  denominator; `--dry-run` prices every arm before a run. `default` is the spec's own recipe; each named arm
+  gets a deep copy, so the spec file is untouched. Ordinary
+  `EvolveSpec -> compose() -> evolve()` per arm, not a second engine or a claim to
+  reproduce the ports' published numbers.
+
+- `run_campaign` / `agentdescent campaign`: run several evolution sessions on one
+  spec, each starting from the previous session's artifact. The campaign works on
+  a copy in a temporary workspace, applies only improving sessions, stops after
+  `patience` non-improving rounds, and reports the best artifact, workspace and
+  `stopped_reason`. Session 0 is the baseline (not a claimed improvement), the
+  split seed is fixed across sessions so rewards are comparable, and `final_reward`
+  is the last session while `best_reward` is the artifact kept. `--dry-run` prices
+  the sessions first; `policy_slot` and inline `text` targets are refused because
+  there is no file to carry, and `--workdir` must be empty.
+
+- MCP tools `safety`, `portfolio` and `audit_trace`: a host agent can now ask
+  whether an archive is safe to seed from, how its layers rank for the next
+  budget window, and where one adoption's evidence came from, without finding the
+  CLI verbs in the source. They return the same structure as the CLI's `--json`
+  (which now also carries `archive` for `safety`), write nothing, and treat a
+  missing archive as an error. The installed `SKILL.md` says when to use them, and
+  the `doctor` tool description now lists `opencode` (#505).
+
+- `LeakageGuard`, a pre-evaluation screen and acceptance backstop that rejects a
+  candidate introducing a protected gold answer, task id or corpus string. It
+  checks diff keys and values before the held-out sweep and reports the existing
+  `critic-rejected` outcome, so a leak never crashes the aggregator or buys an
+  inflated score. The acceptance form only refuses newly introduced matches, so a
+  protected string already in the seed does not freeze the run. Matching is
+  case-insensitive and whitespace-collapsed, and short strings are ignored.
+
+- `ApprovalGate` + `ApprovalStore`: high-risk self-modifications (blast radius or
+  diff size above a threshold) are not committed; a request is appended to a JSONL
+  store, and a human approval lets the same **content** through while a rejection
+  stays sticky. The key fingerprints target, ops and base version instead of the
+  producer's `diff_id`, `needs-approval` / `approval-rejected` are real
+  `MergeOutcome` members, requests carry a reviewable summary, and malformed store
+  lines are skipped. Low-risk candidates delegate to the inner acceptance policy.
+
+- `MarginalGainStop`, a stateful `stop_when` policy: it watches the recent
+  reward/call slope and stops after `patience` measurements whose per-call gain
+  is below `min_gain_per_call`. The per-call bar decides on its own under the
+  defaults, so a run that improves too slowly to pay for its calls now stops;
+  `min_gain` is an optional absolute-gain floor combined by OR. The `reason`
+  names the measured gain and call delta, a round with no new calls never counts
+  as low, and `reset()` makes the object reusable across runs. This is an
+  economic stop for long self-improvement runs, not a safety verdict.
+
+- `VarianceSampler`, a `TaskSampler` that prefers tasks whose recent reward
+  variance is high (flip-flopping tasks) over a lifetime pass-rate average, with a
+  UCB exploration bonus and round-index tie rotation. It is a drop-in
+  `task_sampler=` argument, thread-safe like `DifficultyWeighted`.
+
+- `diagnose_payload` / `agentdescent diagnose` / MCP `diagnose`: turns `show`'s
+  samples, rejected candidates and outcome histogram into one actionable verdict
+  (`solved`, `partial-improvement`, `running`, `cancelled`, `run-failed`,
+  `reflector-error`, `scoring-mismatch`, `gate-rejected`, `agent-failures`,
+  `no-improvement`, `unknown`) with bounded evidence and the next step. A
+  committed-but-partial run is no longer called "no candidate adopted", gate
+  rejections win over the worst-sample rule, truncated samples do not claim a
+  scoring mismatch, and running/cancelled states are named. It reuses the same
+  read model as the CLI/MCP without building a discarded diff.
+
+- `GuardPipeline`, one ordered acceptance gate that composes the checks a caller
+  supplies and names the ring that refused a candidate. It keeps the inner
+  guard's merge category (falling back to `below-threshold`) instead of inventing
+  a category the aggregator cannot decode, reports the first refusal even with
+  `collect_all`, and forwards `bind`/`configure` plus checkpoint, restore and
+  screen-reject hooks to every guard. It imports no specific guard, so third-party
+  checks are first-class.
+
+- `DecisionRecord` + `DecisionLog`: an append-only JSONL of immutable adoption and
+  session decisions with the guard category, evidence, cost and parent link.
+  Malformed lines (including non-object JSON) are skipped, a torn last line is
+  closed before the next append, duplicate record ids are refused, non-finite
+  floats become null, and `children()` exposes the decision tree a dashboard or
+  audit export needs. Writers in one process share a per-path lock.
+
+- `bootstrap_ci` / `is_significant` / `paired_gain` and `contamination_overlap`:
+  seeded paired-task bootstrap confidence intervals with an effect-size test, and
+  a contamination report between train and validation text. Paired keys are
+  sorted so the same seed is reproducible across processes, non-finite scores are
+  refused, normalized exact duplicates and CJK/short text are screened, and
+  "nothing to screen" is `None` rather than a clean-looking `0.0`. Pure
+  standard-library functions for adoption gates, reports and external audits.
+
+- `KillSwitch`, `canary` and `rollback_plan`: a file-based global stop, a paired
+  exact sign test that recommends promote/hold/rollback from incumbent vs candidate
+  per-task scores, and a pure state diff for rollback. Missing candidate tasks
+  block promotion and are reported, significant losses use a separate
+  `max_regression` bar, a delete-only rollback is not a no-op, and the switch
+  treats a directory at its path as engaged and writes atomically. These are
+  deployment operations separate from the acceptance gate, so a committed change
+  can still be canaried and reverted deliberately.
+
+- `run_guarded`, one entry point for a session that cannot skip the kill switch or
+  the decision record. The injected acceptance is chained **before** the spec's
+  own acceptance policy or the shipped default statistical gate, so guards can
+  only tighten adoption; stateful checkpoint/restore/screen-reject hooks are
+  forwarded. The decision record says whether a candidate actually committed and
+  carries the error separately, a failing log does not hide the result, and an
+  `aggregator_factory` algorithm is called out in `notes`. The kill switch is an
+  explicit pre-flight check.
+
+- `RunManifest` / `build_manifest` / `verify_manifest` / `diff_manifest`: a
+  content-addressed manifest of a run's spec, data files or directory tree, model
+  configuration (secret keys redacted), seeds, algorithm and code version. The
+  manifest id is stable for identical inputs, and verification names the fields
+  that changed.
+
+- `RiskPolicy` / `RiskRule` / `RiskContext`: ordered, declarative rules that map a
+  change's tier, blast radius, diff size, capability domain and tenant to
+  `allow`/`approve`/`canary`/`rollback`/`deny`. First match wins, no match is
+  fail-closed (`deny` by default), and invalid actions or duplicate rule names are
+  refused at construction.
+
+- `evaluate` / `EvaluationReport`: a deterministic, budgeted verifier-vs-oracle
+  pass. The verifier scores every task, the oracle only a seeded sample capped by
+  `budget`, and the report carries means, signed/absolute bias, coverage, oracle
+  calls and per-task rows. Zero coverage is explicitly "no truth evidence", not a
+  pass.
+
+- `run_controller` / `ControllerConfig` / `SessionOutcome`: a generic multi-session
+  loop with max sessions, call budget, kill switch, patience/stagnation and an
+  optional decision record per session. The caller supplies `run_session(index,
+  seed)`, so a guarded run, campaign step, population generation or remote job can
+  sit behind the same scheduling and stop policy.
+
+- `metrics_from_records` / `metrics_from_log`, `to_prometheus` and `alerts`: RSI
+  aggregates from decision records -- acceptance rate, calls/tokens/wall clock,
+  calls per accepted decision and category frequency -- plus a deterministic
+  Prometheus text export and pure threshold alerts. The export gives the
+  per-category counter its own family, escapes label values and rejects malformed
+  records instead of silently coercing them. No model calls and no second source
+  of truth.
+
+- `docs/algorithm-authoring.md` plus `agentdescent/algorithms/_TEMPLATE.py`: the short contributor path to register one named Algorithm card in a single PR (`algorithms list` / `show` / `plan`), with links from the generated catalog, plugins docs, and the porting checklists (#539).
+
+- The MCP `apply` tool now accepts optional `from` + `to` (mutually exclusive with
+  `run_id`, same rules as CLI `apply --from`: `from` requires `to`, symlinks
+  refused, dry-run / backup via `apply_from_payload`), so an MCP host can install
+  a campaign `final_target` without shelling out (#540).
+
+- `QualityDiversityArchive`, a MAP-Elites-style archive that keeps one elite per
+  behaviour cell and reports coverage and QD-score instead of collapsing the
+  search to a single best artifact.
+
+- `leave_one_out_credit` and `shapley_credit` attribute a candidate's gain to
+  individual edits, with a shared subset cache and an explicit interaction term so
+  a reflector can learn which change actually paid.
+
+- `ConformalGate`, a split-conformal lower prediction bound for one new task's
+  paired improvement. It uses the finite-sample floor rank, returns `-inf` (and
+  `insufficient`) when the calibration set cannot certify `alpha`, and states the
+  exchangeability/per-task assumption instead of claiming a candidate-level
+  false-acceptance rate.
+
+- `agentdescent mcp --transport streamable-http [--host 127.0.0.1] [--port 8000]`
+  serves the MCP tools over HTTP at `/mcp`, so URL-only hosts such as Grok Bot can
+  connect through an HTTPS tunnel; stdio stays the default. A non-loopback
+  `--host` is refused unless `--allow-remote` is passed. The Grok Bot `HOST.md`
+  and plugin docs now give the copy-paste commands (#560).
+
+- `EProcess` / `sequential_test`, an anytime-valid hedged-betting e-process for
+  paired improvement deltas: a dashboard can watch the same evidence continuously
+  without inflating the false-positive rate.
+
+- `detect_goodhart` and `GoodhartMonitor` measure proxy-oracle inflation, rank
+  tracking, and concrete shortcut candidates, so a self-improving loop can alarm
+  when the reward it optimises stops tracking the reward it cares about.
+
+- `MetamorphicSuite`, `MetamorphicRelation` and `invariance` check output
+  relations under input transforms, so a candidate that scores higher by learning
+  surface form can be caught by a broken invariance. The suite is an acceptance
+  probe, not yet wired into the evolution loop; `accept(min_rate=...)` supports a
+  bounded failure rate.
+
+- `SelfModel`, a deterministic **logit-space Newton/IRLS** Platt calibrator with
+  ECE/Brier reporting and calibrated answer/abstain routing. It refuses to predict
+  before `fit`, reports anti-correlation instead of hiding it, marks tiny samples
+  `insufficient`, and converges on saturated 0/1 confidences where fixed-step
+  gradient descent diverges.
+
+- `dedupe_texts` with Unicode-aware SimHash and MinHash fingerprints, clustering
+  near-duplicate artifacts deterministically. CJK runs contribute character
+  trigrams and punctuation-only text falls back to characters, so distinct rules
+  do not collapse; it is an archive-hygiene utility, not yet wired into the
+  population/QD path.
+
+- `LineageGraph` and `lineage_report` for artifact provenance: ancestry,
+  descendants, shortest derivation path, impact size, roots/leaves, topological
+  order, external-parent accounting, and cycle detection. Walks are iterative and
+  child adjacency is indexed, so long self-improvement lineages stay usable.
+
+- `fit_power_law` / `plan_budget` fit a deterministic saturating compute curve
+  (`a - b * budget^-c`) with grid + local refinement, report R² and RMSE, and
+  invert it to the smallest budget that reaches a target. Unreliable fits are
+  refused by default and targets already observed are not extrapolated.
+
+- `RSIController`, a duck-typed control plane that turns each session result into
+  `accept / reject / defer / rollback / continue / stop` using target, cost,
+  patience, risk, pluggable gates and a budget policy. It wraps the existing
+  guarded/controller/portfolio pieces instead of replacing them.
+
+- `TaskFoundry`, a failure-seeded task assembly line: generate, validate,
+  deduplicate (exact + optional near-duplicate), filter contamination and
+  unlearnable tasks, and split accepted tasks deterministically into train and
+  holdout. `failure_seeds` mines low-reward trajectory rows as seeds.
+
+- `ArtifactGraph`, a Unicode-aware TF-IDF retrieval graph over prompts, skills and
+  harness fragments with kind/tag filters, trust weighting, parent/child edges,
+  and budgeted composition into a task prompt.
+
+- `VerifierEnsemble`, a cost-aware verifier cascade with weighted/majority/unanimous
+  strategies, early stopping on confident agreement, a hard cost cap, fail-closed
+  incomplete panels, explicit-fail vetoes, and disagreement/error reporting.
+
+- `ReplayLab`, a deterministic counterfactual replay layer over a session trace:
+  remove/replace/disable interventions, leave-one-out effects, and Shapley
+  attribution through `credit`. The cache is value/metadata-based (or caller-keyed,
+  or disabled for unhashable payloads), and multi-step results carry the real
+  intervention tuple.
+
+- `DeferralPolicy`, a learned confidence threshold for `auto-approve / defer /
+  deny`: it fits from past reviewer outcomes under a target auto-approve risk,
+  honours a hard-risk deny ceiling, refuses small calibration sets, and makes the
+  defer-all fallback genuinely defer everything (including confidence 1.0).
+
+- `SocietyRuntime`, a role-based blackboard loop for multi-agent RSI:
+  proposer/critic/verifier/historian roles, per-role budgets, consensus or target
+  stopping, cost accounting, participation-based role credit, critic vetoes, and
+  optional Shapley attribution through `credit`.
+
+- `SafeSelfModifier`, a capability gate plus canary/rollback promotion path for
+  self-modifying code: allow-listed imports, forbidden name/attribute references
+  (not only calls), inferred files/network/process capabilities, risk tiers, and a
+  canary measurement before promotion. Static screening is defense-in-depth; a
+  sandbox is still required for execution.
+
+- `RSITelemetry`, an OTel-inspired span/event tree for RSI runs
+  (`run → round → rollout → merge → gate → commit`) with unique IDs, attributes,
+  events, exception/cancellation status, wall vs span time, escaped Prometheus
+  samples, and OTel-shaped dictionaries (not OTLP JSON).
+
+- `bench.rsi_bench`, a long-horizon RSI benchmark: hash-split train/holdout with a
+  generation-outer loop, transfer, mean/max/forgetting-fraction, proxy-vs-oracle
+  **gain** gap, error counts, cost cap, generations-to-target, family breakdown,
+  and `improving / flat / regressing / no-transfer / forgetting / hacking /
+  insufficient` verdicts.
+
+- `DurableRunService` + `SqliteRunStore`: an event-sourced, reopenable run log
+  with leases/heartbeats, idempotent event keys, retries, exactly-once completion,
+  cancel, and expired-lease recovery for long RSI sessions.
+
+- `WorkspaceRegistry`: tenant/workspace principals, role-based permissions
+  (viewer/operator/approver/admin/owner), token/cost/concurrency quotas with
+  reservations, and append-only audit export as JSONL or dicts.
+
+- `PolicyBundle` + `AdmissionController` + signed `ArtifactManifest`: deny-overrides
+  policy evaluation, approval obligations, canonical manifest hashes, HMAC-SHA256
+  detached signatures (demo signer; swap for cosign/Sigstore), and fail-closed
+  admission when the signature is missing or invalid.
+
+- `EvalOps`: versioned dataset registry with content hashes, eval specs, paired
+  bootstrap results, CI regression gates, drift monitoring, scheduled reruns, and
+  a serialisable operations snapshot.
+
+- `OperationsConsole`, a read-model API for runs, approval queues, QD coverage,
+  lineage, and cost: filtered/paginated run lists, risk-sorted pending approvals,
+  terminal decisions, and a serialisable dashboard snapshot.
+
+- `DataFlywheel`: turn production traces into a content-hashed dataset candidate
+  with reward/error filtering, deterministic sampling, recursive secret/PII
+  redaction, exact/near-duplicate clustering and a per-cluster cap.
+
+- `ModelRouter`: a cost-aware Thompson-sampling router over model quality and
+  price, with context/tag/budget filters, epsilon exploration, posterior updates
+  and a per-model routing report.
+
+- `PreferenceModel` + `PreferenceBuffer`: a Bradley-Terry reward model over
+  pairwise preferences with tie targets, deterministic IRLS, accuracy/log-loss,
+  and an uncertainty/distance-based next-query selector for active feedback.
+
+- `ContinualMetaLearner`: online softmax meta-policy updates with a bounded replay
+  buffer, validation-gated promotion, rollback on regression, and a feature-drift
+  signal for when the validation context stops matching the replay context.
+
+- `open_ended_coevolve`: novelty-and-difficulty task/solver co-evolution with a
+  bounded archive, a target-difficulty frontier, deterministic generation and a
+  best-task/coverage report.
+
+- `ProcessRewardModel`: a calibrated step-level logistic reward model with IRLS,
+  accuracy/log-loss/ECE/Brier reporting, and candidate reranking for PRM-guided
+  credit and search.
+
+- `MCTSPlanner`: UCT planning over a caller-supplied simulator and value function,
+  with a hard simulation budget, deterministic seed, terminal transitions,
+  cost penalty, and a PlanResult carrying the chosen action/value/visits.
+
+- `ToolSynthesizer`: generate/validate/select tool candidates with a recorded
+  rejection trail, capability metadata, custom selector, and an `EnvironmentSpec`
+  for grouping validated tools.
+
+- `Deliberation`: structured multi-agent debate with evidence-bearing arguments,
+  confidence/weighted judge votes, agreement tracking, and a consensus/round-budget
+  stopping rule.
+
+- `ProofRunner` + `ProofCertificate`: execute an invariant suite, record
+  warning/error obligations, hash the artifact, and emit/verify a serialisable
+  proof-carrying certificate for manifests, lineage and policy admission.
+
+- `LoopKernel`: a resumable RSI loop over `durable_runs` that composes the
+  existing seams in one order — `step -> RSIController -> apply/rollback` — and
+  replays completed generations after a crash. Each generation carries its
+  observation, control action, gain, cost and optional decision-log/telemetry
+  ids; the final generation is durable instead of being lost in the completion
+  payload.
+
+- `promote()` + `PromotionRules`: one fail-closed promotion decision over
+  evaluation, contamination, conformal/sequential evidence, canary, proof,
+  admission, risk and human approval. Missing evidence returns `defer`, a failed
+  gate returns `reject`, a canary regression returns `rollback`, and only a fully
+  green bundle returns `promote` with a stable evidence hash for manifest/lineage.
+
+- `ComputeController` + `ComputeOption`: an action-level Thompson-sampling
+  allocator over direct / PRM-rerank / MCTS / verifier-ensemble strategies. It
+  composes `model_router` for the concrete model, respects difficulty bands,
+  context/tag/cost constraints and an optional call budget, and records the
+  chosen option, model, expected quality/cost and exploration flag for the
+  decision log.
+
+- `CapabilityFoundry`: the admission loop for a synthesized tool. It binds
+  validation score, debate/review agreement, `safe_selfmod` capability/canary
+  checks, proof certificate verification, holdout gain and artifact-graph
+  registration into one fail-closed outcome (`promoted` / `deferred` / `rejected`
+  / `rolled_back`). Missing evidence defers; failed gates reject; a measured
+  canary regression rolls back.
+
+- `ExperienceStore` + `ExperienceEngine`: append-only cross-run experience
+  memory with nearest-neighbour recall and a continual meta-policy update guarded
+  by a frozen anchor slice. The engine warms its learner replay from an existing
+  store on restart; a candidate that improves validation but regresses the
+  anchors is rolled back, and `ContinualMetaLearner.rollback()` restores the
+  weights while keeping the attempt in history as a rejected update.
+
+- `examples/rsi_loop`: one offline run that composes the loop kernel, adaptive
+  compute, trusted promotion, capability foundry and continual experience, with a
+  test asserting each layer's decision. It is the end-to-end demonstration of the
+  five integration features rather than another primitive.
+
+### Changed
+
+- `agentdescent doctor` prints `skill` and `mcp` on each installed host line
+  (for example `partial (skill ok, mcp missing; …)`), so stale skill vs missing
+  MCP is visible without reading the problems section (#165).
+
+- CI's test matrix runs on `ubuntu-24.04` instead of `ubuntu-latest`: the
+  Ubuntu 26.04 runner image has no Python 3.9 for `setup-python`, so the required
+  `test (3.9)` check could never pass, and the sandboxed AlgoTune timing test was
+  failing there too.
+
+- `LoopKernel`, `promote` / `PromotionRules` and `ComputeController` are now
+  re-exported from the top-level `agentdescent` package, listed in the generated
+  API reference and documented with the loop, promotion and compute guides. The
+  modules stay usable through their submodules as before. An explicit
+  `approved=False` now rejects even when `require_approval` is off, matching the
+  documented fail-closed rule.
+
+- `CapabilityFoundry`, `ExperienceEngine` / `ExperienceStore` and the
+  `ContinualMetaLearner` types are now re-exported from top-level
+  `agentdescent`, listed in the generated API reference, and documented with the
+  capability-foundry and continual-experience guides. The modules remain usable
+  through their submodules as before.
+
+### Fixed
+
+- `agentdescent init` with an `opencode` worker and both `--model` and
+  `--base-url` now writes the OpenCode Coding recipe into `agent` (`-m
+  <provider>/<model>` plus `env.OPENCODE_CONFIG` naming a provider-only
+  `<spec>.opencode-providers.json` beside the spec, key as `{env:VAR}`, never
+  inline) instead of a bare `{"ref": "opencode"}` that ignored both flags.
+  Without both flags the bare ref and its warning are unchanged (#485).
+
+- `agentdescent portfolio`, `exam` and `audit` no longer create a missing archive
+  directory and report it as empty: like `safety`, they now fail with
+  `error: archive '<path>' does not exist` (exit 2). `audit` likewise rejects a
+  `--meta-audit` / `--inner-audit` file that does not exist (#502).
+
+- `gepa`, `skillopt` and `dgm` specs no longer get the default reflective
+  merge pair their own aggregator ignores, so `evolve` stops emitting a
+  `RuntimeWarning` about `conflict`/`fusion` policies nobody wrote; a spec that
+  names those policies explicitly gets the warning from `plan` instead (#504).
+
+- `python -m agentdescent` now runs the CLI, the same as the `agentdescent`
+  console script, instead of failing with "No module named
+  agentdescent.__main__" (#510).
+
+- Missing-archive errors from `safety` / `portfolio` / `audit` (CLI and MCP) now
+  name `continuous_meta_run` and say that `evolve` / plugin runs do not write an
+  archive, so a host agent does not invent a nonexistent "consolidation" step.
+  Those read-only verbs also leave an existing empty archive untouched (no
+  `runs/` directory as a side effect) (#512).
+
+- `--json` now works after the subcommand as well as before it, for every verb:
+  `agentdescent show --json <id>`, `doctor --json`, `status --json`,
+  `plan --json <spec>`, `portfolio --json` and `audit <id> --json` used to exit 2
+  with "unrecognized arguments", even though the docs write them that way.
+
+- `agentdescent install opencode` no longer leaves OpenCode without its MCP
+  server when `~/.config/opencode/opencode.jsonc` has comments: the commented file
+  is still never rewritten, and the `mcp.agentdescent` entry goes into
+  `opencode.json` beside it, which OpenCode merges. If neither file can be parsed,
+  install prints a `FAILED:` line and exits 1, and `install` / `uninstall` now
+  honour `--json`. `doctor` no longer reports such a host as `ok` when the
+  commented file does not even name `agentdescent` (a commented-out mention no longer counts), and `uninstall opencode`
+  cleans up the `opencode.json` entry too.
+
+- `agentdescent campaign` results can now be installed: `agentdescent apply --from
+  <final_target> --to <target> [--dry-run]` applies an on-disk artifact with the
+  same `.bak-N` backup and no-op check as `apply <run_id>`, and the campaign's
+  output ends with the ready-to-copy diff / dry-run / apply / cleanup commands
+  (`next` in `--json`). `docs/campaign.md` no longer points at an `apply --to`
+  form that failed with "has no result to apply yet".
+
+  Symlinks inside a ``--from`` directory (or a ``--from`` path that is itself a
+  symlink) are refused rather than dereferenced into real files under ``--to``,
+  matching ``apply <run_id>`` which never materialises links.
+
+- `campaign` now stops as soon as a session reaches the spec's `target_reward`
+  and reports `stopped_reason: "target_reward"`, instead of spending another
+  session and then reporting `patience` (#534).
+
+- `agentdescent doctor` no longer labels a host CLI it found on `PATH` as
+  `missing`: an installed but unwired CLI now reads `not installed (cli ...)`
+  with the `agentdescent install` command, a host without a CLI reads `no cli
+  on PATH`, and the closing line says `ok: no blocking problems`, naming how
+  many hosts can be wired. The `--json` report is unchanged (#535).
+
+- A bare `agentdescent algorithms` (and `agentdescent algorithms --json`) now lists
+  the algorithms like `algorithms list` instead of exiting with an argparse
+  "arguments are required: action" error (#546).
+
+- `agentdescent algorithms --kind K` now filters like `algorithms list --kind K`
+  (with or without `--json`) instead of exiting 2 with a misleading
+  `invalid choice` error, and `--kind` with `algorithms show` is refused with a
+  clear message rather than ignored (#549).
+
+- `agentdescent plan` without `--json` no longer prints a `{"ok": false, ...}`
+  JSON object when the spec fails to compile (bad `--algorithm` / `--param`, bad
+  data rows): it prints `error: <message>` on stderr and exits 2, like an
+  unreadable spec file. `--json` output is unchanged (#551).
+
+- `agentdescent plan` without `--json` no longer dumps the `{"ok": false, ...}`
+  JSON object when the spec compiles but fails a hard check (too few tasks,
+  missing CLI binary, unfilled placeholder): it prints `error: <message>` on
+  stderr and exits 2, like a spec that fails to compile. `--json` output is
+  unchanged (#553).
+
+- `agentdescent install` no longer reports `updated` for files whose contents are
+  already identical; it prints `kept <path> (unchanged)` and leaves the file
+  untouched (#555).
+
+- `agentdescent init --data` now reads the cases file's first row and, when it has
+  no `prompt`/`gold` column, maps a single common alias (`input`/`question`/`query`/`problem`,
+  `expected`/`answer`/`output`/`target`) and says so, or warns with the real column
+  names. Spec loading now names the `data.prompt` field in a missing-column error,
+  and `plan`/`evolve`/MCP refuse a gold-comparing scorer (`contains`, `exact`,
+  `last_number`, `numeric_close`) when no row has the `data.gold` column instead of
+  silently scoring every answer 0.
+
+- `agentdescent mcp --transport streamable-http --allow-remote` now serves
+  non-loopback clients on mcp 1.x too: the SDK pins allowed Host headers to
+  loopback when the server is built, so a remote bind answered every request 421;
+  the pin is now dropped for a non-loopback host (#587).
+
+- `agentdescent mcp --transport streamable-http` on mcp 1.2–1.7 now exits with a
+  one-line "needs mcp>=1.8" message instead of the SDK's opaque Unknown transport
+  error; CLI host/port defaults stay locked to `mcp.DEFAULT_HTTP_*`, and the
+  `.mcp` import stays lazy so a shadowed cwd still prints one line (#589).
+
+- `agent_society._is_literal` no longer references deprecated `ast.NameConstant`
+  (removed in Python 3.14); `True`/`False`/`None` are already `ast.Constant` on
+  the supported 3.9+ range (#591).
+
+- `agent_society._is_literal` now accepts unary `+` / `-` on numeric constants
+  (`-1`, `+2`, nested in dict/list), matching `ast.literal_eval`, so the society
+  gate no longer reports a signed number as "computed code" (#593).
+
+- The `evoskill` algorithm card now accepts `kind: skill_dir` and `plugin` as well
+  as `agent_dir`, so `agentdescent init <skill> --kind skill_dir --algorithm
+  evoskill` no longer exits 2; the module docstring, `docs/algo-evoskill.md` and
+  the registry now agree (#604). Its `SkillLibraryTree` is now built over the
+  kind's own `FileTree` (new `Overrides.strategy_from` hook), so a plugin keeps its
+  host's frozen paths and its `.ts`/`.js` code, and a `skill_dir` keeps its
+  SKILL.md gate; on a `skill_dir` the induced rule goes to `references/<slug>.md`,
+  linked from a managed index block in the root `SKILL.md`, instead of a nested
+  skill the host would not load.
+
+- `agentdescent doctor` accepts `--home <dir>` with the same probe semantics as
+  `install` / `uninstall` (#605): host skill/MCP status is read under that tree,
+  and an explicit `--home` wins over `CODEX_HOME` / `DSH_HOME` /
+  `XDG_CONFIG_HOME`. The MCP `doctor` tool takes the same optional `home`
+  argument.
+
+- `diagnose` and the guarded-run decision log treat named-algorithm adopt
+  categories (`gepa-select`, `skillopt-accept`, `dgm-select`) and per-round
+  `committed` totals as adoptions, so a successful GEPA/SkillOpt/DGM run is
+  no longer reported as "no candidate was adopted" (#617).
+
 ## [0.7.0] — 2026-10-23
 
 ### Added
@@ -5950,7 +6496,8 @@ First public release on PyPI as **`agentdescent`**.
   discrete-space `Aggregator`, staleness policies, DP/TP/PP parallelism, layered
   governance, and the provider-agnostic `agentdescent.agents` completion layer.
 
-[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/Birfy/agentdescent/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Birfy/agentdescent/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Birfy/agentdescent/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/Birfy/agentdescent/compare/v0.5.0...v0.5.1

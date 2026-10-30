@@ -11,9 +11,9 @@ manifest = build_manifest(
     spec,
     data_paths=[spec.data["path"]],
     model_config={"model": "m", "api_key": "sk-..."},
-    code_version="0.7.0")
+    code_version="0.8.0")
 manifest.manifest_id
-changed = verify_manifest(spec, manifest, data_paths=[...], code_version="0.7.0")
+changed = verify_manifest(spec, manifest, data_paths=[...], code_version="0.8.0")
 ```
 
 - **Spec** is the canonical `spec.to_dict()` hash.
