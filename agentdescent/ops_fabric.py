@@ -38,6 +38,10 @@ from .rsi_telemetry import RSITelemetry, TelemetryReport, TelemetrySpan
 
 __all__ = ["OpsRecord", "OpsSnapshot", "OpsFabric"]
 
+# A failed run is an error span and a cancelled run a cancelled span, so the
+# trace agrees with the console row; non-terminal runs stay unset.
+_SPAN_STATUS = {"completed": "ok", "failed": "error", "cancelled": "cancelled"}
+
 
 @dataclass(frozen=True)
 class OpsRecord:
@@ -150,8 +154,7 @@ class OpsFabric:
             if generation.accepted:
                 last_accepted = generation.artifact_id
         if span is not None and self.telemetry is not None:
-            self.telemetry.end_span(
-                span, "ok" if loop.terminal else "unset")
+            self.telemetry.end_span(span, _SPAN_STATUS.get(loop.status, "unset"))
 
         lineage = lineage_report(self.lineage)
         self.console.set_lineage(LineageSnapshot(
