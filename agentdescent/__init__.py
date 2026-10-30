@@ -360,6 +360,31 @@ from .rsi_metrics import (RSIMetrics, alerts, metrics_from_log,
 from .controller import (ControllerConfig, ControllerReport, SessionOutcome,
                          SessionRecord, run_controller)
 from .evaluation import EvaluationReport, EvaluationRow, evaluate
+from .loop_kernel import (
+    LoopConfig,
+    LoopObservation,
+    LoopContext,
+    LoopGeneration,
+    LoopReport,
+    LoopKernel,
+)
+from .promotion import (
+    PromotionAction,
+    PromotionRules,
+    ProofEvidence,
+    PromotionRequest,
+    PromotionDecision,
+    promote,
+)
+from .compute_policy import (
+    ComputeAction,
+    ComputeOption,
+    ComputeContext,
+    ComputeDecision,
+    OptionReport,
+    ComputeReport,
+    ComputeController,
+)
 from .risk_policy import RiskContext, RiskDecision, RiskPolicy, RiskRule
 from .manifest import (RunManifest, build_manifest, diff_manifest,
                        verify_manifest)
@@ -830,6 +855,25 @@ __all__ = [
     "SessionOutcome",
     "SessionRecord",
     "run_controller",
+    "LoopConfig",
+    "LoopObservation",
+    "LoopContext",
+    "LoopGeneration",
+    "LoopReport",
+    "LoopKernel",
+    "PromotionAction",
+    "PromotionRules",
+    "ProofEvidence",
+    "PromotionRequest",
+    "PromotionDecision",
+    "promote",
+    "ComputeAction",
+    "ComputeOption",
+    "ComputeContext",
+    "ComputeDecision",
+    "OptionReport",
+    "ComputeReport",
+    "ComputeController",
     "EvaluationReport",
     "EvaluationRow",
     "evaluate",

@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-545 public names across 107 modules.
+564 public names across 110 modules.
 
 ---
 
@@ -3232,6 +3232,312 @@ seed_from_archive(
     min_reward: float = 0.0,
     seed: int = 0
 ) -> Tuple[Optional[Dict[str, str]], SeedReport]
+```
+
+---
+
+## The RSI loop kernel
+
+One resumable loop over step, control, apply and the durable event log. &nbsp;·&nbsp; `agentdescent.loop_kernel` &nbsp;·&nbsp; [guide](loop-kernel.md)
+
+### `LoopConfig(...)`
+
+Identity, bounds and controller thresholds for one durable loop.
+
+```python
+LoopConfig(
+    tenant: str,
+    workspace: str,
+    spec_hash: str = 'loop',
+    max_generations: int = 3,
+    target: Optional[float] = None,
+    max_cost: Optional[float] = None,
+    min_gain: float = 0.0,
+    patience: int = 2,
+    risk_limit: float = 1.0,
+    base_seed: int = 0,
+    lease_seconds: float = 30.0,
+    max_retries: int = 3
+) -> None
+```
+
+### `LoopContext(...)`
+
+What the caller's `step` sees for one generation.
+
+```python
+LoopContext(
+    run_id: str,
+    generation: int,
+    seed: int,
+    budget_scale: float,
+    best_reward: Optional[float],
+    history: Tuple[LoopGeneration, ...],
+    snapshot: RunSnapshot
+) -> None
+```
+
+### `LoopGeneration(...)`
+
+One generation's durable record, reconstructed from the event log.
+
+```python
+LoopGeneration(
+    generation: int,
+    seed: int,
+    action: str,
+    reason: str,
+    reward: float,
+    cost: float,
+    risk: float,
+    gain: Optional[float],
+    artifact_id: str,
+    stop: bool,
+    applied: bool = False,
+    error: Optional[str] = None,
+    budget_scale: float = 1.0,
+    span_id: str = ''
+) -> None
+```
+
+### `LoopKernel(...)`
+
+Run a durable loop of `step -> control -> apply` generations.
+
+```python
+LoopKernel(
+    store: SqliteRunStore,
+    config: LoopConfig,
+    *,
+    decision_log: Optional[Any] = None,
+    telemetry: Optional[Any] = None,
+    gate: Optional[Callable[..., Any]] = None,
+    risk_gate: Optional[Callable[..., Any]] = None,
+    controller_factory: Optional[ControllerFactory] = None
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `cancel(run_id: str, *, reason: str = 'operator cancel') -> LoopReport` | Cancel a pending/running loop and return the durable report. |
+| `run(...)` | Resume/run until the controller stops or the budget ends. |
+
+### `LoopObservation(...)`
+
+One measured generation: reward, cost, risk and the artifact it produced.
+
+```python
+LoopObservation(
+    reward: float,
+    cost: float = 0.0,
+    risk: float = 0.0,
+    error: Optional[str] = None,
+    artifact_id: str = '',
+    evidence: Mapping[str, Any] = <factory>
+) -> None
+```
+
+### `LoopReport(...)`
+
+The durable loop's generations and why it stopped.
+
+```python
+LoopReport(
+    run_id: str,
+    status: str,
+    generations: Tuple[LoopGeneration, ...] = (),
+    best_reward: Optional[float] = None,
+    total_cost: float = 0.0,
+    accepted: int = 0,
+    stopped_reason: str = '',
+    reason: str = '',
+    detail: str = ''
+) -> None
+```
+
+---
+
+## Trusted promotion
+
+One fail-closed promotion decision over eval, statistics, proof, canary and admission. &nbsp;·&nbsp; `agentdescent.promotion` &nbsp;·&nbsp; [guide](trusted-promotion.md)
+
+### `PromotionAction()`
+
+The closed vocabulary a promotion decision may emit.
+
+### `PromotionDecision(...)`
+
+The verdict, the evidence it saw and a stable hash of that evidence.
+
+```python
+PromotionDecision(
+    artifact_id: str,
+    action: str,
+    accepted: bool,
+    reasons: Tuple[str, ...] = (),
+    missing: Tuple[str, ...] = (),
+    evidence: Mapping[str, Any] = <factory>,
+    evidence_hash: str = '',
+    decision_hash: str = '',
+    risk: Optional[float] = None
+) -> None
+```
+
+### `PromotionRequest(...)`
+
+All evidence a caller has for one candidate.
+
+```python
+PromotionRequest(
+    artifact_id: str,
+    artifact_hash: Optional[str] = None,
+    eval_result: Optional[EvalResult] = None,
+    contaminated: Optional[bool] = None,
+    conformal: Optional[ConformalReport] = None,
+    sequential: Optional[SequentialReport] = None,
+    canary: Optional[CanaryResult] = None,
+    proof: Optional[ProofEvidence] = None,
+    admission: Optional[AdmissionResult] = None,
+    risk: Optional[float] = None,
+    approved: Optional[bool] = None,
+    metadata: Mapping[str, Any] = <factory>
+) -> None
+```
+
+### `PromotionRules(...)`
+
+What evidence a promotion must present, and the bars it must clear.
+
+```python
+PromotionRules(
+    require_eval: bool = True,
+    require_contamination: bool = True,
+    require_risk: bool = True,
+    require_conformal: bool = False,
+    require_sequential: bool = False,
+    require_canary: bool = True,
+    require_proof: bool = False,
+    require_admission: bool = False,
+    require_approval: bool = False,
+    allow_contaminated: bool = False,
+    min_effect: float = 0.0,
+    min_tasks: int = 2,
+    max_risk: float = 1.0
+) -> None
+```
+
+### `ProofEvidence(certificate: ProofCertificate, verification: ProofVerification) -> None`
+
+A proof certificate plus the verification that actually checked it.
+
+### `promote(request: PromotionRequest, policy: Optional[PromotionRules] = None) -> PromotionDecision`
+
+Assemble and judge one promotion; missing or failed evidence never passes.
+
+---
+
+## Adaptive compute
+
+Which strategy deserves this task's compute: direct, PRM, search or ensemble. &nbsp;·&nbsp; `agentdescent.compute_policy` &nbsp;·&nbsp; [guide](compute-policy.md)
+
+### `ComputeAction()`
+
+The closed strategy vocabulary this policy allocates over.
+
+### `ComputeContext(...)`
+
+What the task asks of the compute policy.
+
+```python
+ComputeContext(
+    task_id: str = '',
+    tokens: int = 0,
+    difficulty: float = 0.5,
+    max_cost: Optional[float] = None,
+    required_tags: Tuple[str, ...] = ()
+) -> None
+```
+
+### `ComputeController(...)`
+
+A cost-aware Thompson-sampling bandit over compute strategies.
+
+```python
+ComputeController(
+    options: Sequence[ComputeOption],
+    router: ModelRouter,
+    *,
+    cost_weight: float = 0.5,
+    exploration: float = 0.05,
+    max_calls: Optional[int] = None,
+    seed: int = 0
+) -> None
+```
+
+### `ComputeDecision(...)`
+
+One allocated strategy + model, with the numbers used to choose it.
+
+```python
+ComputeDecision(
+    option: str,
+    action: str,
+    model: str,
+    reason: str,
+    expected_quality: float,
+    sampled_quality: float,
+    expected_cost: float,
+    calls: int,
+    exploration: bool = False,
+    model_reason: str = '',
+    detail: str = '',
+    reservation_id: str = ''
+) -> None
+```
+
+### `ComputeOption(...)`
+
+One strategy's cost/quality profile and when it is eligible.
+
+```python
+ComputeOption(
+    name: str,
+    action: str,
+    calls: int = 1,
+    quality_prior: Tuple[float, float] = (1.0, 1.0),
+    min_difficulty: float = 0.0,
+    max_difficulty: float = 1.0,
+    note: str = ''
+) -> None
+```
+
+### `ComputeReport(...)`
+
+```python
+ComputeReport(
+    options: Tuple[OptionReport, ...],
+    router: RoutingReport,
+    pulls: int,
+    mean_reward: float,
+    mean_cost: float,
+    total_calls: int,
+    reserved_calls: int = 0,
+    detail: str = ''
+) -> None
+```
+
+### `OptionReport(...)`
+
+```python
+OptionReport(
+    option: str,
+    action: str,
+    pulls: int,
+    mean_reward: float,
+    mean_cost: float,
+    posterior_mean: float,
+    detail: str = ''
+) -> None
 ```
 
 ---

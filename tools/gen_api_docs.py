@@ -145,6 +145,17 @@ SECTIONS: List[Tuple[str, str, str, str]] = [
     ("agentdescent.consolidation", "Cross-run consolidation",
      "What a run learned survives it: archive, retrieve, mini-eval gate.",
      "consolidation.md"),
+    ("agentdescent.loop_kernel", "The RSI loop kernel",
+     "One resumable loop over step, control, apply and the durable event log.",
+     "loop-kernel.md"),
+    ("agentdescent.promotion", "Trusted promotion",
+     "One fail-closed promotion decision over eval, statistics, proof, canary "
+     "and admission.",
+     "trusted-promotion.md"),
+    ("agentdescent.compute_policy", "Adaptive compute",
+     "Which strategy deserves this task's compute: direct, PRM, search or "
+     "ensemble.",
+     "compute-policy.md"),
     ("agentdescent.selfplay", "Solver-challenger self-play",
      "The task distribution evolves too: challenger, frontier, curriculum.",
      "selfplay.md"),
