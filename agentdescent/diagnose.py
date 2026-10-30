@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-__all__ = ["DiagnosisReport", "diagnose_payload"]
+__all__ = ["DiagnosisReport", "adopted_count", "diagnose_payload"]
 
 
 @dataclass(frozen=True)
@@ -54,6 +54,53 @@ def _matches_gold(sample: Dict[str, Any]) -> bool:
     return str(sample.get("output")) == str(sample.get("gold"))
 
 
+# Outcome categories that mean a candidate was adopted. Named algorithms
+# (GEPA / SkillOpt / DGM) record their own category instead of
+# ``MergeOutcome.COMMITTED`` ("committed"), so diagnose and the decision log
+# must recognise them too.
+_ADOPT_OUTCOME_KEYS = frozenset({
+    "committed",
+    "gepa-select",
+    "skillopt-accept",
+    "dgm-select",
+})
+
+
+def adopted_count(
+    *,
+    history: Optional[Any] = None,
+    outcomes: Optional[Dict[str, Any]] = None,
+) -> int:
+    """How many candidates a run adopted.
+
+    Prefers the per-round ``committed`` totals (the same source as the CLI's
+    ``+N/-M`` lines). When there is no history, falls back to outcome
+    categories that mean adoption: the default ``committed`` plus the named
+    algorithm categories ``gepa-select``, ``skillopt-accept`` and
+    ``dgm-select``.
+    """
+    if history:
+        total = 0
+        for row in history:
+            try:
+                if isinstance(row, dict):
+                    value = row.get("committed", 0)
+                else:
+                    value = getattr(row, "committed", 0)
+                total += int(value or 0)
+            except (TypeError, ValueError):
+                continue
+        return total
+    outcomes = outcomes or {}
+    total = 0
+    for key in _ADOPT_OUTCOME_KEYS:
+        try:
+            total += int(outcomes.get(key, 0) or 0)
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
 def diagnose_payload(run_id: str, *, store: Optional[str] = None) -> DiagnosisReport:
     """Classify why a run ended where it did.
 
@@ -92,10 +139,8 @@ def diagnose_payload(run_id: str, *, store: Optional[str] = None) -> DiagnosisRe
     final = payload.get("final_reward")
     final_value = float(final) if final is not None else None
     outcomes = payload.get("outcomes") or {}
-    try:
-        committed = int(outcomes.get("committed", 0) or 0)
-    except (TypeError, ValueError):
-        committed = 0
+    committed = adopted_count(history=payload.get("history") or None,
+                              outcomes=outcomes)
     target_hit = payload.get("stop_reason") == "target_reward"
     if final_value is not None and (target_hit or final_value >= 0.999):
         return DiagnosisReport(run_id, "solved",
