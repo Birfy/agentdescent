@@ -29,7 +29,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Iterable, List, Mapping, Optional, Sequence, Tuple
 
 __all__ = [
     "MetaExample",
@@ -213,6 +213,7 @@ class ContinualMetaLearner:
         self.seed = seed
         self.version = 1
         self._updates: List[MetaUpdate] = []
+        self._previous_policy: Optional[LinearPolicy] = None
 
     def observe(self, example: MetaExample) -> None:
         self.replay.add(example)
@@ -252,14 +253,39 @@ class ContinualMetaLearner:
         candidate = self._candidate(batch)
         after = candidate.expected_reward(validation)
         drift = self._drift(validation)
+        previous = self.policy.copy()
         if after > before + self.min_gain:
+            self._previous_policy = previous
             self.policy = candidate
             self.version += 1
             update = MetaUpdate(self.version, True, before, after, drift, "improved")
         else:
+            self._previous_policy = None
             update = MetaUpdate(self.version, False, before, after, drift, "rejected")
         self._updates.append(update)
         return update
+
+    def rollback(self) -> bool:
+        """Undo the immediately preceding accepted update.
+
+        Used by a forgetting guard: a policy that improved its validation slice
+        but regressed a frozen anchor slice must be reverted. A rejected update
+        leaves no previous policy, so ``rollback`` returns ``False``.
+        """
+        if self._previous_policy is None:
+            return False
+        if not self._updates or not self._updates[-1].accepted:
+            return False
+        previous = self._updates[-1]
+        self.policy = self._previous_policy
+        self._previous_policy = None
+        self.version -= 1
+        # Keep the attempt in the audit trail as a rejected/rolled-back update
+        # instead of pretending it never happened.
+        self._updates[-1] = MetaUpdate(
+            self.version, False, previous.before, previous.after,
+            previous.drift, "rolled_back")
+        return True
 
     def act(self, features: Sequence[float], *, epsilon: float = 0.0) -> str:
         return self.policy.act(features, epsilon=epsilon, seed=self.seed)
