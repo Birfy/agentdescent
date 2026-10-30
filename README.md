@@ -176,7 +176,7 @@ evolve(tasks, reward, agent=LLMAgent(claude_code()))     # Claude Code CLI
 
 </details>
 
-## Use it from your agent — Claude Code, Codex, OpenCode, DeepSeek Harness
+## Use it from your agent — Claude Code, Codex, OpenCode, DeepSeek Harness, Grok Bot
 
 The same engine as a **plugin**. A shared skill teaches the host when to reach
 for it, an MCP server exposes `doctor / plan / start / status / show / apply /
@@ -190,6 +190,11 @@ bash scripts/setup-hosts.sh   # installs it and wires up whichever agent CLIs yo
 agentdescent demo             # a complete evolution, offline, no key, ~10s
 agentdescent doctor           # which CLIs and keys this machine has
 ```
+
+Grok Bot is a **scaffold**, not a one-click wire-up: `agentdescent install grok-bot`
+writes `SKILL.md` / `HOST.md` under `~/.agentdescent/plugins/grok-bot/`, and the
+MCP server is reached via `agentdescent mcp --transport streamable-http` behind an
+HTTPS tunnel. See [Use it from your agent](https://birfy.github.io/agentdescent/plugins/).
 
 Say *"improve this prompt against these examples"* inside the agent. It runs
 `doctor`, writes a spec, **quotes the call count before starting**, waits for
