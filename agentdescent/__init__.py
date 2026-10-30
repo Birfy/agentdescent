@@ -385,6 +385,28 @@ from .compute_policy import (
     ComputeReport,
     ComputeController,
 )
+from .continual_meta import (
+    ContinualMetaLearner,
+    ContinualReport,
+    LinearPolicy,
+    MetaExample,
+    MetaUpdate,
+    ReplayBuffer,
+)
+from .capability_foundry import (
+    CapabilityFoundry,
+    CapabilityOutcome,
+    CapabilityRequest,
+    CapabilityStatus,
+)
+from .experience import (
+    ExperienceEngine,
+    ExperienceHit,
+    ExperienceRecord,
+    ExperienceReport,
+    ExperienceStore,
+    ExperienceUpdate,
+)
 from .risk_policy import RiskContext, RiskDecision, RiskPolicy, RiskRule
 from .manifest import (RunManifest, build_manifest, diff_manifest,
                        verify_manifest)
@@ -874,6 +896,22 @@ __all__ = [
     "OptionReport",
     "ComputeReport",
     "ComputeController",
+    "ContinualMetaLearner",
+    "ContinualReport",
+    "LinearPolicy",
+    "MetaExample",
+    "MetaUpdate",
+    "ReplayBuffer",
+    "CapabilityFoundry",
+    "CapabilityOutcome",
+    "CapabilityRequest",
+    "CapabilityStatus",
+    "ExperienceEngine",
+    "ExperienceHit",
+    "ExperienceRecord",
+    "ExperienceReport",
+    "ExperienceStore",
+    "ExperienceUpdate",
     "EvaluationReport",
     "EvaluationRow",
     "evaluate",

@@ -4,10 +4,12 @@ import pytest
 
 import agentdescent
 from agentdescent import (
+    CapabilityFoundry,
     ComputeAction,
     ComputeContext,
     ComputeController,
     ComputeOption,
+    ExperienceEngine,
     LoopConfig,
     LoopKernel,
     LoopObservation,
@@ -26,6 +28,8 @@ def test_loop_compute_and_promotion_share_one_surface(tmp_path):
     assert LoopKernel is agentdescent.loop_kernel.LoopKernel
     assert promote is agentdescent.promotion.promote
     assert ComputeController is agentdescent.compute_policy.ComputeController
+    assert CapabilityFoundry is agentdescent.capability_foundry.CapabilityFoundry
+    assert ExperienceEngine is agentdescent.experience.ExperienceEngine
 
     router = ModelRouter([ModelSpec("m", cost=1)],
                          cost_weight=0.0, exploration=0.0)

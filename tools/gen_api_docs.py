@@ -156,6 +156,17 @@ SECTIONS: List[Tuple[str, str, str, str]] = [
      "Which strategy deserves this task's compute: direct, PRM, search or "
      "ensemble.",
      "compute-policy.md"),
+    ("agentdescent.capability_foundry", "Capability foundry",
+     "Admit a synthesized tool only after validation, review, safety, proof "
+     "and a holdout gain.",
+     "capability-foundry.md"),
+    ("agentdescent.experience", "Continual experience",
+     "Cross-run recall, replay warm-start and a forgetting guard around the "
+     "meta learner.",
+     "continual-experience.md"),
+    ("agentdescent.continual_meta", "Continual meta-policy",
+     "Online policy updates with replay, validation and rollback.",
+     "continual-experience.md"),
     ("agentdescent.selfplay", "Solver-challenger self-play",
      "The task distribution evolves too: challenger, frontier, curriculum.",
      "selfplay.md"),
