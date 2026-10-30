@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-564 public names across 110 modules.
+580 public names across 113 modules.
 
 ---
 
@@ -3539,6 +3539,226 @@ OptionReport(
     detail: str = ''
 ) -> None
 ```
+
+---
+
+## Capability foundry
+
+Admit a synthesized tool only after validation, review, safety, proof and a holdout gain. &nbsp;·&nbsp; `agentdescent.capability_foundry` &nbsp;·&nbsp; [guide](capability-foundry.md)
+
+### `CapabilityFoundry(...)`
+
+Admit a synthesized tool only when its review, safety, proof and gain hold.
+
+```python
+CapabilityFoundry(
+    gate: SafeSelfModifier,
+    *,
+    graph: Optional[ArtifactGraph] = None,
+    prover: Optional[ProofRunner] = None,
+    require_review: bool = True,
+    require_proof: bool = True,
+    require_registration: bool = True,
+    min_valid_score: float = 0.5,
+    min_review_agreement: float = 0.6,
+    min_holdout_gain: float = 0.0
+) -> None
+```
+
+### `CapabilityOutcome(...)`
+
+The admission decision, the proof and the registered artifact id.
+
+```python
+CapabilityOutcome(
+    gap_id: str,
+    tool_name: str,
+    status: str,
+    reasons: Tuple[str, ...] = (),
+    missing: Tuple[str, ...] = (),
+    artifact_id: str = '',
+    proof: Optional[ProofCertificate] = None,
+    safety: Optional[SafetyDecision] = None,
+    review: Optional[DeliberationReport] = None,
+    validation: Optional[ToolValidation] = None,
+    holdout_gain: Optional[float] = None
+) -> None
+```
+
+### `CapabilityRequest(...)`
+
+One synthesized tool and the evidence gathered for it.
+
+```python
+CapabilityRequest(
+    gap_id: str,
+    tool: ToolSpec,
+    validation: ToolValidation,
+    modification: ModificationSpec,
+    before: float,
+    after: float,
+    canary: Optional[float] = None,
+    review: Optional[DeliberationReport] = None,
+    review_winner: str = 'approve',
+    metadata: Mapping[str, Any] = <factory>
+) -> None
+```
+
+### `CapabilityStatus()`
+
+The closed outcome vocabulary for one capability candidate.
+
+---
+
+## Continual experience
+
+Cross-run recall, replay warm-start and a forgetting guard around the meta learner. &nbsp;·&nbsp; `agentdescent.experience` &nbsp;·&nbsp; [guide](continual-experience.md)
+
+### `ExperienceEngine(...)`
+
+Feed cross-run records into a continual learner with a forgetting guard.
+
+```python
+ExperienceEngine(
+    learner: ContinualMetaLearner,
+    store: ExperienceStore,
+    *,
+    require_anchors: bool = True,
+    anchor_tolerance: float = 0.0
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `replay_from_store() -> int` | Warm the learner replay from the store without re-writing rows. |
+
+### `ExperienceHit(record: ExperienceRecord, distance: float) -> None`
+
+One recalled record and its distance from the query.
+
+### `ExperienceRecord(...)`
+
+One run's experience: context features and the reward of each action.
+
+```python
+ExperienceRecord(
+    run_id: str,
+    features: Tuple[float, ...],
+    rewards: Mapping[str, float],
+    cost: float = 0.0,
+    accepted: bool = True,
+    artifact_id: str = '',
+    created_at: float = 0.0,
+    metadata: Mapping[str, Any] = <factory>
+) -> None
+```
+
+### `ExperienceReport(...)`
+
+```python
+ExperienceReport(
+    rows: int,
+    learner: ContinualReport,
+    skipped: int = 0,
+    detail: str = ''
+) -> None
+```
+
+### `ExperienceStore(path: Optional[str] = None) -> None`
+
+An append-only, optionally persistent experience memory.
+
+| method | what it does |
+|---|---|
+| `recall(features: Sequence[float], *, k: int = 5) -> Tuple[ExperienceHit, ...]` | Nearest records with the same feature dimension; others are skipped. |
+
+### `ExperienceUpdate(...)`
+
+The validation result plus the anchor guard's verdict.
+
+```python
+ExperienceUpdate(
+    version: int,
+    accepted: bool,
+    before: float,
+    after: float,
+    drift: float,
+    anchor_before: Optional[float] = None,
+    anchor_after: Optional[float] = None,
+    rolled_back: bool = False,
+    reason: str = ''
+) -> None
+```
+
+---
+
+## Continual meta-policy
+
+Online policy updates with replay, validation and rollback. &nbsp;·&nbsp; `agentdescent.continual_meta` &nbsp;·&nbsp; [guide](continual-experience.md)
+
+### `ContinualMetaLearner(...)`
+
+Update a softmax meta-policy with replay, validation and rollback.
+
+```python
+ContinualMetaLearner(
+    actions: Sequence[str],
+    *,
+    dim: int,
+    learning_rate: float = 0.2,
+    l2: float = 0.001,
+    replay_size: int = 1000,
+    min_gain: float = 0.0,
+    seed: int = 0
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `rollback() -> bool` | Undo the immediately preceding accepted update. |
+
+### `ContinualReport(...)`
+
+```python
+ContinualReport(
+    version: int,
+    updates: int,
+    accepted: int,
+    rejected: int,
+    replay: int,
+    detail: str = ''
+) -> None
+```
+
+### `LinearPolicy(actions: Tuple[str, ...], dim: int, weights: List[List[float]] = <factory>) -> None`
+
+### `MetaExample(...)`
+
+```python
+MetaExample(
+    features: Tuple[float, ...],
+    rewards: Mapping[str, float],
+    cost: float = 0.0,
+    at: float = 0.0
+) -> None
+```
+
+### `MetaUpdate(...)`
+
+```python
+MetaUpdate(
+    version: int,
+    accepted: bool,
+    before: float,
+    after: float,
+    drift: float,
+    reason: str
+) -> None
+```
+
+### `ReplayBuffer(max_size: int = 1000) -> None`
+
+A bounded, deterministic replay buffer.
 
 ---
 
