@@ -426,6 +426,12 @@ All notable changes to AgentDescent are documented here. The format follows
   a later terminal report updates the run and appends new generations. Unknown
   statuses are refused, and a caller-supplied empty `LineageGraph` is preserved.
 
+- `CalibratedDeferral`: fits `SelfModel` on raw confidence/outcomes, then fits
+  `DeferralPolicy` on the **calibrated** confidence and risk. `decide` returns
+  answer / defer / deny with both raw and calibrated confidence and the hard-risk
+  ceiling still enforced. The report carries the calibration and deferral reports
+  together.
+
 ### Changed
 
 - `agentdescent doctor` prints `skill` and `mcp` on each installed host line
