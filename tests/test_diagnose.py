@@ -99,3 +99,38 @@ def test_missing_gold_and_missing_reward_are_not_failures(monkeypatch):
         "final_reward": 0.6, "outcomes": {},
         "samples": [{"output": "x", "gold": None, "reward": None}]})
     assert diagnose_payload("r").verdict == "no-improvement"
+
+
+def test_named_algorithm_outcomes_count_as_adopted(monkeypatch):
+    """GEPA/SkillOpt/DGM record adopt under their own category, not committed."""
+    for category in ("gepa-select", "skillopt-accept", "dgm-select"):
+        _patch(monkeypatch, {
+            "final_reward": 0.75, "outcomes": {category: 3},
+            "samples": [{"output": "297", "gold": "999", "reward": 0.0}]})
+        report = diagnose_payload("r")
+        assert report.verdict == "partial-improvement", category
+        assert "committed 3" in report.summary
+
+
+def test_history_committed_wins_over_empty_committed_outcome(monkeypatch):
+    _patch(monkeypatch, {
+        "final_reward": 0.75,
+        "outcomes": {"gepa-select": 3},
+        "history": [
+            {"round": 1, "committed": 1, "rejected": 0},
+            {"round": 2, "committed": 1, "rejected": 0},
+            {"round": 3, "committed": 1, "rejected": 0},
+        ],
+        "samples": [{"output": "297", "gold": "999", "reward": 0.0}]})
+    report = diagnose_payload("r")
+    assert report.verdict == "partial-improvement"
+    assert report.evidence["committed"] == 3
+
+
+def test_adopted_count_helper_prefers_history():
+    from agentdescent.diagnose import adopted_count
+    assert adopted_count(history=[{"committed": 1}, {"committed": 2}],
+                         outcomes={"committed": 9}) == 3
+    assert adopted_count(outcomes={"gepa-select": 2, "below-threshold": 5}) == 2
+    assert adopted_count(outcomes={"below-threshold": 5}) == 0
+    assert adopted_count(history=[], outcomes={"skillopt-accept": 1}) == 1

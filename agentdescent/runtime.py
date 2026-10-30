@@ -158,11 +158,13 @@ def run_guarded(spec: EvolveSpec, *, acceptance: Optional[Any] = None,
         names = getattr(chain, "describe", None)
         outcomes = dict(result.outcomes())
         stop_reason = getattr(result, "stop_reason", "")
+        from .diagnose import adopted_count
         try:
             decision = decision_log.record(
                 kind="run", artifact_id=str(comp.kwargs.get(
                     "artifact_id", spec.artifact_id())),
-                accepted=outcomes.get("committed", 0) > 0,
+                accepted=adopted_count(history=result.history,
+                                       outcomes=outcomes) > 0,
                 category=str(getattr(stop_reason, "value", stop_reason)),
                 detail=str(result.error or ""),
                 evidence={

@@ -153,3 +153,29 @@ def test_an_aggregator_factory_is_noted(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime, "compose", lambda spec, **kw: Comp())
     guarded = runtime.run_guarded(spec, acceptance=_Allow())
     assert any("aggregator_factory" in note for note in guarded.notes)
+
+
+def test_decision_log_marks_named_algorithm_adoptions_accepted(tmp_path, monkeypatch):
+    """A gepa-select (etc.) outcome must set decision.accepted, not only committed."""
+    from types import SimpleNamespace
+    from agentdescent import runtime as runtime_mod
+
+    class _Comp:
+        def __init__(self):
+            self.kwargs = {"policies": None, "artifact_id": "prompt"}
+            self.notes = ()
+
+        def run(self):
+            history = [SimpleNamespace(committed=1, reasons={"gepa-select": 1}),
+                       SimpleNamespace(committed=1, reasons={"gepa-select": 1})]
+            return SimpleNamespace(
+                error=None, final_reward=0.75, history=history,
+                stop_reason="max_rounds", wallclock=1.0, usage=None,
+                outcomes=lambda: {"gepa-select": 2})
+
+    monkeypatch.setattr(runtime_mod, "compose", lambda spec, **kw: _Comp())
+    log = _Log()
+    guarded = run_guarded(_dir_spec(str(tmp_path)), decision_log=log,
+                          repo_path=str(tmp_path / "repo"))
+    assert log.records and log.records[0].accepted is True
+    assert guarded.result.outcomes() == {"gepa-select": 2}
