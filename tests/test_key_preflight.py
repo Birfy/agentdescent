@@ -11,13 +11,18 @@ import pytest
 from agentdescent import cli
 from agentdescent.cli import _unusable_refs
 from agentdescent.evolvespec import EvolveSpec
+from agentdescent.integrations import provider_key_names
 
 KEYS = ("OPENAI_API_KEY", "OPENAI_BASE_URL", "ANTHROPIC_API_KEY", "X_KEY", "X_URL")
 
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
-    for k in KEYS:
+    # Every provider key the preflight looks at, not only the ones named here:
+    # a developer or CI box with e.g. ARK_API_KEY exported otherwise gets an
+    # extra "ARK_API_KEY is set -- name one with ..." hint and the exact-text
+    # assertions fail for reasons unrelated to the code under test.
+    for k in {*KEYS, *provider_key_names()}:
         monkeypatch.delenv(k, raising=False)
     # the `anthropic` package is a separate preflight item; pretend it is there
     real = cli.doctor_report
