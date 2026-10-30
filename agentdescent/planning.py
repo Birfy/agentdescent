@@ -68,6 +68,10 @@ class PlanResult:
     nodes: int
     root_visits: int
     detail: str = ""
+    #: The child state the chosen action leads to, when the simulator exposes
+    #: one. Callers use it instead of stepping a possibly side-effecting
+    #: simulator a second time.
+    state: Any = None
 
 
 @dataclass
@@ -188,4 +192,5 @@ class MCTSPlanner:
                   f"visits={best.visits}, value={best.value:.4f}")
         return PlanResult(action=best.action, value=best.value,
                           visits=best.visits, nodes=self.nodes,
-                          root_visits=root.visits, detail=detail)
+                          root_visits=root.visits, detail=detail,
+                          state=best.state)
