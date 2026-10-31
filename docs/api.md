@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-588 public names across 116 modules.
+592 public names across 118 modules.
 
 ---
 
@@ -3613,6 +3613,30 @@ build_trust_evidence(
 
 ---
 
+## Promotion ledger
+
+Sign an accepted promotion into a manifest and lineage receipt. &nbsp;·&nbsp; `agentdescent.promotion_ledger` &nbsp;·&nbsp; [guide](trusted-promotion.md)
+
+### `PromotionLedger(lineage: Optional[LineageGraph] = None, *, issuer: str = 'agentdescent') -> None`
+
+Sign accepted promotions and write their lineage receipt.
+
+### `ReleaseRecord(...)`
+
+The signed manifest, its verification and the lineage node.
+
+```python
+ReleaseRecord(
+    manifest: ArtifactManifest,
+    envelope: SignedEnvelope,
+    verification: VerificationResult,
+    lineage: LineageNode,
+    detail: str = ''
+) -> None
+```
+
+---
+
 ## Capability foundry
 
 Admit a synthesized tool only after validation, review, safety, proof and a holdout gain. &nbsp;·&nbsp; `agentdescent.capability_foundry` &nbsp;·&nbsp; [guide](capability-foundry.md)
@@ -3678,6 +3702,41 @@ CapabilityRequest(
 ### `CapabilityStatus()`
 
 The closed outcome vocabulary for one capability candidate.
+
+---
+
+## Capability scout
+
+Turn failed tasks into a synthesized tool and hand it to the foundry. &nbsp;·&nbsp; `agentdescent.capability_scout` &nbsp;·&nbsp; [guide](capability-foundry.md)
+
+### `CapabilityScout(...)`
+
+Turn failure tasks into a reviewed tool via the existing seams.
+
+```python
+CapabilityScout(
+    synthesizer: ToolSynthesizer,
+    foundry: CapabilityFoundry,
+    *,
+    max_examples: int = 5,
+    max_candidates: int = 4
+) -> None
+```
+
+### `CapabilityScoutReport(...)`
+
+The failure tasks, synthesis trail and admission outcome.
+
+```python
+CapabilityScoutReport(
+    goal: str,
+    tasks: int,
+    synthesis: ToolSynthesisReport,
+    outcome: Optional[CapabilityOutcome],
+    verdict: str,
+    detail: str = ''
+) -> None
+```
 
 ---
 

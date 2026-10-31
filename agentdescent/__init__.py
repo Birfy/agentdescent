@@ -369,6 +369,7 @@ from .loop_kernel import (
     LoopReport,
     LoopKernel,
 )
+from .promotion_ledger import PromotionLedger, ReleaseRecord
 from .promotion import (
     PromotionAction,
     PromotionRules,
@@ -401,6 +402,7 @@ from .capability_foundry import (
     CapabilityRequest,
     CapabilityStatus,
 )
+from .capability_scout import CapabilityScout, CapabilityScoutReport
 from .experience import (
     ExperienceEngine,
     ExperienceHit,
@@ -895,6 +897,8 @@ __all__ = [
     "PromotionRequest",
     "PromotionDecision",
     "promote",
+    "PromotionLedger",
+    "ReleaseRecord",
     "TrustEvidence",
     "build_trust_evidence",
     "ComputeAction",
@@ -914,6 +918,8 @@ __all__ = [
     "CapabilityOutcome",
     "CapabilityRequest",
     "CapabilityStatus",
+    "CapabilityScout",
+    "CapabilityScoutReport",
     "ExperienceEngine",
     "ExperienceHit",
     "ExperienceRecord",
