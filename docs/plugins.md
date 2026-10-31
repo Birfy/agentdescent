@@ -86,7 +86,10 @@ because Grok Bot has no public one-click plugin API for local skill directories
 or stdio MCP (custom connectors need public HTTPS). For those, run
 `agentdescent mcp --transport streamable-http` (loopback, port 8000, path
 `/mcp`) and expose it through an HTTPS tunnel; the server has no auth, and a
-non-loopback `--host` needs `--allow-remote`. `doctor` reports
+non-loopback `--host` needs `--allow-remote`. If the port cannot be bound
+(already in use, for example) the command prints one line naming the port and
+exits 4 before announcing any URL, so pick another `--port` (exit 3 stays
+reserved for a missing or too-old MCP SDK, 2 for a refused `--host`). `doctor` reports
 `mcp n/a` for that host when the scaffold is current. A future one-click route
 (if/when a host-native API appears) is still tracked on #165.
 

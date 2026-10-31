@@ -182,7 +182,36 @@ def test_cmd_mcp_streamable_http_on_pre_1_8_exits_with_actionable_message(monkey
 
     fake = _FakePre18Server()
     monkeypatch.setattr(m, "build_server", lambda store=None: fake)
-    rc = main(["mcp", "--transport", "streamable-http", "--port", "9"])
+    rc = main(["mcp", "--transport", "streamable-http", "--port", str(_free_port())])
     assert rc == 3
     err = capsys.readouterr().err
     assert "mcp>=1.8" in err and "streamable-http" in err
+
+
+def test_streamable_http_busy_port_fails_fast_with_one_line(capsys):
+    """#636: a held port must fail before the URL is printed, with its own code."""
+    with socket.socket() as holder:
+        holder.bind(("127.0.0.1", 0))
+        holder.listen(1)
+        port = holder.getsockname()[1]
+        rc = main(["mcp", "--transport", "streamable-http", "--port", str(port)])
+    assert rc == 4
+    err = capsys.readouterr().err
+    lines = [ln for ln in err.splitlines() if ln.strip()]
+    assert len(lines) == 1, err
+    assert "already in use" in lines[0] and "--port" in lines[0]
+    assert str(port) in lines[0]
+    assert "streamable-http on" not in err
+
+
+def test_port_probe_free_port_is_none():
+    from agentdescent.cli import _mcp_port_unavailable
+
+    assert _mcp_port_unavailable("127.0.0.1", _free_port()) is None
+
+
+def test_grok_bot_host_md_mentions_busy_port():
+    from agentdescent.integrations import grok_bot_host_md
+
+    text = grok_bot_host_md()
+    assert "exits 4" in text and "--port" in text
