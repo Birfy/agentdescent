@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-585 public names across 115 modules.
+587 public names across 116 modules.
 
 ---
 
@@ -3678,6 +3678,41 @@ CapabilityRequest(
 ### `CapabilityStatus()`
 
 The closed outcome vocabulary for one capability candidate.
+
+---
+
+## Capability scout
+
+Turn failed tasks into a synthesized tool and hand it to the foundry. &nbsp;·&nbsp; `agentdescent.capability_scout` &nbsp;·&nbsp; [guide](capability-foundry.md)
+
+### `CapabilityScout(...)`
+
+Turn failure tasks into a reviewed tool via the existing seams.
+
+```python
+CapabilityScout(
+    synthesizer: ToolSynthesizer,
+    foundry: CapabilityFoundry,
+    *,
+    max_examples: int = 5,
+    max_candidates: int = 4
+) -> None
+```
+
+### `CapabilityScoutReport(...)`
+
+The failure tasks, synthesis trail and admission outcome.
+
+```python
+CapabilityScoutReport(
+    goal: str,
+    tasks: int,
+    synthesis: ToolSynthesisReport,
+    outcome: Optional[CapabilityOutcome],
+    verdict: str,
+    detail: str = ''
+) -> None
+```
 
 ---
 
