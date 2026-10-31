@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-594 public names across 119 modules.
+596 public names across 120 modules.
 
 ---
 
@@ -3644,6 +3644,39 @@ CounterfactualExperienceReport(
     record: ExperienceRecord,
     credit: CreditReport,
     observed: int,
+    detail: str = ''
+) -> None
+```
+
+---
+
+## Preference replay
+
+Rank stored experience with a fitted preference model and replay the preferred slice. &nbsp;·&nbsp; `agentdescent.preference_replay` &nbsp;·&nbsp; [guide](continual-experience.md)
+
+### `PreferenceReplay(...)`
+
+Rank stored experience by a preference model and replay the top slice.
+
+```python
+PreferenceReplay(
+    model: PreferenceModel,
+    store: ExperienceStore,
+    *,
+    featurize: Optional[Callable[[ExperienceRecord], Sequence[float]]] = None
+) -> None
+```
+
+### `PreferenceReplayReport(...)`
+
+The selected records, their scores and what the engine ingested.
+
+```python
+PreferenceReplayReport(
+    selected: Tuple[ExperienceRecord, ...],
+    ingested: Tuple[str, ...],
+    scores: Mapping[str, float] = None,
+    skipped: int = 0,
     detail: str = ''
 ) -> None
 ```

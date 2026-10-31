@@ -77,3 +77,21 @@ are summed. An unknown action, wrong feature dimension, or an empty reward map
 is refused. Negative credits are kept by default; set `min_credit` to opt into
 filtering, and `require_positive_gain=True` to refuse traces with no overall
 gain.
+
+## Preference-ranked replay
+
+`PreferenceReplay` uses a fitted `PreferenceModel` as the source-selection
+policy:
+
+```python
+replay = PreferenceReplay(preference_model, source_store)
+report = replay.replay(engine, k=20)
+report.selected, report.scores, report.skipped
+```
+
+The model must be fitted on the same feature space as the records it ranks;
+`featurize=` can adapt a record. Records with another feature dimension are
+skipped (and counted), never crash the ranking. The source store must be
+separate from the engine's replay store; the engine already warms from its own
+store, so replaying the same store is a silent no-op and is refused.
+

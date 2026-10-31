@@ -163,6 +163,10 @@ SECTIONS: List[Tuple[str, str, str, str]] = [
     ("agentdescent.counterfactual_experience", "Counterfactual experience",
      "Turn Shapley step credit into per-action experience rewards.",
      "continual-experience.md"),
+    ("agentdescent.preference_replay", "Preference replay",
+     "Rank stored experience with a fitted preference model and replay the "
+     "preferred slice.",
+     "continual-experience.md"),
     ("agentdescent.promotion_ledger", "Promotion ledger",
      "Sign an accepted promotion into a manifest and lineage receipt.",
      "trusted-promotion.md"),
