@@ -162,6 +162,28 @@ class ArtifactGraph:
         for parent in artifact.parents:
             self._children.setdefault(parent, set()).add(artifact.artifact_id)
 
+    def remove(self, artifact_id: str) -> bool:
+        """Remove one artifact; return whether it existed.
+
+        Children keep their ``parent_ids`` and become external parents, so a
+        caller can remove an evicted elite without rewriting descendants.
+        """
+        artifact = self._artifacts.pop(artifact_id, None)
+        if artifact is None:
+            return False
+        counts = self._tokens.pop(artifact_id, {})
+        # _df counts documents, not term occurrences; decrement once per token.
+        for token in counts:
+            remaining = self._df.get(token, 0) - 1
+            if remaining > 0:
+                self._df[token] = remaining
+            else:
+                self._df.pop(token, None)
+        for parent in artifact.parents:
+            self._children.get(parent, set()).discard(artifact_id)
+        self._children.pop(artifact_id, None)
+        return True
+
     def extend(self, artifacts: Iterable[Artifact]) -> "ArtifactGraph":
         for artifact in artifacts:
             self.add(artifact)
