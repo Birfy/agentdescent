@@ -400,6 +400,7 @@ from .capability_foundry import (
     CapabilityRequest,
     CapabilityStatus,
 )
+from .preference_replay import PreferenceReplay, PreferenceReplayReport
 from .experience import (
     ExperienceEngine,
     ExperienceHit,
@@ -919,6 +920,8 @@ __all__ = [
     "PlatformConfig",
     "PlatformReport",
     "RSIPlatform",
+    "PreferenceReplay",
+    "PreferenceReplayReport",
     "EvaluationReport",
     "EvaluationRow",
     "evaluate",

@@ -58,3 +58,21 @@ exact policy.
 
 The store is append-only and bounded only by the caller's retention policy; the
 learner's `ReplayBuffer` is the bounded hot set (`replay_size`).
+
+
+## Preference-ranked replay
+
+`PreferenceReplay` uses a fitted `PreferenceModel` as the source-selection
+policy:
+
+```python
+replay = PreferenceReplay(preference_model, source_store)
+report = replay.replay(engine, k=20)
+report.selected, report.scores, report.skipped
+```
+
+The model must be fitted on the same feature space as the records it ranks;
+`featurize=` can adapt a record. Records with another feature dimension are
+skipped (and counted), never crash the ranking. The source store must be
+separate from the engine's replay store; the engine already warms from its own
+store, so replaying the same store is a silent no-op and is refused.

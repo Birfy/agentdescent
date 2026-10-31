@@ -160,6 +160,10 @@ SECTIONS: List[Tuple[str, str, str, str]] = [
      "Build the evaluation, canary, statistical, Goodhart, metamorphic, "
      "verifier and calibration reports from one paired run.",
      "trust-evidence.md"),
+    ("agentdescent.preference_replay", "Preference replay",
+     "Rank stored experience with a fitted preference model and replay the "
+     "preferred slice.",
+     "continual-experience.md"),
     ("agentdescent.capability_foundry", "Capability foundry",
      "Admit a synthesized tool only after validation, review, safety, proof "
      "and a holdout gain.",
