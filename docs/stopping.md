@@ -33,3 +33,23 @@ evolve(..., stop_when=policy)
 This is an economic stop, not a safety one: it says the search has stopped
 paying for itself, not that the artifact is good. Pair it with a target or a
 round budget when both matter.
+
+
+## Budgeted search — stop when another expansion stops paying
+
+`MarginalGainStop` stops a run by calls; `BudgetedSearch` applies the same idea
+to UCT. It runs increasing budgets through `SearchFabric`, computes the value
+gain **per expansion**, and stops when the marginal return falls below
+`min_gain_per_expansion` (or when a `MarginalGainStop` fires).
+
+```python
+from agentdescent import BudgetedSearch
+
+search = BudgetedSearch(fabric, patience=1, min_gain_per_expansion=1e-3)
+report = search.run(state, budgets=(5, 20, 60))
+report.best.value, report.stopped_reason, report.rounds
+```
+
+Each round records its budget, cumulative expansions, value, gain and
+gain-per-expansion, so the compute spend is auditable. The fabric's planner
+budget and RNG state are restored after `run()`.

@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-587 public names across 116 modules.
+594 public names across 119 modules.
 
 ---
 
@@ -3650,6 +3650,30 @@ CounterfactualExperienceReport(
 
 ---
 
+## Promotion ledger
+
+Sign an accepted promotion into a manifest and lineage receipt. &nbsp;·&nbsp; `agentdescent.promotion_ledger` &nbsp;·&nbsp; [guide](trusted-promotion.md)
+
+### `PromotionLedger(lineage: Optional[LineageGraph] = None, *, issuer: str = 'agentdescent') -> None`
+
+Sign accepted promotions and write their lineage receipt.
+
+### `ReleaseRecord(...)`
+
+The signed manifest, its verification and the lineage node.
+
+```python
+ReleaseRecord(
+    manifest: ArtifactManifest,
+    envelope: SignedEnvelope,
+    verification: VerificationResult,
+    lineage: LineageNode,
+    detail: str = ''
+) -> None
+```
+
+---
+
 ## Capability foundry
 
 Admit a synthesized tool only after validation, review, safety, proof and a holdout gain. &nbsp;·&nbsp; `agentdescent.capability_foundry` &nbsp;·&nbsp; [guide](capability-foundry.md)
@@ -3715,6 +3739,41 @@ CapabilityRequest(
 ### `CapabilityStatus()`
 
 The closed outcome vocabulary for one capability candidate.
+
+---
+
+## Capability scout
+
+Turn failed tasks into a synthesized tool and hand it to the foundry. &nbsp;·&nbsp; `agentdescent.capability_scout` &nbsp;·&nbsp; [guide](capability-foundry.md)
+
+### `CapabilityScout(...)`
+
+Turn failure tasks into a reviewed tool via the existing seams.
+
+```python
+CapabilityScout(
+    synthesizer: ToolSynthesizer,
+    foundry: CapabilityFoundry,
+    *,
+    max_examples: int = 5,
+    max_candidates: int = 4
+) -> None
+```
+
+### `CapabilityScoutReport(...)`
+
+The failure tasks, synthesis trail and admission outcome.
+
+```python
+CapabilityScoutReport(
+    goal: str,
+    tasks: int,
+    synthesis: ToolSynthesisReport,
+    outcome: Optional[CapabilityOutcome],
+    verdict: str,
+    detail: str = ''
+) -> None
+```
 
 ---
 
@@ -3938,6 +3997,51 @@ RSIPlatform(
 |---|---|
 | `clone(*, base_seed: Optional[int] = None) -> 'RSIPlatform'` | A new platform with a new loop seed, sharing every other component. |
 | `run_cycle(...)` | Run one full cycle; every configured layer must produce a decision. |
+
+---
+
+## Budgeted search
+
+Stop UCT when another expansion stops buying value, using a per-expansion gain bar or MarginalGainStop. &nbsp;·&nbsp; `agentdescent.budgeted_search` &nbsp;·&nbsp; [guide](stopping.md)
+
+### `BudgetedSearch(...)`
+
+Run a search at increasing budgets and stop when the gain plateaus.
+
+```python
+BudgetedSearch(
+    fabric: SearchFabric,
+    *,
+    min_gain_per_expansion: float = 0.0001,
+    patience: int = 2,
+    stop: Optional[MarginalGainStop] = None,
+    seed: int = 0
+) -> None
+```
+
+### `BudgetedSearchReport(...)`
+
+```python
+BudgetedSearchReport(
+    rounds: Tuple[SearchRound, ...],
+    best: Optional[SearchResult],
+    stopped_reason: str,
+    detail: str = ''
+) -> None
+```
+
+### `SearchRound(...)`
+
+```python
+SearchRound(
+    budget: int,
+    result: SearchResult,
+    gain: Optional[float] = None,
+    gain_per_expansion: Optional[float] = None,
+    cumulative_expansions: int = 0,
+    stopped: bool = False
+) -> None
+```
 
 ---
 

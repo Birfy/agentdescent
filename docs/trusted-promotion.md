@@ -96,3 +96,27 @@ It does not re-run the gates. `evalops`, `conformal`, `sequential`, `canary`,
 `proofs` and `policy_release` produce the reports; this module owns the
 ordering, the missing-evidence policy and the audit record. That keeps a
 non-deterministic judge or a billable verifier from being called twice.
+
+
+## Release receipt
+
+`PromotionLedger` writes an accepted promotion into the release path:
+
+```python
+from agentdescent import PromotionLedger, PromotionRules
+from agentdescent.lineage import LineageGraph
+
+rules = PromotionRules(...)
+decision = promote(request, rules)
+ledger = PromotionLedger(LineageGraph(), issuer="ci")
+release = ledger.record(
+    decision, artifact_id="skill-1", content_hash=content_hash,
+    key_id="ci", secret=key, rules=rules,
+    parents=("skill-0",), run_id="run-8")
+release.verification.valid
+```
+
+It refuses a decision for another artifact, a mismatched content hash, a
+tampered evidence/decision hash, wrong rules, or a duplicate lineage id before
+producing a signature. The manifest carries the issuer; `to_dict()` includes the
+envelope and hashes needed to re-verify offline.
