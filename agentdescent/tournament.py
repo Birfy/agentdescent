@@ -131,9 +131,8 @@ def run_tournament(spec: EvolveSpec, algorithm_names: Sequence[str], *,
             continue
         alg = _algorithms.get(name, where="tournament")
         if spec.kind not in alg.kinds:
-            raise ValueError(
-                f"algorithm {name!r} applies to kind {list(alg.kinds)}, "
-                f"not {spec.kind!r}")
+            raise ValueError(_algorithms.kind_mismatch_message(
+                alg, spec.kind, target=str(spec.target)))
     seeds = tuple(dict.fromkeys(int(seed) for seed in seeds))
     if not seeds:
         raise ValueError("run_tournament() needs at least one seed")
@@ -245,9 +244,8 @@ def estimate_tournament(spec: EvolveSpec, algorithm_names: Sequence[str], *,
         if name != DEFAULT_ARM:
             alg = _algorithms.get(name, where="tournament")
             if spec.kind not in alg.kinds:
-                raise ValueError(
-                    f"algorithm {name!r} applies to kind {list(alg.kinds)}, "
-                    f"not {spec.kind!r}")
+                raise ValueError(_algorithms.kind_mismatch_message(
+                    alg, spec.kind, target=str(spec.target)))
         arm = _arm_spec(spec, name, int(seeds[0]), rounds=rounds,
                         max_seconds=max_seconds)
         comp = compose(arm)

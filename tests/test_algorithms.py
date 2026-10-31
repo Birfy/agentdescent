@@ -619,3 +619,49 @@ def test_plan_names_merge_policies_a_factory_algorithm_replaces():
     assert not [w for w in cli.plan_payload(_spec(algorithm="gepa", reflect=_REFLECT,
                                                   allow=["tests."]))["warnings"]
                 if "replaced by" in w]
+
+
+def _skill_dir(tmp_path):
+    skill = tmp_path / "sk"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text("---\nname: s\ndescription: d\n---\nbody\n")
+    return skill
+
+
+def test_kind_mismatch_names_usable_algorithms_and_text_route(tmp_path, capsys):
+    skill = _skill_dir(tmp_path)
+    assert cli.main(["init", str(skill), "--out", str(tmp_path / "s.json"),
+                     "--algorithm", "gepa", "--agent", "opencode"]) == 2
+    err = capsys.readouterr().err
+    assert "archive_selection" in err and "evoskill" in err
+    assert "algorithms list --kind skill_dir" in err
+    assert "--kind text" in err and str(skill / "SKILL.md") in err
+
+
+def test_kind_mismatch_on_text_lists_text_algorithms_without_text_route():
+    msg = algorithms.kind_mismatch_message(algorithms.get("evoskill"), "text",
+                                           target="Be helpful.")
+    assert "gepa" in msg and "rrsi" in msg
+    assert "target it as text" not in msg
+    with pytest.raises(SpecError, match="for kind 'text'"):
+        compose(_spec(algorithm="evoskill"))
+
+
+def test_kind_mismatch_list_comes_from_the_registry(tmp_path):
+    def build(ctx, params):
+        return Overrides()
+
+    algorithms.register(Algorithm(name="_agent_only", summary="s", kinds=("agent_code",),
+                                  fidelity="preset", params=(), build=build),
+                        replace=True)
+    try:
+        msg = algorithms.kind_mismatch_message(algorithms.get("gepa"), "agent_code")
+        assert "_agent_only" in msg
+    finally:
+        algorithms._REGISTRY.pop("_agent_only")
+
+
+def test_kind_mismatch_with_no_usable_algorithm_points_to_default_loop():
+    msg = algorithms.kind_mismatch_message(algorithms.get("gepa"), "no_such_kind")
+    assert "no named algorithm applies to kind 'no_such_kind'" in msg
+    assert "omit --algorithm" in msg

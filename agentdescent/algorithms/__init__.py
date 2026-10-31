@@ -42,7 +42,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 __all__ = ["Algorithm", "AlgorithmError", "BuildContext", "ENTRY_POINT_GROUP",
            "FIDELITY", "Overrides", "Param", "external_errors", "get", "names",
-           "register", "resolve_params", "listing"]
+           "kind_mismatch_message", "register", "resolve_params", "listing"]
 
 FIDELITY = ("benchmark_faithful", "mechanism_microport", "preset")
 
@@ -239,6 +239,41 @@ def listing(kind: Optional[str] = None, *,
     return [a for name, a in sorted(_REGISTRY.items())
             if (kind is None or kind in a.kinds)
             and (not builtin_only or name in _BUILTIN_NAMES)]
+
+
+def kind_mismatch_message(algorithm: Algorithm, kind: str, *,
+                          target: Optional[str] = None,
+                          prefix: str = "algorithm") -> str:
+    """One error text for "``algorithm`` does not apply to ``kind``".
+
+    Names the algorithms that do apply (computed from the registry, so a
+    plugin-registered algorithm shows up too) and, when the algorithm runs on
+    ``text`` and ``target`` is a skill directory holding ``SKILL.md`` (or a
+    single file), how to run it on that one file instead.
+    """
+    import os
+
+    name = algorithm.name
+    msg = (f"{prefix} {name!r} applies to kind {list(algorithm.kinds)}, "
+           f"not {kind!r}")
+    usable = [a.name for a in listing(kind)]
+    if usable:
+        msg += (f"; for kind {kind!r}: {usable} "
+                f"(agentdescent algorithms list --kind {kind})")
+    else:
+        msg += (f"; no named algorithm applies to kind {kind!r}; omit "
+                "--algorithm for the default loop")
+    if kind != "text" and "text" in algorithm.kinds and target:
+        path = os.path.expanduser(str(target))
+        one = None
+        if os.path.isdir(path) and os.path.isfile(os.path.join(path, "SKILL.md")):
+            one = os.path.join(str(target), "SKILL.md")
+        elif os.path.isfile(path):
+            one = str(target)
+        if one is not None:
+            msg += (f"; to run {name} on one file, target it as text: "
+                    f"agentdescent init {one} --kind text ... --algorithm {name}")
+    return msg
 
 
 def resolve_params(algorithm: Algorithm, params: Optional[Mapping[str, Any]], *,
