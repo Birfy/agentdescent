@@ -341,6 +341,7 @@ from .self_improve import (
 )
 from .leakage import LeakageGuard, LeakageReport, find_leakage
 from .stopping import MarginalGainStop
+from .budgeted_search import BudgetedSearch, BudgetedSearchReport, SearchRound
 from .stats_eval import (BootstrapResult, ContaminationReport, bootstrap_ci,
                          contamination_overlap, is_significant, paired_gain)
 from .approval import ApprovalGate, ApprovalRequest, ApprovalStore
@@ -833,6 +834,9 @@ __all__ = [
     "LeakageReport",
     "find_leakage",
     "MarginalGainStop",
+    "BudgetedSearch",
+    "BudgetedSearchReport",
+    "SearchRound",
     "BootstrapResult",
     "ContaminationReport",
     "bootstrap_ci",
