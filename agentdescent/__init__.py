@@ -368,6 +368,7 @@ from .loop_kernel import (
     LoopReport,
     LoopKernel,
 )
+from .promotion_ledger import PromotionLedger, ReleaseRecord
 from .promotion import (
     PromotionAction,
     PromotionRules,
@@ -891,6 +892,8 @@ __all__ = [
     "PromotionRequest",
     "PromotionDecision",
     "promote",
+    "PromotionLedger",
+    "ReleaseRecord",
     "TrustEvidence",
     "build_trust_evidence",
     "ComputeAction",

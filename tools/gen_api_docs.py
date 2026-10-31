@@ -160,6 +160,9 @@ SECTIONS: List[Tuple[str, str, str, str]] = [
      "Build the evaluation, canary, statistical, Goodhart, metamorphic, "
      "verifier and calibration reports from one paired run.",
      "trust-evidence.md"),
+    ("agentdescent.promotion_ledger", "Promotion ledger",
+     "Sign an accepted promotion into a manifest and lineage receipt.",
+     "trusted-promotion.md"),
     ("agentdescent.capability_foundry", "Capability foundry",
      "Admit a synthesized tool only after validation, review, safety, proof "
      "and a holdout gain.",
