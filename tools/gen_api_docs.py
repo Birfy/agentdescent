@@ -175,6 +175,10 @@ SECTIONS: List[Tuple[str, str, str, str]] = [
      "One cycle that hands compute, loop, promotion, foundry and experience "
      "to each other.",
      "platform.md"),
+    ("agentdescent.budgeted_search", "Budgeted search",
+     "Stop UCT when another expansion stops buying value, using a per-expansion "
+     "gain bar or MarginalGainStop.",
+     "stopping.md"),
     ("agentdescent.selfplay", "Solver-challenger self-play",
      "The task distribution evolves too: challenger, frontier, curriculum.",
      "selfplay.md"),

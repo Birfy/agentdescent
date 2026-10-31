@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-585 public names across 115 modules.
+588 public names across 116 modules.
 
 ---
 
@@ -3901,6 +3901,51 @@ RSIPlatform(
 |---|---|
 | `clone(*, base_seed: Optional[int] = None) -> 'RSIPlatform'` | A new platform with a new loop seed, sharing every other component. |
 | `run_cycle(...)` | Run one full cycle; every configured layer must produce a decision. |
+
+---
+
+## Budgeted search
+
+Stop UCT when another expansion stops buying value, using a per-expansion gain bar or MarginalGainStop. &nbsp;·&nbsp; `agentdescent.budgeted_search` &nbsp;·&nbsp; [guide](stopping.md)
+
+### `BudgetedSearch(...)`
+
+Run a search at increasing budgets and stop when the gain plateaus.
+
+```python
+BudgetedSearch(
+    fabric: SearchFabric,
+    *,
+    min_gain_per_expansion: float = 0.0001,
+    patience: int = 2,
+    stop: Optional[MarginalGainStop] = None,
+    seed: int = 0
+) -> None
+```
+
+### `BudgetedSearchReport(...)`
+
+```python
+BudgetedSearchReport(
+    rounds: Tuple[SearchRound, ...],
+    best: Optional[SearchResult],
+    stopped_reason: str,
+    detail: str = ''
+) -> None
+```
+
+### `SearchRound(...)`
+
+```python
+SearchRound(
+    budget: int,
+    result: SearchResult,
+    gain: Optional[float] = None,
+    gain_per_expansion: Optional[float] = None,
+    cumulative_expansions: int = 0,
+    stopped: bool = False
+) -> None
+```
 
 ---
 
