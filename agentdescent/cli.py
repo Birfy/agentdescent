@@ -1302,8 +1302,11 @@ def _apply_algorithm_flag(spec: EvolveSpec, a: argparse.Namespace) -> None:
 
 
 def cmd_plan(a: argparse.Namespace) -> int:
-    spec = load_spec(a.spec)
     try:
+        # Loading sits inside the guard so an unreadable or malformed spec file
+        # answers `--json` with the same `{"ok": false, "error": ...}` object a
+        # spec that fails to compile already gets (#648).
+        spec = load_spec(a.spec)
         _apply_algorithm_flag(spec, a)
         payload = plan_payload(spec, usd_per_call=a.usd_per_call)
     except (SpecError, ValueError) as e:

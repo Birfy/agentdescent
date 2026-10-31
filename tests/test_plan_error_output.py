@@ -60,3 +60,31 @@ def test_plan_hard_check_stays_json_with_json(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is False
     assert "plan saw 3" in payload["error"]
+
+
+def test_unreadable_plan_spec_stays_json_with_json(tmp_path, capsys):
+    # A missing spec file failed before the guard, so `--json` got a bare
+    # stderr line instead of the JSON error object (#648).
+    missing = str(tmp_path / "missing.yaml")
+    assert cli.main(["plan", missing, "--json"]) == 2
+    out, err = capsys.readouterr()
+    payload = json.loads(out)
+    assert payload["ok"] is False
+    assert "missing.yaml" in payload["error"]
+    assert err == ""
+
+
+def test_malformed_plan_spec_stays_json_with_json(tmp_path, capsys):
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json")
+    assert cli.main(["--json", "plan", str(bad)]) == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["error"]
+
+
+def test_unreadable_plan_spec_is_a_stderr_line_without_json(tmp_path, capsys):
+    assert cli.main(["plan", str(tmp_path / "missing.yaml")]) == 2
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err.startswith("error: spec ")
