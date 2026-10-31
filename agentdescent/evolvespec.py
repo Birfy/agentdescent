@@ -916,10 +916,8 @@ def _parse_algorithm(spec: EvolveSpec) -> Optional[Tuple[Any, Dict[str, Any]]]:
     try:
         alg = _algorithms.get(name)
         if spec.kind not in alg.kinds:
-            usable = [a.name for a in _algorithms.listing(spec.kind)]
-            raise _algorithms.AlgorithmError(
-                f"algorithm: {alg.name!r} applies to kind {list(alg.kinds)}, not "
-                f"{spec.kind!r}; for kind {spec.kind!r}: {usable or 'none registered'}")
+            raise _algorithms.AlgorithmError(_algorithms.kind_mismatch_message(
+                alg, spec.kind, target=str(spec.target), prefix="algorithm:"))
         return alg, _algorithms.resolve_params(alg, params)
     except _algorithms.AlgorithmError as e:
         raise SpecError(str(e)) from None

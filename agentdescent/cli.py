@@ -238,7 +238,7 @@ def parse_cli_params(pairs: Optional[Sequence[str]]) -> Dict[str, Any]:
 
 
 def algorithm_override(name: Optional[str], params: Optional[Mapping[str, Any]],
-                       kind: str) -> Optional[Any]:
+                       kind: str, target: Optional[str] = None) -> Optional[Any]:
     """Validate ``--algorithm``/``--param`` for ``kind`` and return the spec value.
 
     Returns ``None`` when no algorithm was named, the name itself when it takes
@@ -255,8 +255,8 @@ def algorithm_override(name: Optional[str], params: Optional[Mapping[str, Any]],
 
     alg = algorithms.get(name, where="--algorithm")
     if kind not in alg.kinds:
-        raise algorithms.AlgorithmError(
-            f"--algorithm {name!r} applies to kind {list(alg.kinds)}, not {kind!r}")
+        raise algorithms.AlgorithmError(algorithms.kind_mismatch_message(
+            alg, kind, target=target, prefix="--algorithm"))
     algorithms.resolve_params(alg, params)      # validates types/unknowns/choices
     return name if not params else {"name": name, "params": dict(params)}
 
@@ -330,7 +330,8 @@ def starter_spec(path: str, *, kind: Optional[str] = None, data: Optional[str] =
         # in wall clock: the recorded run asked for 8 rounds and got 2 in 90 min.
         spec["evolve"] = {"rounds": 4, "n_workers": 2, "max_seconds": 5400}
         spec["allow"] = ["mypkg"]
-    chosen = algorithm_override(algorithm, algorithm_params, spec["kind"])
+    chosen = algorithm_override(algorithm, algorithm_params, spec["kind"],
+                                target=path)
     if chosen is not None:
         spec["algorithm"] = chosen
     return spec
@@ -1296,7 +1297,8 @@ def _apply_algorithm_flag(spec: EvolveSpec, a: argparse.Namespace) -> None:
             raise ValueError("--param needs --algorithm (this spec names none)")
         name = current_name
     merged = ({**current_params, **params} if name == current_name else dict(params))
-    spec.algorithm = algorithm_override(name, merged, spec.kind)
+    spec.algorithm = algorithm_override(name, merged, spec.kind,
+                                        target=str(spec.target))
 
 
 def cmd_plan(a: argparse.Namespace) -> int:
