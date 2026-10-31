@@ -213,6 +213,7 @@ class LoopGeneration:
     error: Optional[str] = None
     budget_scale: float = 1.0
     span_id: str = ""
+    evidence: Mapping[str, Any] = field(default_factory=dict)
 
     @property
     def accepted(self) -> bool:
@@ -235,6 +236,7 @@ class LoopGeneration:
             "error": self.error,
             "budget_scale": self.budget_scale,
             "span_id": self.span_id,
+            "evidence": dict(self.evidence),
         }
 
 
@@ -516,7 +518,8 @@ class LoopKernel:
                 applied=bool(body.get("applied", False)),
                 error=observation.error,
                 budget_scale=decision.budget_scale,
-                span_id=str(body.get("span_id", ""))))
+                span_id=str(body.get("span_id", "")),
+                evidence=dict(observation.evidence)))
         return controller, tuple(rows)
 
     def _report(self, snapshot: RunSnapshot) -> LoopReport:

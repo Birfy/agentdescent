@@ -408,6 +408,7 @@ from .experience import (
     ExperienceStore,
     ExperienceUpdate,
 )
+from .platform import PlatformConfig, PlatformReport, RSIPlatform
 from .risk_policy import RiskContext, RiskDecision, RiskPolicy, RiskRule
 from .manifest import (RunManifest, build_manifest, diff_manifest,
                        verify_manifest)
@@ -915,6 +916,9 @@ __all__ = [
     "ExperienceReport",
     "ExperienceStore",
     "ExperienceUpdate",
+    "PlatformConfig",
+    "PlatformReport",
+    "RSIPlatform",
     "EvaluationReport",
     "EvaluationRow",
     "evaluate",

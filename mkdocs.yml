@@ -108,6 +108,7 @@ nav:
     - Adaptive compute: compute-policy.md
     - Capability foundry: capability-foundry.md
     - Continual experience: continual-experience.md
+    - The RSI platform cycle: platform.md
   - The decision plane (policies):
     - Choosing policies: policies.md
     - Using the slots — a guide: policy-guide.md
