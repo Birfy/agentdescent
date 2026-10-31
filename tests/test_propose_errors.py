@@ -13,6 +13,7 @@ import pytest
 
 from agentdescent import cli, evolution, runstore
 from agentdescent.evolution import AppendRules, Task, evolve
+from agentdescent.integrations import provider_key_names
 
 from tests.test_evolvespec import _dir_spec
 from tests.test_runstore_cli import _cli, store  # noqa: F401  (fixture)
@@ -160,7 +161,11 @@ def test_a_run_with_no_reflector_errors_adds_nothing_to_the_status_line():
 
 
 def test_init_warns_when_the_starter_reflector_cannot_be_called(tmp_path, monkeypatch, capsys):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    # Clear every provider key, not only OPENAI_API_KEY: with e.g. ARK_API_KEY
+    # exported, `init` picks that gateway for the starter reflector and the
+    # "OPENAI_API_KEY is not set" warning this test pins is (rightly) absent.
+    for name in {"OPENAI_API_KEY", *provider_key_names()}:
+        monkeypatch.delenv(name, raising=False)
     skill = tmp_path / "skill"
     skill.mkdir()
     code = cli.main(["init", str(skill), "--out", str(tmp_path / "spec.json")])
