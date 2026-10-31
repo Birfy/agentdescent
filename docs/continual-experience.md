@@ -58,3 +58,22 @@ exact policy.
 
 The store is append-only and bounded only by the caller's retention policy; the
 learner's `ReplayBuffer` is the bounded hot set (`replay_size`).
+
+
+## From counterfactual credit to replay
+
+`CounterfactualExperience` converts a trace's Shapley credit into experience:
+
+```python
+bridge = CounterfactualExperience(
+    ReplayLab(replay), engine,
+    action_of=lambda step: step.kind)
+report = bridge.ingest(trace, features=(0.2, 0.8))
+report.record.rewards
+```
+
+Each step is mapped to a learner action explicitly; credits for the same action
+are summed. An unknown action, wrong feature dimension, or an empty reward map
+is refused. Negative credits are kept by default; set `min_credit` to opt into
+filtering, and `require_positive_gain=True` to refuse traces with no overall
+gain.
