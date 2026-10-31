@@ -1093,6 +1093,9 @@ launcher will not reach the Bot from Cursor's backend.
    # or: ngrok http 8000 --host-header=127.0.0.1:8000
    ```
 
+   If port 8000 is taken, the server exits 4 with one line saying so before
+   printing any URL; pick another `--port` and use it in the tunnel too.
+
    The server has **no authentication**: anyone holding the tunnel URL can
    start runs and `apply` files, so keep the URL private and stop the tunnel
    when done. A non-loopback `--host` is refused unless you pass

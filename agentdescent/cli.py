@@ -2661,6 +2661,40 @@ def _mcp_import_failure(e: BaseException) -> str:
                    f'Underlying error: {e}')
 
 
+# `agentdescent mcp` exit codes: 2 refused (non-loopback --host without
+# --allow-remote), 3 MCP SDK missing / too old, 4 the streamable-http
+# host:port cannot be bound (already in use, permission, bad address) (#636).
+MCP_EXIT_PORT_UNAVAILABLE = 4
+
+
+def _mcp_port_unavailable(host: str, port: int) -> "str | None":
+    """Why ``host:port`` cannot be bound right now, or ``None`` if it can.
+
+    Binds and closes at once, with ``SO_REUSEADDR`` like uvicorn, so a port in
+    TIME_WAIT is not reported busy while one with a live listener is."""
+    import socket
+
+    try:
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM,
+                                   flags=socket.AI_PASSIVE)
+    except (OSError, UnicodeError) as e:
+        return f"cannot resolve host ({e})"
+    family, _, _, _, addr = infos[0]
+    try:
+        with socket.socket(family, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind(addr)
+    except OSError as e:
+        import errno
+
+        if e.errno == errno.EADDRINUSE:
+            return "address already in use"
+        if e.errno == errno.EACCES:
+            return "permission denied (ports below 1024 usually need root)"
+        return e.strerror or str(e)
+    return None
+
+
 def cmd_mcp(a: argparse.Namespace) -> int:
     # A host starts this as a subprocess and shows the user nothing but
     # "CONNECTION_CLOSED" when it dies, so the one thing that can go wrong
@@ -2694,6 +2728,19 @@ def cmd_mcp(a: argparse.Namespace) -> int:
             print(f"agentdescent mcp: WARNING: serving on {host}:{port} with no "
                   "authentication; anyone who can reach it can start runs and write files.",
                   file=sys.stderr)
+        # A busy port otherwise fails deep inside uvicorn's logs *after* we
+        # announced the URL, with the same exit code as a missing SDK, so a
+        # backgrounded server looks up and the tunnel reaches someone else's
+        # process (#636). Probe the bind first, the way uvicorn binds.
+        busy = _mcp_port_unavailable(host, port)
+        if busy is not None:
+            suggest = port + 1 if 1024 <= port < 65535 else 8001
+            tail = (" or stop the process holding it"
+                    if busy == "address already in use" else "")
+            print(f"agentdescent mcp: cannot listen on {host}:{port} -- {busy}; pick "
+                  f"another --port (e.g. --port {suggest}){tail}",
+                  file=sys.stderr)
+            return MCP_EXIT_PORT_UNAVAILABLE
         print(f"agentdescent mcp: streamable-http on http://{host}:{port}/mcp",
               file=sys.stderr)
     try:
@@ -3001,7 +3048,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--host", default="127.0.0.1",
                    help="streamable-http bind address (default 127.0.0.1)")
     s.add_argument("--port", type=int, default=8000,
-                   help="streamable-http port (default 8000)")
+                   help="streamable-http port (default 8000); exits 4 if it cannot be "
+                        "bound, e.g. already in use")
     s.add_argument("--allow-remote", action="store_true",
                    help="allow a non-loopback --host (the tools can start runs and write files)")
     s.set_defaults(fn=cmd_mcp)
