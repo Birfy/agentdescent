@@ -400,6 +400,7 @@ from .capability_foundry import (
     CapabilityRequest,
     CapabilityStatus,
 )
+from .capability_scout import CapabilityScout, CapabilityScoutReport
 from .experience import (
     ExperienceEngine,
     ExperienceHit,
@@ -910,6 +911,8 @@ __all__ = [
     "CapabilityOutcome",
     "CapabilityRequest",
     "CapabilityStatus",
+    "CapabilityScout",
+    "CapabilityScoutReport",
     "ExperienceEngine",
     "ExperienceHit",
     "ExperienceRecord",

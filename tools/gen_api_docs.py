@@ -164,6 +164,9 @@ SECTIONS: List[Tuple[str, str, str, str]] = [
      "Admit a synthesized tool only after validation, review, safety, proof "
      "and a holdout gain.",
      "capability-foundry.md"),
+    ("agentdescent.capability_scout", "Capability scout",
+     "Turn failed tasks into a synthesized tool and hand it to the foundry.",
+     "capability-foundry.md"),
     ("agentdescent.experience", "Continual experience",
      "Cross-run recall, replay warm-start and a forgetting guard around the "
      "meta learner.",

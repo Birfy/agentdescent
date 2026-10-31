@@ -78,6 +78,28 @@ the mismatch.
 `deferred` with `missing=("graph",)`. Set it `False` only when the caller
 registers elsewhere.
 
+## From failed tasks to a candidate
+
+`CapabilityScout` is the failure-driven front door:
+
+```python
+from agentdescent import CapabilityScout, CapabilityFoundry
+
+scout = CapabilityScout(synthesizer, foundry,
+                        max_examples=5, max_candidates=4)
+report = scout.run(
+    failed_tasks,
+    goal="parse a CSV line",
+    make_request=build_capability_request,
+)
+report.verdict, report.outcome.artifact_id
+```
+
+It uses the first `max_examples` failed task prompts as synthesis examples,
+allows `max_candidates` generator attempts, and passes the task ids in
+`constraints` for audit. `no-candidate` / `no-request` are explicit; only an
+admitted tool is `promoted`.
+
 The registered artifact metadata carries the validation score and holdout gain,
 plus the proof digest and artifact hash when a proof was produced
 (`require_proof=True`), so a later audit can see what was checked. With
