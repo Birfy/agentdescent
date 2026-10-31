@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-594 public names across 119 modules.
+596 public names across 120 modules.
 
 ---
 
@@ -3609,6 +3609,43 @@ build_trust_evidence(
     seed: int = 0,
     min_effect: float = 0.0
 ) -> TrustEvidence
+```
+
+---
+
+## Counterfactual experience
+
+Turn Shapley step credit into per-action experience rewards. &nbsp;·&nbsp; `agentdescent.counterfactual_experience` &nbsp;·&nbsp; [guide](continual-experience.md)
+
+### `CounterfactualExperience(...)`
+
+Convert Shapley step credit into an `ExperienceRecord` and ingest it.
+
+```python
+CounterfactualExperience(
+    lab: ReplayLab,
+    engine: ExperienceEngine,
+    action_of: Callable[[TraceStep], str],
+    *,
+    min_credit: Optional[float] = None,
+    require_positive_gain: bool = False,
+    permutations: int = 64,
+    seed: int = 0,
+    exact_limit: int = 7
+) -> None
+```
+
+### `CounterfactualExperienceReport(...)`
+
+The credit report, the record it produced and where it was ingested.
+
+```python
+CounterfactualExperienceReport(
+    record: ExperienceRecord,
+    credit: CreditReport,
+    observed: int,
+    detail: str = ''
+) -> None
 ```
 
 ---

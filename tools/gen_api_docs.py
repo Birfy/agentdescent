@@ -160,6 +160,9 @@ SECTIONS: List[Tuple[str, str, str, str]] = [
      "Build the evaluation, canary, statistical, Goodhart, metamorphic, "
      "verifier and calibration reports from one paired run.",
      "trust-evidence.md"),
+    ("agentdescent.counterfactual_experience", "Counterfactual experience",
+     "Turn Shapley step credit into per-action experience rewards.",
+     "continual-experience.md"),
     ("agentdescent.preference_replay", "Preference replay",
      "Rank stored experience with a fitted preference model and replay the "
      "preferred slice.",

@@ -402,6 +402,7 @@ from .capability_foundry import (
     CapabilityRequest,
     CapabilityStatus,
 )
+from .counterfactual_experience import CounterfactualExperience, CounterfactualExperienceReport
 from .preference_replay import PreferenceReplay, PreferenceReplayReport
 from .capability_scout import CapabilityScout, CapabilityScoutReport
 from .experience import (
@@ -930,6 +931,8 @@ __all__ = [
     "PlatformConfig",
     "PlatformReport",
     "RSIPlatform",
+    "CounterfactualExperience",
+    "CounterfactualExperienceReport",
     "PreferenceReplay",
     "PreferenceReplayReport",
     "EvaluationReport",
