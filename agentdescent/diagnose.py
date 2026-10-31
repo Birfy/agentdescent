@@ -8,6 +8,7 @@ It reads the same `show_payload`, so the CLI and MCP surfaces see one answer.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -101,6 +102,33 @@ def adopted_count(
     return total
 
 
+
+def _has_log(run_id: str, store: Optional[str]) -> bool:
+    """Whether the run left a ``log.txt``; only a detached run writes one."""
+    try:
+        from . import runstore
+        return os.path.exists(runstore.get(run_id, store=store).log_path())
+    except Exception:  # noqa: BLE001 - an unknown run has no log to read
+        return False
+
+
+def _run_failed_next(run_id: str, error: str, store: Optional[str]) -> Tuple[str, ...]:
+    """Next steps for a failed run that point somewhere real (#635).
+
+    A foreground run has no ``log.txt``, and ``doctor`` never checks a model
+    name, so for a provider refusal both old suggestions led nowhere."""
+    first = ("read log.txt / status.json for the first failure"
+             if _has_log(run_id, store) else
+             "read status.json (`agentdescent show <run_id>`) for the first failure")
+    if "ProviderConfigError" in error or " -- check that " in error \
+            or "does not serve model" in error:
+        return ("the provider refused the model or key; fix the hint in the "
+                "error (model name, base URL, or API key variable) and rerun",
+                first.replace("<run_id>", run_id))
+    return (first.replace("<run_id>", run_id),
+            "run `agentdescent doctor` before retrying")
+
+
 def diagnose_payload(run_id: str, *, store: Optional[str] = None) -> DiagnosisReport:
     """Classify why a run ended where it did.
 
@@ -127,8 +155,7 @@ def diagnose_payload(run_id: str, *, store: Optional[str] = None) -> DiagnosisRe
         return DiagnosisReport(
             run_id, "run-failed", f"the run reported an error: {payload['error']}",
             evidence=evidence,
-            recommendations=("read log.txt / status.json for the first failure",
-                             "run `agentdescent doctor` before retrying"))
+            recommendations=_run_failed_next(run_id, str(payload["error"]), store))
     if state == "running":
         return DiagnosisReport(
             run_id, "running", "the run is still running; there is no verdict yet",

@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-596 public names across 120 modules.
+597 public names across 120 modules.
 
 ---
 
@@ -837,6 +837,10 @@ Any `prompt -> text` is a completion; a `WorkspaceAgent` also has a directory. &
 ### `AgentError`
 
 A tool-using agent failed; the message carries its stderr / exit status.
+
+### `ProviderConfigError`
+
+The provider refused the request for a reason no retry can change (#635).
 
 ### `Usage(...)`
 
