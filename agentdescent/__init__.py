@@ -447,6 +447,7 @@ from .runners import (
 from .orchestrator import AgentDescent, RoundStat, run_fork_baseline
 from .agents import (
     AgentError,
+    ProviderConfigError,
     Completion,
     Usage,
     claude,
@@ -688,6 +689,7 @@ __all__ = [
     "cli_agent",
     "WorkspaceAgent",
     "AgentError",
+    "ProviderConfigError",
     "Usage",
     "metered",
     "claude",

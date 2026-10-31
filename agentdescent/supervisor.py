@@ -122,7 +122,9 @@ def _classify(exc: BaseException) -> str:
     at startup and finishes the run clean at zero concurrency."""
     from .workspec import RefError
 
-    if isinstance(exc, RefError):
+    from .agents import ProviderConfigError
+
+    if isinstance(exc, (RefError, ProviderConfigError)):
         return "caller"
     name = type(exc).__name__
     if name in ("EngineError", "SandboxLeak", "OSError", "MemoryError"):

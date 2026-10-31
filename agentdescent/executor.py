@@ -39,6 +39,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator, List, Optional, Protocol, Sequence, runtime_checkable
 
+from .agents import ProviderConfigError
 from .metrics import Meter
 from .pipeline import describe
 from .workspec import RolloutSpec
@@ -132,6 +133,12 @@ class ThreadExecutor:
             else:
                 output = run(spec.rendered, spec.task)
             value = reward(spec.task, output)
+        except ProviderConfigError as e:
+            # A wrong model name or key: every later rollout gets the same
+            # refusal, so it must stop the run rather than count as one bad
+            # sample (#635).
+            return Result(spec.lease_id, spec.task.id, error=describe(e),
+                          kind="caller", seconds=time.time() - t0)
         except Exception as e:  # noqa: BLE001 -- a backend or candidate failure
             return Result(spec.lease_id, spec.task.id, error=describe(e),
                           kind="model", seconds=time.time() - t0)
