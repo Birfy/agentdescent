@@ -3613,6 +3613,30 @@ build_trust_evidence(
 
 ---
 
+## Promotion ledger
+
+Sign an accepted promotion into a manifest and lineage receipt. &nbsp;·&nbsp; `agentdescent.promotion_ledger` &nbsp;·&nbsp; [guide](trusted-promotion.md)
+
+### `PromotionLedger(lineage: Optional[LineageGraph] = None, *, issuer: str = 'agentdescent') -> None`
+
+Sign accepted promotions and write their lineage receipt.
+
+### `ReleaseRecord(...)`
+
+The signed manifest, its verification and the lineage node.
+
+```python
+ReleaseRecord(
+    manifest: ArtifactManifest,
+    envelope: SignedEnvelope,
+    verification: VerificationResult,
+    lineage: LineageNode,
+    detail: str = ''
+) -> None
+```
+
+---
+
 ## Capability foundry
 
 Admit a synthesized tool only after validation, review, safety, proof and a holdout gain. &nbsp;·&nbsp; `agentdescent.capability_foundry` &nbsp;·&nbsp; [guide](capability-foundry.md)
