@@ -400,6 +400,7 @@ from .capability_foundry import (
     CapabilityRequest,
     CapabilityStatus,
 )
+from .counterfactual_experience import CounterfactualExperience, CounterfactualExperienceReport
 from .experience import (
     ExperienceEngine,
     ExperienceHit,
@@ -919,6 +920,8 @@ __all__ = [
     "PlatformConfig",
     "PlatformReport",
     "RSIPlatform",
+    "CounterfactualExperience",
+    "CounterfactualExperienceReport",
     "EvaluationReport",
     "EvaluationRow",
     "evaluate",
