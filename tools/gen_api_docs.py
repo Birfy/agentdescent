@@ -171,6 +171,10 @@ SECTIONS: List[Tuple[str, str, str, str]] = [
     ("agentdescent.continual_meta", "Continual meta-policy",
      "Online policy updates with replay, validation and rollback.",
      "continual-experience.md"),
+    ("agentdescent.platform", "The RSI platform cycle",
+     "One cycle that hands compute, loop, promotion, foundry and experience "
+     "to each other.",
+     "platform.md"),
     ("agentdescent.selfplay", "Solver-challenger self-play",
      "The task distribution evolves too: challenger, frontier, curriculum.",
      "selfplay.md"),

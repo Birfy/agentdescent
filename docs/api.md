@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-582 public names across 114 modules.
+585 public names across 115 modules.
 
 ---
 
@@ -3296,7 +3296,8 @@ LoopGeneration(
     applied: bool = False,
     error: Optional[str] = None,
     budget_scale: float = 1.0,
-    span_id: str = ''
+    span_id: str = '',
+    evidence: Mapping[str, Any] = <factory>
 ) -> None
 ```
 
@@ -3829,6 +3830,77 @@ MetaUpdate(
 ### `ReplayBuffer(max_size: int = 1000) -> None`
 
 A bounded, deterministic replay buffer.
+
+---
+
+## The RSI platform cycle
+
+One cycle that hands compute, loop, promotion, foundry and experience to each other. &nbsp;·&nbsp; `agentdescent.platform` &nbsp;·&nbsp; [guide](platform.md)
+
+### `PlatformConfig(...)`
+
+The loop identity and bounds; the layers keep their own policies.
+
+```python
+PlatformConfig(
+    tenant: str,
+    workspace: str,
+    max_generations: int = 3,
+    target: Optional[float] = None,
+    max_cost: Optional[float] = None,
+    min_gain: float = 0.0,
+    patience: int = 2,
+    risk_limit: float = 1.0,
+    base_seed: int = 0,
+    spec_hash: str = 'platform',
+    lease_seconds: float = 30.0,
+    max_retries: int = 3
+) -> None
+```
+
+### `PlatformReport(...)`
+
+The five layers' decisions for one cycle, and whether all configured ones ran.
+
+```python
+PlatformReport(
+    run_id: str,
+    loop: LoopReport,
+    promotion: Optional[PromotionDecision] = None,
+    foundry: Optional[CapabilityOutcome] = None,
+    experience: Optional[ExperienceUpdate] = None,
+    skipped: Tuple[str, ...] = (),
+    self_validated: bool = False,
+    complete: bool = False,
+    detail: str = ''
+) -> None
+```
+
+### `RSIPlatform(...)`
+
+Compose the loop, compute, promotion, foundry and experience layers.
+
+```python
+RSIPlatform(
+    store: SqliteRunStore,
+    config: PlatformConfig,
+    *,
+    compute: ComputeController,
+    promotion_rules: Optional[PromotionRules] = None,
+    foundry: Optional[CapabilityFoundry] = None,
+    experience: Optional[ExperienceEngine] = None,
+    decision_log: Optional[Any] = None,
+    telemetry: Optional[Any] = None,
+    gate: Optional[Callable[..., Any]] = None,
+    risk_gate: Optional[Callable[..., Any]] = None,
+    _processed: Optional[Dict[str, Dict[str, Any]]] = None
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `clone(*, base_seed: Optional[int] = None) -> 'RSIPlatform'` | A new platform with a new loop seed, sharing every other component. |
+| `run_cycle(...)` | Run one full cycle; every configured layer must produce a decision. |
 
 ---
 
