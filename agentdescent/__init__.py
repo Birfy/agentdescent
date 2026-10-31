@@ -341,6 +341,7 @@ from .self_improve import (
 )
 from .leakage import LeakageGuard, LeakageReport, find_leakage
 from .stopping import MarginalGainStop
+from .budgeted_search import BudgetedSearch, BudgetedSearchReport, SearchRound
 from .stats_eval import (BootstrapResult, ContaminationReport, bootstrap_ci,
                          contamination_overlap, is_significant, paired_gain)
 from .approval import ApprovalGate, ApprovalRequest, ApprovalStore
@@ -368,6 +369,7 @@ from .loop_kernel import (
     LoopReport,
     LoopKernel,
 )
+from .promotion_ledger import PromotionLedger, ReleaseRecord
 from .promotion import (
     PromotionAction,
     PromotionRules,
@@ -401,6 +403,7 @@ from .capability_foundry import (
     CapabilityStatus,
 )
 from .preference_replay import PreferenceReplay, PreferenceReplayReport
+from .capability_scout import CapabilityScout, CapabilityScoutReport
 from .experience import (
     ExperienceEngine,
     ExperienceHit,
@@ -832,6 +835,9 @@ __all__ = [
     "LeakageReport",
     "find_leakage",
     "MarginalGainStop",
+    "BudgetedSearch",
+    "BudgetedSearchReport",
+    "SearchRound",
     "BootstrapResult",
     "ContaminationReport",
     "bootstrap_ci",
@@ -892,6 +898,8 @@ __all__ = [
     "PromotionRequest",
     "PromotionDecision",
     "promote",
+    "PromotionLedger",
+    "ReleaseRecord",
     "TrustEvidence",
     "build_trust_evidence",
     "ComputeAction",
@@ -911,6 +919,8 @@ __all__ = [
     "CapabilityOutcome",
     "CapabilityRequest",
     "CapabilityStatus",
+    "CapabilityScout",
+    "CapabilityScoutReport",
     "ExperienceEngine",
     "ExperienceHit",
     "ExperienceRecord",

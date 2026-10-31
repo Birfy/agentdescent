@@ -164,9 +164,15 @@ SECTIONS: List[Tuple[str, str, str, str]] = [
      "Rank stored experience with a fitted preference model and replay the "
      "preferred slice.",
      "continual-experience.md"),
+    ("agentdescent.promotion_ledger", "Promotion ledger",
+     "Sign an accepted promotion into a manifest and lineage receipt.",
+     "trusted-promotion.md"),
     ("agentdescent.capability_foundry", "Capability foundry",
      "Admit a synthesized tool only after validation, review, safety, proof "
      "and a holdout gain.",
+     "capability-foundry.md"),
+    ("agentdescent.capability_scout", "Capability scout",
+     "Turn failed tasks into a synthesized tool and hand it to the foundry.",
      "capability-foundry.md"),
     ("agentdescent.experience", "Continual experience",
      "Cross-run recall, replay warm-start and a forgetting guard around the "
@@ -179,6 +185,10 @@ SECTIONS: List[Tuple[str, str, str, str]] = [
      "One cycle that hands compute, loop, promotion, foundry and experience "
      "to each other.",
      "platform.md"),
+    ("agentdescent.budgeted_search", "Budgeted search",
+     "Stop UCT when another expansion stops buying value, using a per-expansion "
+     "gain bar or MarginalGainStop.",
+     "stopping.md"),
     ("agentdescent.selfplay", "Solver-challenger self-play",
      "The task distribution evolves too: challenger, frontier, curriculum.",
      "selfplay.md"),
