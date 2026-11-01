@@ -89,6 +89,20 @@ def _out(payload: Any, *, as_json: bool) -> None:
         print(json.dumps(payload, indent=2, ensure_ascii=False, default=str))
 
 
+def _spec_error(a: argparse.Namespace, e: Exception) -> int:
+    """Report a spec that cannot be read or compiled; returns exit code 2.
+
+    With `--json` it is the same `{"ok": false, "error": ...}` object `plan`
+    prints, so a script never has to special-case stderr; otherwise the
+    usual `spec error: ...` line on stderr (#650).
+    """
+    if getattr(a, "json", False):
+        _out({"ok": False, "error": str(e)}, as_json=True)
+    else:
+        print(f"spec error: {e}", file=sys.stderr)
+    return 2
+
+
 def _status_line(st: runstore.RunStatus) -> str:
     reward = "" if st.best_reward is None else f" best={st.best_reward:.3f}"
     rounds = f"{st.round}/{st.rounds}" if st.rounds else f"{st.round}"
@@ -1338,13 +1352,12 @@ def _warn_unusable(spec: EvolveSpec) -> None:
 
 
 def cmd_evolve(a: argparse.Namespace) -> int:
-    spec = load_spec(a.spec)
     try:
+        spec = load_spec(a.spec)
         _apply_algorithm_flag(spec, a)
         comp = compose(spec)                 # fail here, not in the detached child
     except (SpecError, ValueError) as e:
-        print(f"spec error: {e}", file=sys.stderr)
-        return 2
+        return _spec_error(a, e)
     # Before create/launch: a missing --usd-per-call must not leave an orphan run
     # whose status later reads as "process ended without reporting" (#342).
     runstore.require_budget_pair(a.budget, a.usd_per_call)
@@ -2460,8 +2473,7 @@ def cmd_campaign(a: argparse.Namespace) -> int:
             algorithm=a.algorithm, patience=a.patience,
             workdir=a.workdir, keep_ledgers=a.keep_ledgers)
     except (SpecError, ValueError) as e:
-        print(f"spec error: {e}", file=sys.stderr)
-        return 2
+        return _spec_error(a, e)
     # The campaign keeps no run id, so the way back to the user's file is
     # `apply --from` (#533). Print it ready to copy, dry-run first.
     original = os.path.abspath(os.path.expanduser(str(spec.target)))
@@ -2516,8 +2528,7 @@ def cmd_tournament(a: argparse.Namespace) -> int:
             max_seconds=a.max_seconds, repo_root=a.repo_root,
             keep_repos=a.keep)
     except (SpecError, ValueError) as e:
-        print(f"spec error: {e}", file=sys.stderr)
-        return 2
+        return _spec_error(a, e)
     if a.json:
         _out(report.to_dict(), as_json=True)
         return 0 if report.winner is not None else 1
