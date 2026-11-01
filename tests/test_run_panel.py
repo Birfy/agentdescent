@@ -109,3 +109,58 @@ def test_the_cli_exposes_serve():
     assert "serve" in choices
     args = parser.parse_args(["serve", "--port", "9999"])
     assert args.port == 9999 and args.host == runstore.DEFAULT_HTTP_HOST
+
+
+def _serve_args(port, *, json_out=False):
+    import argparse
+
+    ns = argparse.Namespace(host="127.0.0.1", port=port, store=None)
+    if json_out:
+        ns.json = True
+    return ns
+
+
+def test_serve_on_a_busy_port_is_one_line_exit_4(capsys):
+    # #668: used to announce the URL, then die with an OSError traceback.
+    import socket
+
+    from agentdescent import cli
+
+    with socket.socket() as holder:
+        holder.bind(("127.0.0.1", 0))
+        holder.listen(1)
+        port = holder.getsockname()[1]
+        assert cli.cmd_serve(_serve_args(port)) == cli.MCP_EXIT_PORT_UNAVAILABLE
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert "run panel on" not in err
+    assert "Traceback" not in err
+    assert err.strip().count("\n") == 0
+    assert f"cannot listen on 127.0.0.1:{port} -- address already in use" in err
+    assert "--port" in err
+
+
+def test_serve_out_of_range_port_is_json_under_json(capsys):
+    import json
+
+    from agentdescent import cli
+
+    assert cli.cmd_serve(_serve_args(99999, json_out=True)) == 4
+    out, err = capsys.readouterr()
+    payload = json.loads(out)
+    assert payload["ok"] is False
+    assert "port must be 0-65535" in payload["error"]
+    assert err == ""
+
+
+def test_serve_announces_the_bound_port(monkeypatch, capsys):
+    from http.server import ThreadingHTTPServer
+
+    from agentdescent import cli
+
+    monkeypatch.setattr(ThreadingHTTPServer, "serve_forever",
+                        lambda self, *a, **k: None)
+    assert cli.cmd_serve(_serve_args(0)) == 0
+    err = capsys.readouterr().err
+    assert "run panel on http://127.0.0.1:" in err
+    assert ":0/" not in err
