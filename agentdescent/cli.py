@@ -2700,10 +2700,53 @@ def cmd_uninstall(a: argparse.Namespace) -> int:
     return 1 if kept else 0
 
 
+def _bind_failure(e: BaseException) -> str:
+    """One short reason a listening socket could not be opened."""
+    import errno
+
+    if isinstance(e, OverflowError):
+        return "port must be 0-65535"
+    if isinstance(e, UnicodeError):
+        return f"cannot resolve host ({e})"
+    if isinstance(e, OSError):
+        if e.errno == errno.EADDRINUSE:
+            return "address already in use"
+        if e.errno == errno.EACCES:
+            return "permission denied (ports below 1024 usually need root)"
+        return e.strerror or str(e)
+    return str(e)
+
+
 def cmd_serve(a: argparse.Namespace) -> int:
-    print(f"agentdescent: run panel on http://{a.host}:{a.port}/  (read-only; Ctrl-C to stop)",
+    # Bind before announcing the URL: a busy or invalid --port used to print
+    # the banner and then die with a traceback (exit 1), so a backgrounded
+    # panel looked up. Same contract as `mcp --transport streamable-http`
+    # (#636): one line, exit 4, and `{"ok": false}` under --json (#668).
+    try:
+        httpd = runstore.serve_http(host=a.host, port=a.port, store=a.store,
+                                    serve_forever=False)
+    except (OSError, OverflowError, UnicodeError) as e:
+        busy = _bind_failure(e)
+        port = a.port
+        suggest = port + 1 if 1024 <= port < 65535 else runstore.DEFAULT_HTTP_PORT
+        tail = (" or stop the process holding it"
+                if busy == "address already in use" else "")
+        message = (f"cannot listen on {a.host}:{port} -- {busy}; pick another "
+                   f"--port (e.g. --port {suggest}){tail}")
+        if getattr(a, "json", False):
+            _out({"ok": False, "error": message}, as_json=True)
+        else:
+            print(f"agentdescent serve: {message}", file=sys.stderr)
+        return MCP_EXIT_PORT_UNAVAILABLE
+    bound = httpd.server_address[1]
+    print(f"agentdescent: run panel on http://{a.host}:{bound}/  (read-only; Ctrl-C to stop)",
           file=sys.stderr)
-    runstore.serve_http(host=a.host, port=a.port, store=a.store)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        httpd.server_close()
     return 0
 
 
