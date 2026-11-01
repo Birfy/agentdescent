@@ -55,6 +55,26 @@ def test_missing_archive_is_a_stderr_line_without_json(tmp_path, capsys):
     assert err.startswith("error: archive ")
 
 
+def test_exam_missing_archive_is_json_with_json(tmp_path, capsys):
+    missing = tmp_path / "nosuch"
+    assert cli.main(["exam", str(missing), "--domain", "nosuchmod:build",
+                     "--json"]) == 2
+    out, err = capsys.readouterr()
+    payload = json.loads(out)
+    assert payload["ok"] is False
+    assert "does not exist" in payload["error"]
+    assert err == ""
+    assert not missing.exists()
+
+
+def test_exam_missing_archive_is_a_stderr_line_without_json(tmp_path, capsys):
+    assert cli.main(["exam", str(tmp_path / "nosuch"),
+                     "--domain", "nosuchmod:build"]) == 2
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err.startswith("error: archive ")
+
+
 def test_init_value_error_is_json_with_json(tmp_path, capsys, monkeypatch):
     monkeypatch.chdir(tmp_path)
     assert cli.main(["init", "skill", "--param", "bad", "--json"]) == 2
