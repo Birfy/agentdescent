@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-597 public names across 120 modules.
+598 public names across 120 modules.
 
 ---
 
@@ -841,6 +841,10 @@ A tool-using agent failed; the message carries its stderr / exit status.
 ### `ProviderConfigError`
 
 The provider refused the request for a reason no retry can change (#635).
+
+### `QuotaExhausted`
+
+The account's quota or billing limit is used up until a human acts (#653).
 
 ### `Usage(...)`
 
