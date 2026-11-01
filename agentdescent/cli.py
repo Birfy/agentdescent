@@ -2859,8 +2859,38 @@ def cmd_mcp(a: argparse.Namespace) -> int:
 _INTERNAL_COMMANDS = frozenset({"run"})
 
 
+class _CliParser(argparse.ArgumentParser):
+    """ArgumentParser whose usage errors honour ``--json`` (#664).
+
+    argparse reports a missing argument or an invalid choice by printing
+    usage to stderr and exiting 2.  When the command line asked for
+    ``--json`` that leaves a script with nothing to parse on stdout, so the
+    same exit code instead comes with one ``{"ok": false, "error", "usage"}``
+    object.  Subparsers inherit this class through ``add_subparsers``.
+    """
+
+    json_errors = False
+
+    def error(self, message: str):  # type: ignore[override]
+        if _CliParser.json_errors:
+            _out({"ok": False, "error": message,
+                  "usage": self.format_usage().strip()}, as_json=True)
+            self.exit(2)
+        super().error(message)
+
+
+def _wants_json(argv: Sequence[str]) -> bool:
+    """True when ``--json`` appears as an option (before any ``--``)."""
+    for tok in argv:
+        if tok == "--":
+            return False
+        if tok == "--json":
+            return True
+    return False
+
+
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="agentdescent",
+    p = _CliParser(prog="agentdescent",
                                 description="Evolve skills, agents, prompts, code and plugins "
                                             "with a parallel, merge-based optimiser.")
     p.add_argument("-V", "--version", action="version",
@@ -3167,7 +3197,12 @@ def _accept_json_after_verb(sub: "argparse._SubParsersAction") -> None:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    a = build_parser().parse_args(argv)
+    args = list(sys.argv[1:] if argv is None else argv)
+    _CliParser.json_errors = _wants_json(args)
+    try:
+        a = build_parser().parse_args(args)
+    finally:
+        _CliParser.json_errors = False
     try:
         return a.fn(a)
     except (SpecError, runstore.RunStoreError) as e:
