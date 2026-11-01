@@ -715,16 +715,23 @@ def cmd_init(a: argparse.Namespace) -> int:
                             algorithm=getattr(a, "algorithm", None),
                             algorithm_params=params)
     except ValueError as e:      # AlgorithmError is a ValueError
-        print(f"error: {e}", file=sys.stderr)
+        # Same {"ok": false, "error": ...} object under --json as plan/rsi (#660).
+        if getattr(a, "json", False):
+            _out({"ok": False, "error": str(e)}, as_json=True)
+        else:
+            print(f"error: {e}", file=sys.stderr)
         return 2
     if a.agent:
         why = init_agent_mismatch(spec["kind"], a.agent)
         if why:
             # Refuse before writing: `plan` would reject this spec anyway, and a
             # spec that silently swaps the user's --agent is worse (#456).
-            print(f"error: --agent {a.agent}: {why}; pick a matching ref "
-                  "(see `agentdescent doctor`) or omit --agent for the default",
-                  file=sys.stderr)
+            msg = (f"--agent {a.agent}: {why}; pick a matching ref "
+                   "(see `agentdescent doctor`) or omit --agent for the default")
+            if getattr(a, "json", False):
+                _out({"ok": False, "error": msg}, as_json=True)
+            else:
+                print(f"error: {msg}", file=sys.stderr)
             return 2
     column_notes: List[str] = []
     if spec["kind"] != "policy_slot" and isinstance(spec.get("data"), dict):
@@ -2462,27 +2469,21 @@ def cmd_rsi(a: argparse.Namespace) -> int:
     """``agentdescent rsi`` -- is the archive still getting better over time?"""
     from .rsi import rsi_report
 
-    root = _archive_root(getattr(a, "archive", None))
-    if _missing_archive(root):
-        return 2
+    # Mirror portfolio/safety: refuse a missing archive via MetaCommandError so
+    # `--json` gets {"ok": false, "error": ...} on stdout (#660), not stderr.
     try:
+        root = _archive_root(getattr(a, "archive", None))
+        _require_archive(root)
         report = rsi_report(
             root, slot=getattr(a, "slot", None),
             stagnation_window=getattr(a, "stagnation_window", 3))
+    except MetaCommandError as error:
+        return _meta_error(error, a)
     except (FileNotFoundError, ValueError) as e:
-        print(f"error: {e}", file=sys.stderr)
-        return 2
+        return _meta_error(MetaCommandError(str(e)), a)
     if a.json:
         _out(report.to_dict(), as_json=True)
         return 0
-    print(f"{report.verdict}: {report.summary}")
-    if report.evidence:
-        print("evidence:", json.dumps(report.evidence, default=str)[:1200])
-    for line in report.recommendations:
-        print(f"  next: {line}")
-    return 0
-
-
     print(f"verdict: {report.verdict}  ({report.reason})")
     print(f"archive: {root}  rules: {report.total_rules}")
     if not report.slots:
@@ -2496,6 +2497,8 @@ def cmd_rsi(a: argparse.Namespace) -> int:
               f"{row.first_reward:<7.3f}  {row.best_reward:<7.3f}  "
               f"{row.gain:<+7.3f}  {row.records_since_best}")
     return 0
+
+
 def cmd_campaign(a: argparse.Namespace) -> int:
     """``agentdescent campaign`` -- iterate a spec, carrying the artifact forward."""
     from .campaign import estimate_campaign, run_campaign
