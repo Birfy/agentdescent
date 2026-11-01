@@ -87,11 +87,14 @@ def test_cli_evolve_refuses_absent_host_before_create(tmp_path, monkeypatch):
     store = str(tmp_path / "runs")
     path = tmp_path / "spec.json"
     path.write_text(json.dumps(_plugin_spec(tmp_path).to_dict()))
-    err = io.StringIO()
-    with redirect_stdout(io.StringIO()), redirect_stderr(err):
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
         code = cli.main(["--store", store, "--json", "evolve", str(path), "--detach"])
     assert code == 2
-    assert "host" in err.getvalue() and "`claude`" in err.getvalue()
+    # Under --json the refusal is the `{"ok": false, "error"}` object (#658).
+    payload = json.loads(out.getvalue())
+    assert payload["ok"] is False
+    assert "host" in payload["error"] and "`claude`" in payload["error"]
     assert not os.path.isdir(store) or os.listdir(store) == []
 
 

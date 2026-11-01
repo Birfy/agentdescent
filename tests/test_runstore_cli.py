@@ -828,11 +828,15 @@ def test_evolve_refuses_missing_cli_without_creating_a_run(store, tmp_path, monk
     before = set(os.listdir(store)) if os.path.isdir(store) else set()
     import io
     from contextlib import redirect_stderr, redirect_stdout
-    err = io.StringIO()
-    with redirect_stdout(io.StringIO()), redirect_stderr(err):
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
         code = cli.main(["--store", store, "--json", "evolve", str(path), "--detach"])
     assert code == 2
-    assert "claude" in err.getvalue() and "on PATH" in err.getvalue()
+    # Under --json the refusal is the `{"ok": false, "error"}` object (#658).
+    payload = json.loads(out.getvalue())
+    assert payload["ok"] is False
+    assert "claude" in payload["error"] and "on PATH" in payload["error"]
+    assert err.getvalue() == ""
     after = set(os.listdir(store)) if os.path.isdir(store) else set()
     assert after == before
 
