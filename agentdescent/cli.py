@@ -1377,7 +1377,10 @@ def cmd_evolve(a: argparse.Namespace) -> int:
               "notes": comp.notes}
              if a.json else f"{rd.run_id}  started (pid {st.pid})  {rd.path}", as_json=a.json)
         return 0
-    result = runstore.execute(rd, budget_usd=a.budget, usd_per_call=a.usd_per_call)
+    try:
+        result = runstore.execute(rd, budget_usd=a.budget, usd_per_call=a.usd_per_call)
+    except Exception as e:  # noqa: BLE001 - not BaseException: Ctrl-C stays loud
+        return _run_failed(a, rd, e)
     st = rd.status()
     _out({"run_id": rd.run_id, "state": st.state, "final_reward": result.final_reward,
           "stop_reason": result.stop_reason, "outcomes": result.outcomes(),
@@ -1385,6 +1388,35 @@ def cmd_evolve(a: argparse.Namespace) -> int:
          f"{_status_line(st)}\nfinal reward: {result.final_reward:.3f}  "
          f"outcomes: {result.outcomes()}\n{rd.path}", as_json=a.json)
     return 0 if result.error is None else 1
+
+
+def _run_failed(a: argparse.Namespace, rd: "runstore.RunDir", e: Exception) -> int:
+    """Report a foreground run that raised; returns exit code 1 (#652).
+
+    ``runstore.execute`` has already recorded ``state=failed`` and the error
+    in ``status.json`` before re-raising, so the CLI only has to say so: one
+    ``error:`` line (e.g. a ``ProviderConfigError`` hint) and where to look,
+    instead of a traceback; with ``--json`` the same ``{"ok": false, ...}``
+    shape as a spec error. ``AGENTDESCENT_DEBUG=1`` re-raises for a traceback.
+    """
+    if os.environ.get("AGENTDESCENT_DEBUG", "").strip() not in ("", "0"):
+        raise e
+    try:
+        st: Optional[runstore.RunStatus] = rd.status()
+    except Exception:  # noqa: BLE001 - the report must not fail on top of the failure
+        st = None
+    error = (st.error if st is not None and st.error else None) or f"{type(e).__name__}: {e}"
+    if getattr(a, "json", False):
+        _out({"ok": False, "run_id": rd.run_id,
+              "state": st.state if st is not None else "failed",
+              "error": error, "dir": rd.path}, as_json=True)
+    else:
+        if st is not None:
+            print(_status_line(st))
+        print(f"error: {error}", file=sys.stderr)
+        print(f"{rd.run_id}  {rd.path}")
+        print(f"next: agentdescent diagnose {rd.run_id}", file=sys.stderr)
+    return 1
 
 
 def cmd_run(a: argparse.Namespace) -> int:
