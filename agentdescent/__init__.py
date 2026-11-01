@@ -448,6 +448,7 @@ from .orchestrator import AgentDescent, RoundStat, run_fork_baseline
 from .agents import (
     AgentError,
     ProviderConfigError,
+    QuotaExhausted,
     Completion,
     Usage,
     claude,
@@ -690,6 +691,7 @@ __all__ = [
     "WorkspaceAgent",
     "AgentError",
     "ProviderConfigError",
+    "QuotaExhausted",
     "Usage",
     "metered",
     "claude",

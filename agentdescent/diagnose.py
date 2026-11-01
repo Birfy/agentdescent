@@ -120,6 +120,11 @@ def _run_failed_next(run_id: str, error: str, store: Optional[str]) -> Tuple[str
     first = ("read log.txt / status.json for the first failure"
              if _has_log(run_id, store) else
              "read status.json (`agentdescent show <run_id>`) for the first failure")
+    if "QuotaExhausted" in error or "quota for this model is used up" in error:
+        return ("the account's quota for this model is used up; wait for the "
+                "reset the provider names, or point api_key_env / model at "
+                "another plan",
+                first.replace("<run_id>", run_id))
     if "ProviderConfigError" in error or " -- check that " in error \
             or "does not serve model" in error:
         return ("the provider refused the model or key; fix the hint in the "

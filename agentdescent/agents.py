@@ -544,11 +544,24 @@ class ProviderConfigError(ContractError, RuntimeError):
 
     HTTP 401/403 (the key does not belong to this endpoint) and 404 or a body
     saying ``UnsupportedModel`` / ``model_not_found`` (the endpoint does not
-    serve this model) answer every later request the same way. Treated as a
-    transient, one such run burned 25 identical 404s on a ``rounds=1,
-    n_workers=1`` spec before ending ``failed``. It is a :class:`ContractError`
-    so the engines stop the run on the first one, and a ``RuntimeError`` so
-    callers that caught the old untyped failure still do.
+    serve this model) answer every later request the same way. Quota / billing
+    exhaustion on a 429 is the same shape of failure and raises the
+    :class:`QuotaExhausted` subclass (#653). Treated as a transient, one such
+    run burned 25 identical 404s on a ``rounds=1, n_workers=1`` spec before
+    ending ``failed``. It is a :class:`ContractError` so the engines stop the
+    run on the first one, and a ``RuntimeError`` so callers that caught the old
+    untyped failure still do.
+    """
+
+
+class QuotaExhausted(ProviderConfigError):
+    """The account's quota or billing limit is used up until a human acts (#653).
+
+    Ark answers with HTTP 429 ``AccountQuotaExceeded`` (and a reset time);
+    OpenAI with ``insufficient_quota``. Both are permanent on the retry
+    timescale, so :func:`with_retries` must not back them off like a rate
+    limit. Real throttling (``rate_limit_exceeded``, bare 429 + ``Retry-After``)
+    stays on :class:`RateLimited`.
     """
 
 
@@ -556,6 +569,30 @@ class ProviderConfigError(ContractError, RuntimeError):
 #: 400 rather than 401/403/404.
 _CONFIG_ERROR_MARKERS = ("unsupportedmodel", "model_not_found", "invalid_api_key",
                          "modelnotfound", "invalidapikey", "authenticationerror")
+
+
+#: Body markers / substrings of a permanent quota or billing exhaustion on a
+#: 429/503. Codes named explicitly so the list stays small and reviewable;
+#: the substrings ``quota`` and ``billing`` also catch phrasing such as
+#: "exceeded the weekly usage quota". Real throttling codes like
+#: ``rate_limit_exceeded`` do not match (#653).
+_QUOTA_ERROR_MARKERS = (
+    "accountquotaexceeded",   # Volcengine Ark Coding
+    "insufficient_quota",     # OpenAI
+    "insufficientquota",
+    "billing_hard_limit",
+    "billinghardlimit",
+    "exceeded_quota",
+)
+
+
+def _quota_exhausted_hint(detail: str, *, api_key_env: str) -> Optional[str]:
+    """Hint for a permanent quota/billing 429, or ``None`` for ordinary throttling."""
+    lowered = detail.lower()
+    if "quota" not in lowered and "billing" not in lowered             and not any(m in lowered for m in _QUOTA_ERROR_MARKERS):
+        return None
+    return (f"the account's quota for this model is used up: wait for the reset "
+            f"the provider names, or point {api_key_env} / model at another plan")
 
 
 def _provider_config_hint(code: int, detail: str, *, base: str, model: str,
@@ -885,6 +922,13 @@ def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
             message = (f"{base} returned HTTP {e.code} for model {model!r}"
                        + (f": {detail}" if detail else ""))
             if e.code in (429, 503):
+                # Quota / billing exhaustion is permanent on this timescale
+                # (Ark AccountQuotaExceeded, OpenAI insufficient_quota); fail
+                # fast like other ProviderConfigError (#653). Real throttling
+                # keeps the RateLimited path below.
+                quota_hint = _quota_exhausted_hint(detail, api_key_env=api_key_env)
+                if quota_hint is not None:
+                    raise QuotaExhausted(f"{message} -- {quota_hint}") from e
                 # Told apart from every other 4xx so `with_retries` can wait the
                 # seconds a limiter wants instead of the half-second a transport
                 # blip wants. `Retry-After` is seconds or an HTTP date; only the
@@ -1009,6 +1053,9 @@ def anthropic_compatible(model: str, *, base_url_env: str = "ANTHROPIC_BASE_URL"
             message = (f"{base} returned HTTP {e.code} for model {model!r}"
                        + (f": {detail}" if detail else ""))
             if e.code in (429, 503):
+                quota_hint = _quota_exhausted_hint(detail, api_key_env=api_key_env)
+                if quota_hint is not None:
+                    raise QuotaExhausted(f"{message} -- {quota_hint}") from e
                 header = ""
                 try:
                     header = (e.headers.get("Retry-After") or "").strip()
