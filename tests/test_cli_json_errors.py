@@ -101,3 +101,32 @@ def test_rsi_bad_stagnation_window_is_json_with_json(tmp_path, capsys):
     assert payload["ok"] is False
     assert "stagnation_window" in payload["error"]
     assert err == ""
+
+
+@pytest.mark.parametrize("before", [True, False])
+def test_init_success_is_one_json_object_with_json(tmp_path, capsys, monkeypatch, before):
+    # #662: a successful `init --json` printed only prose lines.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "prompt.md").write_text("Answer briefly.\n")
+    argv = ["--json", "init", "prompt.md"] if before else ["init", "prompt.md", "--json"]
+    assert cli.main(argv + ["--out", "spec.json"]) == 0
+    out, err = capsys.readouterr()
+    payload = json.loads(out)
+    assert payload["ok"] is True
+    assert payload["spec"] == "spec.json"
+    assert payload["kind"] == "text"
+    assert payload["providers_config"] is None
+    assert isinstance(payload["warnings"], list)
+    assert all(not w.startswith("warning:") for w in payload["warnings"])
+    assert payload["next"][-1] == "agentdescent plan spec.json"
+    assert (tmp_path / "spec.json").exists()
+    assert err == ""
+
+
+def test_init_success_without_json_stays_prose(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "prompt.md").write_text("Answer briefly.\n")
+    assert cli.main(["init", "prompt.md", "--out", "spec.json"]) == 0
+    out, _ = capsys.readouterr()
+    assert out.startswith("wrote spec.json\n")
+    assert out.rstrip().endswith("then: agentdescent plan spec.json")

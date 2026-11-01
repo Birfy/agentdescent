@@ -759,41 +759,63 @@ def cmd_init(a: argparse.Namespace) -> int:
             json.dump(providers, fh, indent=2)
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(spec, fh, indent=2)
-    print(f"wrote {out}")
+    # Plain output keeps its line order; --json collects the same text by
+    # category into one {"ok": true, ...} object (#662).
+    report: List[Tuple[str, str]] = [("wrote", f"wrote {out}")]
     for line in column_notes:
-        print(line)
+        report.append(("note", line))
     if providers_out:
-        print(f"wrote {providers_out} (OpenCode provider-only config for the worker; "
-              f"key read from ${key_env}, never inline)")
+        report.append(("wrote", f"wrote {providers_out} (OpenCode provider-only config for the worker; "
+              f"key read from ${key_env}, never inline)"))
     if not found and spec["kind"] not in ("text", "policy_slot"):
-        print(f"warning: no worker CLI (claude, codex, dsh, opencode) is on PATH; "
-              f"wrote the placeholder agent `{agent}`. Run `agentdescent doctor`, "
-              "install a CLI, or re-run with `--agent <ref>` / edit `agent.ref` "
-              "before `plan`")
+        report.append(("warning", "no worker CLI (claude, codex, dsh, opencode) is on PATH; "
+                       f"wrote the placeholder agent `{agent}`. Run `agentdescent doctor`, "
+                       "install a CLI, or re-run with `--agent <ref>` / edit `agent.ref` "
+                       "before `plan`"))
     elif a.agent is None and spec["kind"] not in ("text", "policy_slot"):
-        print(f"agent: `{agent}` (the worker CLI found on PATH; "
-              "override with `--agent <ref>`)")
+        report.append(("note", f"agent: `{agent}` (the worker CLI found on PATH; "
+                       "override with `--agent <ref>`)"))
     for line in _starter_model_warnings(spec, out):
-        print(f"warning: {line}")
+        report.append(("warning", line))
     host = spec.get("host") if spec["kind"] == "plugin" else None
     if host in _CLI_BINARIES and not doctor_report()["agent_clis"].get(_CLI_BINARIES[host]):
         # The plugin's format fixes its host; the worker found on PATH does
         # not run it, so say so here rather than only at `plan` (#368).
-        print(f"warning: this plugin's host `{host}` needs `{_CLI_BINARIES[host]}` "
-              f"on PATH to load it and run rollouts, and it is not there; "
-              f"`plan` will refuse until it is installed")
+        report.append(("warning", f"this plugin's host `{host}` needs `{_CLI_BINARIES[host]}` "
+                       f"on PATH to load it and run rollouts, and it is not there; "
+                       f"`plan` will refuse until it is installed"))
     if spec["kind"] == "policy_slot":
         problems = spec["data"]["problems"]
-        print(f"next: provide {problems} -- a zero-argument builder "
-              "returning a mapping of inner problems")
-        print("      make its module importable and include its package in the spec's allow list")
+        report.append(("next", f"provide {problems} -- a zero-argument builder "
+                       "returning a mapping of inner problems"))
+        report.append(("next", "make its module importable and include its package "
+                       "in the spec's allow list"))
     else:
         data = spec["data"]["path"]
         if not os.path.exists(os.path.expanduser(data)):
-            print(f"next: create {data} -- one JSON object per line, "
-                  '{"prompt": "...", "gold": "..."}')
-            print("      (`agentdescent demo` runs a complete example, offline, to copy from)")
-    print(f"then: agentdescent plan {out}")
+            report.append(("next", f"create {data} -- one JSON object per line, "
+                           '{"prompt": "...", "gold": "..."}'))
+            report.append(("next", "(`agentdescent demo` runs a complete example, "
+                           "offline, to copy from)"))
+    report.append(("then", f"agentdescent plan {out}"))
+    if getattr(a, "json", False):
+        _out({"ok": True, "spec": out, "kind": spec["kind"],
+              "providers_config": providers_out,
+              "warnings": [t for k, t in report if k == "warning"],
+              "notes": [t for k, t in report if k == "note"],
+              "next": [t for k, t in report if k in ("next", "then")]}, as_json=True)
+        return 0
+    first_next = True
+    for kind, text in report:
+        if kind == "warning":
+            print(f"warning: {text}")
+        elif kind == "next":
+            print(("next: " if first_next else "      ") + text)
+            first_next = False
+        elif kind == "then":
+            print(f"then: {text}")
+        else:
+            print(text)
     return 0
 
 
