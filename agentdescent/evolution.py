@@ -2242,6 +2242,15 @@ class SmallHeldOutWarning(RuntimeWarning):
     """
 
 
+class EarlyStopWarning(RuntimeWarning):
+    """``evolve()`` stopped early and ``EvolutionResult.error`` already says why.
+
+    A ``RuntimeWarning`` subclass so existing filters and ``python -W error`` keep
+    working. The foreground CLI suppresses it on the terminal (#654): it only
+    repeats the error the status/summary line already prints.
+    """
+
+
 def held_out_size(n_tasks: int, held_out_frac: float) -> int:
     """How many of ``n_tasks`` ``evolve()`` holds out at ``held_out_frac``.
 
@@ -4145,7 +4154,7 @@ def evolve(
         # Never end a run silently: verbose=False is the default, so a partial
         # result is otherwise indistinguishable from a converged one.
         warnings.warn(f"evolve() stopped early after {len(history)} round(s): "
-                      f"{run_error}", RuntimeWarning, stacklevel=2)
+                      f"{run_error}", EarlyStopWarning, stacklevel=2)
     elif propose_errors_total:
         # Not fatal (some proposals got through, or the run was too short to tell
         # a dead reflector from a flaky one), but never silent either (#395).
