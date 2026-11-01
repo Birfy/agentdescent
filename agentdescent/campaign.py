@@ -189,6 +189,8 @@ def run_campaign(spec: EvolveSpec, *, sessions: int = 3,
                               spec.target.rstrip(os.sep)) or "target"))
     best = -math.inf
     baseline = None
+    from .runstore import _plain_cli_warnings
+
     history: List[CampaignSession] = []
     stale = 0
     stopped = "sessions"
@@ -199,7 +201,8 @@ def run_campaign(spec: EvolveSpec, *, sessions: int = 3,
                                 dir=workspace)
         try:
             comp = compose(arm, repo_path=repo)
-            result = comp.run()
+            with _plain_cli_warnings():
+                result = comp.run()
             reward = float(result.final_reward)
             if result.error:
                 improved = None

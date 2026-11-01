@@ -711,22 +711,31 @@ def _signal(pid: int, pgid: Optional[int], sig: int) -> None:
 
 
 @contextlib.contextmanager
-def _plain_held_out_warning() -> Iterator[None]:
-    """Print ``evolve()``'s small-held-out warning as one plain line (#414).
+def _plain_cli_warnings() -> Iterator[None]:
+    """Print AgentDescent package warnings as one plain line (#414, #654).
 
-    The default format is ``<file>:<line>: SmallHeldOutWarning: <text>`` plus the
-    source line that raised it (``return evolve(self.tasks, ...)``), which means
-    nothing to a user. ``compose`` has already put the same sentence in the run's
-    ``notes``, where ``status`` shows it; this is only what the foreground
-    terminal and ``log.txt`` get. Every other warning keeps its normal format.
+    The default format is ``<file>:<line>: Category: <text>`` plus the source
+    line that raised it (``return evolve(self.tasks, ...)``), which means
+    nothing to a CLI user. Warnings raised from the ``agentdescent`` package
+    become ``warning: <text>`` instead. ``EarlyStopWarning`` is suppressed on
+    the terminal entirely: it only repeats ``EvolutionResult.error``, which the
+    status/summary line already shows (the error remains in ``status.json`` /
+    ``result.json``). Library callers of ``evolve()`` that skip this context
+    keep the default ``warnings`` format.
     """
-    from .evolution import SmallHeldOutWarning
+    from .evolution import EarlyStopWarning
 
     previous = warnings.formatwarning
 
+    def _from_package(filename: str) -> bool:
+        parts = os.path.normpath(filename).replace("\\", "/").split("/")
+        return "agentdescent" in parts
+
     def fmt(message, category, filename, lineno, line=None):  # type: ignore[no-untyped-def]
-        if isinstance(message, SmallHeldOutWarning) or (
-                isinstance(category, type) and issubclass(category, SmallHeldOutWarning)):
+        if isinstance(message, EarlyStopWarning) or (
+                isinstance(category, type) and issubclass(category, EarlyStopWarning)):
+            return ""
+        if _from_package(filename):
             return f"warning: {message}\n"
         return previous(message, category, filename, lineno, line)
 
@@ -735,6 +744,10 @@ def _plain_held_out_warning() -> Iterator[None]:
         yield
     finally:
         warnings.formatwarning = previous
+
+
+# Back-compat alias for the #414 name.
+_plain_held_out_warning = _plain_cli_warnings
 
 
 def execute(rd: RunDir, *, budget_usd: Optional[float] = None,
@@ -851,7 +864,7 @@ def execute(rd: RunDir, *, budget_usd: Optional[float] = None,
                        **overrides)
         rd.update_status(rounds=comp.kwargs.get("rounds"), notes=comp.notes,
                          usd=None if usd_per_call is None else 0.0)
-        with _plain_held_out_warning():
+        with _plain_cli_warnings():
             result = comp.run()
     except BaseException as e:  # noqa: BLE001 - the child must report before dying
         rd.update_status(state="failed", finished=time.time(),

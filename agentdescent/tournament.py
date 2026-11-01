@@ -147,6 +147,8 @@ def run_tournament(spec: EvolveSpec, algorithm_names: Sequence[str], *,
     if repo_root is not None:
         os.makedirs(repo_root, exist_ok=True)
 
+    from .runstore import _plain_cli_warnings
+
     entries: List[AlgorithmArm] = []
     for name in names:
         for seed in seeds:
@@ -156,7 +158,8 @@ def run_tournament(spec: EvolveSpec, algorithm_names: Sequence[str], *,
                                     dir=repo_root)
             try:
                 comp = compose(arm, repo_path=repo)
-                result = comp.run()
+                with _plain_cli_warnings():
+                    result = comp.run()
                 entry = AlgorithmArm(
                     algorithm=name, seed=int(seed),
                     final_reward=float(result.final_reward),
