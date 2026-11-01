@@ -2181,20 +2181,6 @@ def _archive_root(archive: Optional[str]) -> str:
     return os.path.join(os.path.abspath(os.path.expanduser(home)), "archive")
 
 
-def _missing_archive(root: str) -> bool:
-    """Report a missing archive the way ``safety`` does and return True.
-
-    The read-only archive commands must not create ``root`` as a side effect
-    of opening it: ``ConsolidationStore`` makes its directory, so a typo'd path
-    used to come back as an empty-but-valid archive (#502). The message names
-    the only writer (#512)."""
-    if os.path.isdir(root):
-        return False
-    from .consolidation import missing_archive_message
-    print(f"error: {missing_archive_message(root)}", file=sys.stderr)
-    return True
-
-
 def _load_ref(ref: str) -> Any:
     """Resolve ``module:attribute`` to the object it names."""
     if ":" not in ref:
@@ -2313,8 +2299,12 @@ def cmd_exam(a: argparse.Namespace) -> int:
     from .meta_exam import exam_archive
 
     root = _archive_root(getattr(a, "archive", None))
-    if _missing_archive(root):
-        return 2
+    if not os.path.isdir(root):
+        # A SpecError so `main` prints one {"ok": false} object under
+        # `--json` and the usual `error:` line otherwise (#670). Checked
+        # before anything opens the archive, which would create it (#502).
+        from .consolidation import missing_archive_message
+        raise SpecError(missing_archive_message(root))
     domain = _load_ref(a.domain)
     built = domain() if callable(domain) and not isinstance(domain, dict) else domain
     if not isinstance(built, Mapping):
