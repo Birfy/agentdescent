@@ -52,3 +52,27 @@ def test_flag_reset_after_parse(capsys):
     assert cli._CliParser.json_errors is False
     code, out, err = _run(capsys, ["init"])
     assert out == "" and err.startswith("usage:")
+
+
+@pytest.mark.parametrize("flag", ["--j", "--js", "--jso"])
+def test_abbreviated_json_flag_gets_json_usage_error(capsys, flag):
+    # argparse resolves the prefix to --json, so the error must match (#666).
+    code, out, err = _run(capsys, [flag, "status", "--no-such-flag"])
+    assert code == 2
+    payload = json.loads(out)
+    assert payload["ok"] is False
+    assert "--no-such-flag" in payload["error"]
+    assert err == ""
+
+
+@pytest.mark.parametrize("argv, expected", [
+    (["--js", "status"], True),
+    (["status", "--jso"], True),
+    (["--", "--js"], False),
+    (["--", "--json"], False),
+    (["-", "status"], False),
+    (["--jsonx", "status"], False),
+    (["--store", "x"], False),
+])
+def test_wants_json_prefixes(argv, expected):
+    assert cli._wants_json(argv) is expected

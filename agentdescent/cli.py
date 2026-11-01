@@ -2880,11 +2880,15 @@ class _CliParser(argparse.ArgumentParser):
 
 
 def _wants_json(argv: Sequence[str]) -> bool:
-    """True when ``--json`` appears as an option (before any ``--``)."""
+    """True when ``--json`` appears as an option (before any ``--``).
+
+    argparse also accepts an unambiguous prefix (``--js``, ``--jso``, ``--j``)
+    and ``--json`` is the only ``--j*`` option, so those count too (#666).
+    """
     for tok in argv:
         if tok == "--":
             return False
-        if tok == "--json":
+        if len(tok) >= 3 and "--json".startswith(tok):
             return True
     return False
 
