@@ -2207,8 +2207,18 @@ def _require_file(flag: str, path: str) -> None:
         raise MetaCommandError(f"{flag} store {path!r} does not exist")
 
 
-def _meta_error(error: MetaCommandError) -> int:
-    print(f"error: {error}" if error.code == 2 else str(error), file=sys.stderr)
+def _meta_error(error: MetaCommandError,
+                a: Optional[argparse.Namespace] = None) -> int:
+    """Report a meta command that cannot answer; returns ``error.code``.
+
+    Under `--json` it is the `{"ok": false, "error": ...}` object on stdout,
+    like `_spec_error` (#658); otherwise the usual line on stderr.
+    """
+    if a is not None and getattr(a, "json", False):
+        _out({"ok": False, "error": str(error)}, as_json=True)
+    else:
+        print(f"error: {error}" if error.code == 2 else str(error),
+              file=sys.stderr)
     return error.code
 
 
@@ -2250,7 +2260,7 @@ def cmd_portfolio(a: argparse.Namespace) -> int:
             getattr(a, "archive", None), floor=a.floor,
             min_samples=a.min_samples, grow=a.grow, shrink=a.shrink, cap=a.cap)
     except MetaCommandError as error:
-        return _meta_error(error)
+        return _meta_error(error, a)
     if a.json:
         _out(payload, as_json=True)
         return 0
@@ -2381,7 +2391,7 @@ def cmd_audit(a: argparse.Namespace) -> int:
             inner_audit=a.inner_audit, harness=harness,
             bias_threshold=a.bias_threshold)
     except MetaCommandError as error:
-        return _meta_error(error)
+        return _meta_error(error, a)
     if a.json:
         _out(payload, as_json=True)
         return 0
@@ -2432,7 +2442,10 @@ def cmd_diagnose(a: argparse.Namespace) -> int:
     try:
         report = diagnose_payload(a.run_id, store=a.store)
     except runstore.RunStoreError as e:
-        print(f"error: {e}", file=sys.stderr)
+        if a.json:       # same object `main()` prints for RunStoreError (#658)
+            _out({"ok": False, "error": str(e)}, as_json=True)
+        else:
+            print(f"error: {e}", file=sys.stderr)
         return 2
     if a.json:
         _out(report.to_dict(), as_json=True)
@@ -2611,7 +2624,7 @@ def cmd_safety(a: argparse.Namespace) -> int:
             bias_threshold=getattr(a, "bias_threshold", 0.1),
             min_exam=getattr(a, "min_exam", "passed"))
     except MetaCommandError as error:
-        return _meta_error(error)
+        return _meta_error(error, a)
     if a.json:
         _out(payload, as_json=True)
     else:
@@ -3133,7 +3146,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         return a.fn(a)
     except (SpecError, runstore.RunStoreError) as e:
-        print(f"error: {e}", file=sys.stderr)
+        # `--json` callers get the same object `_spec_error` prints (#658).
+        if getattr(a, "json", False):
+            _out({"ok": False, "error": str(e)}, as_json=True)
+        else:
+            print(f"error: {e}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         return 130

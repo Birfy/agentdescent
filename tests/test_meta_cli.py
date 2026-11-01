@@ -121,6 +121,14 @@ def test_portfolio_empty_archive_exits_one(tmp_path, capsys):
     (tmp_path / "empty").mkdir()
     code = cli.main(["--json", "portfolio", str(tmp_path / "empty")])
     assert code == 1
+    # Under --json the reason is the `{"ok": false, "error"}` object (#658).
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False and "no rule records" in payload["error"]
+
+
+def test_portfolio_empty_archive_plain_is_stderr(tmp_path, capsys):
+    (tmp_path / "empty").mkdir()
+    assert cli.main(["portfolio", str(tmp_path / "empty")]) == 1
     assert "no rule records" in capsys.readouterr().err
 
 
@@ -262,12 +270,21 @@ def test_audit_traces_rings(tmp_path, capsys):
 
 
 def test_audit_unknown_run_fails(tmp_path, capsys):
-    code = cli.main(["--json", "audit", "nope", "--archive", str(tmp_path)])
+    code = cli.main(["audit", "nope", "--archive", str(tmp_path)])
     # Same exit code and unquoted wording as show/cancel/resume on an unknown
     # run, not the quoted repr of a KeyError (#481).
     assert code == 2
     err = capsys.readouterr().err.strip()
     assert err == "error: no archived run 'nope' to audit"
+
+
+def test_audit_unknown_run_json_is_an_object(tmp_path, capsys):
+    code = cli.main(["--json", "audit", "nope", "--archive", str(tmp_path)])
+    assert code == 2
+    out, err = capsys.readouterr()
+    assert json.loads(out) == {"ok": False,
+                               "error": "no archived run 'nope' to audit"}
+    assert err == ""
 
 
 def test_audit_non_callable_harness_fails_cleanly(tmp_path):
