@@ -14,8 +14,8 @@ and it cannot drift from the package -- and its `cordis.patch.yml` adds the
 `agentdescent mcp` server, so the model gets `mcp__agentdescent__plan`,
 `__start`, `__status`, `__show`, `__apply`, `__list_algorithms`,
 `__describe_algorithm` and the rest. Named methods match
-`agentdescent algorithms list` / `show` (dsh has no slash surface; use the
-skill or those tools).
+`agentdescent algorithms list` / `show` / `run` (dsh has no slash surface; use
+the skill, those tools, or `agentdescent algorithms run NAME PATH`).
 
 Check it composed:
 

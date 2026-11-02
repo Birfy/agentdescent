@@ -415,6 +415,8 @@ Parse `$ARGUMENTS` (trim; empty means `list`):
   params they gave — validate with `describe_algorithm` / `show` first). Run
   `doctor`, `plan`, show the resolved algorithm card and estimate, and wait for
   my yes before `start`. Same apply/cancel/resume rules as `/evolve`.
+  Without MCP: `agentdescent algorithms run <name> <path> [cases.jsonl]
+  [--param k=v...]` (init + plan in one step; then `evolve` after yes).
 
 If they only named a method with no path, `show` it and ask whether to `run`.
 """
@@ -993,8 +995,8 @@ and it cannot drift from the package -- and its `cordis.patch.yml` adds the
 `agentdescent mcp` server, so the model gets `mcp__agentdescent__plan`,
 `__start`, `__status`, `__show`, `__apply`, `__list_algorithms`,
 `__describe_algorithm` and the rest. Named methods match
-`agentdescent algorithms list` / `show` (dsh has no slash surface; use the
-skill or those tools).
+`agentdescent algorithms list` / `show` / `run` (dsh has no slash surface; use
+the skill, those tools, or `agentdescent algorithms run NAME PATH`).
 
 Check it composed:
 
@@ -1078,8 +1080,9 @@ launcher will not reach the Bot from Cursor's backend.
 2. **Drive AgentDescent.** Prefer the CLI on the Bot's computer (the shared
    box): `agentdescent doctor`, `plan`, `evolve`, `status`, `apply`. Named
    methods: `agentdescent algorithms list` / `show <name>`, then
-   `plan`/`evolve --algorithm NAME` (or MCP `list_algorithms` /
-   `describe_algorithm` when the HTTP MCP below is wired). The skill
+   `agentdescent algorithms run NAME PATH [cases.jsonl]` (init + plan in one
+   step; `evolve` the written spec after yes) — or MCP `list_algorithms` /
+   `describe_algorithm` when the HTTP MCP below is wired. The skill
    falls back to those verbs when MCP tools are absent.
 3. **MCP (optional, not auto-wired).** Serve the tools over HTTP on loopback
    and expose them through any HTTPS tunnel, then ask the Bot to add the

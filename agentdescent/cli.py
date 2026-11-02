@@ -24,7 +24,7 @@ commands on a host with no MCP.
     agentdescent --version                                          which AgentDescent this is
     agentdescent install <dsh|claude-code|codex|opencode|grok-bot>  wire a host
     agentdescent uninstall <dsh|claude-code|codex|opencode|grok-bot> undo `install`
-    agentdescent algorithms list [--kind K] | show <name>           named algorithms for a spec
+    agentdescent algorithms list [--kind K] | show <name> | run …   named algorithms for a spec
     agentdescent mcp                                                serve over stdio
     agentdescent serve   [--port N]                                 read-only run panel
 
@@ -713,74 +713,88 @@ def detect_data_columns(path: Optional[str]) -> Tuple[Dict[str, str], List[str]]
     return mapping, notes
 
 
-def cmd_init(a: argparse.Namespace) -> int:
-    agent, found = (a.agent, True) if a.agent else default_agent_ref()
-    try:
-        params = parse_cli_params(getattr(a, "param", None))
-        spec = starter_spec(a.path, kind=a.kind, data=a.data, agent=agent,
-                            agent_explicit=bool(a.agent), model=a.model,
-                            base_url=a.base_url, key_env=a.key_env,
-                            algorithm=getattr(a, "algorithm", None),
-                            algorithm_params=params)
-    except ValueError as e:      # AlgorithmError is a ValueError
-        # Same {"ok": false, "error": ...} object under --json as plan/rsi (#660).
-        if getattr(a, "json", False):
-            _out({"ok": False, "error": str(e)}, as_json=True)
-        else:
-            print(f"error: {e}", file=sys.stderr)
-        return 2
-    if a.agent:
-        why = init_agent_mismatch(spec["kind"], a.agent)
+def write_starter_spec(
+    path: str,
+    *,
+    kind: Optional[str] = None,
+    data: Optional[str] = None,
+    agent: Optional[str] = None,
+    model: Optional[str] = None,
+    base_url: Optional[str] = None,
+    key_env: Optional[str] = None,
+    algorithm: Optional[str] = None,
+    param: Optional[Sequence[str]] = None,
+    out: Optional[str] = None,
+    follow_up: Optional[str] = "plan",
+) -> Tuple[str, Dict[str, Any], List[Tuple[str, str]], Optional[str]]:
+    """Build and write a starter spec (shared by ``init`` and ``algorithms run``).
+
+    Returns ``(out_path, spec, report, providers_out)``. Raises ``ValueError``
+    (including :class:`~agentdescent.algorithms.AlgorithmError`) for a bad
+    algorithm / param / agent mismatch. ``follow_up`` is ``"plan"`` for ``init``
+    (appends ``then: agentdescent plan …``) or ``None`` when the caller will
+    plan itself (#674).
+    """
+    agent_explicit = agent is not None
+    if agent is None:
+        agent, found = default_agent_ref()
+    else:
+        found = True
+    params = parse_cli_params(param)
+    spec = starter_spec(path, kind=kind, data=data, agent=agent,
+                        agent_explicit=agent_explicit, model=model,
+                        base_url=base_url, key_env=key_env,
+                        algorithm=algorithm, algorithm_params=params)
+    if agent_explicit:
+        why = init_agent_mismatch(spec["kind"], agent)
         if why:
             # Refuse before writing: `plan` would reject this spec anyway, and a
             # spec that silently swaps the user's --agent is worse (#456).
-            msg = (f"--agent {a.agent}: {why}; pick a matching ref "
-                   "(see `agentdescent doctor`) or omit --agent for the default")
-            if getattr(a, "json", False):
-                _out({"ok": False, "error": msg}, as_json=True)
-            else:
-                print(f"error: {msg}", file=sys.stderr)
-            return 2
+            raise ValueError(
+                f"--agent {agent}: {why}; pick a matching ref "
+                "(see `agentdescent doctor`) or omit --agent for the default")
     column_notes: List[str] = []
     if spec["kind"] != "policy_slot" and isinstance(spec.get("data"), dict):
-        columns, column_notes = detect_data_columns(a.data)
+        columns, column_notes = detect_data_columns(data)
         spec["data"].update(columns)
-    out = a.out or os.path.join(".agentdescent", f"{os.path.basename(a.path.rstrip('/')) or 'spec'}.evolve.json")
-    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    if out is None:
+        out = os.path.join(
+            ".agentdescent",
+            f"{os.path.basename(path.rstrip('/')) or 'spec'}.evolve.json")
+    os.makedirs(os.path.dirname(os.path.abspath(out)) or ".", exist_ok=True)
     providers_out = None
-    if spec.get("agent") == {"ref": "opencode"} and a.model and a.base_url:
+    providers_key_env = None
+    if spec.get("agent") == {"ref": "opencode"} and model and base_url:
         # The user named the model and endpoint, so wire them into the worker
         # too, not only the reflector: a bare `opencode` would ignore both and
         # fall back on OpenCode's own default (#485). Without both flags the
         # bare ref and the #455 warning stay -- nothing is guessed.
         llm = next((b for b in (spec.get("reflect"), spec.get("agent"))
                     if isinstance(b, dict) and b.get("ref") == "openai_compatible"), {})
-        key_env = llm.get("api_key_env") or a.key_env or "OPENAI_API_KEY"
+        providers_key_env = llm.get("api_key_env") or key_env or "OPENAI_API_KEY"
         stem = os.path.splitext(os.path.basename(out))[0]
         providers_out = os.path.join(os.path.dirname(os.path.abspath(out)),
                                      f"{stem}.opencode-providers.json")
         agent_block, providers = opencode_coding_recipe(
-            model=a.model, base_url=a.base_url, key_env=key_env,
+            model=model, base_url=base_url, key_env=providers_key_env,
             config_path=providers_out)
         spec["agent"] = agent_block
         with open(providers_out, "w", encoding="utf-8") as fh:
             json.dump(providers, fh, indent=2)
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(spec, fh, indent=2)
-    # Plain output keeps its line order; --json collects the same text by
-    # category into one {"ok": true, ...} object (#662).
     report: List[Tuple[str, str]] = [("wrote", f"wrote {out}")]
     for line in column_notes:
         report.append(("note", line))
     if providers_out:
         report.append(("wrote", f"wrote {providers_out} (OpenCode provider-only config for the worker; "
-              f"key read from ${key_env}, never inline)"))
+              f"key read from ${providers_key_env}, never inline)"))
     if not found and spec["kind"] not in ("text", "policy_slot"):
         report.append(("warning", "no worker CLI (claude, codex, dsh, opencode) is on PATH; "
                        f"wrote the placeholder agent `{agent}`. Run `agentdescent doctor`, "
                        "install a CLI, or re-run with `--agent <ref>` / edit `agent.ref` "
                        "before `plan`"))
-    elif a.agent is None and spec["kind"] not in ("text", "policy_slot"):
+    elif not agent_explicit and spec["kind"] not in ("text", "policy_slot"):
         report.append(("note", f"agent: `{agent}` (the worker CLI found on PATH; "
                        "override with `--agent <ref>`)"))
     for line in _starter_model_warnings(spec, out):
@@ -792,27 +806,25 @@ def cmd_init(a: argparse.Namespace) -> int:
         report.append(("warning", f"this plugin's host `{host}` needs `{_CLI_BINARIES[host]}` "
                        f"on PATH to load it and run rollouts, and it is not there; "
                        f"`plan` will refuse until it is installed"))
-    if spec["kind"] == "policy_slot":
-        problems = spec["data"]["problems"]
-        report.append(("next", f"provide {problems} -- a zero-argument builder "
-                       "returning a mapping of inner problems"))
-        report.append(("next", "make its module importable and include its package "
-                       "in the spec's allow list"))
-    else:
-        data = spec["data"]["path"]
-        if not os.path.exists(os.path.expanduser(data)):
-            report.append(("next", f"create {data} -- one JSON object per line, "
-                           '{"prompt": "...", "gold": "..."}'))
-            report.append(("next", "(`agentdescent demo` runs a complete example, "
-                           "offline, to copy from)"))
-    report.append(("then", f"agentdescent plan {out}"))
-    if getattr(a, "json", False):
-        _out({"ok": True, "spec": out, "kind": spec["kind"],
-              "providers_config": providers_out,
-              "warnings": [t for k, t in report if k == "warning"],
-              "notes": [t for k, t in report if k == "note"],
-              "next": [t for k, t in report if k in ("next", "then")]}, as_json=True)
-        return 0
+    if follow_up == "plan":
+        if spec["kind"] == "policy_slot":
+            problems = spec["data"]["problems"]
+            report.append(("next", f"provide {problems} -- a zero-argument builder "
+                           "returning a mapping of inner problems"))
+            report.append(("next", "make its module importable and include its package "
+                           "in the spec's allow list"))
+        else:
+            data_path = spec["data"]["path"]
+            if not os.path.exists(os.path.expanduser(data_path)):
+                report.append(("next", f"create {data_path} -- one JSON object per line, "
+                               '{"prompt": "...", "gold": "..."}'))
+                report.append(("next", "(`agentdescent demo` runs a complete example, "
+                               "offline, to copy from)"))
+        report.append(("then", f"agentdescent plan {out}"))
+    return out, spec, report, providers_out
+
+
+def _print_init_report(report: List[Tuple[str, str]]) -> None:
     first_next = True
     for kind, text in report:
         if kind == "warning":
@@ -824,8 +836,33 @@ def cmd_init(a: argparse.Namespace) -> int:
             print(f"then: {text}")
         else:
             print(text)
-    return 0
 
+
+def cmd_init(a: argparse.Namespace) -> int:
+    try:
+        out, spec, report, providers_out = write_starter_spec(
+            a.path, kind=a.kind, data=a.data, agent=a.agent, model=a.model,
+            base_url=a.base_url, key_env=a.key_env,
+            algorithm=getattr(a, "algorithm", None),
+            param=getattr(a, "param", None), out=a.out, follow_up="plan")
+    except ValueError as e:      # AlgorithmError is a ValueError
+        # Same {"ok": false, "error": ...} object under --json as plan/rsi (#660).
+        if getattr(a, "json", False):
+            _out({"ok": False, "error": str(e)}, as_json=True)
+        else:
+            print(f"error: {e}", file=sys.stderr)
+        return 2
+    # Plain output keeps its line order; --json collects the same text by
+    # category into one {"ok": true, ...} object (#662).
+    if getattr(a, "json", False):
+        _out({"ok": True, "spec": out, "kind": spec["kind"],
+              "providers_config": providers_out,
+              "warnings": [t for k, t in report if k == "warning"],
+              "notes": [t for k, t in report if k == "note"],
+              "next": [t for k, t in report if k in ("next", "then")]}, as_json=True)
+        return 0
+    _print_init_report(report)
+    return 0
 
 #: What an isolated worker of each CLI can fall back on, once it has been
 #: pointed away from the config directory its interactive login lives in.
@@ -2459,7 +2496,7 @@ def cmd_algorithms(a: argparse.Namespace) -> int:
     for name, error in sorted(algorithms.external_errors().items()):
         print(f"warning: algorithm plugin {name!r} failed to load: {error}",
               file=sys.stderr)
-    as_json = a.json
+    as_json = getattr(a, "json", False)
     if a.action in (None, "list"):
         if a.kind is not None and a.kind not in KINDS:
             raise SpecError(f"--kind must be one of {list(KINDS)}, got {a.kind!r}")
@@ -2473,15 +2510,87 @@ def cmd_algorithms(a: argparse.Namespace) -> int:
             for x in found:
                 print(f"{x.name:<{width}}  {x.fidelity:<19}  {','.join(x.kinds):<42}  {x.summary}")
         return 0
+    if a.action == "run":
+        return _cmd_algorithms_run(a)
     if a.kind is not None:
-        # The group accepts --kind for the bare listing; `show` names one
+        # The group accepts --kind for the bare listing / `run`; `show` names one
         # algorithm, so a filter there would be silently ignored (#549).
-        raise SpecError("--kind filters `algorithms list`; `algorithms show` takes only a name")
+        raise SpecError("--kind filters `algorithms list` (or sets kind for "
+                        "`algorithms run`); `algorithms show` takes only a name")
     try:
         card = algorithms.get(a.name, where="show").describe()
     except algorithms.AlgorithmError as e:
         raise SpecError(str(e)) from None
     _out(card if as_json else _algorithm_card_text(card), as_json=as_json)
+    return 0
+
+
+def _cmd_algorithms_run(a: argparse.Namespace) -> int:
+    """``algorithms run NAME PATH`` -- init + plan in one step; does not start a run (#674)."""
+    from . import algorithms
+
+    as_json = getattr(a, "json", False)
+    # Unknown name: same exit and tip as `algorithms show` (where="run").
+    try:
+        algorithms.get(a.name, where="run")
+    except algorithms.AlgorithmError as e:
+        if as_json:
+            _out({"ok": False, "error": str(e)}, as_json=True)
+        else:
+            print(f"error: {e}", file=sys.stderr)
+        return 2
+    out = a.out or f"agentdescent.{a.name}.spec.json"
+    kind = a.kind  # None unless --kind (group or subparser)
+    try:
+        out, _spec, report, providers_out = write_starter_spec(
+            a.path, kind=kind, data=getattr(a, "cases", None),
+            model=getattr(a, "model", None),
+            base_url=getattr(a, "base_url", None),
+            key_env=getattr(a, "key_env", None),
+            algorithm=a.name, param=getattr(a, "param", None),
+            out=out, follow_up=None)
+    except ValueError as e:      # kind mismatch / bad --param
+        if as_json:
+            _out({"ok": False, "error": str(e)}, as_json=True)
+        else:
+            print(f"error: {e}", file=sys.stderr)
+        return 2
+    try:
+        spec = load_spec(out)
+        payload = plan_payload(spec, usd_per_call=getattr(a, "usd_per_call", None))
+    except (SpecError, ValueError) as e:
+        if as_json:
+            _out({"ok": False, "error": str(e), "spec": out}, as_json=True)
+        else:
+            print(f"error: {e}", file=sys.stderr)
+        return 2
+    next_line = f"agentdescent evolve {out}"
+    if as_json:
+        # Exactly one JSON object on stdout for success and error (#674).
+        obj = dict(payload)
+        obj["spec_path"] = out
+        obj["providers_config"] = providers_out
+        obj["warnings"] = list(payload.get("warnings") or []) + [
+            t for k, t in report if k == "warning"]
+        obj["notes"] = [t for k, t in report if k == "note"]
+        obj["next"] = next_line
+        if not obj.get("ok", True):
+            _out(obj, as_json=True)
+            return 2
+        _out(obj, as_json=True)
+        return 0
+    for kind_tag, text in report:
+        if kind_tag == "warning":
+            print(f"warning: {text}")
+        elif kind_tag == "note":
+            print(f"note: {text}")
+        else:
+            print(text)
+    if not payload.get("ok", True):
+        print(f"error: {payload.get('error', 'plan failed')}", file=sys.stderr)
+        return 2
+    _out(payload, as_json=False)
+    print(f"next: {next_line}")
     return 0
 
 
@@ -3146,6 +3255,32 @@ def build_parser() -> argparse.ArgumentParser:
     s2.set_defaults(fn=cmd_algorithms)
     s2 = algo_sub.add_parser("show", help="one algorithm: what it does, its parameters")
     s2.add_argument("name")
+    s2.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                    help="machine-readable output")
+    s2.set_defaults(fn=cmd_algorithms)
+    s2 = algo_sub.add_parser(
+        "run", help="write a starter spec for NAME on PATH and plan it (does not start a run)")
+    s2.add_argument("name", help="algorithm name from `algorithms list`")
+    s2.add_argument("path", help="target path (prompt, skill dir, …)")
+    s2.add_argument("cases", nargs="?", default=None,
+                    help="cases.jsonl (same as init --data)")
+    s2.add_argument("--param", action="append", default=[], metavar="KEY=VALUE",
+                    help="algorithm parameter, repeatable; values are JSON "
+                         "when they parse, otherwise strings")
+    s2.add_argument("--model", default=None,
+                    help="model name for the openai_compatible reflector/agent")
+    s2.add_argument("--base-url", dest="base_url", default=None,
+                    help="endpoint URL for that model (written as default_base_url)")
+    s2.add_argument("--key-env", dest="key_env", default=None,
+                    help="environment variable holding its key")
+    s2.add_argument("--kind", choices=("text", "skill_dir", "agent_dir", "agent_code",
+                                       "plugin", "policy_slot"),
+                    default=argparse.SUPPRESS,
+                    help="spec kind (default: guessed from PATH, as init --kind)")
+    s2.add_argument("--out", help="where to write the spec "
+                    "(default: ./agentdescent.<name>.spec.json)")
+    s2.add_argument("--usd-per-call", type=float, dest="usd_per_call",
+                    help="optional dollar estimate for plan")
     s2.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
                     help="machine-readable output")
     s2.set_defaults(fn=cmd_algorithms)
