@@ -103,6 +103,18 @@ def _spec_error(a: argparse.Namespace, e: Exception) -> int:
     return 2
 
 
+def _surface_error(a: argparse.Namespace, error: Exception) -> int:
+    """A product-surface error: JSON under --json, one stderr line otherwise."""
+    if os.environ.get("AGENTDESCENT_DEBUG"):
+        raise error
+    message = f"{type(error).__name__}: {error}"
+    if getattr(a, "json", False):
+        _out({"ok": False, "error": message}, as_json=True)
+    else:
+        print(f"error: {message}", file=sys.stderr)
+    return 2
+
+
 def _status_line(st: runstore.RunStatus) -> str:
     reward = "" if st.best_reward is None else f" best={st.best_reward:.3f}"
     rounds = f"{st.round}/{st.rounds}" if st.rounds else f"{st.round}"
@@ -2761,6 +2773,206 @@ def cmd_tournament(a: argparse.Namespace) -> int:
             print(f"  {arm.algorithm} seed {arm.seed}: {arm.error[:160]}")
     return 0 if report.winner is not None else 1
 
+def cmd_platform(a: argparse.Namespace) -> int:
+    """``agentdescent platform`` -- init/plan/run a five-layer campaign."""
+    from .surface_common import SurfaceError
+    from . import surface_platform as surface
+
+    try:
+        action = getattr(a, "platform_cmd", None)
+        if action == "init":
+            payload = surface.platform_init(a.out, demo=a.demo)
+        elif action == "plan":
+            payload = surface.platform_plan(a.spec)
+        elif action == "run":
+            payload = surface.platform_run(a.spec, out=a.out)
+        else:
+            raise SurfaceError("platform needs init, plan or run")
+    except Exception as error:  # noqa: BLE001 - user callbacks are part of the surface
+        return _surface_error(a, error)
+    if a.json:
+        _out(payload, as_json=True)
+    else:
+        if action == "init":
+            print(f"spec: {payload['spec']}")
+            print("next:")
+            for step in payload["next"]:
+                print(f"  {step}")
+        elif action == "plan":
+            print(f"runs_db: {payload['runs_db']}")
+            print(f"cycles: {payload['campaign']['max_cycles']}  "
+                  f"generations/cycle: {payload['platform']['max_generations']}")
+            print("next:")
+            for step in payload["next"]:
+                print(f"  {step}")
+        else:
+            report = payload["report"]
+            print(f"cycles: {len(report['cycles'])}  "
+                  f"best_cycle: {report.get('best_cycle')}  "
+                  f"complete: {report['complete']}")
+            print(f"runs_db: {payload['runs_db']}")
+            if payload.get("out"):
+                print(f"report: {payload['out']}")
+    return 0
+
+
+def cmd_capability(a: argparse.Namespace) -> int:
+    """``agentdescent capability`` -- init/plan/run a failure-to-capability loop."""
+    from .surface_common import SurfaceError
+    from . import surface_capability as surface
+
+    try:
+        action = getattr(a, "capability_cmd", None)
+        if action == "init":
+            payload = surface.capability_init(a.out, demo=a.demo)
+        elif action == "plan":
+            payload = surface.capability_plan(a.spec)
+        elif action == "run":
+            payload = surface.capability_run(a.spec, out=a.out)
+        else:
+            raise SurfaceError("capability needs init, plan or run")
+    except Exception as error:  # noqa: BLE001 - user callbacks are part of the surface
+        return _surface_error(a, error)
+    if a.json:
+        _out(payload, as_json=True)
+    else:
+        if action == "init":
+            print(f"spec: {payload['spec']}")
+            print(f"traces: {payload['traces']}")
+            print("next:")
+            for step in payload["next"]:
+                print(f"  {step}")
+        elif action == "plan":
+            print(f"traces: {payload['traces']}  goal: {payload['goal']}")
+            print("next:")
+            for step in payload["next"]:
+                print(f"  {step}")
+        else:
+            report = payload["report"]
+            print(f"verdict: {report['verdict']}  admitted: {report['admitted']}")
+            print(f"detail: {report['detail']}")
+            if payload.get("out"):
+                print(f"report: {payload['out']}")
+    return 0
+
+
+def cmd_ops(a: argparse.Namespace) -> int:
+    """``agentdescent ops`` -- plan/publish a campaign to the control room."""
+    from .surface_common import SurfaceError
+    from . import surface_ops as surface
+
+    try:
+        action = getattr(a, "ops_cmd", None)
+        if action == "plan":
+            payload = surface.ops_plan(
+                runs_db=a.runs_db, tenant=a.tenant, workspace=a.workspace)
+        elif action == "publish":
+            payload = surface.ops_publish(
+                runs_db=a.runs_db, tenant=a.tenant, workspace=a.workspace,
+                min_acceptance=a.min_acceptance,
+                max_cost_per_accepted=a.max_cost_per_accepted,
+                out=a.out, prometheus=a.prometheus)
+        else:
+            raise SurfaceError("ops needs plan or publish")
+    except Exception as error:  # noqa: BLE001 - user callbacks are part of the surface
+        return _surface_error(a, error)
+    if a.json:
+        _out(payload, as_json=True)
+    else:
+        if action == "plan":
+            print(f"runs_db: {payload['runs_db']}")
+            print(f"terminal runs: {payload['terminal_runs']}  "
+                  f"generations: {payload['generations']}")
+            print("next:")
+            for step in payload["next"]:
+                print(f"  {step}")
+        else:
+            print(f"published: {payload['published']}")
+            if "metrics" in payload:
+                metrics = payload["metrics"]
+                print(f"decisions: {metrics['decisions']}  "
+                      f"accepted: {metrics['accepted']}  "
+                      f"calls: {metrics['calls']}")
+                for alert in payload.get("alerts") or ():
+                    print(f"alert: {alert}")
+            else:
+                print(payload.get("detail", "nothing to publish"))
+            if payload.get("out"):
+                print(f"report: {payload['out']}")
+            if payload.get("prometheus"):
+                print(f"prometheus: {payload['prometheus']}")
+    return 0
+
+
+def cmd_experience(a: argparse.Namespace) -> int:
+    """``agentdescent experience`` -- report/ingest/recall/update/replay memory."""
+    from .surface_common import SurfaceError
+    from . import surface_experience as surface
+
+    action = getattr(a, "experience_cmd", None)
+    try:
+        if action == "report":
+            payload = surface.experience_report(store=a.experience_store)
+        elif action == "ingest":
+            payload = surface.experience_ingest(
+                store=a.experience_store, records=a.records)
+        elif action == "recall":
+            payload = surface.experience_recall(
+                store=a.experience_store, features=a.features, k=a.k)
+        elif action == "update":
+            payload = surface.experience_update(
+                store=a.experience_store, validation=a.validation,
+                anchors=a.anchors, actions=a.actions, dim=a.dim,
+                learning_rate=a.learning_rate, l2=a.l2,
+                replay_size=a.replay_size, min_gain=a.min_gain, seed=a.seed,
+                require_anchors=a.require_anchors,
+                anchor_tolerance=a.anchor_tolerance)
+        elif action == "replay":
+            payload = surface.experience_replay(
+                source=a.source, store=a.experience_store, pairs=a.pairs,
+                actions=a.actions, dim=a.dim, k=a.k,
+                learning_rate=a.learning_rate, l2=a.l2,
+                replay_size=a.replay_size, min_gain=a.min_gain, seed=a.seed)
+        else:
+            raise SurfaceError("experience needs report, ingest, recall, update or replay")
+    except Exception as error:  # noqa: BLE001 - user callbacks are part of the surface
+        return _surface_error(a, error)
+    if a.json:
+        _out(payload, as_json=True)
+    else:
+        if action == "report":
+            summary = payload["summary"]
+            print(f"store: {payload['store']}  exists: {payload['exists']}")
+            print(f"rows: {summary['rows']}  accepted: {summary['accepted']}  "
+                  f"last: {summary['last_run'] or '-'}")
+            if summary["actions"]:
+                print("actions: " + ", ".join(
+                    f"{name}={count}" for name, count in summary["actions"].items()))
+        elif action == "ingest":
+            print(f"ingested: {len(payload['ingested'])}  "
+                  f"existing: {payload['existing']}  "
+                  f"rows: {payload['summary']['rows']}")
+        elif action == "recall":
+            for hit in payload["hits"]:
+                record = hit["record"]
+                print(f"{hit['distance']:.4f}  {record['run_id']}  "
+                      f"accepted={record['accepted']}")
+        elif action == "update":
+            update = payload["update"]
+            print(f"accepted: {update['accepted']}  "
+                  f"rolled_back: {update['rolled_back']}  version: {update['version']}")
+            print(f"before: {update['before']:.4f}  after: {update['after']:.4f}  "
+                  f"drift: {update['drift']:.4f}")
+            if update["reason"]:
+                print(f"reason: {update['reason']}")
+        elif action == "replay":
+            replay = payload["replay"]
+            print(f"selected: {len(replay['selected'])}  "
+                  f"ingested: {len(replay['ingested'])}  "
+                  f"skipped: {replay['skipped']}")
+    return 0
+
+
 def cmd_release(a: argparse.Namespace) -> int:
     """``agentdescent release`` -- evidence-gated, signed release receipt."""
     from .release_surface import (
@@ -3468,6 +3680,121 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--metadata", default=None,
                    help="JSON object stored with the manifest")
     s.set_defaults(fn=cmd_release)
+
+    s = sub.add_parser(
+        "platform",
+        help="run a durable five-layer RSI campaign (loop/compute/foundry/experience)")
+    platform_sub = s.add_subparsers(dest="platform_cmd", required=True)
+    sp = platform_sub.add_parser("init", help="write a platform spec")
+    sp.add_argument("--out", required=True, help="where to write the spec")
+    sp.add_argument("--demo", action="store_true",
+                   help="write the runnable offline example")
+    sp.set_defaults(fn=cmd_platform)
+    sp = platform_sub.add_parser("plan", help="validate a spec and resolve every ref")
+    sp.add_argument("--spec", required=True, help="platform JSON spec")
+    sp.set_defaults(fn=cmd_platform)
+    sp = platform_sub.add_parser("run", help="run the campaign")
+    sp.add_argument("--spec", required=True, help="platform JSON spec")
+    sp.add_argument("--out", help="write the full JSON report here")
+    sp.set_defaults(fn=cmd_platform)
+
+    s = sub.add_parser(
+        "capability",
+        help="turn failure traces into an admitted, archived capability")
+    capability_sub = s.add_subparsers(dest="capability_cmd", required=True)
+    sp = capability_sub.add_parser("init", help="write a capability spec")
+    sp.add_argument("--out", required=True, help="where to write the spec")
+    sp.add_argument("--demo", action="store_true",
+                   help="write the runnable offline example and traces")
+    sp.set_defaults(fn=cmd_capability)
+    sp = capability_sub.add_parser("plan", help="validate a spec and load traces")
+    sp.add_argument("--spec", required=True, help="capability JSON spec")
+    sp.set_defaults(fn=cmd_capability)
+    sp = capability_sub.add_parser("run", help="run the capability loop")
+    sp.add_argument("--spec", required=True, help="capability JSON spec")
+    sp.add_argument("--out", help="write the full JSON report here")
+    sp.set_defaults(fn=cmd_capability)
+
+    s = sub.add_parser(
+        "ops", help="publish finished runs to the control room")
+    ops_sub = s.add_subparsers(dest="ops_cmd", required=True)
+    sp = ops_sub.add_parser("plan", help="count what would be published")
+    sp.add_argument("--runs-db", required=True, dest="runs_db",
+                   help="SQLite run database written by platform/loop")
+    sp.add_argument("--tenant", required=True)
+    sp.add_argument("--workspace", required=True)
+    sp.set_defaults(fn=cmd_ops)
+    sp = ops_sub.add_parser("publish", help="record the campaign and return metrics")
+    sp.add_argument("--runs-db", required=True, dest="runs_db")
+    sp.add_argument("--tenant", required=True)
+    sp.add_argument("--workspace", required=True)
+    sp.add_argument("--min-acceptance", type=float, default=0.0,
+                   dest="min_acceptance", help="alert below this acceptance rate")
+    sp.add_argument("--max-cost-per-accepted", type=float, default=None,
+                   dest="max_cost_per_accepted",
+                   help="alert above this calls/accepted value")
+    sp.add_argument("--out", help="write the full JSON report here")
+    sp.add_argument("--prometheus", help="write Prometheus text here")
+    sp.set_defaults(fn=cmd_ops)
+
+    s = sub.add_parser(
+        "experience", help="inspect and update cross-run experience memory")
+    experience_sub = s.add_subparsers(dest="experience_cmd", required=True)
+    sp = experience_sub.add_parser("report", help="summarise the experience store")
+    sp.add_argument("--store", dest="experience_store", default=None,
+                   help="experience JSONL (default: $AGENTDESCENT_HOME/experience.jsonl)")
+    sp.set_defaults(fn=cmd_experience)
+    sp = experience_sub.add_parser("ingest", help="append new ExperienceRecords")
+    sp.add_argument("--store", dest="experience_store", default=None)
+    sp.add_argument("--records", required=True,
+                   help="ExperienceRecord JSONL or JSON array")
+    sp.set_defaults(fn=cmd_experience)
+    sp = experience_sub.add_parser("recall", help="nearest experience by features")
+    sp.add_argument("--store", dest="experience_store", default=None)
+    sp.add_argument("--features", required=True,
+                   help="comma-separated feature vector")
+    sp.add_argument("--k", type=int, default=5)
+    sp.set_defaults(fn=cmd_experience)
+    sp = experience_sub.add_parser("update", help="guarded learner update")
+    sp.add_argument("--store", dest="experience_store", default=None)
+    sp.add_argument("--validation", required=True,
+                   help="validation ExperienceRecord JSONL")
+    sp.add_argument("--anchors", default=None,
+                   help="anchor ExperienceRecord JSONL")
+    sp.add_argument("--actions", required=True,
+                   help="comma-separated action names")
+    sp.add_argument("--dim", type=int, required=True,
+                   help="feature dimension")
+    sp.add_argument("--learning-rate", type=float, default=0.2,
+                   dest="learning_rate")
+    sp.add_argument("--l2", type=float, default=1e-3)
+    sp.add_argument("--replay-size", type=int, default=1000, dest="replay_size")
+    sp.add_argument("--min-gain", type=float, default=0.0, dest="min_gain")
+    sp.add_argument("--seed", type=int, default=0)
+    sp.add_argument("--anchor-tolerance", type=float, default=0.0,
+                   dest="anchor_tolerance")
+    sp.add_argument("--require-anchors", action="store_true", default=True,
+                   dest="require_anchors")
+    sp.add_argument("--no-require-anchors", action="store_false",
+                   dest="require_anchors")
+    sp.set_defaults(fn=cmd_experience)
+    sp = experience_sub.add_parser("replay", help="preference-ranked replay")
+    sp.add_argument("--source", required=True,
+                   help="source ExperienceRecord JSONL")
+    sp.add_argument("--store", dest="experience_store", default=None,
+                   help="engine replay JSONL (must differ from --source)")
+    sp.add_argument("--pairs", required=True,
+                   help="PreferencePair JSONL/JSON array")
+    sp.add_argument("--actions", required=True)
+    sp.add_argument("--dim", type=int, required=True)
+    sp.add_argument("--k", type=int, default=5)
+    sp.add_argument("--learning-rate", type=float, default=0.2,
+                   dest="learning_rate")
+    sp.add_argument("--l2", type=float, default=1e-3)
+    sp.add_argument("--replay-size", type=int, default=1000, dest="replay_size")
+    sp.add_argument("--min-gain", type=float, default=0.0, dest="min_gain")
+    sp.add_argument("--seed", type=int, default=0)
+    sp.set_defaults(fn=cmd_experience)
 
     s = sub.add_parser("serve", help="serve a read-only run panel on loopback, for a host UI")
     s.add_argument("--host", default=runstore.DEFAULT_HTTP_HOST)

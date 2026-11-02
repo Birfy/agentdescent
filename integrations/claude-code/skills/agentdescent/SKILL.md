@@ -290,6 +290,31 @@ does not exist on the CLI/MCP path.
 - **`audit_trace`** — "where did this adopted rule's evidence come from?" for
   one `run_id`. A ring with no store passed in is missing evidence, not a pass.
 
+## When the user wants a governed campaign
+
+These four surfaces consume the long-running stack rather than one evolve run.
+They execute the Python callbacks/builders a spec names, so on MCP the server
+operator must set `AGENTDESCENT_SURFACE_ALLOW` (empty refuses every ref);
+writes are confined to `AGENTDESCENT_SURFACE_WRITE_DIRS`.
+
+- **`platform`** — plan or run a durable five-layer campaign. `dry_run` validates
+  every ref without calling builders or creating the SQLite database; the run
+  returns per-cycle loop/promotion/foundry/experience reports. Offer
+  `agentdescent platform init --demo --out platform.json` for an offline first
+  run, then `platform plan` and `platform run`.
+- **`capability`** — plan or run the failure-to-capability loop (traces ->
+  task pipeline -> tool synthesis -> foundry -> QD archive). `dry_run` resolves
+  refs and loads traces without calling the builders. Offer
+  `agentdescent capability init --demo --out capability.json` first.
+- **`ops`** — plan or publish terminal runs from a SQLite run database into the
+  console, lineage, telemetry, RSI metrics and alerts. `dry_run` only counts;
+  a tenant/workspace with no terminal runs is a no-op.
+- **`experience_report`**, **`experience_ingest`**, **`experience_recall`**,
+  **`experience_update`**, **`experience_replay`** — inspect and update the
+  cross-run experience store: rows/actions, deduped ingest, nearest recall,
+  guarded learner update, and preference-ranked replay into a separate engine
+  store. The store is a JSONL separate from the run store.
+
 `agentdescent exam` re-judges rules with an independent oracle: it needs a
 `--domain module:builder` and runs it, so it is CLI-only. Suggest the command
 to the user rather than looking for a tool.

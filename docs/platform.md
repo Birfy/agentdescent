@@ -67,3 +67,47 @@ whether a promotion is good — it only hands the tested outputs to the next
 layer. A cycle with no `evidence`, `capability` or `experience` runs just the
 loop and is still `complete`.
 
+
+## From the CLI and the MCP server
+
+The same campaign is available as a product surface:
+
+```bash
+agentdescent platform init --out platform.json --demo
+agentdescent platform plan --spec platform.json
+agentdescent platform run  --spec platform.json --json --out report.json
+```
+
+A platform spec names the SQLite run database, the two configs, and the
+callbacks by `module:attribute`:
+
+```json
+{
+  "runs_db": "platform-runs.sqlite3",
+  "platform": {"tenant": "t1", "workspace": "ws", "max_generations": 3},
+  "campaign": {"max_cycles": 5, "target": 0.9, "patience": 2},
+  "compute": "mypkg.wiring:compute",
+  "step": "mypkg.steps:step",
+  "evidence": "mypkg.steps:evidence",
+  "capability": "mypkg.steps:capability",
+  "foundry": "mypkg.wiring:foundry",
+  "experience": "mypkg.wiring:experience"
+}
+```
+
+`compute` may be omitted (a single `direct` strategy over a zero-cost local
+model) or written inline:
+
+```json
+{"models": [{"name": "local", "cost": 0.0}],
+ "options": [{"name": "direct", "action": "direct", "calls": 1}]}
+```
+
+`plan` resolves every ref and validates the configs without running. `run`
+returns the full `PlatformCampaignReport` with `schema_version: 1`. The MCP
+`platform` tool takes the same object and `dry_run=true` for the plan step.
+The spec executes the Python callbacks it names. For MCP, the operator must set
+`AGENTDESCENT_SURFACE_ALLOW` to the allowed module prefixes (an empty value
+refuses every ref), and `AGENTDESCENT_SURFACE_WRITE_DIRS` to the directories the
+server may create reports/DBs in. `plan` resolves refs without calling builders
+or creating the SQLite database.

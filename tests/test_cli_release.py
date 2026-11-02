@@ -165,7 +165,7 @@ def test_mcp_release_tool_uses_the_same_payload(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTDESCENT_RELEASE_KEY", "secret")
     before = {f"t{i}": 0.5 for i in range(50)}
     after = _scores()
-    tools = Tools()
+    tools = Tools(surface_write_dirs=(str(tmp_path),))
     payload = tools.release(
         before, after, artifact_id="skill-mcp",
         artifact_hash="sha256:mcp", key_id="ci",
@@ -179,7 +179,7 @@ def test_mcp_release_tool_uses_the_same_payload(tmp_path, monkeypatch):
 
 def test_mcp_release_tool_reports_bad_material(tmp_path, monkeypatch):
     monkeypatch.delenv("AGENTDESCENT_RELEASE_KEY", raising=False)
-    tools = Tools()
+    tools = Tools(surface_write_dirs=(str(tmp_path),))
     payload = tools.release(
         {"t": 0.5}, {"t": 0.6}, artifact_id="skill",
         artifact_hash="sha256:x", key_id="ci")

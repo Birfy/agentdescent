@@ -184,6 +184,53 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
         "whatever prefixes the operator set in AGENTDESCENT_RESCAN_ALLOW can be named. "
         "That list is not something this tool can widen: if the reference you need is "
         "refused, tell the user which prefix to add and why."),
+    "platform": (
+        "Plan or run a durable five-layer RSI campaign (loop, compute, promotion, "
+        "capability foundry, experience). Pass a platform spec object; dry_run=true "
+        "resolves every `module:attribute` ref and validates the configs without "
+        "running, dry_run=false runs the bounded campaign and returns the per-cycle "
+        "report. Refs are refused unless the server operator allowlists their "
+        "module prefix in AGENTDESCENT_SURFACE_ALLOW (empty refuses every ref); "
+        "writes are confined to AGENTDESCENT_SURFACE_WRITE_DIRS. Optional `out` "
+        "writes the JSON report atomically."),
+    "capability": (
+        "Plan or run the failure-to-capability loop (traces -> task pipeline -> "
+        "tool synthesis -> capability foundry -> QD archive). Pass a capability spec "
+        "object; dry_run=true validates refs and loads traces, dry_run=false runs "
+        "the loop and returns the pipeline/scout/archive verdict. Refs are "
+        "refused unless the operator allowlists their module prefix in "
+        "AGENTDESCENT_SURFACE_ALLOW (empty refuses every ref); writes are "
+        "confined to AGENTDESCENT_SURFACE_WRITE_DIRS."),
+    "ops": (
+        "Plan or publish terminal runs from a SQLite run database into the "
+        "control room: console, lineage, telemetry, RSI metrics and alerts. dry_run "
+        "counts the runs first. `out` writes the JSON report; `prometheus` writes "
+        "Prometheus text. A tenant/workspace with no terminal runs is a no-op, not "
+        "an error. `out`/`prometheus` must be under "
+        "AGENTDESCENT_SURFACE_WRITE_DIRS."),
+    "experience_report": (
+        "Summarise an ExperienceStore JSONL: rows, accepted count, action "
+        "histogram, mean action reward, last run id and feature dimensions. A "
+        "missing store reports zero rows; it does not create the file."),
+    "experience_ingest": (
+        "Append ExperienceRecord objects (list or JSONL path) to an experience "
+        "store, deduplicating by run_id. Returns the new ids, how many already "
+        "existed, and the updated summary. `store` must be under "
+        "AGENTDESCENT_SURFACE_WRITE_DIRS."),
+    "experience_recall": (
+        "Nearest stored ExperienceRecords to a feature vector. `features` is a list "
+        "or comma-separated string; records with a different feature dimension are "
+        "skipped. Returns distance plus the full record."),
+    "experience_update": (
+        "Run the guarded continual-meta update over validation rows with anchors, "
+        "using the same ExperienceEngine forgetting guard as the library. Supply "
+        "action names and the feature dimension; returns the update decision, "
+        "before/after/drift and whether it rolled back."),
+    "experience_replay": (
+        "Fit a Bradley-Terry preference model from pairwise preferences, rank a "
+        "source experience store, and replay the preferred slice into a separate "
+        "engine store. Source and store must be different files. Returns the "
+        "selected/ingested ids and the fitted-model replay report."),
     "release": (
         "Gate and sign one release from paired task scores: build the same trusted "
         "evidence as `evolve`, run the fail-closed promotion decision, and only on "
@@ -229,8 +276,23 @@ class Tools:
     """The tool bodies, SDK-free. One instance per server, bound to a run store."""
 
     def __init__(self, store: Optional[str] = None, *,
-                 rescan_allow: Optional[Sequence[str]] = None) -> None:
+                 rescan_allow: Optional[Sequence[str]] = None,
+                 surface_allow: Optional[Sequence[str]] = None,
+                 surface_write_dirs: Optional[Sequence[str]] = None) -> None:
+        from .surface_common import (
+            surface_allow_from_env, surface_write_dirs_from_env,
+        )
         self.store = store
+        #: The operator's allowlist for `platform`/`capability` refs. Empty
+        #: refuses every ref: the model-filled spec is not the boundary.
+        self.surface_allow: Tuple[str, ...] = (
+            tuple(surface_allow) if surface_allow is not None
+            else surface_allow_from_env())
+        #: Where the MCP surfaces may create/overwrite files. The default is the
+        #: server's cwd and $AGENTDESCENT_HOME; an explicit empty list refuses.
+        self.surface_write_dirs: Tuple[str, ...] = (
+            tuple(surface_write_dirs) if surface_write_dirs is not None
+            else surface_write_dirs_from_env())
         #: Import prefixes `audit_rescan` may resolve beyond this package. It is
         #: read from the operator's environment and never from a tool call: see
         #: `audit_rescan` for why that distinction is the whole control.
@@ -588,6 +650,7 @@ class Tools:
         )
 
         try:
+            self._check_write(lineage, "lineage")
             policy = load_rules(
                 rules, min_effect=min_effect, max_risk=max_risk)
             secret = resolve_secret()
@@ -601,6 +664,118 @@ class Tools:
                 issuer=issuer, run_id=run_id, kind=kind, metadata=metadata)
         except (ReleaseSurfaceError, OSError, ValueError) as e:
             return {"ok": False, "error": str(e)}
+
+    def _check_write(self, path: Optional[str], name: str) -> Optional[str]:
+        from .surface_common import ensure_write_path
+
+        return ensure_write_path(
+            path, name=name, allow=self.surface_write_dirs)
+
+    def platform(self, spec: Dict[str, Any], *, dry_run: bool = False,
+                 out: Optional[str] = None) -> Dict[str, Any]:
+        from . import surface_platform as surface
+        try:
+            if dry_run:
+                return surface.platform_plan(spec, allow=self.surface_allow)
+            self._check_write(out, "out")
+            if isinstance(spec, dict):
+                self._check_write(spec.get("runs_db") or spec.get("store"),
+                                  "runs_db")
+            return surface.platform_run(
+                spec, out=out, allow=self.surface_allow)
+        except Exception as e:  # noqa: BLE001 - a bad spec must not kill the server
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+    def capability(self, spec: Dict[str, Any], *, dry_run: bool = False,
+                   out: Optional[str] = None) -> Dict[str, Any]:
+        from . import surface_capability as surface
+        try:
+            if dry_run:
+                return surface.capability_plan(spec, allow=self.surface_allow)
+            self._check_write(out, "out")
+            return surface.capability_run(
+                spec, out=out, allow=self.surface_allow)
+        except Exception as e:  # noqa: BLE001 - a bad spec must not kill the server
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+    def ops(self, runs_db: str, tenant: str, workspace: str, *,
+            dry_run: bool = False, min_acceptance: float = 0.0,
+            max_cost_per_accepted: Optional[float] = None,
+            out: Optional[str] = None,
+            prometheus: Optional[str] = None) -> Dict[str, Any]:
+        from . import surface_ops as surface
+        try:
+            if dry_run:
+                return surface.ops_plan(
+                    runs_db=runs_db, tenant=tenant, workspace=workspace)
+            self._check_write(out, "out")
+            self._check_write(prometheus, "prometheus")
+            return surface.ops_publish(
+                runs_db=runs_db, tenant=tenant, workspace=workspace,
+                min_acceptance=min_acceptance,
+                max_cost_per_accepted=max_cost_per_accepted,
+                out=out, prometheus=prometheus)
+        except Exception as e:  # noqa: BLE001 - a bad spec must not kill the server
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+    def experience_report(self, store: Optional[str] = None) -> Dict[str, Any]:
+        from . import surface_experience as surface
+        try:
+            return surface.experience_report(store=store)
+        except Exception as e:  # noqa: BLE001 - a bad spec must not kill the server
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+    def experience_ingest(self, store: Optional[str], records: Any) -> Dict[str, Any]:
+        from . import surface_experience as surface
+        try:
+            self._check_write(store, "store")
+            return surface.experience_ingest(store=store, records=records)
+        except Exception as e:  # noqa: BLE001 - a bad spec must not kill the server
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+    def experience_recall(self, store: Optional[str], features: Any,
+                          k: int = 5) -> Dict[str, Any]:
+        from . import surface_experience as surface
+        try:
+            return surface.experience_recall(
+                store=store, features=features, k=k)
+        except Exception as e:  # noqa: BLE001 - a bad spec must not kill the server
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+    def experience_update(
+            self, store: Optional[str], validation: Any, anchors: Any,
+            actions: Any, dim: int, *, learning_rate: float = 0.2,
+            l2: float = 1e-3, replay_size: int = 1000,
+            min_gain: float = 0.0, seed: int = 0,
+            require_anchors: bool = True,
+            anchor_tolerance: float = 0.0) -> Dict[str, Any]:
+        from . import surface_experience as surface
+        try:
+            self._check_write(store, "store")
+            return surface.experience_update(
+                store=store, validation=validation, anchors=anchors,
+                actions=actions, dim=dim, learning_rate=learning_rate, l2=l2,
+                replay_size=replay_size, min_gain=min_gain, seed=seed,
+                require_anchors=require_anchors,
+                anchor_tolerance=anchor_tolerance)
+        except Exception as e:  # noqa: BLE001 - a bad spec must not kill the server
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+    def experience_replay(
+            self, source: str, store: Optional[str], pairs: Any,
+            actions: Any, dim: int, *, k: int = 5,
+            learning_rate: float = 0.2, l2: float = 1e-3,
+            replay_size: int = 1000, min_gain: float = 0.0,
+            seed: int = 0) -> Dict[str, Any]:
+        from . import surface_experience as surface
+        try:
+            self._check_write(store, "store")
+            return surface.experience_replay(
+                source=source, store=store, pairs=pairs, actions=actions,
+                dim=dim, k=k, learning_rate=learning_rate, l2=l2,
+                replay_size=replay_size, min_gain=min_gain, seed=seed)
+        except Exception as e:  # noqa: BLE001 - a bad spec must not kill the server
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
 
 def _context_class():
@@ -855,6 +1030,65 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent",
             max_risk=max_risk, alpha=alpha, seed=seed,
             proxy_gains=proxy_gains, oracle_gains=oracle_gains,
             issuer=issuer, run_id=run_id, kind=kind, metadata=metadata)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["platform"])
+    def platform(spec: Dict[str, Any], dry_run: bool = False,
+                 out: Optional[str] = None) -> Dict[str, Any]:
+        return t.platform(spec, dry_run=dry_run, out=out)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["capability"])
+    def capability(spec: Dict[str, Any], dry_run: bool = False,
+                   out: Optional[str] = None) -> Dict[str, Any]:
+        return t.capability(spec, dry_run=dry_run, out=out)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["ops"])
+    def ops(runs_db: str, tenant: str, workspace: str,
+            dry_run: bool = False, min_acceptance: float = 0.0,
+            max_cost_per_accepted: Optional[float] = None,
+            out: Optional[str] = None,
+            prometheus: Optional[str] = None) -> Dict[str, Any]:
+        return t.ops(
+            runs_db, tenant, workspace, dry_run=dry_run,
+            min_acceptance=min_acceptance,
+            max_cost_per_accepted=max_cost_per_accepted,
+            out=out, prometheus=prometheus)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["experience_report"])
+    def experience_report(store: Optional[str] = None) -> Dict[str, Any]:
+        return t.experience_report(store)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["experience_ingest"])
+    def experience_ingest(store: Optional[str], records: Any) -> Dict[str, Any]:
+        return t.experience_ingest(store, records)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["experience_recall"])
+    def experience_recall(store: Optional[str], features: Any,
+                          k: int = 5) -> Dict[str, Any]:
+        return t.experience_recall(store, features, k)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["experience_update"])
+    def experience_update(store: Optional[str], validation: Any, anchors: Any,
+                          actions: Any, dim: int,
+                          learning_rate: float = 0.2, l2: float = 1e-3,
+                          replay_size: int = 1000, min_gain: float = 0.0,
+                          seed: int = 0, require_anchors: bool = True,
+                          anchor_tolerance: float = 0.0) -> Dict[str, Any]:
+        return t.experience_update(
+            store, validation, anchors, actions, dim,
+            learning_rate=learning_rate, l2=l2, replay_size=replay_size,
+            min_gain=min_gain, seed=seed, require_anchors=require_anchors,
+            anchor_tolerance=anchor_tolerance)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["experience_replay"])
+    def experience_replay(source: str, store: Optional[str], pairs: Any,
+                          actions: Any, dim: int, k: int = 5,
+                          learning_rate: float = 0.2, l2: float = 1e-3,
+                          replay_size: int = 1000, min_gain: float = 0.0,
+                          seed: int = 0) -> Dict[str, Any]:
+        return t.experience_replay(
+            source, store, pairs, actions, dim, k=k,
+            learning_rate=learning_rate, l2=l2, replay_size=replay_size,
+            min_gain=min_gain, seed=seed)
 
     @server.tool(description=TOOL_DESCRIPTIONS["portfolio"])
     def portfolio(archive: Optional[str] = None, floor: float = 0.05,

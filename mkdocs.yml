@@ -111,6 +111,9 @@ nav:
     - Capability foundry: capability-foundry.md
     - Continual experience: continual-experience.md
     - The RSI platform cycle: platform.md
+    - Capability loop: capability-loop.md
+    - Operations console: ops.md
+    - Experience store: experience-cli.md
   - The decision plane (policies):
     - Choosing policies: policies.md
     - Using the slots — a guide: policy-guide.md
