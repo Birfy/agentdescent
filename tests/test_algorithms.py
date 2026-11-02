@@ -665,3 +665,32 @@ def test_kind_mismatch_with_no_usable_algorithm_points_to_default_loop():
     msg = algorithms.kind_mismatch_message(algorithms.get("gepa"), "no_such_kind")
     assert "no named algorithm applies to kind 'no_such_kind'" in msg
     assert "omit --algorithm" in msg
+
+
+def test_algorithm_names_ignore_case_and_hyphens(capsys):
+    # #696: `algorithms show GEPA` / `archive-selection` failed as unknown.
+    assert algorithms.get("GEPA").name == "gepa"
+    assert algorithms.get(" Archive-Selection ").name == "archive_selection"
+    with pytest.raises(algorithms.AlgorithmError, match="unknown algorithm 'nope'"):
+        algorithms.get("nope")
+    for name in ("GEPA", "archive-selection"):
+        assert cli.main(["algorithms", "show", name, "--json"]) == 0
+        canonical = json.loads(capsys.readouterr().out)["name"]
+        assert canonical == name.lower().replace("-", "_")
+    # A spec naming the algorithm in another case composes the same algorithm.
+    pol = compose(_spec(algorithm="RRSI")).kwargs["policies"]
+    assert isinstance(pol.acceptance, RRsiAcceptance)
+
+
+def test_an_ambiguous_folded_name_stays_unknown():
+    algorithms.register(Algorithm(name="_Probe_Case", summary="s", kinds=("text",),
+                                  fidelity="preset", params=(), build=lambda p: None))
+    algorithms.register(Algorithm(name="_probe-case", summary="s", kinds=("text",),
+                                  fidelity="preset", params=(), build=lambda p: None))
+    try:
+        assert algorithms.get("_Probe_Case").name == "_Probe_Case"   # exact wins
+        with pytest.raises(algorithms.AlgorithmError, match="unknown algorithm"):
+            algorithms.get("_PROBE_CASE")
+    finally:
+        algorithms._REGISTRY.pop("_Probe_Case")
+        algorithms._REGISTRY.pop("_probe-case")

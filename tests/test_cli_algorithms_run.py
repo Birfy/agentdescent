@@ -275,3 +275,19 @@ def test_algorithms_run_failed_plan_plain_next_is_plan(tmp_path, capsys, monkeyp
     assert "at least 4 tasks" in captured.err
     assert f"next: fix {out}, then agentdescent plan {out}" in captured.out
     assert "agentdescent evolve" not in captured.out
+
+
+def test_algorithms_run_resolves_a_case_variant_to_the_registered_name(
+        tmp_path, capsys, monkeypatch):
+    # #696: `algorithms run GEPA` failed as unknown; it now writes the
+    # canonical name into the spec and the default file name.
+    monkeypatch.chdir(tmp_path)
+    prompt, cases = _prompt_and_cases(tmp_path)
+    assert cli.main([
+        "algorithms", "run", "GEPA", str(prompt), str(cases),
+        "--model", "m", "--base-url", "https://example.test/v1",
+    ]) == 0
+    out = tmp_path / "agentdescent.gepa.spec.json"
+    assert out.exists()
+    assert json.loads(out.read_text())["algorithm"] == "gepa"
+    assert f"next: agentdescent evolve {out.name}" in capsys.readouterr().out

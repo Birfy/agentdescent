@@ -2560,8 +2560,10 @@ def _cmd_algorithms_run(a: argparse.Namespace) -> int:
 
     as_json = getattr(a, "json", False)
     # Unknown name: same exit and tip as `algorithms show` (where="run").
+    # A case/hyphen variant resolves, and the spec and its file name use the
+    # registered name (#696).
     try:
-        algorithms.get(a.name, where="run")
+        a.name = algorithms.get(a.name, where="run").name
     except algorithms.AlgorithmError as e:
         if as_json:
             _out({"ok": False, "error": str(e)}, as_json=True)

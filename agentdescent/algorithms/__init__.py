@@ -211,14 +211,35 @@ def external_errors() -> Dict[str, str]:
     return dict(_EXTERNAL_ERRORS)
 
 
+def _fold(name: str) -> str:
+    return name.strip().casefold().replace("-", "_")
+
+
+def _resolve_alias(name: str) -> str:
+    """The registered name ``name`` means, ignoring case and ``-`` vs ``_``.
+
+    Only a single match resolves; an ambiguous or unknown name is returned
+    unchanged so the caller reports it as unknown.
+    """
+    folded = _fold(name)
+    matches = [n for n in _REGISTRY if _fold(n) == folded]
+    return matches[0] if len(matches) == 1 else name
+
+
 def get(name: Any, *, where: str = "algorithm") -> Algorithm:
-    """The named algorithm, or an :class:`AlgorithmError` listing the valid names."""
+    """The named algorithm, or an :class:`AlgorithmError` listing the valid names.
+
+    A name that matches exactly one registered algorithm once case and
+    ``-``/``_`` are ignored resolves to it (``GEPA``, ``archive-selection``).
+    """
     _load_builtin()
     _load_external()
     if (isinstance(name, str) and name in _EXTERNAL_ERRORS
             and name not in _REGISTRY):
         raise AlgorithmError(
             f"{where}: algorithm {name!r} failed to load: {_EXTERNAL_ERRORS[name]}")
+    if isinstance(name, str) and name not in _REGISTRY:
+        name = _resolve_alias(name)
     if not isinstance(name, str) or name not in _REGISTRY:
         raise AlgorithmError(
             f"{where}: unknown algorithm {name!r}; available: {sorted(_REGISTRY)} "
