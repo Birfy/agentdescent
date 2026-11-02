@@ -2537,6 +2537,23 @@ def cmd_algorithms(a: argparse.Namespace) -> int:
     return 0
 
 
+def _algorithms_run_missing_data_hint(msg: str, *, cases: Optional[str]) -> str:
+    """Make a missing ``data.path`` failure actionable for ``algorithms run`` (#692).
+
+    ``init`` already prints ``next: create …``; ``algorithms run`` plans immediately,
+    so the same gap needs a tip on the error itself.
+    """
+    if "data.path" not in msg or "does not exist" not in msg:
+        return msg
+    if cases:
+        return (f"{msg}; check the cases path you passed as the third argument "
+                "(one JSON object per line with prompt/gold keys)")
+    return (f"{msg}; pass a cases.jsonl as the third argument "
+            "(see `agentdescent algorithms run --help`), or create that file "
+            "-- one JSON object per line with prompt/gold keys "
+            "(`agentdescent demo` writes a complete offline example to copy from)")
+
+
 def _cmd_algorithms_run(a: argparse.Namespace) -> int:
     """``algorithms run NAME PATH`` -- init + plan in one step; does not start a run (#674)."""
     from . import algorithms
@@ -2581,14 +2598,16 @@ def _cmd_algorithms_run(a: argparse.Namespace) -> int:
         spec = load_spec(out)
         payload = plan_payload(spec, usd_per_call=getattr(a, "usd_per_call", None))
     except (SpecError, ValueError) as e:
+        err = _algorithms_run_missing_data_hint(
+            str(e), cases=getattr(a, "cases", None))
         if as_json:
-            _out({"ok": False, "error": str(e), "spec": out}, as_json=True)
+            _out({"ok": False, "error": err, "spec": out}, as_json=True)
         else:
             # The spec is already on disk: say so before the error (#688).
             for kind_tag, text in report:
                 if kind_tag == "wrote":
                     print(text)
-            print(f"error: {e}", file=sys.stderr)
+            print(f"error: {err}", file=sys.stderr)
         return 2
     next_line = f"agentdescent evolve {out}"
     if as_json:

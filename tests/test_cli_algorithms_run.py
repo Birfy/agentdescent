@@ -139,6 +139,7 @@ def _skill(tmp_path: Path) -> Path:
 
 def test_algorithms_run_plan_failure_still_reports_written_spec(tmp_path, capsys, monkeypatch):
     # #688: the spec is on disk even when plan fails; plain mode must say so.
+    # #692: a missing cases path the user passed is named in the tip.
     monkeypatch.chdir(tmp_path)
     prompt = tmp_path / "p.md"
     prompt.write_text("x\n")
@@ -150,6 +151,7 @@ def test_algorithms_run_plan_failure_still_reports_written_spec(tmp_path, capsys
     captured = capsys.readouterr()
     assert "wrote agentdescent.gepa.spec.json" in captured.out
     assert "does not exist" in captured.err
+    assert "check the cases path you passed" in captured.err
     assert (tmp_path / "agentdescent.gepa.spec.json").exists()
 
 
@@ -177,9 +179,13 @@ def test_algorithms_run_group_kind_validated_json(tmp_path, capsys, monkeypatch)
 def test_algorithms_run_agent_passthrough(tmp_path, capsys, monkeypatch):
     monkeypatch.chdir(tmp_path)
     skill = _skill(tmp_path)
+    _, cases = _prompt_and_cases(tmp_path)
     out = tmp_path / "s.json"
-    cli.main(["algorithms", "run", "evoskill", str(skill), "--agent", "dsh",
-              "--out", str(out)])
+    rc = cli.main(["algorithms", "run", "evoskill", str(skill), str(cases),
+                   "--agent", "dsh", "--out", str(out)])
+    # Plan may still exit 2 when `dsh` is not on PATH; the agent must be written.
+    assert rc in (0, 2)
+    assert out.exists()
     capsys.readouterr()
     spec = json.loads(out.read_text())
     assert spec["agent"] == {"ref": "dsh"}
@@ -194,3 +200,39 @@ def test_algorithms_run_agent_mismatch_refused(tmp_path, capsys, monkeypatch):
                      "--agent", "openai_compatible", "--out", str(out)]) == 2
     assert "--agent openai_compatible" in capsys.readouterr().err
     assert not out.exists()
+
+def test_algorithms_run_omitted_cases_tips_third_arg(tmp_path, capsys, monkeypatch):
+    # #692: default eval/cases.jsonl missing → tip the optional third argument.
+    monkeypatch.chdir(tmp_path)
+    prompt = tmp_path / "p.md"
+    prompt.write_text("x\n")
+    out = tmp_path / "o.json"
+    assert cli.main([
+        "algorithms", "run", "gepa", str(prompt),
+        "--model", "m", "--base-url", "https://example.test/v1",
+        "--out", str(out),
+    ]) == 2
+    captured = capsys.readouterr()
+    assert f"wrote {out}" in captured.out
+    assert "does not exist" in captured.err
+    assert "pass a cases.jsonl as the third argument" in captured.err
+    assert "agentdescent algorithms run --help" in captured.err
+    assert out.exists()
+
+
+def test_algorithms_run_omitted_cases_tips_third_arg_json(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    prompt = tmp_path / "p.md"
+    prompt.write_text("x\n")
+    out = tmp_path / "o.json"
+    assert cli.main([
+        "--json", "algorithms", "run", "gepa", str(prompt),
+        "--model", "m", "--base-url", "https://example.test/v1",
+        "--out", str(out),
+    ]) == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["spec"] == str(out)
+    assert "pass a cases.jsonl as the third argument" in payload["error"]
+    assert "does not exist" in payload["error"]
+
