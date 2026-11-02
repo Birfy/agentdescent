@@ -152,6 +152,8 @@ def test_algorithms_run_plan_failure_still_reports_written_spec(tmp_path, capsys
     assert "wrote agentdescent.gepa.spec.json" in captured.out
     assert "does not exist" in captured.err
     assert "check the cases path you passed" in captured.err
+    assert "next: fix agentdescent.gepa.spec.json, then agentdescent plan" in captured.out
+    assert "agentdescent evolve" not in captured.out
     assert (tmp_path / "agentdescent.gepa.spec.json").exists()
 
 
@@ -233,6 +235,43 @@ def test_algorithms_run_omitted_cases_tips_third_arg_json(tmp_path, capsys, monk
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is False
     assert payload["spec"] == str(out)
+    # #694: same keys as the failed-plan shape, and never `evolve` next.
+    assert payload["spec_path"] == str(out)
+    assert payload["next"] == f"agentdescent plan {out}"
     assert "pass a cases.jsonl as the third argument" in payload["error"]
     assert "does not exist" in payload["error"]
 
+
+def test_algorithms_run_failed_plan_json_next_is_plan_not_evolve(
+        tmp_path, capsys, monkeypatch):
+    # #694: plan refuses the spec (too few cases); `next` must not say evolve.
+    monkeypatch.chdir(tmp_path)
+    prompt, cases = _prompt_and_cases(tmp_path, n=1)
+    out = tmp_path / "s.json"
+    assert cli.main([
+        "--json", "algorithms", "run", "gepa", str(prompt), str(cases),
+        "--model", "m", "--base-url", "https://example.test/v1",
+        "--out", str(out),
+    ]) == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert "at least 4 tasks" in payload["error"]
+    assert payload["spec_path"] == str(out)
+    assert payload["next"] == f"agentdescent plan {out}"
+    assert out.exists()
+
+
+def test_algorithms_run_failed_plan_plain_next_is_plan(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    prompt, cases = _prompt_and_cases(tmp_path, n=1)
+    out = tmp_path / "s.json"
+    assert cli.main([
+        "algorithms", "run", "gepa", str(prompt), str(cases),
+        "--model", "m", "--base-url", "https://example.test/v1",
+        "--out", str(out),
+    ]) == 2
+    captured = capsys.readouterr()
+    assert f"wrote {out}" in captured.out
+    assert "at least 4 tasks" in captured.err
+    assert f"next: fix {out}, then agentdescent plan {out}" in captured.out
+    assert "agentdescent evolve" not in captured.out

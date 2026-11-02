@@ -2594,6 +2594,9 @@ def _cmd_algorithms_run(a: argparse.Namespace) -> int:
         else:
             print(f"error: {e}", file=sys.stderr)
         return 2
+    # Once the spec is on disk, a failed plan's next step is to fix it and
+    # re-plan -- never `evolve` on a spec plan just refused (#694).
+    retry_line = f"agentdescent plan {out}"
     try:
         spec = load_spec(out)
         payload = plan_payload(spec, usd_per_call=getattr(a, "usd_per_call", None))
@@ -2601,15 +2604,19 @@ def _cmd_algorithms_run(a: argparse.Namespace) -> int:
         err = _algorithms_run_missing_data_hint(
             str(e), cases=getattr(a, "cases", None))
         if as_json:
-            _out({"ok": False, "error": err, "spec": out}, as_json=True)
+            # `spec` kept for compatibility; `spec_path` matches the plan shape.
+            _out({"ok": False, "error": err, "spec": out, "spec_path": out,
+                  "next": retry_line}, as_json=True)
         else:
             # The spec is already on disk: say so before the error (#688).
             for kind_tag, text in report:
                 if kind_tag == "wrote":
                     print(text)
             print(f"error: {err}", file=sys.stderr)
+            print(f"next: fix {out}, then {retry_line}")
         return 2
-    next_line = f"agentdescent evolve {out}"
+    ok = bool(payload.get("ok", True))
+    next_line = f"agentdescent evolve {out}" if ok else retry_line
     if as_json:
         # Exactly one JSON object on stdout for success and error (#674).
         obj = dict(payload)
@@ -2619,11 +2626,8 @@ def _cmd_algorithms_run(a: argparse.Namespace) -> int:
             t for k, t in report if k == "warning"]
         obj["notes"] = [t for k, t in report if k == "note"]
         obj["next"] = next_line
-        if not obj.get("ok", True):
-            _out(obj, as_json=True)
-            return 2
         _out(obj, as_json=True)
-        return 0
+        return 0 if ok else 2
     for kind_tag, text in report:
         if kind_tag == "warning":
             print(f"warning: {text}")
@@ -2631,8 +2635,9 @@ def _cmd_algorithms_run(a: argparse.Namespace) -> int:
             print(f"note: {text}")
         else:
             print(text)
-    if not payload.get("ok", True):
+    if not ok:
         print(f"error: {payload.get('error', 'plan failed')}", file=sys.stderr)
+        print(f"next: fix {out}, then {next_line}")
         return 2
     _out(payload, as_json=False)
     print(f"next: {next_line}")
