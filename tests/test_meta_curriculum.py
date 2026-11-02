@@ -15,6 +15,7 @@ import pytest
 
 from agentdescent import (
     ConsolidationStore,
+    MetaAuditStore,
     MetaChallengerConfig,
     MetaOutcome,
     MetaProblemChallenger,
@@ -191,3 +192,126 @@ def test_overlapping_train_and_validation_is_refused(tmp_path):
             challenger=_challenger(), propose=_nudge_up,
             problems={"a": _helpful}, val_problems={"a": _helpful_val},
             seeds=(0, 1), val_seeds=(1, 2))
+
+
+# -- verified seeding ------------------------------------------------------------
+
+
+def test_min_exam_passed_excludes_a_flagged_rule_and_falls_back_to_seed(tmp_path):
+    store = ConsolidationStore(str(tmp_path / "archive"))
+    _seed_rule(store, tmp_path, 0.4, run_id="flagged-rule")
+    store.mark_exam("flagged-rule", exam="flagged", flags=1, note="failed once")
+    report, _ = curriculum_meta_run(
+        **_common(store, tmp_path), challenger=_challenger(),
+        problems={"ta": _helpful, "tb": _helpful},
+        val_problems={"va": _helpful_val}, min_exam="passed")
+    assert report["seeded_from"] is None
+    assert _c_of(report["seed_value"]) == 0.2
+
+
+def test_min_exam_passed_seeds_from_a_passed_rule(tmp_path):
+    store = ConsolidationStore(str(tmp_path / "archive"))
+    _seed_rule(store, tmp_path, 0.4, run_id="passed-rule")
+    store.mark_exam("passed-rule", exam="passed", flags=0, note="ok")
+    report, _ = curriculum_meta_run(
+        **_common(store, tmp_path), challenger=_challenger(),
+        problems={"ta": _helpful, "tb": _helpful},
+        val_problems={"va": _helpful_val}, min_exam="passed")
+    assert report["seeded_from"] == "passed-rule"
+    assert _c_of(report["seed_value"]) == 0.4
+
+
+# -- audited validation ---------------------------------------------------------
+
+
+def test_audited_validation_records_pairs_but_the_verifier_decides(tmp_path):
+    plain_store = ConsolidationStore(str(tmp_path / "archive-plain"))
+    plain, _ = curriculum_meta_run(
+        **_common(plain_store, tmp_path), challenger=_challenger(),
+        problems={"ta": _helpful, "tb": _helpful},
+        val_problems={"va": _helpful_val})
+
+    store = ConsolidationStore(str(tmp_path / "archive-audited"))
+    audit = MetaAuditStore(str(tmp_path / "audit.jsonl"))
+    report, _ = curriculum_meta_run(
+        **_common(store, tmp_path), challenger=_challenger(),
+        problems={"ta": _helpful, "tb": _helpful},
+        val_problems={"va": _helpful_val},
+        oracle=lambda outcome: outcome.final, audit_store=audit,
+        audit_rate=1.0)
+
+    assert report["audited_n"] >= 1
+    assert "gain_bias" in report and "oracle_gain" in report
+    assert report["audit_store"] == str(tmp_path / "audit.jsonl")
+    assert len(list(audit.iter_records())) >= 1
+    assert len(audit.verdicts()) == 1
+    assert audit.verdicts()[0]["verdict"] == report["verdict"]
+    # the oracle only lands in the store: the table/verdict are the verifier's
+    assert report["validation"] == plain["validation"]
+    assert report["mean_gain"] == plain["mean_gain"]
+    assert report["verdict"] == plain["verdict"]
+
+
+@pytest.mark.parametrize("audit_kwargs", [
+    {"oracle": lambda outcome: outcome.final},
+    {"audit_store": MetaAuditStore()},
+])
+def test_audit_needs_both_oracle_and_store(tmp_path, audit_kwargs):
+    store = ConsolidationStore(str(tmp_path / "archive"))
+    with pytest.raises(ValueError, match="both oracle"):
+        curriculum_meta_run(
+            **_common(store, tmp_path), challenger=_challenger(),
+            problems={"ta": _helpful, "tb": _helpful},
+            val_problems={"va": _helpful_val}, **audit_kwargs)
+
+
+# -- the two unmerged defects ---------------------------------------------------
+
+
+def test_generated_problems_are_bounded_by_the_frontier_pool():
+    # the name -> Problem map must not keep every problem ever generated
+    from agentdescent.meta_curriculum import _MetaCurriculumDriver
+    from agentdescent.selfplay import FrontierSampler
+    import random as _random
+    challenger = _challenger()
+    challenger.config = MetaChallengerConfig(
+        generated_per_round=4, max_frontier_pool=6, max_generate_attempts=20)
+    sampler = FrontierSampler(challenger, seed=0)
+    problems = {"ta": _helpful, "tb": _helpful}
+    driver = _MetaCurriculumDriver(challenger, sampler, problems,
+                                   solved_threshold=0.999, rng=_random.Random(1))
+    driver.refresh()
+    for _ in range(25):
+        driver.after_round(None)
+    assert sampler.stats()["generated_total"] >= 100
+    assert {"ta", "tb"} <= set(problems)
+    assert len(problems) <= 2 + 6
+    live = {t.id for t in sampler._frontier}
+    assert set(problems) - {"ta", "tb"} == live
+
+
+def test_default_run_ids_do_not_collide_within_one_second(tmp_path):
+    store = ConsolidationStore(str(tmp_path / "archive"))
+    ids = []
+    for i in range(2):
+        common = _common(store, tmp_path)
+        common["repo_dir"] = str(tmp_path / f"repos{i}")
+        report, _ = curriculum_meta_run(
+            **common, challenger=_challenger(),
+            problems={"ta": _helpful, "tb": _helpful},
+            val_problems={"va": _helpful_val})
+        assert report["verdict"] == "adopt", report["reason"]
+        ids.append(report["run_id"])
+    assert ids[0] != ids[1]
+
+
+def test_default_call_still_seeds_from_an_unexamined_rule(tmp_path):
+    store = ConsolidationStore(str(tmp_path / "archive"))
+    _seed_rule(store, tmp_path, 0.3, run_id="legacy")
+    report, _ = curriculum_meta_run(
+        **_common(store, tmp_path), challenger=_challenger(),
+        problems={"ta": _helpful, "tb": _helpful},
+        val_problems={"va": _helpful_val})
+    assert report["seeded_from"] == "legacy"
+    assert "audited_n" not in report
+    assert "gain_bias" not in report

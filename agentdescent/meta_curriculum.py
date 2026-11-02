@@ -35,17 +35,20 @@ import os
 import random
 import tempfile
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from .consolidation import ConsolidationStore
 from .evolution import EvolutionResult, Task, evolve
 from .meta import (
-    MetaOutcome, MetaReward, MetaRunReport, Problem, SlotSpec, _archived_rules,
+    MetaOutcome, MetaReward, MetaRunReport, Problem, SlotSpec,
     _mean_gain, _require_disjoint, _transfer_from, archive_rule, auc,
     meta_validate, problem_descriptor,
 )
+from .meta_audit import _digest, audited_meta_validate
 from .selfplay import FrontierSampler
+from .verified_seed import verified_rules
 
 __all__ = [
     "MetaChallengerConfig",
@@ -120,6 +123,9 @@ class _MetaCurriculumDriver:
         self._rounds_closed = 0
         self._reports: List[Dict[str, float]] = []
         self._next_index = 0
+        #: names of the generated problems in ``problems`` (the seed problems
+        #: are never pruned)
+        self._generated: List[str] = []
 
     def refresh(self) -> None:
         """Generate, validate and install the next frontier batch of problems."""
@@ -138,12 +144,32 @@ class _MetaCurriculumDriver:
             name = f"frontier-{self._next_index}"
             self._next_index += 1
             self.problems[name] = problem
+            self._generated.append(name)
             task = Task(id=name, prompt=f"frontier problem {name}",
                         meta={"problem": name, "seed": self._rng.getrandbits(32),
                               "generated": True, "spec": self.challenger.spec})
             batch.append(task)
         if batch:
             self.sampler.install(batch)
+        self._prune()
+
+    def _prune(self) -> None:
+        """Forget generated problems the sampler no longer holds.
+
+        The sampler drops learned/stuck problems and caps its pool at
+        ``max_frontier_pool``; without this the name -> Problem map kept every
+        problem ever generated, growing by ``generated_per_round`` per round
+        for the life of the run. Called between rounds only, so no rollout is
+        in flight on a pruned name.
+        """
+        live = {t.id for t in self.sampler._frontier}
+        keep = []
+        for name in self._generated:
+            if name in live:
+                keep.append(name)
+            else:
+                self.problems.pop(name, None)
+        self._generated = keep
 
     def after_round(self, info: Any) -> None:
         """Close the meta round: judge the frontier, feed the challenger."""
@@ -185,6 +211,13 @@ def curriculum_meta_run(
     solved_threshold: float = 0.999,
     run_id: Optional[str] = None,
     repo_dir: Optional[str] = None,
+    min_exam: Optional[str] = None,
+    meta_audit: Optional[Any] = None,
+    bias_threshold: float = 0.1,
+    oracle: Optional[MetaReward] = None,
+    audit_store: Optional[Any] = None,
+    audit_rate: float = 0.1,
+    audit_seed: int = 0,
     **evolve_kwargs: Any,
 ) -> Tuple[Dict[str, Any], EvolutionResult]:
     """Evolve a decision slot against a problem distribution the meta loop generates.
@@ -221,7 +254,22 @@ def curriculum_meta_run(
         What a generated problem must reach to count as learned by the rule.
     run_id, repo_dir:
         The archived ``run_id`` and the base directory for the session's fresh
-        ledger repo (a shared repo would resume and ignore the seed).
+        ledger repo (a shared repo would resume and ignore the seed). A
+        ``meta-cur-<slot>-<unix time>-<random>`` id is generated when omitted.
+    min_exam, meta_audit, bias_threshold:
+        The seeding gate applied to archived rules via
+        :func:`~agentdescent.verified_seed.verified_rules`. ``min_exam=None``
+        (the default) reproduces the old ``_archived_rules`` behaviour exactly;
+        ``"flagged"`` / ``"passed"`` require that exam status or better, and a
+        supplied ``meta_audit`` store additionally excludes rules whose gain
+        bias exceeds ``bias_threshold``.
+    oracle, audit_store, audit_rate, audit_seed:
+        When both ``oracle`` and ``audit_store`` are supplied the validation
+        table is :func:`~agentdescent.meta_audit.audited_meta_validate`: a
+        probability sample of ``(problem, seed)`` pairs is scored by ``oracle``
+        and persisted, and the verdict is written back with
+        ``audit_store.record_verdict``. The verdict itself still rides the
+        verifier, never the oracle. Supplying only one of the two raises.
     **evolve_kwargs:
         The outer :func:`evolve` call's settings (``rounds``, ``n_workers``,
         ``held_out_frac`` ...), except ``task_sampler`` / ``on_round`` /
@@ -244,13 +292,20 @@ def curriculum_meta_run(
         raise ValueError("curriculum_meta_run() needs problems and val_problems")
     if propose is None and model is None:
         raise ValueError("curriculum_meta_run() needs propose= or model=")
+    if (oracle is None) != (audit_store is None):
+        raise ValueError(
+            "curriculum_meta_run() needs both oracle= and audit_store= to "
+            "audit the meta gain, or neither")
     _require_disjoint(problems, val_problems, seeds, val_seeds)
     score = meta_reward or auc
     if repo_dir is not None:
         os.makedirs(repo_dir, exist_ok=True)
+    rid = run_id or f"meta-cur-{slot}-{int(time.time())}-{uuid.uuid4().hex[:8]}"
 
-    rules = _archived_rules(store, slot=slot, spec=spec, config=config,
-                            artifact_id="meta-rule")
+    rules = list(verified_rules(
+        store, slot=slot, spec=spec, config=config, artifact_id="meta-rule",
+        min_exam=min_exam, meta_audit=meta_audit,
+        bias_threshold=bias_threshold).rules)
     prior = rules[0] if rules else None
     prior_state = dict(prior.state) if prior is not None else None
     prior_value = (spec.render(prior_state) if prior_state
@@ -293,9 +348,15 @@ def curriculum_meta_run(
 
     train_validation = meta_validate(
         spec, prior_value, value, problems, seeds=seeds, meta_reward=score)
-    validation = meta_validate(
-        spec, prior_value, value, val_problems, seeds=val_seeds,
-        meta_reward=score)
+    if audit_store is not None:
+        validation = audited_meta_validate(
+            spec, prior_value, value, val_problems, seeds=val_seeds,
+            meta_reward=score, oracle=oracle, store=audit_store, slot=slot,
+            run_id=rid, sample_rate=audit_rate, seed=audit_seed)
+    else:
+        validation = meta_validate(
+            spec, prior_value, value, val_problems, seeds=val_seeds,
+            meta_reward=score)
     mean_gain = _mean_gain(validation)
     train_gain = _mean_gain(train_validation)
     transfer = _transfer_from(train_gain, mean_gain)
@@ -313,8 +374,23 @@ def curriculum_meta_run(
             f"mean gain {mean_gain:+.3f} on unseen problems, "
             f"transfer {transfer if transfer is None else round(transfer, 3)}")
 
+    audit_fields: Dict[str, Any] = {}
+    if audit_store is not None:
+        audited_n = sum(1 for _ in audit_store.iter_records(run_id=rid))
+        oracle_gain = audit_store.rectified_gain(run_id=rid)
+        gain_bias = audit_store.gain_bias(run_id=rid)
+        audit_store.record_verdict(
+            run_id=rid, slot=slot, verdict=verdict, reason=reason,
+            mean_gain=mean_gain, transfer=transfer, audited_n=audited_n,
+            oracle_gain=oracle_gain, value_digest=_digest(value))
+        audit_fields = {
+            "audited_n": audited_n,
+            "oracle_gain": oracle_gain,
+            "gain_bias": gain_bias,
+            "audit_store": audit_store.path,
+        }
+
     frontier = driver.final_stats()
-    rid = run_id or f"meta-cur-{slot}-{int(time.time())}"
     if verdict == "adopt":
         report = MetaRunReport(
             slot=slot, seed_value=prior_value, value=value,
@@ -331,6 +407,7 @@ def curriculum_meta_run(
         "run_id": rid if verdict == "adopt" else None,
         "seeded_from": prior.run_id if prior is not None else None,
         "frontier": frontier,
+        **audit_fields,
     }
     try:
         result.meta = report
