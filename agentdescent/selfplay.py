@@ -183,6 +183,10 @@ class FrontierSampler:
         book["last"] = score
         book["attempts"] = book.get("attempts", 0) + 1
 
+    def live_ids(self) -> Tuple[str, ...]:
+        """The ids currently on the frontier."""
+        return tuple(task.id for task in self._frontier)
+
     def install(self, tasks: Sequence[Task]) -> None:
         """Add a freshly generated, validated frontier batch."""
         cfg = self.challenger.config

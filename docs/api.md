@@ -4129,6 +4129,7 @@ A `TaskSampler` that mixes the fixed seed tasks with a growable frontier pool th
 |---|---|
 | `count_invalid() -> None` | A validity gate refused a generated payload. |
 | `install(tasks: Sequence[Task]) -> None` | Add a freshly generated, validated frontier batch. |
+| `live_ids() -> Tuple[str, ...]` | The ids currently on the frontier. |
 | `pick(keys: Sequence[str], r: int) -> Any` | A seed id (from the shard) or a frontier Task object. |
 | `record(task_id: str, score: float) -> None` | Learn one rollout's outcome. The engine calls this for every task, seed or frontier; only frontier ids are tracked. |
 | `sweep(solved_threshold: float) -> Dict[str, float]` | Close one solver round: judge every frontier task that was attempted, return the learnability report for the challenger. |
