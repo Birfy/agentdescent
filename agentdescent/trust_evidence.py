@@ -70,8 +70,8 @@ class TrustEvidence:
 
     eval_result: EvalResult
     canary: CanaryResult
-    conformal: ConformalReport
-    sequential: SequentialReport
+    conformal: Optional[ConformalReport] = None
+    sequential: Optional[SequentialReport] = None
     goodhart: Optional[GoodhartReport] = None
     metamorphic: Optional[MetamorphicReport] = None
     verifier: Optional[EnsembleReport] = None
@@ -120,8 +120,8 @@ class TrustEvidence:
         return {
             "eval": self.eval_result.to_dict(),
             "canary": asdict(self.canary),
-            "conformal": asdict(self.conformal),
-            "sequential": asdict(self.sequential),
+            "conformal": None if self.conformal is None else asdict(self.conformal),
+            "sequential": None if self.sequential is None else asdict(self.sequential),
             "goodhart": None if self.goodhart is None else asdict(self.goodhart),
             "metamorphic": (None if self.metamorphic is None
                             else asdict(self.metamorphic)),

@@ -282,6 +282,11 @@ does not exist on the CLI/MCP path.
 - **`portfolio`** — "how do the layers rank, and how should the next budget
   window be split?" It reports `reallocated` and a `reasons` line per layer;
   it only suggests, nothing is applied.
+- **`release`** — gate and sign one release from paired held-out scores. It is
+  fail-closed: a reject/defer is a normal `released: false`; only an accepted
+  promotion writes the signed manifest and lineage. The signing secret is the
+  server's `AGENTDESCENT_RELEASE_KEY`, never a tool argument. Relay the verdict
+  and the reasons/missing list; do not present a deferral as a release.
 - **`audit_trace`** — "where did this adopted rule's evidence come from?" for
   one `run_id`. A ring with no store passed in is missing evidence, not a pass.
 

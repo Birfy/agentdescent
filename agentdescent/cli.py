@@ -2761,6 +2761,49 @@ def cmd_tournament(a: argparse.Namespace) -> int:
             print(f"  {arm.algorithm} seed {arm.seed}: {arm.error[:160]}")
     return 0 if report.winner is not None else 1
 
+def cmd_release(a: argparse.Namespace) -> int:
+    """``agentdescent release`` -- evidence-gated, signed release receipt."""
+    from .release_surface import (
+        ReleaseSurfaceError, load_rules, release_payload, release_text,
+        resolve_secret,
+    )
+
+    try:
+        rules = load_rules(
+            a.rules, min_effect=a.min_effect, max_risk=a.max_risk)
+        secret = resolve_secret(
+            secret_env=a.secret_env, secret_file=a.secret_file)
+        metadata = None
+        if a.metadata is not None:
+            try:
+                metadata = json.loads(a.metadata)
+            except ValueError as error:
+                raise ReleaseSurfaceError(
+                    f"--metadata is not valid JSON: {error}") from None
+            if not isinstance(metadata, dict):
+                raise ReleaseSurfaceError("--metadata must be a JSON object")
+        payload = release_payload(
+            a.before, a.after, artifact_id=a.artifact_id,
+            artifact_hash=a.artifact_hash, key_id=a.key_id, secret=secret,
+            rules=rules, lineage=a.lineage, parents=a.parents,
+            contaminated=a.contamination, approved=a.approval, risk=a.risk,
+            min_effect=a.min_effect, alpha=a.alpha, seed=a.seed,
+            proxy_gains=a.proxy_gains, oracle_gains=a.oracle_gains,
+            issuer=a.issuer, run_id=a.run_id, kind=a.kind,
+            metadata=metadata, out=a.out)
+    except (ReleaseSurfaceError, OSError, ValueError) as error:
+        if getattr(a, "json", False):
+            _out({"ok": False, "error": str(error)}, as_json=True)
+        else:
+            print(f"release error: {error}", file=sys.stderr)
+        return 2
+    if a.json:
+        _out(payload, as_json=True)
+    else:
+        print(release_text(payload))
+    return 0 if payload["released"] else 1
+
+
 def safety_payload(archive: Optional[str] = None, *,
                    audit: Optional[str] = None, bias_threshold: float = 0.1,
                    min_exam: Optional[str] = "passed") -> Dict[str, Any]:
@@ -3369,6 +3412,62 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
                    help="machine-readable output")
     s.set_defaults(fn=cmd_safety)
+
+    s = sub.add_parser(
+        "release",
+        help="gate paired evidence and sign an accepted release receipt")
+    s.add_argument("--before", required=True, metavar="PATH",
+                   help="JSON object of task -> incumbent score, or '-' for stdin")
+    s.add_argument("--after", required=True, metavar="PATH",
+                   help="JSON object of task -> candidate score, or '-' for stdin")
+    s.add_argument("--artifact-id", required=True, dest="artifact_id",
+                   help="the released artifact id")
+    s.add_argument("--artifact-hash", required=True, dest="artifact_hash",
+                   help="content hash of the artifact (also the manifest identity)")
+    s.add_argument("--key-id", required=True, dest="key_id",
+                   help="signing key id written into the manifest")
+    s.add_argument("--secret-env", dest="secret_env", default=None,
+                   help="environment variable holding the HMAC secret "
+                        "(default: AGENTDESCENT_RELEASE_KEY)")
+    s.add_argument("--secret-file", dest="secret_file", default=None,
+                   help="file holding the HMAC secret (never pass it on argv)")
+    s.add_argument("--lineage", help="lineage JSON to load and extend on release")
+    s.add_argument("--out", help="write the JSON report here as well")
+    s.add_argument("--rules", help="PromotionRules JSON object (overrides the flags)")
+    s.add_argument("--min-effect", type=float, default=0.0,
+                   dest="min_effect", help="minimum eval delta (default 0.0)")
+    s.add_argument("--max-risk", type=float, default=1.0,
+                   dest="max_risk", help="highest risk the rules accept (default 1.0)")
+    s.add_argument("--risk", type=float, default=None,
+                   help="this candidate's risk in [0, 1]")
+    s.add_argument("--contamination", choices=("unknown", "clean", "contaminated"),
+                   default="unknown", help="held-out contamination status")
+    s.add_argument("--clean", dest="contamination", action="store_const",
+                   const="clean", help="mark the held-out set clean (shortcut)")
+    s.add_argument("--contaminated", dest="contamination", action="store_const",
+                   const="contaminated", help="mark the held-out set contaminated")
+    s.add_argument("--approval", choices=("unknown", "approved", "rejected"),
+                   default="unknown", help="human approval status")
+    s.add_argument("--approved", dest="approval", action="store_const",
+                   const="approved", help="mark the candidate human-approved")
+    s.add_argument("--rejected", dest="approval", action="store_const",
+                   const="rejected", help="mark the candidate human-rejected")
+    s.add_argument("--alpha", type=float, default=0.05,
+                   help="statistical alpha (default 0.05)")
+    s.add_argument("--seed", type=int, default=0, help="bootstrap seed")
+    s.add_argument("--proxy-gains", dest="proxy_gains", default=None,
+                   help="JSON array of proxy gain observations (Goodhart check)")
+    s.add_argument("--oracle-gains", dest="oracle_gains", default=None,
+                   help="JSON array of oracle gain observations (Goodhart check)")
+    s.add_argument("--parents", default="",
+                   help="comma-separated parent artifact ids")
+    s.add_argument("--run-id", dest="run_id", default="", help="source run id")
+    s.add_argument("--kind", default="skill", help="artifact kind (default skill)")
+    s.add_argument("--issuer", default="agentdescent",
+                   help="manifest issuer (default agentdescent)")
+    s.add_argument("--metadata", default=None,
+                   help="JSON object stored with the manifest")
+    s.set_defaults(fn=cmd_release)
 
     s = sub.add_parser("serve", help="serve a read-only run panel on loopback, for a host UI")
     s.add_argument("--host", default=runstore.DEFAULT_HTTP_HOST)

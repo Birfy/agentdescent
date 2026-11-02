@@ -106,6 +106,7 @@ nav:
     - The RSI loop kernel: loop-kernel.md
     - Trusted promotion: trusted-promotion.md
     - Trusted evidence: trust-evidence.md
+    - Release a candidate: release.md
     - Adaptive compute: compute-policy.md
     - Capability foundry: capability-foundry.md
     - Continual experience: continual-experience.md

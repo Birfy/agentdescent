@@ -3571,8 +3571,8 @@ The reports one paired evaluation produced, ready for `promote()`.
 TrustEvidence(
     eval_result: EvalResult,
     canary: CanaryResult,
-    conformal: ConformalReport,
-    sequential: SequentialReport,
+    conformal: Optional[ConformalReport] = None,
+    sequential: Optional[SequentialReport] = None,
     goodhart: Optional[GoodhartReport] = None,
     metamorphic: Optional[MetamorphicReport] = None,
     verifier: Optional[EnsembleReport] = None,

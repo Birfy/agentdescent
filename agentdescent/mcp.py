@@ -184,6 +184,16 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
         "whatever prefixes the operator set in AGENTDESCENT_RESCAN_ALLOW can be named. "
         "That list is not something this tool can widen: if the reference you need is "
         "refused, tell the user which prefix to add and why."),
+    "release": (
+        "Gate and sign one release from paired task scores: build the same trusted "
+        "evidence as `evolve`, run the fail-closed promotion decision, and only on "
+        "an accepted promotion write a signed `ArtifactManifest` and lineage node. "
+        "`before` and `after` are task -> score objects for the same held-out tasks; "
+        "`artifact_hash` is required and is the manifest identity. The signing "
+        "secret is read from `secret_env` (default AGENTDESCENT_RELEASE_KEY) or "
+        "`secret_file`, never from a tool argument. A reject/defer is a normal "
+        "result with `released: false`; ask the user before treating any release as "
+        "final. Pass `lineage` to persist and extend the receipt graph."),
     "safety": (
         "Read-only: is a consolidation archive (the rules meta runs adopted) safe to "
         "keep seeding new runs from? Returns `verdict` (safe / caution / unsafe), a "
@@ -558,6 +568,40 @@ class Tools:
         except MetaCommandError as e:
             return {"error": str(e)}
 
+    def release(self, before: Dict[str, float], after: Dict[str, float], *,
+                artifact_id: str, artifact_hash: str, key_id: str,
+                rules: Optional[Dict[str, Any]] = None,
+                lineage: Optional[str] = None,
+                parents: Optional[Sequence[str]] = None,
+                contamination: str = "unknown",
+                approval: str = "unknown",
+                risk: Optional[float] = None,
+                min_effect: float = 0.0, max_risk: float = 1.0,
+                alpha: float = 0.05, seed: int = 0,
+                proxy_gains: Optional[Sequence[float]] = None,
+                oracle_gains: Optional[Sequence[float]] = None,
+                issuer: str = "agentdescent", run_id: str = "",
+                kind: str = "skill",
+                metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        from .release_surface import (
+            ReleaseSurfaceError, load_rules, release_payload, resolve_secret,
+        )
+
+        try:
+            policy = load_rules(
+                rules, min_effect=min_effect, max_risk=max_risk)
+            secret = resolve_secret()
+            return release_payload(
+                before, after, artifact_id=artifact_id,
+                artifact_hash=artifact_hash, key_id=key_id, secret=secret,
+                rules=policy, lineage=lineage, parents=parents or (),
+                contaminated=contamination, approved=approval, risk=risk,
+                min_effect=min_effect, alpha=alpha, seed=seed,
+                proxy_gains=proxy_gains, oracle_gains=oracle_gains,
+                issuer=issuer, run_id=run_id, kind=kind, metadata=metadata)
+        except (ReleaseSurfaceError, OSError, ValueError) as e:
+            return {"ok": False, "error": str(e)}
+
 
 def _context_class():
     """The SDK's ``Context``, whose *annotation* is how a tool asks for a session.
@@ -786,6 +830,31 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent",
     def safety(archive: Optional[str] = None, audit: Optional[str] = None,
                bias_threshold: float = 0.1, min_exam: str = "passed") -> Dict[str, Any]:
         return t.safety(archive, audit, bias_threshold, min_exam)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["release"])
+    def release(before: Dict[str, float], after: Dict[str, float],
+                artifact_id: str, artifact_hash: str, key_id: str,
+                rules: Optional[Dict[str, Any]] = None,
+                lineage: Optional[str] = None,
+                parents: Optional[Sequence[str]] = None,
+                contamination: str = "unknown",
+                approval: str = "unknown",
+                risk: Optional[float] = None,
+                min_effect: float = 0.0, max_risk: float = 1.0,
+                alpha: float = 0.05, seed: int = 0,
+                proxy_gains: Optional[Sequence[float]] = None,
+                oracle_gains: Optional[Sequence[float]] = None,
+                issuer: str = "agentdescent", run_id: str = "",
+                kind: str = "skill",
+                metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        return t.release(
+            before, after, artifact_id=artifact_id,
+            artifact_hash=artifact_hash, key_id=key_id, rules=rules,
+            lineage=lineage, parents=parents, contamination=contamination,
+            approval=approval, risk=risk, min_effect=min_effect,
+            max_risk=max_risk, alpha=alpha, seed=seed,
+            proxy_gains=proxy_gains, oracle_gains=oracle_gains,
+            issuer=issuer, run_id=run_id, kind=kind, metadata=metadata)
 
     @server.tool(description=TOOL_DESCRIPTIONS["portfolio"])
     def portfolio(archive: Optional[str] = None, floor: float = 0.05,
