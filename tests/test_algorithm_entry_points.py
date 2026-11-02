@@ -80,6 +80,30 @@ def test_a_broken_plugin_does_not_hide_the_shipped_ones(monkeypatch, clean_regis
     assert algorithms.get("rrsi")
 
 
+def test_a_case_or_hyphen_variant_of_a_broken_plugin_reports_its_load_error(
+        monkeypatch, clean_registry):
+    # #698: `ACME-Method` said "unknown algorithm" instead of the load error.
+    _points(monkeypatch, _EntryPoint("acme_method", error=RuntimeError("boom")))
+    for name in ("ACME-Method", " acme-method "):
+        with pytest.raises(AlgorithmError,
+                           match="algorithm 'acme_method' failed to load.*boom"):
+            algorithms.get(name, where="show")
+    # A registered algorithm still wins, and an unrelated name stays unknown.
+    assert algorithms.get("GEPA").name == "gepa"
+    with pytest.raises(AlgorithmError, match="unknown algorithm 'nope'"):
+        algorithms.get("nope")
+
+
+def test_cli_show_reports_a_broken_plugin_variant_as_failed_to_load(
+        monkeypatch, clean_registry, capsys):
+    from agentdescent import cli
+
+    _points(monkeypatch, _EntryPoint("acme_method", error=RuntimeError("boom")))
+    assert cli.main(["algorithms", "show", "Acme-Method"]) != 0
+    err = capsys.readouterr().err
+    assert "'acme_method' failed to load" in err and "unknown algorithm" not in err
+
+
 def test_a_broken_plugin_does_not_escape_as_a_process_exit(monkeypatch, clean_registry):
     _points(monkeypatch, _EntryPoint("exits", error=SystemExit(3)))
     assert "exits" not in algorithms.names()

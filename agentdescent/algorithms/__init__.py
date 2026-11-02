@@ -215,14 +215,16 @@ def _fold(name: str) -> str:
     return name.strip().casefold().replace("-", "_")
 
 
-def _resolve_alias(name: str) -> str:
-    """The registered name ``name`` means, ignoring case and ``-`` vs ``_``.
+def _resolve_alias(name: str, pool: Any = None) -> str:
+    """The name in ``pool`` (default: the registry) ``name`` means, ignoring
+    case and ``-`` vs ``_``.
 
     Only a single match resolves; an ambiguous or unknown name is returned
     unchanged so the caller reports it as unknown.
     """
     folded = _fold(name)
-    matches = [n for n in _REGISTRY if _fold(n) == folded]
+    matches = [n for n in (_REGISTRY if pool is None else pool)
+               if _fold(n) == folded]
     return matches[0] if len(matches) == 1 else name
 
 
@@ -240,6 +242,13 @@ def get(name: Any, *, where: str = "algorithm") -> Algorithm:
             f"{where}: algorithm {name!r} failed to load: {_EXTERNAL_ERRORS[name]}")
     if isinstance(name, str) and name not in _REGISTRY:
         name = _resolve_alias(name)
+    if isinstance(name, str) and name not in _REGISTRY:
+        # A variant of a broken plugin's name reports its load error (#698).
+        broken = _resolve_alias(name, [n for n in _EXTERNAL_ERRORS
+                                       if n not in _REGISTRY])
+        if broken in _EXTERNAL_ERRORS and broken not in _REGISTRY:
+            raise AlgorithmError(f"{where}: algorithm {broken!r} failed to load: "
+                                 f"{_EXTERNAL_ERRORS[broken]}")
     if not isinstance(name, str) or name not in _REGISTRY:
         raise AlgorithmError(
             f"{where}: unknown algorithm {name!r}; available: {sorted(_REGISTRY)} "
