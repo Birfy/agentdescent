@@ -457,7 +457,15 @@ def doctor_report(*, home: Optional[str] = None) -> Dict[str, Any]:
             "opencode is on PATH and %s is set: for an isolated worker %s"
             % (", ".join(gateway), _opencode_coding_recipe(gateway)))
     for name, info in hosts.items():
-        if info["state"] in ("stale", "partial"):
+        if name == "grok-bot" and info.get("user_skill") == "stale":
+            # Grok Bot loads its saved user skill; `install` cannot rewrite that
+            # (doctor/install never write the Bot's skill store, #675).
+            problems.append(
+                f"{name}: the saved Grok Bot user skill is stale "
+                f"({info.get('user_skill_path')}); run `agentdescent install {name}`, "
+                f"then in a Grok Bot chat ask it to rewrite its `agentdescent` skill "
+                f"from {info['path']}")
+        elif info["state"] in ("stale", "partial"):
             problems.append(
                 f"{name}: the installed integration is {info['state']} "
                 f"(skill {info['skill']}, mcp {info['mcp']}); run `agentdescent install {name}`")
@@ -2126,6 +2134,13 @@ def cmd_doctor(a: argparse.Namespace) -> int:
             else:
                 # skill/mcp on the host line itself so stale vs MCP-missing is
                 # inspectable without reading the problems section (#165).
+                if name == "grok-bot":
+                    # No desktop CLI to report; the saved user skill is what the
+                    # Bot loads (#675).
+                    print(f"host {name}: {info['state']} "
+                          f"(skill {info['skill']}, mcp {info['mcp']}; "
+                          f"user skill {info.get('user_skill', 'unknown')})")
+                    continue
                 cli_bit = (f"cli {info['cli']}" if info["cli"] else "cli not on PATH")
                 print(f"host {name}: {info['state']} "
                       f"(skill {info['skill']}, mcp {info['mcp']}; {cli_bit})")

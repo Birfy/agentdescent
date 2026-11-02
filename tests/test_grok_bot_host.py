@@ -47,6 +47,8 @@ def test_doctor_reports_mcp_na_when_scaffold_current(home):
         "mcp": "n/a",
         "path": str(home / ".agentdescent" / "plugins" / "grok-bot" /
                     "skills" / "agentdescent" / "SKILL.md"),
+        "user_skill": "missing",
+        "user_skill_path": "",
     }
 
 
