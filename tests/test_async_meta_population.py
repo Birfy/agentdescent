@@ -8,7 +8,14 @@ the surfaces that make this honest: the decision and report are identical to
 the sequential call's on the same archive, `workers` bounds concurrency,
 validation is a real concurrency test (islands share the archive), an errored
 island is never promoted, and an empty archive is refused.
+
+The outer meta-proposer must actually run: a `propose()` that raises is only a
+warning and a counted `propose_errors` entry, so a broken fixture used to leave
+every outer round with nothing to try -- no island was ever promoted -- while
+the tests still passed (#700).
 """
+
+import re
 
 import pytest
 
@@ -27,7 +34,6 @@ from agentdescent.sampling import DifficultyWeighted
 
 
 def _cap(rendered):
-    import re
     m = re.search(r"cap:(\d+)", rendered)
     return int(m.group(1)) if m else 0
 
@@ -66,7 +72,6 @@ def _sampler_slot():
 
 
 def _nudge_up():
-    import re
     def propose(rendered, task, output, reward):
         c = _c_of(rendered)
         if reward < 0.7:
@@ -110,17 +115,34 @@ def _call(store, tmp_path, *, repo, **kw):
     return base
 
 
-def test_async_reports_islands_and_promotes_like_sequential(tmp_path):
-    store = ConsolidationStore(str(tmp_path / "archive"))
+def _two_rule_store(path):
+    store = ConsolidationStore(str(path))
     _archive_rule(store, "run-high", 0.3, 0.8)
     _archive_rule(store, "run-low", 0.2, 0.6)
+    return store
+
+
+def test_the_outer_proposer_reads_and_nudges_the_rule():
+    # It raised NameError (no module-level `re`), so every outer round
+    # proposed nothing and no island could ever improve (#700).
+    propose = _nudge_up()
+    assert propose("# Policy parameters\nc: 0.2", None, None, 0.5) == "c: 0.30"
+    assert propose("# Policy parameters\nc: 0.2", None, None, 0.9) == "c: 0.20"
+
+
+def test_async_reports_islands_and_promotes_like_sequential(tmp_path):
     common = dict(islands=2, train_runs=3, val_runs=1,
                   problems={"a": _stair, "b": _stair},
                   val_problems={"v": _stair_val})
-    rep_seq, _ = meta_population_run(**_call(store, tmp_path, repo="s", **common))
-    store2 = ConsolidationStore(str(tmp_path / "archive"))
+    # Each call gets its own copy of the same two-rule archive: a promotion by
+    # the sequential call must not change what the async call starts from.
+    rep_seq, _ = meta_population_run(
+        **_call(_two_rule_store(tmp_path / "archive-s"), tmp_path, repo="s", **common))
     rep_async, _ = async_meta_population_run(
-        **_call(store2, tmp_path, repo="a", **common))
+        **_call(_two_rule_store(tmp_path / "archive-a"), tmp_path, repo="a", **common))
+    # run-low (c=0.2) is nudged to c=0.3, clears the stair and is promoted
+    assert rep_seq.promoted_from == 1
+    assert rep_seq.islands[1].verdict == "adopt"
     # the decision and the per-island verdicts are identical
     assert rep_async.promoted_from == rep_seq.promoted_from
     assert [i.verdict for i in rep_async.islands] == \
