@@ -36,8 +36,6 @@ def test_algorithms_run_writes_spec_and_plans(tmp_path, capsys, monkeypatch):
     assert spec["data"]["path"] == str(cases)
     # Did not start a run.
     assert not (tmp_path / ".agentdescent" / "runs").exists()
-    home_runs = Path.home() / ".agentdescent" / "runs"
-    # No new claim: just ensure the verb did not create under cwd store.
     assert "started" not in captured.out.lower()
 
 
@@ -108,8 +106,9 @@ def test_algorithms_run_kind_mismatch(tmp_path, capsys, monkeypatch):
         "--model", "m",
     ]) == 2
     err = capsys.readouterr().err
-    assert "applies to kind" in err or "kind" in err
-    assert "archive_selection" in err or "evoskill" in err
+    assert "'gepa' applies to kind ['text'], not 'skill_dir'" in err
+    assert "evoskill" in err
+    assert not list(tmp_path.glob("agentdescent.*.spec.json"))
 
 
 def test_algorithms_run_kind_mismatch_json(tmp_path, capsys, monkeypatch):
@@ -129,3 +128,69 @@ def test_algorithms_list_and_show_unchanged(capsys):
     assert "gepa" in listed and "rrsi" in listed
     assert cli.main(["algorithms", "show", "gepa"]) == 0
     assert "gepa" in capsys.readouterr().out
+
+
+def _skill(tmp_path: Path) -> Path:
+    skill = tmp_path / "sk"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text("---\nname: s\ndescription: d\n---\nbody\n")
+    return skill
+
+
+def test_algorithms_run_plan_failure_still_reports_written_spec(tmp_path, capsys, monkeypatch):
+    # #688: the spec is on disk even when plan fails; plain mode must say so.
+    monkeypatch.chdir(tmp_path)
+    prompt = tmp_path / "p.md"
+    prompt.write_text("x\n")
+    missing = tmp_path / "missing.jsonl"
+    assert cli.main([
+        "algorithms", "run", "gepa", str(prompt), str(missing),
+        "--model", "m", "--base-url", "https://example.test/v1",
+    ]) == 2
+    captured = capsys.readouterr()
+    assert "wrote agentdescent.gepa.spec.json" in captured.out
+    assert "does not exist" in captured.err
+    assert (tmp_path / "agentdescent.gepa.spec.json").exists()
+
+
+def test_algorithms_run_group_kind_validated(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    prompt = tmp_path / "p.md"
+    prompt.write_text("x\n")
+    assert cli.main(["algorithms", "--kind", "bogus", "run", "gepa", str(prompt)]) == 2
+    err = capsys.readouterr().err
+    assert "--kind must be one of" in err and "'bogus'" in err
+    assert not list(tmp_path.glob("agentdescent.*.spec.json"))
+
+
+def test_algorithms_run_group_kind_validated_json(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    prompt = tmp_path / "p.md"
+    prompt.write_text("x\n")
+    assert cli.main(["--json", "algorithms", "--kind", "bogus", "run", "gepa",
+                     str(prompt)]) == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert "--kind must be one of" in payload["error"]
+
+
+def test_algorithms_run_agent_passthrough(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    skill = _skill(tmp_path)
+    out = tmp_path / "s.json"
+    cli.main(["algorithms", "run", "evoskill", str(skill), "--agent", "dsh",
+              "--out", str(out)])
+    capsys.readouterr()
+    spec = json.loads(out.read_text())
+    assert spec["agent"] == {"ref": "dsh"}
+    assert spec["algorithm"] == "evoskill"
+
+
+def test_algorithms_run_agent_mismatch_refused(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    skill = _skill(tmp_path)
+    out = tmp_path / "s.json"
+    assert cli.main(["algorithms", "run", "evoskill", str(skill),
+                     "--agent", "openai_compatible", "--out", str(out)]) == 2
+    assert "--agent openai_compatible" in capsys.readouterr().err
+    assert not out.exists()

@@ -2541,9 +2541,19 @@ def _cmd_algorithms_run(a: argparse.Namespace) -> int:
         return 2
     out = a.out or f"agentdescent.{a.name}.spec.json"
     kind = a.kind  # None unless --kind (group or subparser)
+    if kind is not None and kind not in KINDS:
+        # The group-level --kind is free text; fail closed with the real choices
+        # before anything is written (#688).
+        msg = f"--kind must be one of {list(KINDS)}, got {kind!r}"
+        if as_json:
+            _out({"ok": False, "error": msg}, as_json=True)
+        else:
+            print(f"error: {msg}", file=sys.stderr)
+        return 2
     try:
         out, _spec, report, providers_out = write_starter_spec(
             a.path, kind=kind, data=getattr(a, "cases", None),
+            agent=getattr(a, "agent", None),
             model=getattr(a, "model", None),
             base_url=getattr(a, "base_url", None),
             key_env=getattr(a, "key_env", None),
@@ -2562,6 +2572,10 @@ def _cmd_algorithms_run(a: argparse.Namespace) -> int:
         if as_json:
             _out({"ok": False, "error": str(e), "spec": out}, as_json=True)
         else:
+            # The spec is already on disk: say so before the error (#688).
+            for kind_tag, text in report:
+                if kind_tag == "wrote":
+                    print(text)
             print(f"error: {e}", file=sys.stderr)
         return 2
     next_line = f"agentdescent evolve {out}"
@@ -3264,6 +3278,9 @@ def build_parser() -> argparse.ArgumentParser:
     s2.add_argument("path", help="target path (prompt, skill dir, …)")
     s2.add_argument("cases", nargs="?", default=None,
                     help="cases.jsonl (same as init --data)")
+    s2.add_argument("--agent", default=None,
+                    help="worker agent short name, as init --agent (default: the "
+                         "first worker CLI on PATH)")
     s2.add_argument("--param", action="append", default=[], metavar="KEY=VALUE",
                     help="algorithm parameter, repeatable; values are JSON "
                          "when they parse, otherwise strings")
