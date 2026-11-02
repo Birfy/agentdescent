@@ -20,5 +20,7 @@ Parse `$ARGUMENTS` (trim; empty means `list`):
   params they gave — validate with `describe_algorithm` / `show` first). Run
   `doctor`, `plan`, show the resolved algorithm card and estimate, and wait for
   my yes before `start`. Same apply/cancel/resume rules as `/evolve`.
+  Without MCP: `agentdescent algorithms run <name> <path> [cases.jsonl]
+  [--param k=v...]` (init + plan in one step; then `evolve` after yes).
 
 If they only named a method with no path, `show` it and ask whether to `run`.
