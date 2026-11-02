@@ -75,6 +75,55 @@ def test_exam_missing_archive_is_a_stderr_line_without_json(tmp_path, capsys):
     assert err.startswith("error: archive ")
 
 
+
+def _empty_archive(tmp_path):
+    root = tmp_path / "archive"
+    root.mkdir()
+    return str(root)
+
+
+def test_exam_domain_builder_typeerror_is_json_with_json(tmp_path, capsys):
+    # json.dumps needs an obj; calling it as a zero-arg domain builder raises
+    # TypeError. That used to be a raw traceback (#672).
+    assert cli.main(["exam", _empty_archive(tmp_path), "--domain", "json:dumps",
+                     "--json"]) == 2
+    out, err = capsys.readouterr()
+    payload = json.loads(out)
+    assert payload["ok"] is False
+    assert "json:dumps" in payload["error"]
+    assert "TypeError" in payload["error"]
+    assert err == ""
+
+
+def test_exam_domain_builder_typeerror_is_a_stderr_line_without_json(tmp_path, capsys):
+    assert cli.main(["exam", _empty_archive(tmp_path),
+                     "--domain", "json:dumps"]) == 2
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err.startswith("error: ")
+    assert "json:dumps" in err
+    assert "TypeError" in err
+
+
+def incomplete_domain():
+    """Returns a Mapping missing the required exam keys."""
+    return {"oracle": object()}
+
+
+def test_exam_domain_missing_keys_is_json_with_json(tmp_path, capsys):
+    assert cli.main([
+        "exam", _empty_archive(tmp_path),
+        "--domain", "tests.test_cli_json_errors:incomplete_domain",
+        "--json",
+    ]) == 2
+    out, err = capsys.readouterr()
+    payload = json.loads(out)
+    assert payload["ok"] is False
+    assert "missing" in payload["error"]
+    assert "tasks_for" in payload["error"]
+    assert err == ""
+
+
 def test_init_value_error_is_json_with_json(tmp_path, capsys, monkeypatch):
     monkeypatch.chdir(tmp_path)
     assert cli.main(["init", "skill", "--param", "bad", "--json"]) == 2

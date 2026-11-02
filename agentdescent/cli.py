@@ -2306,11 +2306,27 @@ def cmd_exam(a: argparse.Namespace) -> int:
         from .consolidation import missing_archive_message
         raise SpecError(missing_archive_message(root))
     domain = _load_ref(a.domain)
-    built = domain() if callable(domain) and not isinstance(domain, dict) else domain
+    # A bad builder used to crash with a raw TypeError / KeyError traceback
+    # (e.g. `--domain json:dumps`). Turn those into SpecError so `main` prints
+    # one `error:` line / `{"ok": false}` under `--json` (#672).
+    try:
+        built = domain() if callable(domain) and not isinstance(domain, dict) else domain
+    except Exception as error:  # noqa: BLE001 - builder mistakes must not traceback
+        raise SpecError(
+            f"--domain builder {a.domain!r} raised {type(error).__name__}: {error}"
+        ) from None
+    required = ("oracle", "tasks_for", "run", "reward", "propose", "strategy")
     if not isinstance(built, Mapping):
         raise SpecError("--domain must resolve to a builder that returns a dict "
                         "with keys: oracle, tasks_for, run, reward, propose, "
                         "strategy (and optionally slot, spec)")
+    missing = [k for k in required if k not in built]
+    if missing:
+        raise SpecError(
+            "--domain builder must return a dict with keys: "
+            "oracle, tasks_for, run, reward, propose, strategy "
+            f"(and optionally slot, spec); missing: {', '.join(missing)}"
+        )
     store = ConsolidationStore(root, create=False)
     config = None
     if getattr(a, "config", None) is not None:
