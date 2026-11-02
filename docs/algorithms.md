@@ -12,6 +12,7 @@ The default recipe for a `kind` is used when no algorithm is named, and
 agentdescent algorithms [--kind K] [--json]      # same as `algorithms list`
 agentdescent algorithms list [--kind K] [--json]
 agentdescent algorithms show NAME
+agentdescent algorithms run NAME PATH [cases.jsonl] [--param k=v...]
 agentdescent init PATH --algorithm NAME --param KEY=VALUE
 ```
 
