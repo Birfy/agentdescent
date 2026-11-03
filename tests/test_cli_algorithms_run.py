@@ -111,6 +111,59 @@ def test_algorithms_run_kind_mismatch(tmp_path, capsys, monkeypatch):
     assert not list(tmp_path.glob("agentdescent.*.spec.json"))
 
 
+def test_algorithms_run_kind_mismatch_speaks_run_not_init(tmp_path, capsys, monkeypatch):
+    # The name is positional: no phantom --algorithm flag, and the one-file
+    # route is `algorithms run ... --kind text`, not `init` (#702).
+    monkeypatch.chdir(tmp_path)
+    skill = tmp_path / "sk"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text("---\nname: s\ndescription: d\n---\nbody\n")
+    assert cli.main(["algorithms", "run", "gepa", str(skill)]) == 2
+    err = capsys.readouterr().err
+    assert "--algorithm" not in err
+    assert "agentdescent init" not in err
+    assert f"agentdescent algorithms run gepa {skill / 'SKILL.md'} --kind text" in err
+    assert not list(tmp_path.glob("agentdescent.*.spec.json"))
+
+
+def test_algorithms_run_kind_mismatch_on_file_says_it_needs_a_directory(
+        tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    prompt, _cases = _prompt_and_cases(tmp_path)
+    assert cli.main(["--json", "algorithms", "run", "evoskill", str(prompt)]) == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert set(payload) == {"ok", "error"} and payload["ok"] is False
+    assert payload["error"].startswith("algorithm 'evoskill' applies to kind")
+    assert "--algorithm" not in payload["error"]
+    assert "is a file, so its kind is 'text'" in payload["error"]
+    assert "needs a directory target" in payload["error"]
+
+
+def test_algorithms_run_guessed_dir_kind_names_kind_flag(tmp_path, capsys, monkeypatch):
+    # A directory's kind is only a guess; say so and name --kind (#702).
+    from agentdescent import algorithms
+    from agentdescent.algorithms import Algorithm, Overrides
+
+    monkeypatch.chdir(tmp_path)
+    algorithms.register(Algorithm(name="_agent_dir_only", summary="s",
+                                  kinds=("agent_dir",), fidelity="preset",
+                                  params=(), build=lambda ctx, p: Overrides()),
+                        replace=True)
+    try:
+        skill = tmp_path / "sk"
+        skill.mkdir()
+        assert cli.main(["algorithms", "run", "_agent_dir_only", str(skill)]) == 2
+        err = capsys.readouterr().err
+        assert f"kind 'skill_dir' was guessed from {skill}" in err
+        assert "pass --kind (one of ['agent_dir'])" in err
+        # An explicit --kind is not a guess: no such hint.
+        assert cli.main(["algorithms", "run", "_agent_dir_only", str(skill),
+                         "--kind", "skill_dir"]) == 2
+        assert "was guessed" not in capsys.readouterr().err
+    finally:
+        algorithms._REGISTRY.pop("_agent_dir_only")
+
+
 def test_algorithms_run_kind_mismatch_json(tmp_path, capsys, monkeypatch):
     monkeypatch.chdir(tmp_path)
     skill = tmp_path / "sk"

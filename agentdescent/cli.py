@@ -287,6 +287,22 @@ def algorithm_override(name: Optional[str], params: Optional[Mapping[str, Any]],
     return name if not params else {"name": name, "params": dict(params)}
 
 
+def guess_kind(path: str) -> str:
+    """The spec kind ``init`` / ``algorithms run`` assume for ``path`` without ``--kind``."""
+    p = os.path.expanduser(path)
+    if os.path.isfile(p):
+        return "text"
+    if os.path.isdir(p) and os.path.exists(os.path.join(p, "tests")) and any(
+            f.endswith(".py") for f in os.listdir(p)):
+        return "agent_code"
+    if os.path.isdir(p) and (os.path.exists(os.path.join(p, ".claude-plugin"))
+                             or os.path.exists(os.path.join(p, "cordis.patch.yml"))):
+        return "plugin"
+    if os.path.basename(os.path.dirname(p.rstrip(os.sep))) == "agents":
+        return "agent_dir"
+    return "skill_dir"
+
+
 def starter_spec(path: str, *, kind: Optional[str] = None, data: Optional[str] = None,
                  agent: Optional[str] = None,
                  agent_explicit: bool = False, model: Optional[str] = None,
@@ -309,18 +325,7 @@ def starter_spec(path: str, *, kind: Optional[str] = None, data: Optional[str] =
     llm = starter_model_block(model=model, base_url=base_url, key_env=key_env)
     p = os.path.expanduser(path)
     if kind is None:
-        if os.path.isfile(p):
-            kind = "text"
-        elif os.path.isdir(p) and os.path.exists(os.path.join(p, "tests")) and any(
-                f.endswith(".py") for f in os.listdir(p)):
-            kind = "agent_code"
-        elif os.path.isdir(p) and (os.path.exists(os.path.join(p, ".claude-plugin"))
-                                   or os.path.exists(os.path.join(p, "cordis.patch.yml"))):
-            kind = "plugin"
-        elif os.path.basename(os.path.dirname(p.rstrip(os.sep))) == "agents":
-            kind = "agent_dir"
-        else:
-            kind = "skill_dir"
+        kind = guess_kind(path)
     spec: Dict[str, Any] = {
         "version": 1, "kind": kind, "target": path,
         "data": {"path": data or "eval/cases.jsonl", "prompt": "prompt", "gold": "gold"},
@@ -2576,6 +2581,27 @@ def _cmd_algorithms_run(a: argparse.Namespace) -> int:
         # The group-level --kind is free text; fail closed with the real choices
         # before anything is written (#688).
         msg = f"--kind must be one of {list(KINDS)}, got {kind!r}"
+        if as_json:
+            _out({"ok": False, "error": msg}, as_json=True)
+        else:
+            print(f"error: {msg}", file=sys.stderr)
+        return 2
+    # The name is positional here: say so, route the one-file fix through
+    # `algorithms run`, and name --kind when the kind was only guessed (#702).
+    alg = algorithms.get(a.name)
+    use_kind = kind if kind is not None else guess_kind(a.path)
+    if use_kind not in alg.kinds:
+        msg = algorithms.kind_mismatch_message(
+            alg, use_kind, target=a.path, prefix="algorithm", via="run")
+        dir_kinds = [k for k in alg.kinds if k != "text"]
+        if kind is None and os.path.isfile(os.path.expanduser(a.path)):
+            msg += (f"; {a.path} is a file, so its kind is 'text'; {alg.name} "
+                    f"needs a directory target (kind {dir_kinds})")
+        elif kind is None and dir_kinds:
+            # Only a directory's guess can be wrong (agent_dir vs skill_dir, a
+            # plugin without .claude-plugin), and only toward a dir kind.
+            msg += (f"; kind {use_kind!r} was guessed from {a.path}; if that is "
+                    f"wrong, pass --kind (one of {dir_kinds})")
         if as_json:
             _out({"ok": False, "error": msg}, as_json=True)
         else:

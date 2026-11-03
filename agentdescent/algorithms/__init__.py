@@ -273,13 +273,18 @@ def listing(kind: Optional[str] = None, *,
 
 def kind_mismatch_message(algorithm: Algorithm, kind: str, *,
                           target: Optional[str] = None,
-                          prefix: str = "algorithm") -> str:
+                          prefix: str = "algorithm",
+                          via: str = "init") -> str:
     """One error text for "``algorithm`` does not apply to ``kind``".
 
     Names the algorithms that do apply (computed from the registry, so a
     plugin-registered algorithm shows up too) and, when the algorithm runs on
     ``text`` and ``target`` is a skill directory holding ``SKILL.md`` (or a
     single file), how to run it on that one file instead.
+
+    ``via="run"`` phrases that route as ``agentdescent algorithms run NAME
+    FILE --kind text`` (the name is positional there, #702); the default is
+    the ``init ... --algorithm NAME`` form.
     """
     import os
 
@@ -301,8 +306,12 @@ def kind_mismatch_message(algorithm: Algorithm, kind: str, *,
         elif os.path.isfile(path):
             one = str(target)
         if one is not None:
-            msg += (f"; to run {name} on one file, target it as text: "
-                    f"agentdescent init {one} --kind text ... --algorithm {name}")
+            if via == "run":
+                msg += (f"; to run {name} on one file, target it as text: "
+                        f"agentdescent algorithms run {name} {one} --kind text")
+            else:
+                msg += (f"; to run {name} on one file, target it as text: "
+                        f"agentdescent init {one} --kind text ... --algorithm {name}")
     return msg
 
 
