@@ -10,6 +10,8 @@ agentdescent experience recall  --store experience.jsonl --features 0.2,0.8 --k 
 agentdescent experience update  --store experience.jsonl \
     --validation current.jsonl --anchors anchors.jsonl \
     --actions edit,retry --dim 2
+agentdescent experience cycle   --store experience.jsonl \
+    --records new.jsonl --actions edit,retry --dim 2
 agentdescent experience replay  --source old.jsonl --store replay.jsonl \
     --pairs preferences.jsonl --actions edit,retry --dim 2 --k 5
 ```
@@ -25,6 +27,7 @@ The default is `$AGENTDESCENT_HOME/experience.jsonl`.
 | `ingest` | append `ExperienceRecord` rows, deduplicating by `run_id` |
 | `recall` | nearest records to a feature vector; different dimensions are skipped |
 | `update` | `ExperienceEngine.update` with the same forgetting guard as the library |
+| `cycle` | ingest new records, plan validation/anchors through the adaptive cascade, then run the guarded update |
 | `replay` | fit a Bradley–Terry preference model, rank a source store, replay the preferred slice into a separate engine store |
 
 Records are one JSON object per line:
@@ -38,5 +41,7 @@ Records are one JSON object per line:
 is available for a warm-up. `replay` requires `--source` and `--store` to be
 different files, because the engine's own store is the replay destination.
 The MCP tools use the same payloads (`experience_report`, `experience_ingest`,
-`experience_recall`, `experience_update`, `experience_replay`). The MCP
-`store` write is confined to `AGENTDESCENT_SURFACE_WRITE_DIRS`.
+`experience_recall`, `experience_update`, `experience_cycle`,
+`experience_replay`). The MCP `store` write is confined to
+`AGENTDESCENT_SURFACE_WRITE_DIRS`. `cycle` exits 1 when the update is not
+accepted (for example, the forgetting guard rolled it back).

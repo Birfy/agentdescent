@@ -326,6 +326,9 @@ writes are confined to `AGENTDESCENT_SURFACE_WRITE_DIRS`.
   cross-run experience store: rows/actions, deduped ingest, nearest recall,
   guarded learner update, and preference-ranked replay into a separate engine
   store. The store is a JSONL separate from the run store.
+  **`experience_cycle`** runs one adaptive cycle: ingest, choose
+  validation/anchors through the preference/recall/history cascade, then the
+  guarded update; exit 1 when the update is not accepted.
 
 `agentdescent exam` re-judges rules with an independent oracle: it needs a
 `--domain module:builder` and runs it, so it is CLI-only. Suggest the command

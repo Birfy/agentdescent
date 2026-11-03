@@ -25,6 +25,7 @@ import os
 from collections import Counter
 from typing import Any, Dict, List, Tuple
 
+from .adaptive_experience import AdaptiveExperience
 from .continual_meta import ContinualMetaLearner
 from .experience import ExperienceEngine, ExperienceRecord, ExperienceStore
 from .preference import PreferenceModel, PreferencePair
@@ -35,6 +36,7 @@ from .surface_common import (
 )
 
 __all__ = [
+    "experience_cycle",
     "experience_ingest",
     "experience_recall",
     "experience_replay",
@@ -202,6 +204,48 @@ def experience_update(
             "rolled_back": update.rolled_back,
             "reason": update.reason,
         },
+        "summary": _summary(memory),
+    }
+
+
+def experience_cycle(
+        *, store: Any = None, records: Any = (), validation: Any = None,
+        anchors: Any = None, actions: Any, dim: int,
+        learning_rate: float = 0.2, l2: float = 1e-3,
+        replay_size: int = 1000, min_gain: float = 0.0, seed: int = 0,
+        require_anchors: bool = True, anchor_tolerance: float = 0.0,
+        features: Any = None, k: int = 5) -> Dict[str, Any]:
+    """Ingest, select anchors and run one guarded :class:`AdaptiveExperience`.
+
+    This is the surface for the adaptive cycle: it ingests new records, chooses
+    validation/anchors through the preference/recall/history cascade, and lets
+    `ExperienceEngine` own the update and forgetting guard.
+    """
+    path = _store_path(store)
+    incoming = load_records(records, name="records") if records else ()
+    val = load_records(validation, name="validation") if validation else None
+    anc = load_records(anchors, name="anchors") if anchors else None
+    if not incoming and val is None:
+        raise SurfaceError(
+            "experience cycle needs records= or validation= to run")
+    memory = ExperienceStore(path)
+    engine = ExperienceEngine(
+        _learner(actions, dim=dim, learning_rate=learning_rate, l2=l2,
+                 replay_size=replay_size, min_gain=min_gain, seed=seed),
+        memory, require_anchors=require_anchors,
+        anchor_tolerance=anchor_tolerance)
+    adaptive = AdaptiveExperience(engine)
+    query = parse_floats(features, name="features") if features is not None else None
+    try:
+        report = adaptive.cycle(
+            incoming, validation=val, anchors=anc, features=query, k=k)
+    except (TypeError, ValueError) as error:
+        raise SurfaceError(f"experience cycle refused: {error}") from None
+    return {
+        "schema_version": SURFACE_SCHEMA_VERSION,
+        "ok": True,
+        "store": path,
+        "report": report.to_dict(),
         "summary": _summary(memory),
     }
 

@@ -227,6 +227,14 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
         "Prometheus text. A tenant/workspace with no terminal runs is a no-op, not "
         "an error. `out`/`prometheus` must be under "
         "AGENTDESCENT_SURFACE_WRITE_DIRS."),
+    "experience_cycle": (
+        "Run one guarded adaptive experience cycle: ingest new records, choose "
+        "validation/anchors through the preference/recall/history cascade, and "
+        "delegate the update and forgetting guard to ExperienceEngine. Supply "
+        "action names and the feature dimension; `records`/`validation`/`anchors` "
+        "are lists or JSONL paths. `store` must be under "
+        "AGENTDESCENT_SURFACE_WRITE_DIRS. Returns the plan, ingested ids and the "
+        "update decision (accepted/rolled_back/reason)."),
     "experience_report": (
         "Summarise an ExperienceStore JSONL: rows, accepted count, action "
         "histogram, mean action reward, last run id and feature dimensions. A "
@@ -770,6 +778,29 @@ class Tools:
         except Exception as e:  # noqa: BLE001 - a bad spec must not kill the server
             return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
+    def experience_cycle(
+            self, store: Optional[str], records: Any, validation: Any,
+            anchors: Any, actions: Any, dim: int, *,
+            learning_rate: float = 0.2, l2: float = 1e-3,
+            replay_size: int = 1000, min_gain: float = 0.0, seed: int = 0,
+            require_anchors: bool = True,
+            anchor_tolerance: float = 0.0,
+            features: Any = None, k: int = 5) -> Dict[str, Any]:
+        from . import surface_experience as surface
+
+        try:
+            self._check_write(store, "store")
+            return surface.experience_cycle(
+                store=store, records=records, validation=validation,
+                anchors=anchors, actions=actions, dim=dim,
+                learning_rate=learning_rate, l2=l2,
+                replay_size=replay_size, min_gain=min_gain, seed=seed,
+                require_anchors=require_anchors,
+                anchor_tolerance=anchor_tolerance,
+                features=features, k=k)
+        except Exception as e:  # noqa: BLE001 - a bad spec must not kill the server
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
     def experience_report(self, store: Optional[str] = None) -> Dict[str, Any]:
         from . import surface_experience as surface
         try:
@@ -1114,6 +1145,22 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent",
             min_acceptance=min_acceptance,
             max_cost_per_accepted=max_cost_per_accepted,
             out=out, prometheus=prometheus)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["experience_cycle"])
+    def experience_cycle(store: Optional[str], records: Any,
+                         validation: Any = None, anchors: Any = None,
+                         actions: Any = None, dim: int = 0,
+                         learning_rate: float = 0.2, l2: float = 1e-3,
+                         replay_size: int = 1000, min_gain: float = 0.0,
+                         seed: int = 0, require_anchors: bool = True,
+                         anchor_tolerance: float = 0.0,
+                         features: Any = None,
+                         k: int = 5) -> Dict[str, Any]:
+        return t.experience_cycle(
+            store, records, validation, anchors, actions, dim,
+            learning_rate=learning_rate, l2=l2, replay_size=replay_size,
+            min_gain=min_gain, seed=seed, require_anchors=require_anchors,
+            anchor_tolerance=anchor_tolerance, features=features, k=k)
 
     @server.tool(description=TOOL_DESCRIPTIONS["experience_report"])
     def experience_report(store: Optional[str] = None) -> Dict[str, Any]:

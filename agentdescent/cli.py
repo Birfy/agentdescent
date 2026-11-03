@@ -3031,6 +3031,16 @@ def cmd_experience(a: argparse.Namespace) -> int:
                 replay_size=a.replay_size, min_gain=a.min_gain, seed=a.seed,
                 require_anchors=a.require_anchors,
                 anchor_tolerance=a.anchor_tolerance)
+        elif action == "cycle":
+            payload = surface.experience_cycle(
+                store=a.experience_store, records=a.records,
+                validation=a.validation, anchors=a.anchors,
+                actions=a.actions, dim=a.dim,
+                learning_rate=a.learning_rate, l2=a.l2,
+                replay_size=a.replay_size, min_gain=a.min_gain, seed=a.seed,
+                require_anchors=a.require_anchors,
+                anchor_tolerance=a.anchor_tolerance,
+                features=a.features, k=a.k)
         elif action == "replay":
             payload = surface.experience_replay(
                 source=a.source, store=a.experience_store, pairs=a.pairs,
@@ -3061,8 +3071,17 @@ def cmd_experience(a: argparse.Namespace) -> int:
                 record = hit["record"]
                 print(f"{hit['distance']:.4f}  {record['run_id']}  "
                       f"accepted={record['accepted']}")
-        elif action == "update":
-            update = payload["update"]
+        elif action in ("update", "cycle"):
+            if action == "cycle":
+                report = payload["report"]
+                plan = report["plan"]
+                update = report["update"]
+                print(f"ingested: {len(report['ingested'])}  "
+                      f"validation: {len(plan['validation'])}  "
+                      f"anchors: {len(plan['anchors'])}  "
+                      f"source: {plan['source']}")
+            else:
+                update = payload["update"]
             print(f"accepted: {update['accepted']}  "
                   f"rolled_back: {update['rolled_back']}  version: {update['version']}")
             print(f"before: {update['before']:.4f}  after: {update['after']:.4f}  "
@@ -3074,6 +3093,9 @@ def cmd_experience(a: argparse.Namespace) -> int:
             print(f"selected: {len(replay['selected'])}  "
                   f"ingested: {len(replay['ingested'])}  "
                   f"skipped: {replay['skipped']}")
+    if (action == "cycle"
+            and not payload["report"]["update"]["accepted"]):
+        return 1
     return 0
 
 
@@ -3968,6 +3990,36 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--no-require-anchors", action="store_false",
                    dest="require_anchors")
     sp.set_defaults(fn=cmd_experience)
+    sp = experience_sub.add_parser(
+        "cycle", help="ingest, plan anchors and run one guarded adaptive cycle")
+    sp.add_argument("--store", dest="experience_store", default=None)
+    sp.add_argument("--records", default=None,
+                    help="new ExperienceRecord JSONL/JSON array")
+    sp.add_argument("--validation", default=None,
+                    help="optional validation ExperienceRecord JSONL")
+    sp.add_argument("--anchors", default=None,
+                    help="optional anchor ExperienceRecord JSONL")
+    sp.add_argument("--actions", required=True,
+                    help="comma-separated action names")
+    sp.add_argument("--dim", type=int, required=True,
+                    help="feature dimension")
+    sp.add_argument("--learning-rate", type=float, default=0.2,
+                    dest="learning_rate")
+    sp.add_argument("--l2", type=float, default=1e-3)
+    sp.add_argument("--replay-size", type=int, default=1000, dest="replay_size")
+    sp.add_argument("--min-gain", type=float, default=0.0, dest="min_gain")
+    sp.add_argument("--seed", type=int, default=0)
+    sp.add_argument("--anchor-tolerance", type=float, default=0.0,
+                    dest="anchor_tolerance")
+    sp.add_argument("--require-anchors", action="store_true", default=True,
+                    dest="require_anchors")
+    sp.add_argument("--no-require-anchors", action="store_false",
+                    dest="require_anchors")
+    sp.add_argument("--features", default=None,
+                    help="optional feature vector for recall anchors")
+    sp.add_argument("--k", type=int, default=5)
+    sp.set_defaults(fn=cmd_experience)
+
     sp = experience_sub.add_parser("replay", help="preference-ranked replay")
     sp.add_argument("--source", required=True,
                    help="source ExperienceRecord JSONL")
