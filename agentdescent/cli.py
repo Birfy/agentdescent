@@ -2656,112 +2656,133 @@ def _algorithms_run_missing_data_hint(msg: str, *, cases: Optional[str]) -> str:
             "(`agentdescent demo` writes a complete offline example to copy from)")
 
 
-def _cmd_algorithms_run(a: argparse.Namespace) -> int:
-    """``algorithms run NAME PATH`` -- init + plan in one step; does not start a run (#674)."""
+def algorithms_run_payload(
+    name: str,
+    path: str,
+    *,
+    kind: Optional[str] = None,
+    cases: Optional[str] = None,
+    agent: Optional[str] = None,
+    model: Optional[str] = None,
+    base_url: Optional[str] = None,
+    key_env: Optional[str] = None,
+    param: Optional[Sequence[str]] = None,
+    out: Optional[str] = None,
+    rounds: Optional[int] = None,
+    workers: Optional[int] = None,
+    usd_per_call: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Write a starter spec for algorithm ``name`` on ``path`` and plan it.
+
+    The one code path behind ``algorithms run`` (#674) and the MCP
+    ``algorithm_spec`` tool (#723). Returns the ``--json`` object; the private
+    ``_report`` (init's report lines), ``_plan`` (the plan payload) and
+    ``_stage`` keys are for the CLI's text rendering and are popped before
+    anything is printed or returned to a host. Never starts a run.
+    """
     from . import algorithms
 
-    as_json = getattr(a, "json", False)
     # Unknown name: same exit and tip as `algorithms show` (where="run").
     # A case/hyphen variant resolves, and the spec and its file name use the
     # registered name (#696).
     try:
-        a.name = algorithms.get(a.name, where="run").name
+        name = algorithms.get(name, where="run").name
     except algorithms.AlgorithmError as e:
-        if as_json:
-            _out({"ok": False, "error": str(e)}, as_json=True)
-        else:
-            print(f"error: {e}", file=sys.stderr)
-        return 2
-    out = a.out or f"agentdescent.{a.name}.spec.json"
-    kind = a.kind  # None unless --kind (group or subparser)
+        return {"ok": False, "error": str(e), "_stage": "pre"}
+    out = out or f"agentdescent.{name}.spec.json"
     if kind is not None and kind not in KINDS:
         # The group-level --kind is free text; fail closed with the real choices
         # before anything is written (#688).
-        msg = f"--kind must be one of {list(KINDS)}, got {kind!r}"
-        if as_json:
-            _out({"ok": False, "error": msg}, as_json=True)
-        else:
-            print(f"error: {msg}", file=sys.stderr)
-        return 2
+        return {"ok": False, "_stage": "pre",
+                "error": f"--kind must be one of {list(KINDS)}, got {kind!r}"}
     # The name is positional here: say so, route the one-file fix through
     # `algorithms run`, and name --kind when the kind was only guessed (#702).
-    alg = algorithms.get(a.name)
+    alg = algorithms.get(name)
     # Missing PATH before kind guess / kind-mismatch (#706).
-    missing = require_existing_target(a.path, kind)
+    missing = require_existing_target(path, kind)
     if missing:
-        if as_json:
-            _out({"ok": False, "error": missing}, as_json=True)
-        else:
-            print(f"error: {missing}", file=sys.stderr)
-        return 2
-    use_kind = kind if kind is not None else guess_kind(a.path)
+        return {"ok": False, "error": missing, "_stage": "pre"}
+    use_kind = kind if kind is not None else guess_kind(path)
     if use_kind not in alg.kinds:
         msg = algorithms.kind_mismatch_message(
-            alg, use_kind, target=a.path, prefix="algorithm", via="run")
+            alg, use_kind, target=path, prefix="algorithm", via="run")
         dir_kinds = [k for k in alg.kinds if k != "text"]
-        if kind is None and os.path.isfile(os.path.expanduser(a.path)):
-            msg += (f"; {a.path} is a file, so its kind is 'text'; {alg.name} "
+        if kind is None and os.path.isfile(os.path.expanduser(path)):
+            msg += (f"; {path} is a file, so its kind is 'text'; {alg.name} "
                     f"needs a directory target (kind {dir_kinds})")
         elif kind is None and dir_kinds:
             # Only a directory's guess can be wrong (agent_dir vs skill_dir, a
             # plugin without .claude-plugin), and only toward a dir kind.
-            msg += (f"; kind {use_kind!r} was guessed from {a.path}; if that is "
+            msg += (f"; kind {use_kind!r} was guessed from {path}; if that is "
                     f"wrong, pass --kind (one of {dir_kinds})")
-        if as_json:
-            _out({"ok": False, "error": msg}, as_json=True)
-        else:
-            print(f"error: {msg}", file=sys.stderr)
-        return 2
+        return {"ok": False, "error": msg, "_stage": "pre"}
     try:
         out, _spec, report, providers_out = write_starter_spec(
-            a.path, kind=kind, data=getattr(a, "cases", None),
-            agent=getattr(a, "agent", None),
-            model=getattr(a, "model", None),
-            base_url=getattr(a, "base_url", None),
-            key_env=getattr(a, "key_env", None),
-            algorithm=a.name, param=getattr(a, "param", None),
-            out=out, follow_up=None,
-            rounds=getattr(a, "rounds", None), workers=getattr(a, "workers", None))
+            path, kind=kind, data=cases, agent=agent, model=model,
+            base_url=base_url, key_env=key_env, algorithm=name, param=param,
+            out=out, follow_up=None, rounds=rounds, workers=workers)
     except ValueError as e:      # kind mismatch / bad --param
-        if as_json:
-            _out({"ok": False, "error": str(e)}, as_json=True)
-        else:
-            print(f"error: {e}", file=sys.stderr)
-        return 2
+        return {"ok": False, "error": str(e), "_stage": "pre"}
     # Once the spec is on disk, a failed plan's next step is to fix it and
     # re-plan -- never `evolve` on a spec plan just refused (#694).
     retry_line = f"agentdescent plan {out}"
     try:
         spec = load_spec(out)
-        payload = plan_payload(spec, usd_per_call=getattr(a, "usd_per_call", None))
+        payload = plan_payload(spec, usd_per_call=usd_per_call)
     except (SpecError, ValueError) as e:
-        err = _algorithms_run_missing_data_hint(
-            str(e), cases=getattr(a, "cases", None))
-        if as_json:
-            # `spec` kept for compatibility; `spec_path` matches the plan shape.
-            _out({"ok": False, "error": err, "spec": out, "spec_path": out,
-                  "next": retry_line}, as_json=True)
-        else:
-            # The spec is already on disk: say so before the error (#688).
-            for kind_tag, text in report:
-                if kind_tag == "wrote":
-                    print(text)
-            print(f"error: {err}", file=sys.stderr)
-            print(f"next: fix {out}, then {retry_line}")
-        return 2
+        err = _algorithms_run_missing_data_hint(str(e), cases=cases)
+        # `spec` kept for compatibility; `spec_path` matches the plan shape.
+        return {"ok": False, "error": err, "spec": out, "spec_path": out,
+                "next": retry_line, "_stage": "plan", "_report": report}
     ok = bool(payload.get("ok", True))
-    next_line = f"agentdescent evolve {out}" if ok else retry_line
+    obj = dict(payload)
+    obj["spec_path"] = out
+    obj["providers_config"] = providers_out
+    obj["warnings"] = list(payload.get("warnings") or []) + [
+        t for k, t in report if k == "warning"]
+    obj["notes"] = [t for k, t in report if k == "note"]
+    obj["next"] = f"agentdescent evolve {out}" if ok else retry_line
+    obj["_stage"] = "done"
+    obj["_report"] = report
+    obj["_plan"] = payload
+    return obj
+
+
+def _public(obj: Dict[str, Any]) -> Dict[str, Any]:
+    """``obj`` without the private ``_``-keys of :func:`algorithms_run_payload`."""
+    return {k: v for k, v in obj.items() if not k.startswith("_")}
+
+
+def _cmd_algorithms_run(a: argparse.Namespace) -> int:
+    """``algorithms run NAME PATH`` -- init + plan in one step; does not start a run (#674)."""
+    as_json = getattr(a, "json", False)
+    obj = algorithms_run_payload(
+        a.name, a.path, kind=a.kind, cases=getattr(a, "cases", None),
+        agent=getattr(a, "agent", None), model=getattr(a, "model", None),
+        base_url=getattr(a, "base_url", None), key_env=getattr(a, "key_env", None),
+        param=getattr(a, "param", None), out=a.out,
+        rounds=getattr(a, "rounds", None), workers=getattr(a, "workers", None),
+        usd_per_call=getattr(a, "usd_per_call", None))
+    stage = obj["_stage"]
+    report = obj.get("_report") or []
+    ok = bool(obj.get("ok", True))
     if as_json:
         # Exactly one JSON object on stdout for success and error (#674).
-        obj = dict(payload)
-        obj["spec_path"] = out
-        obj["providers_config"] = providers_out
-        obj["warnings"] = list(payload.get("warnings") or []) + [
-            t for k, t in report if k == "warning"]
-        obj["notes"] = [t for k, t in report if k == "note"]
-        obj["next"] = next_line
-        _out(obj, as_json=True)
+        _out(_public(obj), as_json=True)
         return 0 if ok else 2
+    if stage == "pre":
+        print(f"error: {obj['error']}", file=sys.stderr)
+        return 2
+    out = obj["spec_path"]
+    if stage == "plan":
+        # The spec is already on disk: say so before the error (#688).
+        for kind_tag, text in report:
+            if kind_tag == "wrote":
+                print(text)
+        print(f"error: {obj['error']}", file=sys.stderr)
+        print(f"next: fix {out}, then {obj['next']}")
+        return 2
+    payload = obj["_plan"]
     for kind_tag, text in report:
         if kind_tag == "warning":
             print(f"warning: {text}")
@@ -2771,10 +2792,10 @@ def _cmd_algorithms_run(a: argparse.Namespace) -> int:
             print(text)
     if not ok:
         print(f"error: {payload.get('error', 'plan failed')}", file=sys.stderr)
-        print(f"next: fix {out}, then {next_line}")
+        print(f"next: fix {out}, then {obj['next']}")
         return 2
     _out(payload, as_json=False)
-    print(f"next: {next_line}")
+    print(f"next: {obj['next']}")
     calls = (payload.get("estimate") or {}).get("agent_calls_upper_bound")
     if (getattr(a, "rounds", None) is None and getattr(a, "workers", None) is None
             and isinstance(calls, (int, float)) and calls > QUICK_TRIAL_CALLS):

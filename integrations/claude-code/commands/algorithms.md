@@ -16,10 +16,11 @@ Parse `$ARGUMENTS` (trim; empty means `list`):
   `agentdescent algorithms show <name>`). Show the full card (params, defaults,
   extra cost, what it changes). Stop here unless they ask to run it.
 - **`run <name> <path>`** [optional `cases.jsonl`] [optional `--param k=v`]:
-  build a spec for the path with `algorithm` set to that name (and only the
-  params they gave — validate with `describe_algorithm` / `show` first). Run
-  `doctor`, `plan`, show the resolved algorithm card and estimate, and wait for
-  my yes before `start`. Same apply/cancel/resume rules as `/evolve`.
+  call `algorithm_spec` with the name, the absolute path, the absolute cases
+  file and only the params they gave (validate with `describe_algorithm` /
+  `show` first); it writes and plans the spec and returns `spec`. Run `doctor`
+  first, show the resolved algorithm card and estimate, and wait for my yes
+  before `start` with that `spec`. Same apply/cancel/resume rules as `/evolve`.
   Without MCP: `agentdescent algorithms run <name> <path> [cases.jsonl]
   [--param k=v...] [--rounds N] [--workers N]` (init + plan in one step; then
   `evolve` after yes). For a quick, cheap trial pass `--rounds 1 --workers 1`.

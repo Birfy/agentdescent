@@ -39,7 +39,12 @@ written back until the user says so.
      too few it has both committed a worse rule and committed nothing at all.
    - `algorithm` (optional): a named method. Call `list_algorithms` (or
      `describe_algorithm` for one) before naming one; the same data is in
-     `agentdescent algorithms list` / `show`. Hosts that expose slash
+     `agentdescent algorithms list` / `show`. To build the spec for one,
+     call `algorithm_spec` (name, absolute `path`, absolute `cases`, optional
+     `params` object, `rounds`/`workers` 1/1 for a quick trial): it writes the
+     starter spec beside the target, plans it, and returns `spec` to pass to
+     `start` after the user's yes -- the MCP form of `agentdescent algorithms
+     run`. Hosts that expose slash
      commands also ship `/algorithms` (Claude `/agentdescent:algorithms`,
      OpenCode `/agentdescent/algorithms`, Codex `/prompts:algorithms`) for
      list / show / run. To compare methods on the user's

@@ -332,7 +332,9 @@ The other fields:
   the resolved card, its parameters and its extra cost, and rejects an unknown
   name, an unknown parameter, a wrong type or a kind the method does not support
   before any run starts. A host can discover the same cards with the
-  `list_algorithms` / `describe_algorithm` MCP tools, or write the field with
+  `list_algorithms` / `describe_algorithm` MCP tools and build a planned
+  starter spec with `algorithm_spec` (the MCP form of `agentdescent algorithms
+  run NAME PATH [cases]`), or write the field with
   `agentdescent init --algorithm NAME --param KEY=VALUE`. Third-party packages
   can add a name by exposing an `Algorithm` under the
   `agentdescent.algorithms` entry-point group; a plugin that fails to load is

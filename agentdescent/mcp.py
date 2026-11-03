@@ -95,6 +95,16 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
         "parameter with its type, default and bounds. Call this before setting "
         "`algorithm: {name, params}` so the values you pass are the ones plan expects. "
         "The same data is in `agentdescent algorithms show <name>`."),
+    "algorithm_spec": (
+        "Build and plan a starter spec for one named algorithm on the user's target "
+        "-- the MCP form of `agentdescent algorithms run NAME PATH [cases]`. Pass the "
+        "algorithm `name` (from list_algorithms), the absolute target `path`, and the "
+        "absolute `cases` JSONL; `params` is the algorithm's params as an object "
+        "(check describe_algorithm first), and `rounds`/`workers` = 1/1 is a quick "
+        "trial. It writes the spec file (default beside the target, never inside it) "
+        "and returns the plan estimate plus `spec`, the dict to pass to start. It "
+        "starts nothing: show the user the estimate and get a yes before start. "
+        "`model`/`base_url` come from the user, never guess them."),
     "plan": (
         "Validate an EvolveSpec and estimate its cost WITHOUT running anything. Resolves "
         "every agent/scorer/policy reference and loads the data, so a wrong field fails "
@@ -403,6 +413,64 @@ class Tools:
             return algorithms.get(name, where="describe_algorithm").describe()
         except algorithms.AlgorithmError as e:
             return {"error": str(e)}
+
+    def algorithm_spec(self, name: str, path: str, cases: Optional[str] = None,
+                       kind: Optional[str] = None,
+                       params: Optional[Dict[str, Any]] = None,
+                       rounds: Optional[int] = None, workers: Optional[int] = None,
+                       agent: Optional[str] = None, model: Optional[str] = None,
+                       base_url: Optional[str] = None, key_env: Optional[str] = None,
+                       out: Optional[str] = None,
+                       usd_per_call: Optional[float] = None) -> Dict[str, Any]:
+        """``algorithms run`` over MCP (#723): same checks, same object."""
+        from .cli import _public, algorithms_run_payload
+
+        if params is not None and not isinstance(params, dict):
+            return {"ok": False, "error": "params must be an object of "
+                    "{parameter: value} (see describe_algorithm)"}
+        # The server's cwd is not the host's, so paths are made absolute here
+        # and the default spec goes beside the target -- never inside a
+        # directory target, where it would become part of the artifact.
+        abs_path = os.path.abspath(os.path.expanduser(path))
+        abs_cases = (os.path.abspath(os.path.expanduser(cases))
+                     if cases is not None else None)
+        if out is None:
+            from . import algorithms
+
+            try:
+                registered = algorithms.get(name, where="algorithm_spec").name
+            except algorithms.AlgorithmError as e:
+                return {"ok": False, "error": str(e)}
+            out = os.path.join(os.path.dirname(abs_path.rstrip(os.sep)) or os.sep,
+                               f"agentdescent.{registered}.spec.json")
+        else:
+            out = os.path.abspath(os.path.expanduser(out))
+        pairs = [f"{k}={json.dumps(v)}" for k, v in (params or {}).items()]
+        try:
+            obj = algorithms_run_payload(
+                name, abs_path, kind=kind, cases=abs_cases, agent=agent,
+                model=model, base_url=base_url, key_env=key_env, param=pairs,
+                out=out, rounds=rounds, workers=workers, usd_per_call=usd_per_call)
+        except SpecError as e:
+            return {"ok": False, "error": str(e)}
+        result = _public(obj)
+        if isinstance(result.get("error"), str):
+            # The CLI hint names its positional; here the field is `cases`.
+            result["error"] = result["error"].replace(
+                "the cases path you passed as the third argument",
+                "the `cases` path you passed").replace(
+                "pass a cases.jsonl as the third argument "
+                "(see `agentdescent algorithms run --help`)", "pass `cases`")
+        if isinstance(result.get("spec"), str):
+            # The CLI's legacy `spec` (a path) would read as the dict for start.
+            result.pop("spec")
+        if result.get("ok", True) and obj.get("_stage") == "done":
+            from .evolvespec import load_spec
+
+            result["spec"] = load_spec(obj["spec_path"]).to_dict()
+            result["next"] = ("show the user this estimate; after their yes, call "
+                              "start with `spec`")
+        return result
 
     def plan(self, spec: Dict[str, Any], usd_per_call: Optional[float] = None) -> Dict[str, Any]:
         try:
@@ -1005,6 +1073,18 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent",
     def rsi(archive: Optional[str] = None, slot: Optional[str] = None,
             stagnation_window: int = 3) -> Dict[str, Any]:
         return t.rsi(archive, slot, stagnation_window)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["algorithm_spec"])
+    def algorithm_spec(name: str, path: str, cases: Optional[str] = None,
+                       kind: Optional[str] = None,
+                       params: Optional[Dict[str, Any]] = None,
+                       rounds: Optional[int] = None, workers: Optional[int] = None,
+                       agent: Optional[str] = None, model: Optional[str] = None,
+                       base_url: Optional[str] = None, key_env: Optional[str] = None,
+                       out: Optional[str] = None,
+                       usd_per_call: Optional[float] = None) -> Dict[str, Any]:
+        return t.algorithm_spec(name, path, cases, kind, params, rounds, workers,
+                                agent, model, base_url, key_env, out, usd_per_call)
 
     @server.tool(description=TOOL_DESCRIPTIONS["plan"])
     def plan(spec: Dict[str, Any], usd_per_call: Optional[float] = None) -> Dict[str, Any]:
