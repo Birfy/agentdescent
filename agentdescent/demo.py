@@ -26,12 +26,13 @@ import os
 import random
 import re
 import sys
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from .agents import Completion, cli_agent
 
 __all__ = [
     "DEMO_SKILL",
+    "OFFLINE_ALGORITHMS",
     "build",
     "demo_spec",
     "offline_agent",
@@ -40,6 +41,12 @@ __all__ = [
 
 #: The demo's skill directory name, and the artifact id the run reports.
 DEMO_SKILL = "csv-total"
+
+#: Named algorithms ``agentdescent demo --algorithm`` accepts: each is verified
+#: (tests/test_demo.py) to fix the demo skill against the offline agent and
+#: reflector. Others that apply to ``skill_dir`` (``evoskill``) need a real
+#: model's proposal protocol, so they are refused rather than shown failing.
+OFFLINE_ALGORITHMS = ("archive_selection",)
 
 #: The agent, as a program. It reads `references/rules.md` out of the workspace
 #: to learn which column to total -- so a skill that names the wrong column
@@ -136,8 +143,12 @@ def demo_spec(root: str) -> Dict[str, Any]:
     }
 
 
-def build(root: str) -> Dict[str, Any]:
-    """Write the demo's skill, dataset and spec under ``root``. Returns the spec."""
+def build(root: str, algorithm: Optional[str] = None) -> Dict[str, Any]:
+    """Write the demo's skill, dataset and spec under ``root``. Returns the spec.
+
+    ``algorithm`` (one of :data:`OFFLINE_ALGORITHMS`) is written as the spec's
+    ``"algorithm"``; the caller validates the name.
+    """
     skill = os.path.join(root, DEMO_SKILL)
     os.makedirs(os.path.join(skill, "references"), exist_ok=True)
     with open(os.path.join(skill, "SKILL.md"), "w", encoding="utf-8") as fh:
@@ -147,6 +158,8 @@ def build(root: str) -> Dict[str, Any]:
     with open(os.path.join(root, "cases.jsonl"), "w", encoding="utf-8") as fh:
         fh.write("\n".join(json.dumps(r) for r in _rows()) + "\n")
     spec = demo_spec(root)
+    if algorithm:
+        spec["algorithm"] = algorithm
     with open(os.path.join(root, "spec.json"), "w", encoding="utf-8") as fh:
         json.dump(spec, fh, indent=2)
     return spec

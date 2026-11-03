@@ -135,3 +135,50 @@ def test_plan_on_the_demo_keeps_the_structural_gate_on(tmp_path):
     payload = plan_payload(EvolveSpec.from_dict(spec).absolutise())
     blob = json.dumps(payload)
     assert "no-frontmatter" not in blob and "structural gate is off" not in blob
+
+
+@pytest.mark.parametrize("name", demo.OFFLINE_ALGORITHMS)
+def test_demo_algorithm_runs_each_offline_algorithm_end_to_end(tmp_path, monkeypatch, name):
+    # #719: every name the demo accepts must actually fix the skill offline
+    monkeypatch.setenv("AGENTDESCENT_HOME", str(tmp_path / "home"))
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        code = cli.main(["--store", str(tmp_path / "runs"), "demo",
+                         "--dir", str(tmp_path / "work"), "--algorithm", name])
+    out = buf.getvalue()
+    assert code == 0, out
+    assert f"algorithm: {name}" in out, out
+    assert "held-out reward: 0.000 -> 1.000" in out, out
+    spec = json.loads((tmp_path / "work" / "spec.json").read_text())
+    assert spec["algorithm"] == name
+
+
+def test_demo_algorithm_accepts_an_alias(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTDESCENT_HOME", str(tmp_path / "home"))
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        code = cli.main(["--store", str(tmp_path / "runs"), "demo",
+                         "--dir", str(tmp_path / "work"),
+                         "--algorithm", "Archive-Selection"])
+    assert code == 0, buf.getvalue()
+    assert "algorithm: archive_selection" in buf.getvalue()
+
+
+def test_demo_algorithm_refuses_one_that_needs_a_real_model(tmp_path, capsys):
+    code = cli.main(["--store", str(tmp_path / "runs"), "demo",
+                     "--dir", str(tmp_path / "work"), "--algorithm", "evoskill"])
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "does not run against the offline demo" in err
+    assert "agentdescent algorithms run evoskill" in err
+    # refused before anything is built or run
+    assert not (tmp_path / "work").exists()
+    assert not (tmp_path / "runs").exists() or not os.listdir(tmp_path / "runs")
+
+
+def test_demo_algorithm_unknown_name_lists_the_real_ones(tmp_path, capsys):
+    code = cli.main(["--store", str(tmp_path / "runs"), "demo",
+                     "--dir", str(tmp_path / "work"), "--algorithm", "nope"])
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "unknown algorithm 'nope'" in err and "archive_selection" in err

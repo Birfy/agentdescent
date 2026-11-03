@@ -580,16 +580,35 @@ def _tree_diff(before: Dict[str, str], after: Dict[str, str]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _demo_offline_algorithms() -> Tuple[str, ...]:
+    from . import demo as demo_mod
+    return demo_mod.OFFLINE_ALGORITHMS
+
+
 def cmd_demo(a: argparse.Namespace) -> int:
     """Build a complete example and run it, so the first thing seen works."""
     import tempfile
 
+    from . import algorithms
     from . import demo as demo_mod
 
+    algo = None
+    if getattr(a, "algorithm", None):
+        try:
+            algo = algorithms.get(a.algorithm, where="demo --algorithm").name
+        except algorithms.AlgorithmError as e:
+            raise SpecError(str(e)) from None
+        if algo not in demo_mod.OFFLINE_ALGORITHMS:
+            raise SpecError(
+                f"demo --algorithm: {algo!r} does not run against the offline demo "
+                f"agent (it needs a real model); offline: "
+                f"{list(demo_mod.OFFLINE_ALGORITHMS)}. Run it for real with "
+                f"`agentdescent algorithms run {algo} <path> <cases.jsonl>` "
+                f"(`agentdescent algorithms show {algo}` for its parameters)")
     root = os.path.abspath(os.path.expanduser(a.dir)) if a.dir else tempfile.mkdtemp(
         prefix="agentdescent-demo-")
     os.makedirs(root, exist_ok=True)
-    spec_dict = demo_mod.build(root)
+    spec_dict = demo_mod.build(root, algorithm=algo)
     skill = os.path.join(root, demo_mod.DEMO_SKILL)
     rules = os.path.join(skill, "references", "rules.md")
 
@@ -597,7 +616,10 @@ def cmd_demo(a: argparse.Namespace) -> int:
     print(f"  {demo_mod.DEMO_SKILL}/references/rules.md  ->  "
           f"{open(rules).read().strip()!r}   (wrong: `id` is a row number)")
     print("  cases.jsonl                        ->  12 CSVs with known totals")
-    print("  the agent is a local program, so this costs nothing and needs no key\n")
+    print("  the agent is a local program, so this costs nothing and needs no key")
+    if algo:
+        print(f"  algorithm: {algo}   (`agentdescent algorithms show {algo}`)")
+    print()
 
     spec = EvolveSpec.from_dict(spec_dict)
     comp = compose(spec)
@@ -3643,6 +3665,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("demo", help="build a complete example and run it, offline")
     s.add_argument("--dir", help="where to build it (default: a temp directory)")
+    s.add_argument("--algorithm", metavar="NAME",
+                   help="run the demo with this named algorithm (one that works "
+                        "offline: " + ", ".join(_demo_offline_algorithms()) + ")")
     s.set_defaults(fn=cmd_demo)
 
     s = sub.add_parser("init", help="write a starter spec for a path")
