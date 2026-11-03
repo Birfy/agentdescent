@@ -103,6 +103,35 @@ model) or written inline:
  "options": [{"name": "direct", "action": "direct", "calls": 1}]}
 ```
 
+### Budgeted PRM/verifier search as the step
+
+`step` may be a `{"budgeted": ...}` block instead of a callable ref. It builds
+the existing `BudgetedStep` from `budgeted_loop`:
+
+```json
+"step": {
+  "budgeted": {
+    "fabric": "mypkg.search:build_fabric",
+    "state": "mypkg.search:state",
+    "config": {"budgets": [8, 16, 32], "min_gain_per_expansion": 0.0001,
+               "patience": 2},
+    "risk": "mypkg.search:risk"
+  }
+}
+```
+
+- `fabric` is a zero-argument builder (or a ready `SearchFabric`).
+- `state` is `(LoopContext) -> state`;
+- `config` is `BudgetedStepConfig`;
+- `risk` and `evidence_of` are optional callables.
+
+The platform passes its own `(context, compute_decision)` to the step; the
+budgeted adapter ignores the compute decision because the search owns its
+budget. `plan` validates the refs and config without calling the builders, so a
+builder that raises is reported at `run`, not `plan`. `scale_budget` defaults to
+true, so the actual budgets are multiplied by the loop controller's
+`budget_scale` (the configured numbers are the base budgets).
+
 `plan` resolves every ref and validates the configs without running. `run`
 returns the full `PlatformCampaignReport` with `schema_version: 1`. The MCP
 `platform` tool takes the same object and `dry_run=true` for the plan step.

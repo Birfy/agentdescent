@@ -33,6 +33,7 @@ import os
 from dataclasses import asdict, fields
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
+from .budgeted_loop import BudgetedStep, BudgetedStepConfig
 from .capability_foundry import CapabilityFoundry
 from .compute_policy import (
     ComputeAction, ComputeController, ComputeOption,
@@ -43,6 +44,7 @@ from .loop_kernel import LoopContext, LoopObservation
 from .model_router import ModelRouter, ModelSpec
 from .platform import PlatformConfig, RSIPlatform
 from .platform_campaign import CampaignConfig, PlatformCampaign
+from .search_fabric import SearchFabric
 from .surface_common import (
     SURFACE_SCHEMA_VERSION, SurfaceError, atomic_write_json, load_json,
     load_jsonl, require_callable, require_instance, require_mapping,
@@ -136,6 +138,87 @@ def _optional_ref(value: Any, name: str, *, builder: bool = False,
             else resolve_ref(value, name=name, allow=allow))
 
 
+_BUDGETED_KEYS = ("fabric", "state", "config", "risk", "evidence_of")
+
+
+def _budgeted_data(value: Any) -> Dict[str, Any]:
+    data = require_mapping(value, "step.budgeted")
+    unknown = sorted(set(data) - set(_BUDGETED_KEYS))
+    if unknown:
+        raise SurfaceError(
+            "unknown step.budgeted key(s): " + ", ".join(unknown)
+            + "; allowed: " + ", ".join(_BUDGETED_KEYS))
+    return data
+
+
+def _budgeted_step(value: Any, *, allow: Optional[Sequence[str]] = None
+                   ) -> BudgetedStep:
+    data = _budgeted_data(value)
+    fabric = require_instance(
+        resolve_builder(data.get("fabric"), name="step.budgeted.fabric",
+                        allow=allow), SearchFabric, "step.budgeted.fabric")
+    state = require_callable(
+        resolve_ref(data.get("state"), name="step.budgeted.state", allow=allow),
+        "step.budgeted.state")
+    config = _config(
+        BudgetedStepConfig, data.get("config"), "step.budgeted.config")
+    risk = _optional_ref(data.get("risk"), "step.budgeted.risk", allow=allow)
+    evidence_of = _optional_ref(
+        data.get("evidence_of"), "step.budgeted.evidence_of", allow=allow)
+    for label, fn in (("step.budgeted.risk", risk),
+                      ("step.budgeted.evidence_of", evidence_of)):
+        if fn is not None:
+            require_callable(fn, label)
+    budgeted = BudgetedStep(
+        fabric, state, config=config, risk=risk, evidence_of=evidence_of)
+
+    def run_step(context: LoopContext, decision: Any = None) -> LoopObservation:
+        # The platform passes ``(context, compute_decision)``; BudgetedStep owns
+        # its own budget decision and only needs the context.
+        return budgeted(context)
+
+    return run_step
+
+
+def _step(spec: Mapping[str, Any], *,
+          allow: Optional[Sequence[str]] = None) -> Any:
+    value = spec.get("step")
+    if isinstance(value, Mapping):
+        if set(value) != {"budgeted"}:
+            raise SurfaceError(
+                "a step object must contain exactly the 'budgeted' block")
+        return _budgeted_step(value["budgeted"], allow=allow)
+    return require_callable(
+        resolve_ref(value, name="step", allow=allow), "step")
+
+
+def _validate_step(spec: Mapping[str, Any], *,
+                   allow: Optional[Sequence[str]] = None) -> None:
+    value = spec.get("step")
+    if not isinstance(value, Mapping):
+        require_callable(
+            resolve_ref(value, name="step", allow=allow), "step")
+        return
+    if set(value) != {"budgeted"}:
+        raise SurfaceError(
+            "a step object must contain exactly the 'budgeted' block")
+    data = _budgeted_data(value["budgeted"])
+    fabric = resolve_ref(
+        data.get("fabric"), name="step.budgeted.fabric", allow=allow)
+    if not callable(fabric) and not isinstance(fabric, SearchFabric):
+        raise SurfaceError(
+            "step.budgeted.fabric must be a builder or SearchFabric")
+    require_callable(
+        resolve_ref(data.get("state"), name="step.budgeted.state", allow=allow),
+        "step.budgeted.state")
+    _config(BudgetedStepConfig, data.get("config"), "step.budgeted.config")
+    for name in ("risk", "evidence_of"):
+        value = _optional_ref(
+            data.get(name), f"step.budgeted.{name}", allow=allow)
+        if value is not None:
+            require_callable(value, f"step.budgeted.{name}")
+
+
 def _build(spec: Mapping[str, Any], *, allow: Optional[Sequence[str]] = None
            ) -> Tuple[RSIPlatform, PlatformCampaign, Dict[str, Any]]:
     runs_db = spec.get("runs_db") or spec.get("store") or _default_runs_db()
@@ -145,8 +228,7 @@ def _build(spec: Mapping[str, Any], *, allow: Optional[Sequence[str]] = None
     platform_config = _config(PlatformConfig, spec.get("platform"), "platform")
     campaign_config = _config(CampaignConfig, spec.get("campaign"), "campaign")
     compute = _compute(spec.get("compute"), allow=allow)
-    step = require_callable(
-        resolve_ref(spec.get("step"), name="step", allow=allow), "step")
+    step = _step(spec, allow=allow)
     evidence = _optional_ref(spec.get("evidence"), "evidence", allow=allow)
     capability = _optional_ref(spec.get("capability"), "capability", allow=allow)
     if evidence is not None:
@@ -213,8 +295,7 @@ def _validate(spec: Mapping[str, Any], *, allow: Optional[Sequence[str]] = None
         _compute(compute, allow=allow)
     else:
         resolve_ref(compute, name="compute", allow=allow)
-    step = resolve_ref(spec.get("step"), name="step", allow=allow)
-    require_callable(step, "step")
+    _validate_step(spec, allow=allow)
     for name in ("evidence", "capability", "gate", "risk_gate"):
         value = _optional_ref(spec.get(name), name, allow=allow)
         if value is not None:
