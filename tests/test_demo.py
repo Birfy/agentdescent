@@ -82,7 +82,8 @@ def test_the_demo_command_runs_a_real_evolution_and_fixes_the_skill(tmp_path, mo
                          "--dir", str(tmp_path / "work")])
     out = buf.getvalue()
     assert code == 0, out
-    assert "held-out reward: 1.000" in out, out
+    # #708: seed starts wrong (COLUMN: id) so the printed line shows the lift.
+    assert "held-out reward: 0.000 -> 1.000" in out, out
     assert "'COLUMN: amount'" in out, out
     assert "agentdescent apply" in out and "--dry-run" in out
     # the next-step footer must name a spec path that the init line it shows

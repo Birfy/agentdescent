@@ -1371,10 +1371,14 @@ def estimate(comp: Composition, *, usd_per_call: Optional[float] = None) -> Dict
     per_round_gate = held_out                       # one held-out sweep per candidate
     per_round = (per_round_rollouts + per_round_proposals + per_round_verify
                  + per_round_rank + per_round_gate)
-    total = per_round * rounds
+    # One held-out sweep of the seed before round 0 (#708). Often a cache hit
+    # when the gate later scores the same incumbent; counted as a miss here.
+    seed_score = held_out
+    total = per_round * rounds + seed_score
     out: Dict[str, Any] = {
         "rounds": rounds, "n_workers": n_workers, "tasks": n_tasks,
         "held_out_tasks": held_out,
+        "seed_score_calls": seed_score,
         "calls_per_round": {"rollouts": per_round_rollouts,
                             "proposals": per_round_proposals,
                             "self_verify": per_round_verify,
@@ -1384,6 +1388,7 @@ def estimate(comp: Composition, *, usd_per_call: Optional[float] = None) -> Dict
             "every round runs to completion (target_reward / patience may stop it earlier)",
             "one candidate reaches the gate per round",
             "the evaluation cache serves repeated (candidate, task) pairs; counted as misses here",
+            "one seed held-out sweep before round 0 (often a later cache hit on the incumbent)",
         ],
     }
     if usd_per_call is not None:

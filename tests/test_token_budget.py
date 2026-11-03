@@ -85,10 +85,12 @@ def _run_evolve(*, max_tokens=None, rounds=3, asynchronous=False, **kw):
 def test_sync_max_tokens_stops_run():
     """A token budget that is reached stops the run with stop_reason="max_tokens"."""
     # 300 tokens/call, 2 calls/round (solve + propose) = 600 tokens/round.
-    # 3 rounds = 1800 tokens. A cap of 1200 should stop after round 2.
-    result, agent = _run_evolve(max_tokens=1200, rounds=5)
+    # Seed held-out sweep (#708) adds 3 × 300 = 900 tokens before round 0, so a
+    # 1800 cap covers the seed plus one round and then stops (governor projects
+    # the next round will not fit).
+    result, agent = _run_evolve(max_tokens=1800, rounds=5)
     assert result.stop_reason == "max_tokens"
-    assert result.usage.total_tokens >= 1200
+    assert result.usage.total_tokens >= 1800
     # The run did not complete all 5 rounds.
     assert len(result.history) < 5
 

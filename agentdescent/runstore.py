@@ -138,6 +138,9 @@ class RunStatus:
     rounds: Optional[int] = None
     best_reward: Optional[float] = None
     last_reward: Optional[float] = None
+    #: Held-out reward of the seed before round 0 (#708). ``None`` until the
+    #: run finishes scoring it, or when seed scoring failed / predates the field.
+    initial_reward: Optional[float] = None
     committed: int = 0
     #: ``propose`` calls that raised, summed over the rounds so far (#395), and
     #: the first such exception as ``Type: message``. Non-zero with
@@ -876,11 +879,13 @@ def execute(rd: RunDir, *, budget_usd: Optional[float] = None,
         shutil.rmtree(rd.tree_path, ignore_errors=True)
         materialize(result.state, rd.tree_path)
     final = _finite_or_none(result.final_reward)
+    initial = _finite_or_none(getattr(result, "initial_reward", None))
     rd.update_status(
         state="failed" if result.error else "done", finished=time.time(),
         stop_reason=result.stop_reason, error=result.error,
         best_reward=max(best) if best else final,
-        last_reward=final, calls=usage.calls, pending_calls=0, phase=None,
+        last_reward=final, initial_reward=initial,
+        calls=usage.calls, pending_calls=0, phase=None,
         usd=None if usd_per_call is None else round(usage.calls * usd_per_call, 4))
     return result
 

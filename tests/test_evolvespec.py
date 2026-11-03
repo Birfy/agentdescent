@@ -418,7 +418,9 @@ def test_estimate_counts_and_declares_its_assumptions(tmp_path):
     comp = compose(_dir_spec(str(tmp_path)))
     est = estimate(comp)
     assert est["rounds"] == 3 and est["n_workers"] == 2
-    assert est["agent_calls_upper_bound"] == sum(est["calls_per_round"].values()) * 3
+    assert est["seed_score_calls"] == est["held_out_tasks"]
+    assert est["agent_calls_upper_bound"] == (
+        sum(est["calls_per_round"].values()) * 3 + est["seed_score_calls"])
     assert est["usd_upper_bound"] is None and any("price" in a for a in est["assumptions"])
     assert estimate(comp, usd_per_call=0.1)["usd_upper_bound"] > 0
 

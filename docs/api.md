@@ -34,6 +34,7 @@ EvolutionResult(
     final_reward: float,
     history: List[RoundInfo],
     ledger_log: List[str],
+    initial_reward: Optional[float] = None,
     error: Optional[str] = None,
     stop_reason: str = 'rounds',
     forced_refreshes: int = 0,

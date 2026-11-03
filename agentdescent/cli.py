@@ -613,7 +613,13 @@ def cmd_demo(a: argparse.Namespace) -> int:
         print(f"  round {info.round:>2}  reward={info.held_out_reward:.3f}  "
               f"+{info.committed}/-{info.rejected}")
 
-    print(f"\nheld-out reward: {result.final_reward:.3f}   outcomes: {result.outcomes()}")
+    init = getattr(result, "initial_reward", None)
+    if init is not None:
+        print(f"\nheld-out reward: {init:.3f} -> {result.final_reward:.3f}   "
+              f"outcomes: {result.outcomes()}")
+    else:
+        print(f"\nheld-out reward: {result.final_reward:.3f}   "
+              f"outcomes: {result.outcomes()}")
     print(f"what it learned:  rules.md -> "
           f"{result.state.get('references/rules.md', '').strip()!r}")
     if result.final_reward < 1.0:
@@ -1530,11 +1536,18 @@ def cmd_evolve(a: argparse.Namespace) -> int:
     except Exception as e:  # noqa: BLE001 - not BaseException: Ctrl-C stays loud
         return _run_failed(a, rd, e)
     st = rd.status()
-    _out({"run_id": rd.run_id, "state": st.state, "final_reward": result.final_reward,
-          "stop_reason": result.stop_reason, "outcomes": result.outcomes(),
-          "error": result.error, "dir": rd.path} if a.json else
-         f"{_status_line(st)}\nfinal reward: {result.final_reward:.3f}  "
-         f"outcomes: {result.outcomes()}\n{rd.path}", as_json=a.json)
+    init = getattr(result, "initial_reward", None)
+    payload = {"run_id": rd.run_id, "state": st.state, "final_reward": result.final_reward,
+               "initial_reward": init, "stop_reason": result.stop_reason,
+               "outcomes": result.outcomes(), "error": result.error, "dir": rd.path}
+    if init is not None:
+        plain = (f"{_status_line(st)}\n"
+                 f"held-out reward: {init:.3f} -> {result.final_reward:.3f}  "
+                 f"outcomes: {result.outcomes()}\n{rd.path}")
+    else:
+        plain = (f"{_status_line(st)}\nfinal reward: {result.final_reward:.3f}  "
+                 f"outcomes: {result.outcomes()}\n{rd.path}")
+    _out(payload if a.json else plain, as_json=a.json)
     return 0 if result.error is None else 1
 
 
@@ -1814,6 +1827,8 @@ def _partial_show(rd: "runstore.RunDir", st: Any) -> Dict[str, Any]:
                 "propose_errors", "propose_error")
         out["history"] = [{k: r[k] for k in keep if r.get(k) not in (None, {})}
                           for r in rounds[-SHOW_HISTORY:]]
+    if getattr(st, "initial_reward", None) is not None:
+        out["initial_reward"] = st.initial_reward
     if getattr(st, "best_reward", None) is not None:
         out["best_reward"] = st.best_reward
     perr = getattr(st, "propose_errors", 0) or sum(
@@ -1851,7 +1866,9 @@ def show_payload(run_id: str, *, store: Optional[str] = None, diff: bool = True,
         payload.update(_partial_show(rd, st))
         payload["note"] = "no result yet"
         return payload
-    payload.update(final_reward=result.final_reward, outcomes=result.outcomes(),
+    payload.update(final_reward=result.final_reward,
+                   initial_reward=getattr(result, "initial_reward", None),
+                   outcomes=result.outcomes(),
                    rounds=len(result.history))
     # Reflector exceptions (#395). Only when there were some, so a healthy run's
     # payload is unchanged.
@@ -1912,7 +1929,8 @@ def cmd_show(a: argparse.Namespace) -> int:
     if a.json:
         _out(payload, as_json=True)
         return 0
-    for k in ("run_id", "state", "stop_reason", "error", "final_reward", "outcomes",
+    for k in ("run_id", "state", "stop_reason", "error", "initial_reward",
+              "final_reward", "outcomes",
               "best_reward", "propose_errors", "propose_error", "note"):
         if payload.get(k) is not None:
             print(f"{k}: {payload[k]}")

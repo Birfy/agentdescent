@@ -1417,6 +1417,10 @@ class EvolutionResult:
     final_reward: float
     history: List[RoundInfo]
     ledger_log: List[str]
+    #: Held-out reward of the *seed* artifact, scored once before round 0 (#708).
+    #: ``None`` when seed scoring failed (dead backend) or the result was written
+    #: before this field existed. Never aborts the run.
+    initial_reward: Optional[float] = None
     #: ``None`` on a clean run; otherwise a description of the failure that either
     #: ended the run early **or** made its final measurement unusable (in which case
     #: ``final_reward`` falls back to the last measured round, and the message says
@@ -1736,6 +1740,7 @@ class EvolutionResult:
             "state": self.state,
             "rendered": self.rendered,
             "final_reward": self.final_reward,
+            "initial_reward": self.initial_reward,
             "error": self.error,
             "history": [
                 {"round": h.round, "held_out_reward": h.held_out_reward,
@@ -1909,6 +1914,7 @@ class EvolutionResult:
         return cls(
             state=d["state"], rendered=d["rendered"],
             final_reward=d["final_reward"],
+            initial_reward=d.get("initial_reward"),
             # Only the fields this version knows: a result.json written by a newer
             # install (the shared run store outlives upgrades and downgrades) must
             # not make `apply` / `show` raise on a round field it has not heard of.
@@ -2831,6 +2837,21 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     return eng
 
 
+
+def _score_seed_held_out(artifact: "EvolvingArtifact", held_out: Sequence) -> Optional[float]:
+    """Score the seed on ``held_out`` once; never abort the run (#708).
+
+    The eval cache makes a later gate score of the same incumbent free when the
+    artifact is unchanged. A dead backend leaves ``None`` so the run continues.
+    """
+    try:
+        return float(artifact.score(held_out))
+    except ContractError:
+        raise
+    except Exception:  # noqa: BLE001 - seed score is diagnostic, not a stop reason
+        return None
+
+
 def evolve(
     tasks: Sequence[Task],
     reward: Reward,
@@ -3544,6 +3565,17 @@ def evolve(
     #: The most recent artifact successfully read from the ledger. If the final
     #: read fails there is still a real result to hand back instead of an exception.
     last_good: Optional[EvolvingArtifact] = None
+    # Score the seed once on held-out before round 0 so show/status/demo can
+    # tell "the algorithm fixed it" from "nothing needed fixing" (#708).
+    try:
+        seed_art = ledger.snapshot(Ledger.DEV).get(artifact_id)
+    except LedgerFailure:
+        seed_art = None
+    if seed_art is None:
+        seed_art = EvolvingArtifact(
+            artifact_id, dict(initial_state or strategy.initial()),
+            blast_radius=blast_radius, runtime=eng.runtime, strategy=strategy)
+    initial_reward = _score_seed_held_out(seed_art, held_out)
     straggler_rounds = 0
     # Shared with the barrier-free loop: the same two questions, the same
     # tracker, and now the same epsilon (they had two).
@@ -4165,7 +4197,8 @@ def evolve(
     # back rather than holding it for the lifetime of the interpreter.
     result = EvolutionResult(state=dict(final.state), rendered=final.render(),
                              final_reward=final_reward, history=history,
-                             ledger_log=_safe_log(ledger), error=run_error,
+                             ledger_log=_safe_log(ledger),
+                             initial_reward=initial_reward, error=run_error,
                              stop_reason="error" if run_error else stop_reason,
                              fusion_trials=_fusion_trials(aggregator),
                              budget=governor.summary() if governor.active else None,

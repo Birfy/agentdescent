@@ -42,6 +42,7 @@ from .agents import Usage
 from .budget import BudgetGovernor, CallBudget
 from .policies import Policies
 from .evolution import (
+    _score_seed_held_out,
     _publish_stable, _safe_log,
     Agent, EvolutionResult, Propose, Reward, RoundInfo, Run, Strategy, Task,
     _ASYNC_WIRED_POLICIES, _cost_fields, _fusion_trials, _replay_stats,
@@ -556,6 +557,18 @@ def async_evolve(
     counter = [0]
     counter_lock = threading.Lock()
     history: List[RoundInfo] = []
+    # Score the seed once on held-out before workers start (#708).
+    try:
+        seed_art = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)
+    except Exception:  # noqa: BLE001 - ledger hiccup must not abort the run
+        seed_art = None
+    if seed_art is None:
+        from .evolution import EvolvingArtifact
+        seed_art = EvolvingArtifact(
+            eng.artifact_id, dict(eng.strategy.initial()),
+            blast_radius=eng.blast_radius, runtime=eng.runtime,
+            strategy=eng.strategy)
+    initial_reward = _score_seed_held_out(seed_art, eng.held_out)
     # [best held-out reward so far, sweeps since it last improved] -- a list so
     # the merger closure can mutate it without a `nonlocal` per field.
     # Shared with the barrier-free loop's sibling: one tracker, one epsilon.
@@ -1405,6 +1418,7 @@ def async_evolve(
     result = EvolutionResult(state=dict(final.state), rendered=final.render(),
                              final_reward=final_reward, history=history,
                              ledger_log=_safe_log(eng.ledger),
+                             initial_reward=initial_reward,
                              error=run_error, retired_workers=retired[0],
                              stop_reason="error" if run_error else stop_reason[0],
                              forced_refreshes=forced_refreshes[0],

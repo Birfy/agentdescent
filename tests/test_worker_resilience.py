@@ -61,12 +61,15 @@ def test_an_intermittent_backend_does_not_kill_the_run():
 
 def test_a_worker_that_dies_after_working_warns_rather_than_going_quiet():
     """Not retiring must not mean not telling anyone."""
-    state, lock = {"ok": True}, threading.Lock()
+    # Seed held-out scoring (#708) runs the agent on every held-out task before
+    # workers start (4 here at held_out_frac=0.5). Leave one success after that
+    # so a worker still observes "worked, then died" rather than "never worked".
+    state, lock = {"left": 5}, threading.Lock()
 
     def run(rendered, task):
         with lock:
-            if state["ok"]:
-                state["ok"] = False    # exactly one success, then the backend dies
+            if state["left"] > 0:
+                state["left"] -= 1
                 return task.prompt
         raise RuntimeError("500 backend gone")
 
