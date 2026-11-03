@@ -70,6 +70,7 @@ nav:
     - The data model: data-model.md
     - Governance (L0 / L1 / L2): governance.md
     - Capability map: capabilities.md
+    - The main path: main-path.md
   - The evolve method: evolution.md
   - Modules — design and usage:
     - Module map: modules.md
