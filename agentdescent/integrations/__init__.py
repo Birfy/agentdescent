@@ -1250,6 +1250,23 @@ HOSTS: Dict[str, Callable[[str, _Writer], None]] = {
     "grok-bot": install_grok_bot,
 }
 
+#: Names people actually type for a host: the binary (``claude``), the product
+#: name ("Grok Bot", "DeepSeek Harness") or another separator. ``install`` /
+#: ``uninstall`` map them to the canonical key, case-insensitively (#721).
+HOST_ALIASES: Dict[str, str] = {
+    "claude": "claude-code", "claude_code": "claude-code", "claudecode": "claude-code",
+    "grok": "grok-bot", "grokbot": "grok-bot", "grok_bot": "grok-bot",
+    "deepseek-harness": "dsh", "deepseek_harness": "dsh", "deepseekharness": "dsh",
+    "open-code": "opencode", "open_code": "opencode",
+}
+
+
+def canonical_host(name: str) -> str:
+    """``name`` as a :data:`HOSTS` key: aliases and case are folded; an unknown
+    name comes back folded but unchanged, so the caller's own error names it."""
+    key = (name or "").strip().lower()
+    return HOST_ALIASES.get(key, key)
+
 
 def _read(path: str) -> Optional[str]:
     try:
@@ -1505,6 +1522,7 @@ def mcp_launcher() -> List[str]:
 
 def install(host: str, *, dry_run: bool = False, home: Optional[str] = None) -> List[str]:
     """Wire ``host`` up. Returns the lines to print: what was written or kept."""
+    host = canonical_host(host)
     if host not in HOSTS:
         raise ValueError(f"unknown host {host!r}; choose from {sorted(HOSTS)}")
     # Bind machine-local configuration to this installation, not the host's
@@ -1793,6 +1811,7 @@ def uninstall(host: str, *, dry_run: bool = False, home: Optional[str] = None) -
     install made through the host's own marketplace is removed with that host's
     plugin command. ``dry_run`` reports without changing anything.
     """
+    host = canonical_host(host)
     if host not in HOSTS:
         raise ValueError(f"unknown host {host!r}; choose from {sorted(HOSTS)}")
     home, honour_env = _resolve_home(home)

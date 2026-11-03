@@ -115,6 +115,10 @@ that runs it for real with your model.
 agentdescent install claude-code    # or: dsh, codex, opencode, grok-bot
 ```
 
+Not sure which host is wired? A bare `agentdescent install` lists every host
+with its state and the command to run. Common aliases work too: `claude`,
+`grok`, `deepseek-harness` (any case).
+
 #### Grok Bot
 
 `agentdescent install grok-bot` writes a scaffold under

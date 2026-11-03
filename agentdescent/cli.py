@@ -3377,9 +3377,55 @@ def cmd_safety(a: argparse.Namespace) -> int:
     return {"safe": 0, "caution": 1, "unsafe": 3}.get(payload["verdict"], 1)
 
 
+_HOST_CHOICES = ("dsh", "claude-code", "codex", "opencode", "grok-bot")
+
+
+def _host_arg(value: str) -> str:
+    """argparse ``type`` for a host: fold aliases (``claude``, ``grok``) and case."""
+    from .integrations import canonical_host
+
+    return canonical_host(value)
+
+
+def _list_hosts(a: argparse.Namespace, verb: str) -> int:
+    """Bare ``install`` / ``uninstall``: say which hosts exist here and what to
+    run, instead of argparse's "the following arguments are required" (#721).
+    Exit 2: no host was named, so nothing was done."""
+    import shutil
+
+    from .integrations import HOST_CLI
+
+    home = getattr(a, "home", None)
+    clis = {b: shutil.which(b) for b in HOST_CLI.values() if b}
+    try:
+        hosts, _ = _host_integrations(clis, home=home)
+    except ValueError as e:        # e.g. an empty --home (#412)
+        raise SpecError(f"{verb}: {e}") from None
+    if verb == "install":
+        suggest = [n for n, i in hosts.items()
+                   if (i["cli"] and i["state"] != "ok") or i["state"] in ("stale", "partial")]
+    else:
+        suggest = [n for n, i in hosts.items() if i["state"] != "missing"]
+    commands = [f"agentdescent {verb} {n}" for n in suggest]
+    if getattr(a, "json", False):
+        _out({"ok": False, "error": f"{verb}: name a host", "hosts": hosts,
+              "suggested": commands}, as_json=True)
+        return 2
+    print(f"{verb}: name a host, one of {', '.join(_HOST_CHOICES)}", file=sys.stderr)
+    for name, info in hosts.items():
+        cli_bit = (f"cli {info['cli']}" if info["cli"]
+                   else ("no desktop cli" if HOST_CLI.get(name) is None else "cli not on PATH"))
+        print(f"  {name:<12} {info['state']:<8} ({cli_bit})", file=sys.stderr)
+    if commands:
+        print("next: " + "  |  ".join(commands), file=sys.stderr)
+    return 2
+
+
 def cmd_install(a: argparse.Namespace) -> int:
     from .integrations import install
 
+    if a.host is None:
+        return _list_hosts(a, "install")
     try:
         written = install(a.host, dry_run=a.dry_run, home=a.home)
     except ValueError as e:        # e.g. an empty --home (#412)
@@ -3399,6 +3445,8 @@ def cmd_install(a: argparse.Namespace) -> int:
 def cmd_uninstall(a: argparse.Namespace) -> int:
     from .integrations import uninstall
 
+    if a.host is None:
+        return _list_hosts(a, "uninstall")
     try:
         lines = uninstall(a.host, dry_run=a.dry_run, home=a.home)
     except ValueError as e:        # e.g. an empty --home (#412)
@@ -3820,13 +3868,17 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_doctor)
 
     s = sub.add_parser("install", help="wire the skill and MCP server into a host")
-    s.add_argument("host", choices=("dsh", "claude-code", "codex", "opencode", "grok-bot"))
+    # Aliases (`claude`, `grok`, `deepseek-harness`, any case) fold to the
+    # canonical name before the choices check; bare `install` lists hosts (#721).
+    s.add_argument("host", nargs="?", type=_host_arg, choices=_HOST_CHOICES,
+                   help="host to wire; omit to list hosts and their state")
     s.add_argument("--dry-run", action="store_true", dest="dry_run")
     s.add_argument("--home", help="the host's home directory (default: the real one)")
     s.set_defaults(fn=cmd_install)
 
     s = sub.add_parser("uninstall", help="undo `install` for a host")
-    s.add_argument("host", choices=("dsh", "claude-code", "codex", "opencode", "grok-bot"))
+    s.add_argument("host", nargs="?", type=_host_arg, choices=_HOST_CHOICES,
+                   help="host to unwire; omit to list hosts and their state")
     s.add_argument("--dry-run", action="store_true", dest="dry_run")
     s.add_argument("--home", help="the host's home directory (default: the real one)")
     s.set_defaults(fn=cmd_uninstall)
