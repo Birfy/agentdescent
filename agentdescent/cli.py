@@ -287,9 +287,34 @@ def algorithm_override(name: Optional[str], params: Optional[Mapping[str, Any]],
     return name if not params else {"name": name, "params": dict(params)}
 
 
+def missing_target_message(path: str) -> str:
+    """One-line error when ``init`` / ``algorithms run`` get a PATH that is not there (#706)."""
+    return f"target {path!r} does not exist (cwd {os.getcwd()})"
+
+
+def require_existing_target(path: str, kind: Optional[str]) -> Optional[str]:
+    """Error text when PATH must exist for this kind, else ``None``.
+
+    ``text`` and ``policy_slot`` may name a non-path (inline prompt / slot name).
+    When ``kind`` is omitted a missing PATH must not fall through ``guess_kind``
+    to ``skill_dir`` (#706).
+    """
+    if kind in ("text", "policy_slot"):
+        return None
+    if os.path.exists(os.path.expanduser(path)):
+        return None
+    return missing_target_message(path)
+
+
 def guess_kind(path: str) -> str:
-    """The spec kind ``init`` / ``algorithms run`` assume for ``path`` without ``--kind``."""
+    """The spec kind ``init`` / ``algorithms run`` assume for ``path`` without ``--kind``.
+
+    A path that does not exist is never guessed as ``skill_dir``: callers must
+    report :func:`missing_target_message` first (#706).
+    """
     p = os.path.expanduser(path)
+    if not os.path.exists(p):
+        raise ValueError(missing_target_message(path))
     if os.path.isfile(p):
         return "text"
     if os.path.isdir(p) and os.path.exists(os.path.join(p, "tests")) and any(
@@ -757,6 +782,10 @@ def write_starter_spec(
         agent, found = default_agent_ref()
     else:
         found = True
+    # Refuse a missing PATH before kind guess / agent mismatch / writing (#706).
+    missing = require_existing_target(path, kind)
+    if missing:
+        raise ValueError(missing)
     params = parse_cli_params(param)
     spec = starter_spec(path, kind=kind, data=data, agent=agent,
                         agent_explicit=agent_explicit, model=model,
@@ -803,6 +832,13 @@ def write_starter_spec(
     report: List[Tuple[str, str]] = [("wrote", f"wrote {out}")]
     for line in column_notes:
         report.append(("note", line))
+    if spec["kind"] == "text":
+        from .evolvespec import looks_like_path_target
+        if looks_like_path_target(path) and not os.path.isfile(os.path.expanduser(path)):
+            report.append((
+                "warning",
+                f"target {path!r} is not a file; kind=text will use the path "
+                "string itself as the prompt text"))
     if providers_out:
         report.append(("wrote", f"wrote {providers_out} (OpenCode provider-only config for the worker; "
               f"key read from ${providers_key_env}, never inline)"))
@@ -1346,6 +1382,14 @@ def plan_payload(spec: EvolveSpec, *, usd_per_call: Optional[float] = None) -> D
     replaced = _merge_policies_replaced(comp)
     if replaced:
         warnings.append(replaced)
+    # kind=text missing path-looking target: also a plan warning (#706).
+    from .evolvespec import looks_like_path_target
+    if (spec.kind == "text" and looks_like_path_target(str(spec.target))
+            and not os.path.isfile(os.path.expanduser(str(spec.target)))):
+        msg = (f"target {spec.target!r} is not a file; kind=text will use the "
+               "path string itself as the prompt text")
+        if msg not in warnings:
+            warnings.append(msg)
     audit = None
     if comp.audit is not None:
         audit = {"store": comp.audit.store.path,
@@ -2589,6 +2633,14 @@ def _cmd_algorithms_run(a: argparse.Namespace) -> int:
     # The name is positional here: say so, route the one-file fix through
     # `algorithms run`, and name --kind when the kind was only guessed (#702).
     alg = algorithms.get(a.name)
+    # Missing PATH before kind guess / kind-mismatch (#706).
+    missing = require_existing_target(a.path, kind)
+    if missing:
+        if as_json:
+            _out({"ok": False, "error": missing}, as_json=True)
+        else:
+            print(f"error: {missing}", file=sys.stderr)
+        return 2
     use_kind = kind if kind is not None else guess_kind(a.path)
     if use_kind not in alg.kinds:
         msg = algorithms.kind_mismatch_message(

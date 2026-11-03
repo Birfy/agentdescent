@@ -126,6 +126,9 @@ def test_exam_domain_missing_keys_is_json_with_json(tmp_path, capsys):
 
 def test_init_value_error_is_json_with_json(tmp_path, capsys, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    # PATH must exist so --param validation is what fails (#706); a missing
+    # target is now refused before parse_cli_params.
+    (tmp_path / "skill").mkdir()
     assert cli.main(["init", "skill", "--param", "bad", "--json"]) == 2
     out, err = capsys.readouterr()
     payload = json.loads(out)
@@ -136,6 +139,7 @@ def test_init_value_error_is_json_with_json(tmp_path, capsys, monkeypatch):
 
 def test_init_value_error_is_a_stderr_line_without_json(tmp_path, capsys, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    (tmp_path / "skill").mkdir()
     assert cli.main(["init", "skill", "--param", "bad"]) == 2
     out, err = capsys.readouterr()
     assert out == ""

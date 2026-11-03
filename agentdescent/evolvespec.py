@@ -704,6 +704,32 @@ def _train_count(n_tasks: int, held_out_frac: float) -> int:
     return max(0, n_tasks - held_out_size(n_tasks, held_out_frac))
 
 
+#: Suffixes that make a bare name look like a file path rather than inline
+#: prompt text. Used when ``kind: text`` accepts a missing target as the
+#: instruction itself (#706): a typo like ``nope.txt`` should warn.
+_TEXT_PATH_SUFFIXES = (
+    ".txt", ".md", ".prompt", ".json", ".yml", ".yaml", ".toml", ".cfg", ".ini",
+)
+
+
+def looks_like_path_target(target: str) -> bool:
+    """True when ``target`` looks like a filesystem path, not inline text.
+
+    ``kind: text`` may pass either a file or the prompt string itself. A value
+    with a path separator or a common text-file suffix is almost certainly the
+    former, so a missing file is reported as a warning rather than silently
+    optimised as a 9-character prompt (#706).
+    """
+    if not isinstance(target, str) or not target:
+        return False
+    if os.sep in target or (os.altsep and os.altsep in target):
+        return True
+    if target.startswith(("~/", "./", "../")):
+        return True
+    lower = target.lower()
+    return any(lower.endswith(suffix) for suffix in _TEXT_PATH_SUFFIXES)
+
+
 def _read_text_target(target: str) -> str:
     path = os.path.expanduser(target)
     if os.path.isfile(path):
@@ -1109,12 +1135,24 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
             run=run, propose=reflector(reflect),
             strategy=SingleSlot(initial_value=_read_text_target(spec.target)),
             blast_radius=SKILL_BLAST_RADIUS)
+        # Inline text is supported, but a path-looking missing file is almost
+        # certainly a typo -- warn so plan surfaces it (#706).
+        if looks_like_path_target(spec.target) and not os.path.isfile(
+                os.path.expanduser(spec.target)):
+            notes.append(
+                f"target {spec.target!r} is not a file; kind=text will use the "
+                "path string itself as the prompt text")
         defaults = {"rounds": 8, "held_out_frac": 0.3, "patience": 3,
                     "target_reward": 0.98}
         default_workers = 8
     else:
         path = os.path.expanduser(spec.target)
         if not os.path.isdir(path):
+            # Prefer "does not exist" over "is not a directory" when the path is
+            # absent: a typo in PATH used to land here after guess_kind fell
+            # through to skill_dir (#706).
+            if not os.path.exists(path):
+                raise SpecError(f"target {spec.target!r} does not exist")
             raise SpecError(f"target {spec.target!r} is not a directory")
         # A host plugin is code, and the loader's default extensions are not:
         # `.md .txt .py .json .yaml .yml .toml .sh .cfg .ini`. Without this a
