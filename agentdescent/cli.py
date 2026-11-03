@@ -783,12 +783,14 @@ def detect_data_columns(path: Optional[str]) -> Tuple[Dict[str, str], List[str]]
     return mapping, notes
 
 
-def _backup_existing_spec(out: str, spec: Dict[str, Any]) -> Optional[str]:
-    """Copy an existing, different ``out`` to ``<out>.bak`` before it is replaced.
+def _backup_existing_spec(out: str, spec: Any) -> Optional[str]:
+    """Copy an existing, different ``out`` to ``<out>.bak-N`` before it is replaced.
 
     Returns the backup path, or ``None`` when ``out`` is new or already holds
-    exactly ``spec`` (a plain re-run is not worth a backup). An existing
-    backup is overwritten: it only ever keeps the copy just replaced (#725).
+    exactly ``spec`` as JSON (a plain re-run is not worth a backup). Backups
+    are numbered like ``apply``'s, so a second replacement never overwrites
+    the first one's copy (#725, #727). Used for the spec and for the OpenCode
+    provider-only config written next to it.
     """
     if not os.path.isfile(out):
         return None
@@ -803,7 +805,7 @@ def _backup_existing_spec(out: str, spec: Dict[str, Any]) -> Optional[str]:
                 return None
         except ValueError:
             pass
-    backup = out + ".bak"
+    backup = _backup_slot(out)
     shutil.copyfile(out, backup)
     return backup
 
@@ -875,6 +877,7 @@ def write_starter_spec(
     os.makedirs(os.path.dirname(os.path.abspath(out)) or ".", exist_ok=True)
     providers_out = None
     providers_key_env = None
+    providers_backup = None
     if spec.get("agent") == {"ref": "opencode"} and model and base_url:
         # The user named the model and endpoint, so wire them into the worker
         # too, not only the reflector: a bare `opencode` would ignore both and
@@ -890,6 +893,7 @@ def write_starter_spec(
             model=model, base_url=base_url, key_env=providers_key_env,
             config_path=providers_out)
         spec["agent"] = agent_block
+        providers_backup = _backup_existing_spec(providers_out, providers)
         with open(providers_out, "w", encoding="utf-8") as fh:
             json.dump(providers, fh, indent=2)
     backup = _backup_existing_spec(out, spec)
@@ -913,6 +917,9 @@ def write_starter_spec(
     if providers_out:
         report.append(("wrote", f"wrote {providers_out} (OpenCode provider-only config for the worker; "
               f"key read from ${providers_key_env}, never inline)"))
+        if providers_backup:
+            report.append(("note", f"{providers_out} already existed with different "
+                           f"content; the previous copy is saved as {providers_backup}"))
     if not found and spec["kind"] not in ("text", "policy_slot"):
         report.append(("warning", "no worker CLI (claude, codex, dsh, opencode) is on PATH; "
                        f"wrote the placeholder agent `{agent}`. Run `agentdescent doctor`, "
