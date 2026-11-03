@@ -53,6 +53,10 @@ written back until the user says so.
      `algorithm: {name, params}`; explicit `policies` / `evolve` fields in the
      same spec still override the algorithm's defaults. `plan` echoes what was
      resolved and what it costs.
+     For a quick first look at a named method, `agentdescent algorithms run
+     NAME PATH [cases.jsonl] --rounds 1 --workers 1` (same flags on `init`)
+     writes a one-round, one-worker spec and plans it, so the call estimate is
+     small; quote that estimate, then scale the flags up once it works.
    - No data? Offer to draft 12 to 20 cases into `eval/cases.jsonl`
      (`{"prompt": ..., "gold": ...}` per line) and have the user check them.
      Fewer than 12 leaves under 4 held-out cases at the default `held_out_frac`

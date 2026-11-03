@@ -416,7 +416,8 @@ Parse `$ARGUMENTS` (trim; empty means `list`):
   `doctor`, `plan`, show the resolved algorithm card and estimate, and wait for
   my yes before `start`. Same apply/cancel/resume rules as `/evolve`.
   Without MCP: `agentdescent algorithms run <name> <path> [cases.jsonl]
-  [--param k=v...]` (init + plan in one step; then `evolve` after yes).
+  [--param k=v...] [--rounds N] [--workers N]` (init + plan in one step; then
+  `evolve` after yes). For a quick, cheap trial pass `--rounds 1 --workers 1`.
 
 If they only named a method with no path, `show` it and ask whether to `run`.
 """
@@ -1081,7 +1082,8 @@ launcher will not reach the Bot from Cursor's backend.
    box): `agentdescent doctor`, `plan`, `evolve`, `status`, `apply`. Named
    methods: `agentdescent algorithms list` / `show <name>`, then
    `agentdescent algorithms run NAME PATH [cases.jsonl]` (init + plan in one
-   step; `evolve` the written spec after yes) — or MCP `list_algorithms` /
+   step; add `--rounds 1 --workers 1` for a quick trial; `evolve` the written
+   spec after yes) — or MCP `list_algorithms` /
    `describe_algorithm` when the HTTP MCP below is wired. The skill
    falls back to those verbs when MCP tools are absent.
 3. **MCP (optional, not auto-wired).** Serve the tools over HTTP on loopback

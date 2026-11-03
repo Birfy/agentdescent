@@ -12,8 +12,14 @@ The default recipe for a `kind` is used when no algorithm is named, and
 agentdescent algorithms [--kind K] [--json]      # same as `algorithms list`
 agentdescent algorithms list [--kind K] [--json]
 agentdescent algorithms show NAME
-agentdescent algorithms run NAME PATH [cases.jsonl] [--param k=v...]
-agentdescent init PATH --algorithm NAME --param KEY=VALUE
+agentdescent algorithms run NAME PATH [cases.jsonl] [--param k=v...] [--rounds N] [--workers N]
+agentdescent init PATH --algorithm NAME --param KEY=VALUE [--rounds N] [--workers N]
+```
+
+`--rounds 1 --workers 1` turns the kind's default plan (for a text prompt,
+8 rounds x 8 workers) into a quick trial without editing the spec.
+
+```bash
 ```
 
 To **register one named card in a single PR**, follow

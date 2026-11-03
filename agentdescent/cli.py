@@ -768,6 +768,8 @@ def write_starter_spec(
     param: Optional[Sequence[str]] = None,
     out: Optional[str] = None,
     follow_up: Optional[str] = "plan",
+    rounds: Optional[int] = None,
+    workers: Optional[int] = None,
 ) -> Tuple[str, Dict[str, Any], List[Tuple[str, str]], Optional[str]]:
     """Build and write a starter spec (shared by ``init`` and ``algorithms run``).
 
@@ -775,8 +777,14 @@ def write_starter_spec(
     (including :class:`~agentdescent.algorithms.AlgorithmError`) for a bad
     algorithm / param / agent mismatch. ``follow_up`` is ``"plan"`` for ``init``
     (appends ``then: agentdescent plan …``) or ``None`` when the caller will
-    plan itself (#674).
+    plan itself (#674). ``rounds`` / ``workers`` (``--rounds`` / ``--workers``)
+    replace the kind's ``evolve.rounds`` / ``evolve.n_workers`` so a cheap
+    trial needs no hand-edited JSON; left out, the kind defaults stay (#707).
     """
+    for flag, value in (("--rounds", rounds), ("--workers", workers)):
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int)
+                                  or value < 1):
+            raise ValueError(f"{flag} must be an integer >= 1, got {value!r}")
     agent_explicit = agent is not None
     if agent is None:
         agent, found = default_agent_ref()
@@ -791,6 +799,10 @@ def write_starter_spec(
                         agent_explicit=agent_explicit, model=model,
                         base_url=base_url, key_env=key_env,
                         algorithm=algorithm, algorithm_params=params)
+    if rounds is not None:
+        spec["evolve"]["rounds"] = rounds
+    if workers is not None:
+        spec["evolve"]["n_workers"] = workers
     if agent_explicit:
         why = init_agent_mismatch(spec["kind"], agent)
         if why:
@@ -897,7 +909,8 @@ def cmd_init(a: argparse.Namespace) -> int:
             a.path, kind=a.kind, data=a.data, agent=a.agent, model=a.model,
             base_url=a.base_url, key_env=a.key_env,
             algorithm=getattr(a, "algorithm", None),
-            param=getattr(a, "param", None), out=a.out, follow_up="plan")
+            param=getattr(a, "param", None), out=a.out, follow_up="plan",
+            rounds=getattr(a, "rounds", None), workers=getattr(a, "workers", None))
     except ValueError as e:      # AlgorithmError is a ValueError
         # Same {"ok": false, "error": ...} object under --json as plan/rsi (#660).
         if getattr(a, "json", False):
@@ -2667,7 +2680,8 @@ def _cmd_algorithms_run(a: argparse.Namespace) -> int:
             base_url=getattr(a, "base_url", None),
             key_env=getattr(a, "key_env", None),
             algorithm=a.name, param=getattr(a, "param", None),
-            out=out, follow_up=None)
+            out=out, follow_up=None,
+            rounds=getattr(a, "rounds", None), workers=getattr(a, "workers", None))
     except ValueError as e:      # kind mismatch / bad --param
         if as_json:
             _out({"ok": False, "error": str(e)}, as_json=True)
@@ -2721,7 +2735,17 @@ def _cmd_algorithms_run(a: argparse.Namespace) -> int:
         return 2
     _out(payload, as_json=False)
     print(f"next: {next_line}")
+    calls = (payload.get("estimate") or {}).get("agent_calls_upper_bound")
+    if (getattr(a, "rounds", None) is None and getattr(a, "workers", None) is None
+            and isinstance(calls, (int, float)) and calls > QUICK_TRIAL_CALLS):
+        # The kind defaults plan a full run; name the one-command cheap trial (#707).
+        print("      (for a quick trial: re-run with --rounds 1 --workers 1)")
     return 0
+
+
+#: Above this many planned agent calls, a flagless ``algorithms run`` names
+#: ``--rounds 1 --workers 1`` as the quick-trial path (#707).
+QUICK_TRIAL_CALLS = 50
 
 
 def cmd_diagnose(a: argparse.Namespace) -> int:
@@ -3588,6 +3612,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--param", action="append", default=[], metavar="KEY=VALUE",
                    help="algorithm parameter, repeatable; values are JSON "
                         "when they parse, otherwise strings")
+    s.add_argument("--rounds", type=int, default=None,
+                   help="evolve rounds (default: the kind's; --rounds 1 --workers 1 "
+                        "is a quick trial)")
+    s.add_argument("--workers", type=int, default=None,
+                   help="candidates per round, written as evolve.n_workers "
+                        "(default: the kind's)")
     s.add_argument("--out", help="where to write the spec")
     s.set_defaults(fn=cmd_init)
 
@@ -3763,6 +3793,13 @@ def build_parser() -> argparse.ArgumentParser:
                     help="spec kind (default: guessed from PATH, as init --kind)")
     s2.add_argument("--out", help="where to write the spec "
                     "(default: ./agentdescent.<name>.spec.json)")
+    s2.add_argument("--rounds", type=int, default=None,
+                   help="evolve rounds (default: the kind's; --rounds 1 --workers 1 "
+                        "is a quick trial)")
+    s2.add_argument("--workers", type=int, default=None,
+                   help="candidates per round, written as evolve.n_workers "
+                        "(default: the kind's)")
+
     s2.add_argument("--usd-per-call", type=float, dest="usd_per_call",
                     help="optional dollar estimate for plan")
     s2.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
