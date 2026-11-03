@@ -783,6 +783,31 @@ def detect_data_columns(path: Optional[str]) -> Tuple[Dict[str, str], List[str]]
     return mapping, notes
 
 
+def _backup_existing_spec(out: str, spec: Dict[str, Any]) -> Optional[str]:
+    """Copy an existing, different ``out`` to ``<out>.bak`` before it is replaced.
+
+    Returns the backup path, or ``None`` when ``out`` is new or already holds
+    exactly ``spec`` (a plain re-run is not worth a backup). An existing
+    backup is overwritten: it only ever keeps the copy just replaced (#725).
+    """
+    if not os.path.isfile(out):
+        return None
+    try:
+        with open(out, "r", encoding="utf-8") as fh:
+            old_text = fh.read()
+    except OSError:
+        old_text = None
+    if old_text is not None:
+        try:
+            if json.loads(old_text) == json.loads(json.dumps(spec)):
+                return None
+        except ValueError:
+            pass
+    backup = out + ".bak"
+    shutil.copyfile(out, backup)
+    return backup
+
+
 def write_starter_spec(
     path: str,
     *,
@@ -867,9 +892,15 @@ def write_starter_spec(
         spec["agent"] = agent_block
         with open(providers_out, "w", encoding="utf-8") as fh:
             json.dump(providers, fh, indent=2)
+    backup = _backup_existing_spec(out, spec)
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(spec, fh, indent=2)
     report: List[Tuple[str, str]] = [("wrote", f"wrote {out}")]
+    if backup:
+        # Re-running init / `algorithms run` on the same --out used to drop a
+        # hand-edited spec without a word; keep the old copy and say so (#725).
+        report.append(("note", f"{out} already existed with different content; "
+                       f"the previous copy is saved as {backup}"))
     for line in column_notes:
         report.append(("note", line))
     if spec["kind"] == "text":
