@@ -184,6 +184,17 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
         "whatever prefixes the operator set in AGENTDESCENT_RESCAN_ALLOW can be named. "
         "That list is not something this tool can widen: if the reference you need is "
         "refused, tell the user which prefix to add and why."),
+    "meta_campaign": (
+        "Run continuous meta-learning as a bounded campaign: repeated "
+        "continuous_meta_run sessions over one ConsolidationStore, each in a fresh "
+        "ledger repo, with RSIController target/cost/patience/session stops. Pass a "
+        "meta-campaign spec object; dry_run validates refs and configs without "
+        "calling builders or creating the archive. Refs use "
+        "AGENTDESCENT_SURFACE_ALLOW; archive/repo_dir/out writes use "
+        "AGENTDESCENT_SURFACE_WRITE_DIRS. When repo_dir is omitted the server "
+        "uses a system temporary directory outside that allowlist; pass repo_dir "
+        "to keep every ledger confined. A rejected rule is a normal measured "
+        "session; an errored session stops the campaign with complete=false."),
     "governed_harness": (
         "Gate and sign one harness/code self-modification: safety (AST/capability "
         "gate), proof invariants, human approval, canary/rollback plan and the "
@@ -679,6 +690,21 @@ class Tools:
         return ensure_write_path(
             path, name=name, allow=self.surface_write_dirs)
 
+    def meta_campaign(self, spec: Dict[str, Any], *, dry_run: bool = False,
+                      out: Optional[str] = None) -> Dict[str, Any]:
+        from . import surface_meta_campaign as surface
+
+        try:
+            self._check_write(spec.get("archive"), "archive")
+            self._check_write(spec.get("repo_dir"), "repo_dir")
+            if dry_run:
+                return surface.meta_campaign_plan(spec, allow=self.surface_allow)
+            self._check_write(out, "out")
+            return surface.meta_campaign_run_surface(
+                spec, out=out, allow=self.surface_allow)
+        except Exception as e:  # noqa: BLE001 - a bad spec must not kill the server
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
     def governed_harness(self, spec: Dict[str, Any], *,
                          dry_run: bool = False,
                          out: Optional[str] = None) -> Dict[str, Any]:
@@ -1056,6 +1082,11 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent",
             max_risk=max_risk, alpha=alpha, seed=seed,
             proxy_gains=proxy_gains, oracle_gains=oracle_gains,
             issuer=issuer, run_id=run_id, kind=kind, metadata=metadata)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["meta_campaign"])
+    def meta_campaign(spec: Dict[str, Any], dry_run: bool = False,
+                      out: Optional[str] = None) -> Dict[str, Any]:
+        return t.meta_campaign(spec, dry_run=dry_run, out=out)
 
     @server.tool(description=TOOL_DESCRIPTIONS["governed_harness"])
     def governed_harness(spec: Dict[str, Any], dry_run: bool = False,

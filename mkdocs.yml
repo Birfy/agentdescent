@@ -108,6 +108,7 @@ nav:
     - Trusted evidence: trust-evidence.md
     - Release a candidate: release.md
     - Governed harness change: governed-harness.md
+    - Meta campaign: meta-campaign.md
     - Adaptive compute: compute-policy.md
     - Capability foundry: capability-foundry.md
     - Continual experience: continual-experience.md

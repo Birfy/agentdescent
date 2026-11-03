@@ -297,6 +297,12 @@ They execute the Python callbacks/builders a spec names, so on MCP the server
 operator must set `AGENTDESCENT_SURFACE_ALLOW` (empty refuses every ref);
 writes are confined to `AGENTDESCENT_SURFACE_WRITE_DIRS`.
 
+- **`meta_campaign`** — run continuous meta-learning as a bounded campaign:
+  repeated `continuous_meta_run` sessions over one archive, each in a fresh
+  ledger repo, with target/cost/patience/session stops. `dry_run` validates refs
+  and configs without calling builders or creating the archive. A rejected rule
+  is a normal session; an errored session stops the campaign with
+  `complete=false`. Relay per-session verdicts and the archive count.
 - **`governed_harness`** — gate and sign one harness/code self-modification:
   safety gate, proof invariants, human approval, canary/rollback and promotion.
   `dry_run` validates refs and scores without running the gates; a pending or

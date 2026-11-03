@@ -3077,6 +3077,48 @@ def cmd_experience(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_meta_campaign(a: argparse.Namespace) -> int:
+    """``agentdescent meta-campaign`` -- init/plan/run continuous meta-learning."""
+    from .surface_common import SurfaceError
+    from . import surface_meta_campaign as surface
+
+    action = getattr(a, "meta_campaign_cmd", None)
+    try:
+        if action == "init":
+            payload = surface.meta_campaign_init(a.out, demo=a.demo)
+        elif action == "plan":
+            payload = surface.meta_campaign_plan(a.spec)
+        elif action == "run":
+            payload = surface.meta_campaign_run_surface(a.spec, out=a.out)
+        else:
+            raise SurfaceError("meta-campaign needs init, plan or run")
+    except Exception as error:  # noqa: BLE001 - user callbacks are part of the surface
+        return _surface_error(a, error)
+    if a.json:
+        _out(payload, as_json=True)
+    else:
+        if action == "init":
+            print(f"spec: {payload['spec']}")
+            print("next:")
+            for step in payload["next"]:
+                print(f"  {step}")
+        elif action == "plan":
+            print(f"archive: {payload['archive']}  exists: {payload['archive_exists']}")
+            print(f"slot: {payload['slot']}  sessions: {payload['campaign']['max_sessions']}")
+            print("next:")
+            for step in payload["next"]:
+                print(f"  {step}")
+        else:
+            report = payload["report"]
+            print(f"sessions: {len(report['sessions'])}  "
+                  f"best_session: {report.get('best_session')}  "
+                  f"complete: {report['complete']}")
+            print(f"archive: {payload['archive']}  count: {report['archive_count']}")
+            if payload.get("out"):
+                print(f"report: {payload['out']}")
+    return 0 if action != "run" or payload["report"]["complete"] else 1
+
+
 def cmd_governed_harness(a: argparse.Namespace) -> int:
     """``agentdescent governed-harness`` -- init/plan/run a governed change."""
     from .surface_common import SurfaceError
@@ -3960,6 +4002,23 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--spec", required=True, help="governed-harness JSON spec")
     sp.add_argument("--out", help="write the full JSON report here")
     sp.set_defaults(fn=cmd_governed_harness)
+
+    s = sub.add_parser(
+        "meta-campaign",
+        help="run continuous meta-learning as a bounded campaign")
+    meta_campaign_sub = s.add_subparsers(dest="meta_campaign_cmd", required=True)
+    sp = meta_campaign_sub.add_parser("init", help="write a meta-campaign spec")
+    sp.add_argument("--out", required=True, help="where to write the spec")
+    sp.add_argument("--demo", action="store_true",
+                    help="write the runnable offline example")
+    sp.set_defaults(fn=cmd_meta_campaign)
+    sp = meta_campaign_sub.add_parser("plan", help="validate a spec without running")
+    sp.add_argument("--spec", required=True, help="meta-campaign JSON spec")
+    sp.set_defaults(fn=cmd_meta_campaign)
+    sp = meta_campaign_sub.add_parser("run", help="run the campaign")
+    sp.add_argument("--spec", required=True, help="meta-campaign JSON spec")
+    sp.add_argument("--out", help="write the full JSON report here")
+    sp.set_defaults(fn=cmd_meta_campaign)
 
     s = sub.add_parser("serve", help="serve a read-only run panel on loopback, for a host UI")
     s.add_argument("--host", default=runstore.DEFAULT_HTTP_HOST)
