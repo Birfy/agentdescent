@@ -301,12 +301,6 @@ def govern_harness_change(
         approved = True
 
     effective_risk = modification.risk if risk is None else risk
-    evidence = build_trust_evidence(
-        before, after, approved=approved, risk=effective_risk,
-        contaminated=contaminated, **evidence_kwargs)
-
-    request = evidence.to_promotion_request(
-        artifact_id, artifact_hash=None, proof=proof_evidence)
     if rules is None:
         rules = PromotionRules(require_proof=prover is not None,
                                require_approval=approval is not None)
@@ -315,6 +309,24 @@ def govern_harness_change(
             rules,
             require_proof=bool(rules.require_proof or prover is not None),
             require_approval=bool(rules.require_approval or approval is not None))
+    evidence = build_trust_evidence(
+        before, after, approved=approved, risk=effective_risk,
+        contaminated=contaminated, **evidence_kwargs)
+    # Optional statistical reports only participate when the rules ask for them.
+    # A ``continue`` sequential or ``insufficient`` conformal report would
+    # otherwise defer a change the caller never asked to gate on those tests;
+    # a reject is kept and still hard-fails.
+    if (not rules.require_conformal
+            and evidence.conformal is not None
+            and evidence.conformal.decision == "insufficient"):
+        evidence = replace(evidence, conformal=None)
+    if (not rules.require_sequential
+            and evidence.sequential is not None
+            and evidence.sequential.decision == "continue"):
+        evidence = replace(evidence, sequential=None)
+
+    request = evidence.to_promotion_request(
+        artifact_id, artifact_hash=None, proof=proof_evidence)
     decision = promote(request, rules)
 
     rollback: Mapping[str, Any] = {}

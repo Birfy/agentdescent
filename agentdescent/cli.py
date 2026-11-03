@@ -3025,6 +3025,50 @@ def cmd_experience(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_governed_harness(a: argparse.Namespace) -> int:
+    """``agentdescent governed-harness`` -- init/plan/run a governed change."""
+    from .surface_common import SurfaceError
+    from . import surface_governed as surface
+
+    action = getattr(a, "governed_cmd", None)
+    try:
+        if action == "init":
+            payload = surface.governed_init(a.out, demo=a.demo)
+        elif action == "plan":
+            payload = surface.governed_plan(a.spec)
+        elif action == "run":
+            payload = surface.governed_run(a.spec, out=a.out)
+        else:
+            raise SurfaceError("governed-harness needs init, plan or run")
+    except Exception as error:  # noqa: BLE001 - user callbacks are part of the surface
+        return _surface_error(a, error)
+    if a.json:
+        _out(payload, as_json=True)
+    else:
+        if action == "init":
+            print(f"spec: {payload['spec']}")
+            print(f"before: {payload['before']}")
+            print(f"after: {payload['after']}")
+            print("next:")
+            for step in payload["next"]:
+                print(f"  {step}")
+        elif action == "plan":
+            print(f"artifact: {payload['artifact_id']}  tasks: {payload['tasks']}")
+            print(f"gate: {payload['gate']}  prover: {payload['prover'] or '-'}")
+            print("next:")
+            for step in payload["next"]:
+                print(f"  {step}")
+        else:
+            report = payload["report"]
+            print(f"promoted: {payload['promoted']}  verdict: {report['verdict']}")
+            print(f"decision: {report['decision']['action']}")
+            if report["rollback"]:
+                print(f"rollback: {report['rollback']}")
+            if payload.get("out"):
+                print(f"report: {payload['out']}")
+    return 0 if action != "run" or payload.get("promoted") else 1
+
+
 def cmd_release(a: argparse.Namespace) -> int:
     """``agentdescent release`` -- evidence-gated, signed release receipt."""
     from .release_surface import (
@@ -3847,6 +3891,23 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--min-gain", type=float, default=0.0, dest="min_gain")
     sp.add_argument("--seed", type=int, default=0)
     sp.set_defaults(fn=cmd_experience)
+
+    s = sub.add_parser(
+        "governed-harness",
+        help="gate and sign one harness/code self-modification")
+    governed_sub = s.add_subparsers(dest="governed_cmd", required=True)
+    sp = governed_sub.add_parser("init", help="write a governed-harness spec")
+    sp.add_argument("--out", required=True, help="where to write the spec")
+    sp.add_argument("--demo", action="store_true",
+                    help="write the runnable offline example")
+    sp.set_defaults(fn=cmd_governed_harness)
+    sp = governed_sub.add_parser("plan", help="validate a spec without running the gates")
+    sp.add_argument("--spec", required=True, help="governed-harness JSON spec")
+    sp.set_defaults(fn=cmd_governed_harness)
+    sp = governed_sub.add_parser("run", help="run the governed change")
+    sp.add_argument("--spec", required=True, help="governed-harness JSON spec")
+    sp.add_argument("--out", help="write the full JSON report here")
+    sp.set_defaults(fn=cmd_governed_harness)
 
     s = sub.add_parser("serve", help="serve a read-only run panel on loopback, for a host UI")
     s.add_argument("--host", default=runstore.DEFAULT_HTTP_HOST)

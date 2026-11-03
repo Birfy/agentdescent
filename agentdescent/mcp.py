@@ -184,6 +184,14 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
         "whatever prefixes the operator set in AGENTDESCENT_RESCAN_ALLOW can be named. "
         "That list is not something this tool can widen: if the reference you need is "
         "refused, tell the user which prefix to add and why."),
+    "governed_harness": (
+        "Gate and sign one harness/code self-modification: safety (AST/capability "
+        "gate), proof invariants, human approval, canary/rollback plan and the "
+        "fail-closed promotion decision. Pass a governed-harness spec object; "
+        "dry_run validates refs and scores without running the gates. Refs are "
+        "gated by AGENTDESCENT_SURFACE_ALLOW; writes by "
+        "AGENTDESCENT_SURFACE_WRITE_DIRS. A pending/rejected approval or failed "
+        "proof never reaches promotion; only an accepted change is `promoted`."),
     "platform": (
         "Plan or run a durable five-layer RSI campaign (loop, compute, promotion, "
         "capability foundry, experience). Pass a platform spec object; dry_run=true "
@@ -671,6 +679,24 @@ class Tools:
         return ensure_write_path(
             path, name=name, allow=self.surface_write_dirs)
 
+    def governed_harness(self, spec: Dict[str, Any], *,
+                         dry_run: bool = False,
+                         out: Optional[str] = None) -> Dict[str, Any]:
+        from . import surface_governed as surface
+
+        try:
+            approval = spec.get("approval_store") if isinstance(spec, dict) else None
+            if isinstance(approval, dict):
+                approval = approval.get("path")
+            self._check_write(approval, "approval_store")
+            if dry_run:
+                return surface.governed_plan(spec, allow=self.surface_allow)
+            self._check_write(out, "out")
+            return surface.governed_run(
+                spec, out=out, allow=self.surface_allow)
+        except Exception as e:  # noqa: BLE001 - a bad spec must not kill the server
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
     def platform(self, spec: Dict[str, Any], *, dry_run: bool = False,
                  out: Optional[str] = None) -> Dict[str, Any]:
         from . import surface_platform as surface
@@ -1030,6 +1056,11 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent",
             max_risk=max_risk, alpha=alpha, seed=seed,
             proxy_gains=proxy_gains, oracle_gains=oracle_gains,
             issuer=issuer, run_id=run_id, kind=kind, metadata=metadata)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["governed_harness"])
+    def governed_harness(spec: Dict[str, Any], dry_run: bool = False,
+                         out: Optional[str] = None) -> Dict[str, Any]:
+        return t.governed_harness(spec, dry_run=dry_run, out=out)
 
     @server.tool(description=TOOL_DESCRIPTIONS["platform"])
     def platform(spec: Dict[str, Any], dry_run: bool = False,

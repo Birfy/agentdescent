@@ -292,11 +292,17 @@ does not exist on the CLI/MCP path.
 
 ## When the user wants a governed campaign
 
-These four surfaces consume the long-running stack rather than one evolve run.
+These surfaces consume the long-running stack rather than one evolve run.
 They execute the Python callbacks/builders a spec names, so on MCP the server
 operator must set `AGENTDESCENT_SURFACE_ALLOW` (empty refuses every ref);
 writes are confined to `AGENTDESCENT_SURFACE_WRITE_DIRS`.
 
+- **`governed_harness`** — gate and sign one harness/code self-modification:
+  safety gate, proof invariants, human approval, canary/rollback and promotion.
+  `dry_run` validates refs and scores without running the gates; a pending or
+  rejected approval and a failed proof never reach promotion. Relay the
+  `verdict`, `decision.reasons` and the rollback plan; never apply the change
+  yourself.
 - **`platform`** — plan or run a durable five-layer campaign. `dry_run` validates
   every ref without calling builders or creating the SQLite database; the run
   returns per-cycle loop/promotion/foundry/experience reports. Offer

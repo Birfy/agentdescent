@@ -107,6 +107,7 @@ nav:
     - Trusted promotion: trusted-promotion.md
     - Trusted evidence: trust-evidence.md
     - Release a candidate: release.md
+    - Governed harness change: governed-harness.md
     - Adaptive compute: compute-policy.md
     - Capability foundry: capability-foundry.md
     - Continual experience: continual-experience.md
