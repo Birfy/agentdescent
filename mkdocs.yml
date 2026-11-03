@@ -73,6 +73,7 @@ nav:
   - The evolve method: evolution.md
   - Modules — design and usage:
     - Module map: modules.md
+    - Experimental modules: experimental.md
     - Strategies — what evolves: strategies.md
     - Evolving a directory: directory-evolution.md
     - Agents & LLMs: agents.md
