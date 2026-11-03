@@ -184,6 +184,16 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
         "whatever prefixes the operator set in AGENTDESCENT_RESCAN_ALLOW can be named. "
         "That list is not something this tool can widen: if the reference you need is "
         "refused, tell the user which prefix to add and why."),
+    "tenant": (
+        "Run one platform cycle under a workspace registry's roles, quota and "
+        "audit. Pass a tenant spec object containing a nested `platform` spec "
+        "plus tenant/workspace/principal/roles/quota and the tokens/cost to "
+        "reserve. dry_run validates the platform refs and checks run:write "
+        "without creating the DB; the run reserves quota, executes the cycle and "
+        "commits usage. Refs use AGENTDESCENT_SURFACE_ALLOW; written paths use "
+        "AGENTDESCENT_SURFACE_WRITE_DIRS. Roles are spec-asserted, not "
+        "authenticated; the registry/quota are per-invocation and the audit "
+        "trail is not persisted."),
     "meta_campaign": (
         "Run continuous meta-learning as a bounded campaign: repeated "
         "continuous_meta_run sessions over one ConsolidationStore, each in a fresh "
@@ -698,6 +708,24 @@ class Tools:
         return ensure_write_path(
             path, name=name, allow=self.surface_write_dirs)
 
+    def tenant(self, spec: Dict[str, Any], *, dry_run: bool = False,
+               out: Optional[str] = None) -> Dict[str, Any]:
+        from . import surface_tenant as surface
+
+        try:
+            platform_spec = spec.get("platform") if isinstance(spec, dict) else None
+            if isinstance(platform_spec, dict):
+                self._check_write(
+                    platform_spec.get("runs_db") or platform_spec.get("store"),
+                    "runs_db")
+            if dry_run:
+                return surface.tenant_plan(spec, allow=self.surface_allow)
+            self._check_write(out, "out")
+            return surface.tenant_run(
+                spec, out=out, allow=self.surface_allow)
+        except Exception as e:  # noqa: BLE001 - a bad spec must not kill the server
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
     def meta_campaign(self, spec: Dict[str, Any], *, dry_run: bool = False,
                       out: Optional[str] = None) -> Dict[str, Any]:
         from . import surface_meta_campaign as surface
@@ -1113,6 +1141,11 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent",
             max_risk=max_risk, alpha=alpha, seed=seed,
             proxy_gains=proxy_gains, oracle_gains=oracle_gains,
             issuer=issuer, run_id=run_id, kind=kind, metadata=metadata)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["tenant"])
+    def tenant(spec: Dict[str, Any], dry_run: bool = False,
+               out: Optional[str] = None) -> Dict[str, Any]:
+        return t.tenant(spec, dry_run=dry_run, out=out)
 
     @server.tool(description=TOOL_DESCRIPTIONS["meta_campaign"])
     def meta_campaign(spec: Dict[str, Any], dry_run: bool = False,

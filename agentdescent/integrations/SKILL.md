@@ -301,6 +301,11 @@ They execute the Python callbacks/builders a spec names, so on MCP the server
 operator must set `AGENTDESCENT_SURFACE_ALLOW` (empty refuses every ref);
 writes are confined to `AGENTDESCENT_SURFACE_WRITE_DIRS`.
 
+- **`tenant`** — run one platform cycle under a workspace registry's roles,
+  quota reservation and audit. The spec nests the normal platform spec plus
+  tenant/workspace/principal/roles/quota and the tokens/cost to reserve.
+  `dry_run` validates refs and checks `run:write` without creating the DB; a
+  denied role or exhausted quota fails closed.
 - **`meta_campaign`** — run continuous meta-learning as a bounded campaign:
   repeated `continuous_meta_run` sessions over one archive, each in a fresh
   ledger repo, with target/cost/patience/session stops. `dry_run` validates refs

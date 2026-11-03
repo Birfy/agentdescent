@@ -227,7 +227,7 @@ async def main():
 asyncio.run(main())
 ```
 
-Expected tools: `apply audit_drift audit_pending audit_recompute audit_rescan audit_resolve audit_scorecard audit_status audit_trace cancel capability describe_algorithm diagnose doctor experience_cycle experience_ingest experience_recall experience_replay experience_report experience_update governed_harness list_algorithms meta_campaign ops plan platform portfolio release resume rsi safety show start status` and a doctor report (34 total: run lifecycle, audit, algorithm discovery, archive/meta, release, and the platform/capability/ops/experience/governed-harness/meta-campaign surfaces).
+Expected tools: `apply audit_drift audit_pending audit_recompute audit_rescan audit_resolve audit_scorecard audit_status audit_trace cancel capability describe_algorithm diagnose doctor experience_cycle experience_ingest experience_recall experience_replay experience_report experience_update governed_harness list_algorithms meta_campaign ops plan platform portfolio release resume rsi safety show start status tenant` and a doctor report (35 total: run lifecycle, audit, algorithm discovery, archive/meta, release, and the platform/capability/ops/experience/governed-harness/meta-campaign/tenant surfaces).
 
 ## 6. The web panel
 

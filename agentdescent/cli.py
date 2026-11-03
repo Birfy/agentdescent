@@ -3123,6 +3123,46 @@ def cmd_experience(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_tenant(a: argparse.Namespace) -> int:
+    """``agentdescent tenant`` -- init/plan/run a quota-checked platform cycle."""
+    from .surface_common import SurfaceError
+    from . import surface_tenant as surface
+
+    action = getattr(a, "tenant_cmd", None)
+    try:
+        if action == "init":
+            payload = surface.tenant_init(a.out, demo=a.demo)
+        elif action == "plan":
+            payload = surface.tenant_plan(a.spec)
+        elif action == "run":
+            payload = surface.tenant_run(a.spec, out=a.out)
+        else:
+            raise SurfaceError("tenant needs init, plan or run")
+    except Exception as error:  # noqa: BLE001 - user callbacks are part of the surface
+        return _surface_error(a, error)
+    if a.json:
+        _out(payload, as_json=True)
+    else:
+        if action == "init":
+            print(f"spec: {payload['spec']}")
+            print("next:")
+            for step in payload["next"]:
+                print(f"  {step}")
+        elif action == "plan":
+            print(f"tenant: {payload['tenant']}  workspace: {payload['workspace']}  "
+                  f"principal: {payload['principal']}")
+            print(f"reserve: {payload['reserve']}  quota: {payload['quota']}")
+            print("next:")
+            for step in payload["next"]:
+                print(f"  {step}")
+        else:
+            report = payload["report"]
+            print(f"complete: {report['complete']}  usage: {report['usage']}")
+            if payload.get("out"):
+                print(f"report: {payload['out']}")
+    return 0 if action != "run" or payload["report"]["complete"] else 1
+
+
 def cmd_meta_campaign(a: argparse.Namespace) -> int:
     """``agentdescent meta-campaign`` -- init/plan/run continuous meta-learning."""
     from .surface_common import SurfaceError
@@ -4108,6 +4148,23 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--spec", required=True, help="meta-campaign JSON spec")
     sp.add_argument("--out", help="write the full JSON report here")
     sp.set_defaults(fn=cmd_meta_campaign)
+
+    s = sub.add_parser(
+        "tenant",
+        help="run one platform cycle under workspace roles and quota")
+    tenant_sub = s.add_subparsers(dest="tenant_cmd", required=True)
+    sp = tenant_sub.add_parser("init", help="write a tenant spec")
+    sp.add_argument("--out", required=True, help="where to write the spec")
+    sp.add_argument("--demo", action="store_true",
+                    help="write the runnable offline example")
+    sp.set_defaults(fn=cmd_tenant)
+    sp = tenant_sub.add_parser("plan", help="validate a spec without running")
+    sp.add_argument("--spec", required=True, help="tenant JSON spec")
+    sp.set_defaults(fn=cmd_tenant)
+    sp = tenant_sub.add_parser("run", help="run one quota-checked cycle")
+    sp.add_argument("--spec", required=True, help="tenant JSON spec")
+    sp.add_argument("--out", help="write the full JSON report here")
+    sp.set_defaults(fn=cmd_tenant)
 
     s = sub.add_parser("serve", help="serve a read-only run panel on loopback, for a host UI")
     s.add_argument("--host", default=runstore.DEFAULT_HTTP_HOST)
