@@ -140,3 +140,21 @@ The spec executes the Python callbacks it names. For MCP, the operator must set
 refuses every ref), and `AGENTDESCENT_SURFACE_WRITE_DIRS` to the directories the
 server may create reports/DBs in. `plan` resolves refs without calling builders
 or creating the SQLite database.
+
+### Inspect a campaign after it finished
+
+`platform run` keeps every cycle in its SQLite run database, so a process that
+has exited can still be inspected without SQL:
+
+```bash
+agentdescent platform status --runs-db platform-runs.sqlite3 \
+  [--tenant t1] [--workspace ws] [--limit 20] [--json]
+agentdescent platform status --runs-db platform-runs.sqlite3 --run-id RUN_ID
+```
+
+Without `--run-id`, the command lists the most recent runs, newest first, with
+status, best reward, generation count, accepted count and stop reason. With
+`--run-id` it returns that run's full `LoopReport`. It only reads the database
+and does not need the compute, foundry or experience callbacks. A missing
+database or unknown run is an input error (exit 2). The MCP `platform_status`
+tool exposes the same read-only view.

@@ -328,6 +328,10 @@ writes are confined to `AGENTDESCENT_SURFACE_WRITE_DIRS`.
   returns per-cycle loop/promotion/foundry/experience reports. Offer
   `agentdescent platform init --demo --out platform.json` for an offline first
   run, then `platform plan` and `platform run`.
+- **`platform_status`** — read-only: list a campaign's recent runs or one run's
+  full report from its SQLite database after the process finished. Use it when
+  the user asks what a campaign actually ran; a missing database or run id is an
+  error, not an empty result.
 - **`capability`** — plan or run the failure-to-capability loop (traces ->
   task pipeline -> tool synthesis -> foundry -> QD archive). `dry_run` resolves
   refs and loads traces without calling the builders. Offer

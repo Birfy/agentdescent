@@ -30,8 +30,11 @@ already-tested objects, and prints ``PlatformCampaignReport.to_dict()``.
 from __future__ import annotations
 
 import os
+import sqlite3
+import tempfile
 from dataclasses import asdict, fields
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
+from urllib.parse import quote
 
 from .budgeted_loop import BudgetedStep, BudgetedStepConfig
 from .capability_foundry import CapabilityFoundry
@@ -40,7 +43,7 @@ from .compute_policy import (
 )
 from .durable_runs import SqliteRunStore
 from .experience import ExperienceEngine, ExperienceRecord
-from .loop_kernel import LoopContext, LoopObservation
+from .loop_kernel import LoopConfig, LoopContext, LoopKernel, LoopObservation
 from .model_router import ModelRouter, ModelSpec
 from .platform import PlatformConfig, RSIPlatform
 from .platform_campaign import CampaignConfig, PlatformCampaign
@@ -55,6 +58,7 @@ __all__ = [
     "platform_init",
     "platform_plan",
     "platform_run",
+    "platform_status",
     "demo_step",
 ]
 
@@ -411,6 +415,126 @@ def platform_init(out: Any, *, demo: bool = False) -> Dict[str, Any]:
             f"agentdescent platform run  --spec {target} --json",
         ],
     }
+
+
+def _read_only_copy(path: str) -> str:
+    """Copy a SQLite database (WAL included) without touching the original.
+
+    Opening the original read-write so ``LoopKernel`` can read it would let the
+    last connection checkpoint the WAL, which changes the file a campaign left
+    behind. A read-only connection plus ``backup`` reads the same logical state
+    and leaves the main file and its WAL untouched.
+    """
+    source = sqlite3.connect(
+        "file:" + quote(path) + "?mode=ro", uri=True)
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=".agentdescent-status-", suffix=".sqlite3")
+    os.close(descriptor)
+    try:
+        target = sqlite3.connect(temporary)
+        try:
+            source.backup(target)
+        finally:
+            target.close()
+    except Exception:
+        for suffix in ("", "-wal", "-shm"):
+            try:
+                os.unlink(temporary + suffix)
+            except OSError:
+                pass
+        raise
+    finally:
+        source.close()
+    return temporary
+
+
+def _remove_copy(path: str) -> None:
+    for suffix in ("", "-wal", "-shm"):
+        try:
+            os.unlink(path + suffix)
+        except OSError:
+            pass
+
+
+def platform_status(*, runs_db: Any, tenant: Optional[str] = None,
+                    workspace: Optional[str] = None,
+                    run_id: Optional[str] = None,
+                    limit: int = 20) -> Dict[str, Any]:
+    """Read a campaign's runs after the process that wrote them is gone.
+
+    Without ``run_id`` it lists the most recent ``limit`` runs (newest first)
+    with just enough summary to see where a campaign ended. With ``run_id`` it
+    returns that run's full ``LoopReport``. The database is only read.
+    """
+    path = os.path.abspath(os.path.expanduser(_text(runs_db, "runs_db")))
+    if not os.path.isfile(path):
+        raise SurfaceError(
+            f"runs_db {runs_db!r} does not exist; pass the SQLite file a "
+            "platform run wrote")
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+        raise SurfaceError("limit must be an int >= 1")
+    tenant = None if tenant is None else _text(tenant, "tenant")
+    workspace = None if workspace is None else _text(workspace, "workspace")
+    temporary = _read_only_copy(path)
+    store = SqliteRunStore(temporary)
+    try:
+        if run_id is not None:
+            run_id = _text(run_id, "run_id")
+            try:
+                snapshot = store.snapshot(run_id)
+            except KeyError:
+                raise SurfaceError(f"unknown run {run_id!r}") from None
+            kernel = LoopKernel(
+                store, LoopConfig(
+                    tenant=snapshot.tenant, workspace=snapshot.workspace,
+                    spec_hash="status"))
+            return {
+                "schema_version": SURFACE_SCHEMA_VERSION,
+                "ok": True,
+                "runs_db": path,
+                "run_id": run_id,
+                "tenant": snapshot.tenant,
+                "workspace": snapshot.workspace,
+                "status": snapshot.status,
+                "report": kernel.report(run_id).to_dict(),
+            }
+        ids = list(store.list_runs(tenant=tenant, workspace=workspace))
+        selected = ids[-limit:][::-1]
+        kernel = LoopKernel(
+            store, LoopConfig(tenant=tenant or "all",
+                              workspace=workspace or "all",
+                              spec_hash="status"))
+        runs = []
+        for selected_id in selected:
+            snapshot = store.snapshot(selected_id)
+            report = kernel.report(selected_id)
+            runs.append({
+                "run_id": selected_id,
+                "tenant": snapshot.tenant,
+                "workspace": snapshot.workspace,
+                "status": report.status,
+                "best_reward": report.best_reward,
+                "generations": len(report.generations),
+                "accepted": report.accepted,
+                "stopped_reason": report.stopped_reason,
+            })
+        return {
+            "schema_version": SURFACE_SCHEMA_VERSION,
+            "ok": True,
+            "runs_db": path,
+            "tenant": tenant,
+            "workspace": workspace,
+            "limit": limit,
+            "runs": runs,
+            "next": (
+                [f"agentdescent platform status --runs-db {path} "
+                 f"--run-id {runs[0]['run_id']}"]
+                if runs else
+                ["run a platform/loop campaign first"]),
+        }
+    finally:
+        store.close()
+        _remove_copy(temporary)
 
 
 def demo_step(context: LoopContext, decision: Any) -> LoopObservation:

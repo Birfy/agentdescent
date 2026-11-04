@@ -3026,8 +3026,12 @@ def cmd_platform(a: argparse.Namespace) -> int:
             payload = surface.platform_plan(a.spec)
         elif action == "run":
             payload = surface.platform_run(a.spec, out=a.out)
+        elif action == "status":
+            payload = surface.platform_status(
+                runs_db=a.runs_db, tenant=a.tenant, workspace=a.workspace,
+                run_id=a.run_id, limit=a.limit)
         else:
-            raise SurfaceError("platform needs init, plan or run")
+            raise SurfaceError("platform needs init, plan, run or status")
     except Exception as error:  # noqa: BLE001 - user callbacks are part of the surface
         return _surface_error(a, error)
     if a.json:
@@ -3045,6 +3049,23 @@ def cmd_platform(a: argparse.Namespace) -> int:
             print("next:")
             for step in payload["next"]:
                 print(f"  {step}")
+        elif action == "status":
+            if payload.get("run_id") is not None:
+                report = payload["report"]
+                print(f"run: {payload['run_id']}  status: {payload['status']}  "
+                      f"generations: {len(report['generations'])}")
+                print(f"best_reward: {report['best_reward']}  "
+                      f"accepted: {report['accepted']}  "
+                      f"stopped: {report['stopped_reason']}")
+            else:
+                print(f"runs_db: {payload['runs_db']}  runs: {len(payload['runs'])}")
+                for row in payload["runs"]:
+                    print(f"{row['run_id']}  {row['tenant']}/{row['workspace']}  "
+                          f"{row['status']}  best={row['best_reward']}  "
+                          f"generations={row['generations']}  "
+                          f"accepted={row['accepted']}")
+                if not payload["runs"]:
+                    print("no runs matched")
         else:
             report = payload["report"]
             print(f"cycles: {len(report['cycles'])}  "
@@ -4152,6 +4173,17 @@ def build_parser() -> argparse.ArgumentParser:
     sp = platform_sub.add_parser("run", help="run the campaign")
     sp.add_argument("--spec", required=True, help="platform JSON spec")
     sp.add_argument("--out", help="write the full JSON report here")
+    sp.set_defaults(fn=cmd_platform)
+    sp = platform_sub.add_parser(
+        "status", help="inspect a campaign's runs after it finished")
+    sp.add_argument("--runs-db", required=True, dest="runs_db",
+                    help="SQLite run database written by the campaign")
+    sp.add_argument("--tenant", default=None)
+    sp.add_argument("--workspace", default=None)
+    sp.add_argument("--run-id", dest="run_id", default=None,
+                    help="return this run's full report")
+    sp.add_argument("--limit", type=int, default=20,
+                    help="how many recent runs to list (default 20)")
     sp.set_defaults(fn=cmd_platform)
 
     s = sub.add_parser(

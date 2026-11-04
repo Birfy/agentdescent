@@ -233,6 +233,12 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
         "module prefix in AGENTDESCENT_SURFACE_ALLOW (empty refuses every ref); "
         "writes are confined to AGENTDESCENT_SURFACE_WRITE_DIRS. Optional `out` "
         "writes the JSON report atomically."),
+    "platform_status": (
+        "Read-only: inspect a platform campaign's SQLite run database after the "
+        "process that wrote it is gone. With no `run_id`, list the most recent "
+        "`limit` runs with status, best reward, generation count, accepted count "
+        "and stop reason; with `run_id`, return that run's full loop report. A "
+        "missing database or unknown run is an error; nothing is written."),
     "capability": (
         "Plan or run the failure-to-capability loop (traces -> task pipeline -> "
         "tool synthesis -> capability foundry -> QD archive). Pass a capability spec "
@@ -855,6 +861,19 @@ class Tools:
         except Exception as e:  # noqa: BLE001 - a bad spec must not kill the server
             return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
+    def platform_status(self, runs_db: str, *,
+                        tenant: Optional[str] = None,
+                        workspace: Optional[str] = None,
+                        run_id: Optional[str] = None,
+                        limit: int = 20) -> Dict[str, Any]:
+        from . import surface_platform as surface
+        try:
+            return surface.platform_status(
+                runs_db=runs_db, tenant=tenant, workspace=workspace,
+                run_id=run_id, limit=limit)
+        except Exception as e:  # noqa: BLE001 - a bad path must not kill the server
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
     def capability(self, spec: Dict[str, Any], *, dry_run: bool = False,
                    out: Optional[str] = None) -> Dict[str, Any]:
         from . import surface_capability as surface
@@ -1254,6 +1273,15 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent",
     def platform(spec: Dict[str, Any], dry_run: bool = False,
                  out: Optional[str] = None) -> Dict[str, Any]:
         return t.platform(spec, dry_run=dry_run, out=out)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["platform_status"])
+    def platform_status(runs_db: str, tenant: Optional[str] = None,
+                        workspace: Optional[str] = None,
+                        run_id: Optional[str] = None,
+                        limit: int = 20) -> Dict[str, Any]:
+        return t.platform_status(
+            runs_db, tenant=tenant, workspace=workspace,
+            run_id=run_id, limit=limit)
 
     @server.tool(description=TOOL_DESCRIPTIONS["capability"])
     def capability(spec: Dict[str, Any], dry_run: bool = False,
