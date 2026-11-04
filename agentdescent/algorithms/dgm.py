@@ -27,6 +27,7 @@ from ..evolvable import Diff, EvidenceCard
 from ..ledger import CASConflict, Ledger
 from ..selection import Archive, Candidate, SelectionContext
 from . import Algorithm, BuildContext, Overrides, Param, register
+from ._applied import append_tail, split_applied_block
 
 __all__ = ["CAPABILITIES_HEADER", "DGMArchiveAggregator", "DGMContext",
            "HarnessStrategy", "dgm_aggregator_factory", "make_propose"]
@@ -53,52 +54,21 @@ def _caps_of(capabilities: str) -> set:
     return {c.strip() for c in capabilities.split(",") if c.strip()}
 
 
-def _split_applied_capabilities(seed: str) -> Tuple[str, str]:
+def _split_applied_capabilities(seed: str) -> Tuple[str, str, str]:
     """If ``seed`` is a prior DGM render, peel ``## Capabilities`` into state.
 
-    Returns ``(prose_seed, capabilities_csv)``. A plain first-run target is
-    unchanged with an empty capabilities string. An applied artifact yields the
-    prose alone and the prior bullets so a second evolve keeps a single header
-    (#741).
+    Returns ``(prose_seed, capabilities_csv, tail)``. A plain first-run target
+    is unchanged with an empty capabilities string. An applied artifact yields
+    the prose, the prior bullets so a second evolve keeps a single header
+    (#741), and any user text after the list so a re-render keeps it (#743).
     """
-    if not seed:
-        return seed, ""
-    start: Optional[int] = None
-    header = CAPABILITIES_HEADER
-    if seed.startswith(header + "\n") or seed.rstrip("\n") == header:
-        start = 0
-    else:
-        needle = "\n\n" + header + "\n"
-        pos = seed.rfind(needle)
-        if pos >= 0:
-            start = pos + 2
-        else:
-            alt = "\n\n" + header
-            if seed.endswith(alt) or seed.rstrip("\n").endswith(alt):
-                pos = seed.rstrip("\n").rfind(alt)
-                if pos >= 0:
-                    start = pos + 2
-    if start is None:
-        return seed, ""
-    body = seed[start + len(header):]
-    if body.startswith("\n"):
-        body = body[1:]
-    stripped = body.lstrip()
-    # Only peel when the body is empty or looks like a bullet list.
-    if stripped and not any(
-            line.lstrip().startswith("- ") for line in stripped.splitlines() if line.strip()):
-        return seed, ""
-    prose = seed[:start]
-    if prose.endswith("\n\n"):
-        prose = prose[:-1]
-    caps = []
-    for line in body.splitlines():
-        s = line.strip()
-        if s.startswith("- "):
-            cap = s[2:].strip()
-            if cap:
-                caps.append(cap)
-    return prose, ",".join(sorted(set(caps)))
+    block = split_applied_block(seed, CAPABILITIES_HEADER,
+                                lambda line: line.startswith("- "))
+    if block is None:
+        return seed, "", ""
+    caps = [ln.strip()[2:].strip() for ln in block.lines
+            if ln.startswith("- ")]
+    return block.prose, ",".join(sorted({c for c in caps if c})), block.tail
 
 
 class HarnessStrategy:
@@ -114,22 +84,27 @@ class HarnessStrategy:
     """
 
     def __init__(self, seed: str = "") -> None:
-        prose, caps = _split_applied_capabilities(seed)
+        prose, caps, tail = _split_applied_capabilities(seed)
+        self._original = seed
         self.seed = prose
         self._initial_capabilities = caps
+        self._tail = tail
 
     def initial(self) -> Dict[str, str]:
         return {"capabilities": self._initial_capabilities}
 
     def render(self, state: Dict[str, str]) -> str:
         caps = sorted(_caps_of(state.get("capabilities", "")))
+        if self._original and set(caps) == _caps_of(self._initial_capabilities):
+            return self._original  # unchanged run: byte-identical apply noop
         if not caps:
-            return self.seed
+            return append_tail(self.seed, self._tail)
         body = self.seed.rstrip("\n")
         if body:
             body += "\n\n"
         body += CAPABILITIES_HEADER + "\n" + "\n".join(f"- {c}" for c in caps)
-        return body if body.endswith("\n") else body + "\n"
+        body = body if body.endswith("\n") else body + "\n"
+        return append_tail(body, self._tail)
 
     def to_diff(self, state, proposal, author, base_version, target) -> Optional[Diff]:
         cap = ((proposal or "").strip().splitlines()[0]
