@@ -100,3 +100,26 @@ def test_same_object_as_algorithms_run_json(tmp_path, capsys):
 def test_description_is_written_for_the_model():
     text = TOOL_DESCRIPTIONS["algorithm_spec"]
     assert "algorithms run" in text and "start" in text and "never guess" in text
+
+
+def test_params_object_is_passed_through_not_re_split(tmp_path):
+    # #729: params used to be re-encoded as `--param k=v` strings, so a key
+    # with `=` was split and an empty key's error named the CLI flag.
+    prompt, cases = _prompt_and_cases(tmp_path)
+    t = Tools(None)
+    r = t.algorithm_spec("gepa", str(prompt), str(cases),
+                         params={"seed=9": 3}, **_FLAGS)
+    assert r["ok"] is False and "'seed=9'" in r["error"], r
+    assert "expected int" not in r["error"]
+    r = t.algorithm_spec("gepa", str(prompt), str(cases), params={"": 1}, **_FLAGS)
+    assert r["ok"] is False and "params key" in r["error"]
+    assert "--param" not in r["error"]
+    r = t.algorithm_spec("gepa", str(prompt), str(cases),
+                         params={"seed": 1, " seed ": 2}, **_FLAGS)
+    assert r["ok"] is False and "more than once" in r["error"]
+    assert "--param" not in r["error"]
+    assert not list(tmp_path.glob("agentdescent.*.spec.json"))
+    # Names are stripped like the CLI's `--param`.
+    r = t.algorithm_spec("gepa", str(prompt), str(cases),
+                         params={" seed ": 4}, rounds=1, workers=1, **_FLAGS)
+    assert r["ok"] is True and r["spec"]["algorithm"]["params"] == {"seed": 4}, r

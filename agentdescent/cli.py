@@ -823,6 +823,7 @@ def write_starter_spec(
     param: Optional[Sequence[str]] = None,
     out: Optional[str] = None,
     follow_up: Optional[str] = "plan",
+    params: Optional[Mapping[str, Any]] = None,
     rounds: Optional[int] = None,
     workers: Optional[int] = None,
 ) -> Tuple[str, Dict[str, Any], List[Tuple[str, str]], Optional[str]]:
@@ -835,6 +836,9 @@ def write_starter_spec(
     plan itself (#674). ``rounds`` / ``workers`` (``--rounds`` / ``--workers``)
     replace the kind's ``evolve.rounds`` / ``evolve.n_workers`` so a cheap
     trial needs no hand-edited JSON; left out, the kind defaults stay (#707).
+    ``params`` is an already-parsed ``{name: value}`` mapping (the MCP
+    ``algorithm_spec`` tool); it replaces ``param`` so keys and values are
+    never round-tripped through ``KEY=VALUE`` strings (#729).
     """
     for flag, value in (("--rounds", rounds), ("--workers", workers)):
         if value is not None and (isinstance(value, bool) or not isinstance(value, int)
@@ -849,7 +853,7 @@ def write_starter_spec(
     missing = require_existing_target(path, kind)
     if missing:
         raise ValueError(missing)
-    params = parse_cli_params(param)
+    params = dict(params) if params is not None else parse_cli_params(param)
     spec = starter_spec(path, kind=kind, data=data, agent=agent,
                         agent_explicit=agent_explicit, model=model,
                         base_url=base_url, key_env=key_env,
@@ -2709,6 +2713,7 @@ def algorithms_run_payload(
     rounds: Optional[int] = None,
     workers: Optional[int] = None,
     usd_per_call: Optional[float] = None,
+    params: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Write a starter spec for algorithm ``name`` on ``path`` and plan it.
 
@@ -2716,7 +2721,8 @@ def algorithms_run_payload(
     ``algorithm_spec`` tool (#723). Returns the ``--json`` object; the private
     ``_report`` (init's report lines), ``_plan`` (the plan payload) and
     ``_stage`` keys are for the CLI's text rendering and are popped before
-    anything is printed or returned to a host. Never starts a run.
+    anything is printed or returned to a host. Never starts a run. ``params``
+    (an already-parsed mapping, from MCP) replaces ``param`` (#729).
     """
     from . import algorithms
 
@@ -2758,7 +2764,8 @@ def algorithms_run_payload(
         out, _spec, report, providers_out = write_starter_spec(
             path, kind=kind, data=cases, agent=agent, model=model,
             base_url=base_url, key_env=key_env, algorithm=name, param=param,
-            out=out, follow_up=None, rounds=rounds, workers=workers)
+            out=out, follow_up=None, rounds=rounds, workers=workers,
+            params=params)
     except ValueError as e:      # kind mismatch / bad --param
         return {"ok": False, "error": str(e), "_stage": "pre"}
     # Once the spec is on disk, a failed plan's next step is to fix it and

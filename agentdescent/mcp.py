@@ -428,6 +428,19 @@ class Tools:
         if params is not None and not isinstance(params, dict):
             return {"ok": False, "error": "params must be an object of "
                     "{parameter: value} (see describe_algorithm)"}
+        # Passed through as an object, never re-encoded as `--param k=v`
+        # strings: that split a key containing `=` and named a CLI flag the
+        # host never used (#729). Names are stripped like the CLI's.
+        clean: Dict[str, Any] = {}
+        for key, value in (params or {}).items():
+            pname = key.strip() if isinstance(key, str) else ""
+            if not pname:
+                return {"ok": False, "error": f"params key {key!r} must be a "
+                        "non-empty parameter name (see describe_algorithm)"}
+            if pname in clean:
+                return {"ok": False, "error": f"params key {pname!r} was given "
+                        "more than once"}
+            clean[pname] = value
         # The server's cwd is not the host's, so paths are made absolute here
         # and the default spec goes beside the target -- never inside a
         # directory target, where it would become part of the artifact.
@@ -445,11 +458,10 @@ class Tools:
                                f"agentdescent.{registered}.spec.json")
         else:
             out = os.path.abspath(os.path.expanduser(out))
-        pairs = [f"{k}={json.dumps(v)}" for k, v in (params or {}).items()]
         try:
             obj = algorithms_run_payload(
                 name, abs_path, kind=kind, cases=abs_cases, agent=agent,
-                model=model, base_url=base_url, key_env=key_env, param=pairs,
+                model=model, base_url=base_url, key_env=key_env, params=clean,
                 out=out, rounds=rounds, workers=workers, usd_per_call=usd_per_call)
         except SpecError as e:
             return {"ok": False, "error": str(e)}
