@@ -719,6 +719,25 @@ _WORKSPACE_REFS = ("claude_code", "codex", "dsh", "opencode", "cli_agent")
 _PLAIN_REFS = ("openai_compatible", "host_model", "claude", "echo")
 
 
+def init_agent_unknown(ref: str) -> Optional[str]:
+    """Why ``--agent ref`` can never resolve, or None (#745).
+
+    ``plan`` would refuse a name that is neither a built-in agent short ref nor
+    ``module:attribute``; say so before a spec is written, list only the agent
+    refs (not the policy classes ``SHORT_REFS`` also holds), and point a host
+    name such as ``claude-code`` at its ref spelling.
+    """
+    agents = _WORKSPACE_REFS + _PLAIN_REFS
+    if ref in agents or ":" in ref:
+        return None
+    msg = (f"--agent {ref}: not a known agent; use one of {', '.join(agents)} "
+           "or a custom 'module:attribute'")
+    guess = ref.strip().lower().replace("-", "_")
+    if guess in agents:
+        msg += f" (did you mean `--agent {guess}`?)"
+    return msg
+
+
 def init_agent_mismatch(kind: str, ref: str) -> Optional[str]:
     """Why ``plan`` would refuse agent ``ref`` for ``kind``, or None (#456).
 
@@ -863,6 +882,10 @@ def write_starter_spec(
     if workers is not None:
         spec["evolve"]["n_workers"] = workers
     if agent_explicit:
+        why = init_agent_unknown(agent)
+        if why:
+            # Refuse before writing, as for a kind mismatch: `plan` cannot resolve it.
+            raise ValueError(why)
         why = init_agent_mismatch(spec["kind"], agent)
         if why:
             # Refuse before writing: `plan` would reject this spec anyway, and a

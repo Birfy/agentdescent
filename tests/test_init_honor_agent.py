@@ -72,3 +72,35 @@ def test_custom_ref_is_not_second_guessed(ws):
 def test_policy_slot_keeps_explicit_agent(ws):
     assert _init("selection", "--kind", "policy_slot", "--agent", "host_model") == 0
     assert json.loads((ws / "spec.json").read_text())["agent"] == {"ref": "host_model"}
+
+
+@pytest.mark.parametrize("ref,hint", [("claude-code", "claude_code"),
+                                      ("grok-bot", None), ("bogus", None)])
+def test_unknown_agent_refused_before_writing(ws, capsys, ref, hint):
+    # A name `plan` can never resolve (here: install's host spelling) used to be
+    # written anyway, with an error listing policy classes as agents (#745).
+    (ws / "spec.json").write_text('{"keep": 1}')
+    assert _init(str(ws / "my-skill"), "--agent", ref) == 2
+    assert json.loads((ws / "spec.json").read_text()) == {"keep": 1}
+    assert not list(ws.glob("spec.json.bak-*"))
+    err = capsys.readouterr().err
+    assert f"--agent {ref}: not a known agent" in err
+    assert "claude_code" in err and "opencode" in err
+    assert "Beam" not in err and "DefaultFusion" not in err
+    assert ("did you mean `--agent claude_code`" in err) == (hint is not None)
+
+
+def test_algorithms_run_refuses_unknown_agent(ws, capsys):
+    rc = cli.main(["algorithms", "run", "archive_selection", str(ws / "my-skill"),
+                   "--agent", "claude-code", "--out", "spec.json"])
+    assert rc == 2
+    assert not (ws / "spec.json").exists()
+    assert "did you mean `--agent claude_code`" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("ref", ["claude_code", "dsh", "codex", "cli_agent", "echo"])
+def test_known_agent_refs_still_accepted(ws, ref):
+    target = "prompt.txt" if ref == "echo" else str(ws / "my-skill")
+    kind = ["--kind", "text"] if ref == "echo" else []
+    assert _init(target, *kind, "--agent", ref) == 0
+    assert json.loads((ws / "spec.json").read_text())["agent"]["ref"] == ref
