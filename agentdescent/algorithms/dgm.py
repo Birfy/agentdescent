@@ -53,6 +53,54 @@ def _caps_of(capabilities: str) -> set:
     return {c.strip() for c in capabilities.split(",") if c.strip()}
 
 
+def _split_applied_capabilities(seed: str) -> Tuple[str, str]:
+    """If ``seed`` is a prior DGM render, peel ``## Capabilities`` into state.
+
+    Returns ``(prose_seed, capabilities_csv)``. A plain first-run target is
+    unchanged with an empty capabilities string. An applied artifact yields the
+    prose alone and the prior bullets so a second evolve keeps a single header
+    (#741).
+    """
+    if not seed:
+        return seed, ""
+    start: Optional[int] = None
+    header = CAPABILITIES_HEADER
+    if seed.startswith(header + "\n") or seed.rstrip("\n") == header:
+        start = 0
+    else:
+        needle = "\n\n" + header + "\n"
+        pos = seed.rfind(needle)
+        if pos >= 0:
+            start = pos + 2
+        else:
+            alt = "\n\n" + header
+            if seed.endswith(alt) or seed.rstrip("\n").endswith(alt):
+                pos = seed.rstrip("\n").rfind(alt)
+                if pos >= 0:
+                    start = pos + 2
+    if start is None:
+        return seed, ""
+    body = seed[start + len(header):]
+    if body.startswith("\n"):
+        body = body[1:]
+    stripped = body.lstrip()
+    # Only peel when the body is empty or looks like a bullet list.
+    if stripped and not any(
+            line.lstrip().startswith("- ") for line in stripped.splitlines() if line.strip()):
+        return seed, ""
+    prose = seed[:start]
+    if prose.endswith("\n\n"):
+        prose = prose[:-1]
+    caps = []
+    for line in body.splitlines():
+        s = line.strip()
+        if s.startswith("- "):
+            cap = s[2:].strip()
+            if cap:
+                caps.append(cap)
+    return prose, ",".join(sorted(set(caps)))
+
+
 class HarnessStrategy:
     """Prose seed plus an optional capability list; a proposal adds one capability.
 
@@ -61,14 +109,17 @@ class HarnessStrategy:
     bookkeeping; ``render`` keeps the seed verbatim and appends a
     ``## Capabilities`` bullet list when any have been admitted. An unchanged
     run therefore renders byte-identical to the seed so ``apply`` is a noop
-    (#731).
+    (#731). Re-opening an applied artifact parses that trailing list back into
+    state so a second run does not duplicate the header (#741).
     """
 
     def __init__(self, seed: str = "") -> None:
-        self.seed = seed
+        prose, caps = _split_applied_capabilities(seed)
+        self.seed = prose
+        self._initial_capabilities = caps
 
     def initial(self) -> Dict[str, str]:
-        return {"capabilities": ""}
+        return {"capabilities": self._initial_capabilities}
 
     def render(self, state: Dict[str, str]) -> str:
         caps = sorted(_caps_of(state.get("capabilities", "")))
@@ -252,9 +303,10 @@ def _build(ctx: BuildContext, p: Dict[str, object]) -> Overrides:
     seed = _read_text_target(str(ctx.spec.target))
     context = DGMContext(rng=random.Random(int(p["seed"])),
                           archive_mode=str(p["archive_mode"]))
+    strategy = HarnessStrategy(seed=seed)
     knobs: Dict[str, object] = {
-        "strategy": HarnessStrategy(seed=seed),
-        "initial_state": {"capabilities": ""},
+        "strategy": strategy,
+        "initial_state": strategy.initial(),
         "aggregator_factory": dgm_aggregator_factory(
             context, artifact_id=ctx.spec.artifact_id()),
     }
@@ -268,6 +320,8 @@ def _build(ctx: BuildContext, p: Dict[str, object]) -> Overrides:
                "candidate on the held-out set. The target text is the prose "
                "seed (never comma-split); admitted capabilities append under "
                "## Capabilities so an unchanged run is an apply noop (#731). "
+               "Re-opening an applied artifact parses that list back into state "
+               "so a second run does not duplicate the header (#741). "
                "The example's staged evaluator and Docker harness stay "
                "example-only."])
 

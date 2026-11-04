@@ -553,6 +553,51 @@ def _record_prompt(prompt):
     return "NOPE"
 
 
+
+def test_ace_and_dgm_reparse_an_applied_artifact_without_duplicating_headers():
+    """Second evolve on an applied target keeps one header and prior items (#741)."""
+    from agentdescent.algorithms.ace import ACEPlaybook
+    from agentdescent.algorithms.dgm import CAPABILITIES_HEADER, HarnessStrategy
+
+    prose = "Solve carefully.\n"
+    pb = ACEPlaybook(seed=prose)
+    st = {**pb.initial(), **pb.to_diff(pb.initial(),
+                                       "revenue :: tag deferred revenue",
+                                       "w0", 1, "a").ops}
+    applied = pb.render(st)
+    pb2 = ACEPlaybook(seed=applied)
+    assert pb2.seed == prose
+    assert pb2.initial()  # prior bullet recovered
+    assert pb2.render(pb2.initial()) == applied
+    st2 = {**pb2.initial(), **pb2.to_diff(pb2.initial(),
+                                          "debt :: notes are LTD",
+                                          "w1", 1, "a").ops}
+    out = pb2.render(st2)
+    assert out.count("# Playbook (ACE)") == 1
+    assert "tag deferred revenue" in out and "notes are LTD" in out
+    # de-dup still sees the recovered bullet
+    assert pb2.to_diff(st2, "revenue :: tag deferred revenue", "w2", 1, "a") is None
+
+    hs = HarnessStrategy(seed=prose)
+    st = {**hs.initial(), **hs.to_diff(hs.initial(), "use chain of thought",
+                                       "w0", 1, "a").ops}
+    applied = hs.render(st)
+    hs2 = HarnessStrategy(seed=applied)
+    assert hs2.seed == prose
+    assert "use chain of thought" in hs2.initial()["capabilities"]
+    assert hs2.render(hs2.initial()) == applied
+    st2 = {**hs2.initial(), **hs2.to_diff(hs2.initial(), "check units",
+                                          "w1", 1, "a").ops}
+    out = hs2.render(st2)
+    assert out.count(CAPABILITIES_HEADER) == 1
+    assert "use chain of thought" in out and "check units" in out
+    # a mid-prose mention of the header is not peeled
+    noisy = "See " + CAPABILITIES_HEADER + " in the docs.\n"
+    hs3 = HarnessStrategy(seed=noisy)
+    assert hs3.initial() == {"capabilities": ""}
+    assert CAPABILITIES_HEADER in hs3.seed
+
+
 def test_ace_and_dgm_compose_seed_reaches_the_first_rollout(tmp_path):
     """First rollout prompt must contain the target prose, not an empty playbook (#731)."""
     import json

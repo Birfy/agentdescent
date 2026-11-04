@@ -36,6 +36,69 @@ def jaccard(a: str, b: str) -> float:
         return 0.0
     return len(ta & tb) / len(ta | tb)
 
+
+def _split_applied_playbook(seed: str, title: str) -> Tuple[str, Dict[str, str]]:
+    """If ``seed`` is a prior ACE render, peel the trailing playbook into state.
+
+    A first-run target is returned unchanged with an empty state. An applied
+    artifact (prose + ``title`` + section bullets) yields the prose alone and a
+    state dict keyed by the rendered bullet ids so a second evolve continues
+    under a single playbook header (#741).
+    """
+    if not seed or not title:
+        return seed, {}
+    start: Optional[int] = None
+    if seed.startswith(title + "\n") or seed == title or seed.rstrip("\n") == title:
+        start = 0
+    else:
+        needle = "\n\n" + title + "\n"
+        pos = seed.rfind(needle)
+        if pos >= 0:
+            start = pos + 2  # index of title
+        else:
+            # title at EOF with only a preceding blank line, no trailing body nl
+            alt = "\n\n" + title
+            if seed.endswith(alt) or seed.rstrip("\n").endswith(alt):
+                pos = seed.rstrip("\n").rfind(alt)
+                if pos >= 0:
+                    start = pos + 2
+    if start is None:
+        return seed, {}
+    body = seed[start + len(title):]
+    if body.startswith("\n"):
+        body = body[1:]
+    # Refuse to treat a mid-prose mention as a playbook unless the body looks
+    # like one (empty marker or ``##`` sections / ``- [id]`` bullets).
+    stripped = body.lstrip()
+    looks = (
+        stripped.startswith("(empty -- no lessons yet)")
+        or stripped.startswith("## ")
+        or stripped.startswith("- [")
+        or stripped == ""
+    )
+    if not looks:
+        return seed, {}
+    prose = seed[:start]
+    if prose.endswith("\n\n"):
+        prose = prose[:-1]  # keep a single trailing newline when present
+    state: Dict[str, str] = {}
+    if stripped.startswith("(empty -- no lessons yet)"):
+        return prose, state
+    section = "general"
+    for line in body.splitlines():
+        if line.startswith("## "):
+            section = line[3:].strip() or "general"
+            continue
+        m = re.match(r"\s*-\s*\[([^\]]+)\]\s*(.*)$", line)
+        if not m:
+            continue
+        bid, lesson = m.group(1).strip(), m.group(2).strip()
+        if not bid or not lesson:
+            continue
+        state[bid] = f"{section} :: {lesson}"
+    return prose, state
+
+
 class ACEPlaybook:
     """ACE's context object: sectioned, itemised bullets, grown by delta only.
 
@@ -54,10 +117,12 @@ class ACEPlaybook:
                  seed: str = ""):
         self.title = title
         self.dedup_threshold = dedup_threshold
-        self.seed = seed
+        prose, state = _split_applied_playbook(seed, title)
+        self.seed = prose
+        self._initial_state = state
 
     def initial(self) -> Dict[str, str]:
-        return {}
+        return dict(self._initial_state)
 
     @staticmethod
     def _split(entry: str) -> Tuple[str, str]:
@@ -179,7 +244,9 @@ def _build(ctx: BuildContext, p: Dict[str, object]) -> Overrides:
                "(no held-out gate per bullet) and de-duplicates near-identical "
                "lessons in the same section; utility counters are upstream's job, "
                "not this engine's. The target text is the seed prompt; an empty "
-               "playbook renders it verbatim so apply is a noop (#731)."])
+               "playbook renders it verbatim so apply is a noop (#731). Re-opening "
+               "an applied artifact parses the trailing playbook back into state "
+               "so a second run does not duplicate the header (#741)."])
 
 
 register(Algorithm(
