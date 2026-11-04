@@ -43,11 +43,18 @@ class ACEPlaybook:
     lesson"``. `to_diff` **appends** a new content-addressed bullet, or returns
     ``None`` when the lesson duplicates (exact or near-duplicate) an existing one
     -- ACE's *grow-and-refine*. It never rewrites existing bullets, so the
-    playbook accumulates detail instead of collapsing into a lossy summary."""
+    playbook accumulates detail instead of collapsing into a lossy summary.
 
-    def __init__(self, title: str = "# Playbook (ACE)", dedup_threshold: float = 0.8):
+    ``seed`` is the caller's existing text prompt (the spec ``target``). An empty
+    playbook renders the seed verbatim so ``apply`` is a noop; admitted bullets
+    are appended under the playbook title rather than replacing the seed (#731).
+    """
+
+    def __init__(self, title: str = "# Playbook (ACE)", dedup_threshold: float = 0.8,
+                 seed: str = ""):
         self.title = title
         self.dedup_threshold = dedup_threshold
+        self.seed = seed
 
     def initial(self) -> Dict[str, str]:
         return {}
@@ -57,7 +64,7 @@ class ACEPlaybook:
         section, _, text = entry.partition(" :: ")
         return (section or "general"), text
 
-    def render(self, state: Dict[str, str]) -> str:
+    def _render_playbook(self, state: Dict[str, str]) -> str:
         if not state:
             return f"{self.title}\n(empty -- no lessons yet)"
         by_section: Dict[str, List[str]] = {}
@@ -69,6 +76,14 @@ class ACEPlaybook:
             out.append(f"## {section}")
             out.extend(by_section[section])
         return "\n".join(out)
+
+    def render(self, state: Dict[str, str]) -> str:
+        if not self.seed:
+            return self._render_playbook(state)
+        if not state:
+            return self.seed
+        body = self.seed.rstrip("\n") + "\n\n" + self._render_playbook(state)
+        return body if body.endswith("\n") else body + "\n"
 
     def to_diff(self, state, proposal, author, base_version, target) -> Optional[Diff]:
         m = re.match(r"\s*([\w\- /]+?)\s*::\s*(.+)", proposal, re.DOTALL)
@@ -153,14 +168,18 @@ _REFLECTOR_TMPL = (
 
 
 def _build(ctx: BuildContext, p: Dict[str, object]) -> Overrides:
+    from ..evolvespec import _read_text_target
+    seed = _read_text_target(str(ctx.spec.target))
     return Overrides(
         knobs={"strategy": ACEPlaybook(title=str(p["title"]),
-                                       dedup_threshold=float(p["dedup_threshold"]))},
+                                       dedup_threshold=float(p["dedup_threshold"]),
+                                       seed=seed)},
         policies={"acceptance": GrowAndRefine()},
         notes=["algorithm ace: grow-and-refine admits every structural delta "
                "(no held-out gate per bullet) and de-duplicates near-identical "
                "lessons in the same section; utility counters are upstream's job, "
-               "not this engine's."])
+               "not this engine's. The target text is the seed prompt; an empty "
+               "playbook renders it verbatim so apply is a noop (#731)."])
 
 
 register(Algorithm(

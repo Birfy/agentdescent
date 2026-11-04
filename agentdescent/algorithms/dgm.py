@@ -8,8 +8,10 @@ keeps its coding-agent domain and Docker harness; this registry entry runs the
 same archive on a spec's own artifact and data.
 
 Use it from a spec as ``"algorithm": "dgm"`` (``kind: text``). The artifact is
-the capability list the spec's ``run`` sees (one comma-separated line); the
-spec's ``reflect`` model proposes one new capability from each failure.
+the caller's text prompt (the spec ``target``) plus an optional
+``## Capabilities`` list of admitted capability phrases; the spec's ``reflect``
+model proposes one new capability from each failure. The prose seed is never
+comma-split (#731).
 """
 
 from __future__ import annotations
@@ -26,8 +28,8 @@ from ..ledger import CASConflict, Ledger
 from ..selection import Archive, Candidate, SelectionContext
 from . import Algorithm, BuildContext, Overrides, Param, register
 
-__all__ = ["DGMArchiveAggregator", "DGMContext", "HarnessStrategy",
-           "dgm_aggregator_factory", "make_propose"]
+__all__ = ["CAPABILITIES_HEADER", "DGMArchiveAggregator", "DGMContext",
+           "HarnessStrategy", "dgm_aggregator_factory", "make_propose"]
 
 _PROPOSE_TMPL = """You are improving a task-solving agent by adding ONE capability.
 
@@ -42,26 +44,46 @@ Propose ONE short, general capability that would help with this class of task.
 Output only the capability name/phrase (no quotes, no explanation)."""
 
 
-def _caps_of(rendered: str) -> set:
-    return {c.strip() for c in rendered.split(",") if c.strip()}
+#: Marker under which admitted capabilities are listed when the artifact is rendered.
+CAPABILITIES_HEADER = "## Capabilities"
+
+
+def _caps_of(capabilities: str) -> set:
+    """Capability names stored in state (comma-separated), never the prose seed."""
+    return {c.strip() for c in capabilities.split(",") if c.strip()}
 
 
 class HarnessStrategy:
-    """The artifact is the harness's capability set; a proposal adds one capability."""
+    """Prose seed plus an optional capability list; a proposal adds one capability.
+
+    ``seed`` is the caller's existing text prompt. Capabilities live in
+    ``state["capabilities"]`` as a comma-separated set used only for archive
+    bookkeeping; ``render`` keeps the seed verbatim and appends a
+    ``## Capabilities`` bullet list when any have been admitted. An unchanged
+    run therefore renders byte-identical to the seed so ``apply`` is a noop
+    (#731).
+    """
 
     def __init__(self, seed: str = "") -> None:
         self.seed = seed
 
     def initial(self) -> Dict[str, str]:
-        return {"capabilities": self.seed}
+        return {"capabilities": ""}
 
     def render(self, state: Dict[str, str]) -> str:
-        return state.get("capabilities", self.seed)
+        caps = sorted(_caps_of(state.get("capabilities", "")))
+        if not caps:
+            return self.seed
+        body = self.seed.rstrip("\n")
+        if body:
+            body += "\n\n"
+        body += CAPABILITIES_HEADER + "\n" + "\n".join(f"- {c}" for c in caps)
+        return body if body.endswith("\n") else body + "\n"
 
     def to_diff(self, state, proposal, author, base_version, target) -> Optional[Diff]:
         cap = ((proposal or "").strip().splitlines()[0]
                .replace(",", " ").strip(" -`\"'")[:120] if proposal else "")
-        current = _caps_of(state.get("capabilities", self.seed))
+        current = _caps_of(state.get("capabilities", ""))
         if not cap or cap in current:
             return None
         new = ",".join(sorted(current | {cap}))
@@ -232,7 +254,7 @@ def _build(ctx: BuildContext, p: Dict[str, object]) -> Overrides:
                           archive_mode=str(p["archive_mode"]))
     knobs: Dict[str, object] = {
         "strategy": HarnessStrategy(seed=seed),
-        "initial_state": {"capabilities": seed},
+        "initial_state": {"capabilities": ""},
         "aggregator_factory": dgm_aggregator_factory(
             context, artifact_id=ctx.spec.artifact_id()),
     }
@@ -243,8 +265,11 @@ def _build(ctx: BuildContext, p: Dict[str, object]) -> Overrides:
         knobs=knobs,
         notes=["algorithm dgm: a keep-all capability archive with DGM's "
                "sigmoid×novelty parent draw; the spec's run/score judge each "
-               "candidate on the held-out set. The example's staged evaluator "
-               "and Docker harness stay example-only."])
+               "candidate on the held-out set. The target text is the prose "
+               "seed (never comma-split); admitted capabilities append under "
+               "## Capabilities so an unchanged run is an apply noop (#731). "
+               "The example's staged evaluator and Docker harness stay "
+               "example-only."])
 
 
 register(Algorithm(

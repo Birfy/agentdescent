@@ -10,8 +10,11 @@ description: A runnable reproduction of ACE (Agentic Context Engineering): evolv
 >
 > **Spec form:** the playbook and Curator ship in
 > `agentdescent/algorithms/ace.py`; a spec can name `"algorithm": "ace"`
-> (`title`, `dedup_threshold`). Registry fidelity is `mechanism_microport` —
-> the FiNER reproduction above is the `benchmark_faithful` one.
+> (`title`, `dedup_threshold`). The kind=`text` target is the **seed prompt**:
+> an empty playbook renders that text verbatim (so `apply` is a noop), and
+> admitted lessons append under `# Playbook (ACE)` rather than replacing it.
+> Registry fidelity is `mechanism_microport` — the FiNER reproduction above is
+> the `benchmark_faithful` one.
 
 | | |
 |---|---|

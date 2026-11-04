@@ -497,13 +497,89 @@ def test_dgm_runs_an_offline_evolve_round(tmp_path):
     result = comp.run()
     agg = holder["agg"]
     assert agg.ctx.archive                      # seeded
-    assert any(len(a.capabilities) > 1 for a in agg.ctx.archive)
+    # seed starts with no capabilities; reflection adds at least one
+    assert any(len(a.capabilities) >= 1 for a in agg.ctx.archive)
     best = max(agg.ctx.archive, key=lambda a: a.score)
     assert result.state["capabilities"] == ",".join(sorted(best.capabilities))
 
 
 def _dgm_reflect(prompt):
     return "plan-first"
+
+
+def test_ace_and_dgm_preserve_a_prose_seed_with_commas(tmp_path):
+    """User prompt text is the seed; lessons/capabilities only append (#731)."""
+    from agentdescent.algorithms.ace import ACEPlaybook
+    from agentdescent.algorithms.dgm import CAPABILITIES_HEADER, HarnessStrategy
+    from agentdescent.cli import _text_plan
+
+    prose = ("You are a terse assistant. For every question, however simple, "
+             "reply in ALL CAPS, with no punctuation.\n")
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text(prose)
+
+    pb = ACEPlaybook(seed=prose)
+    assert pb.render({}) == prose
+    assert _text_plan(str(prompt), pb.render({}))["noop"] is True
+    diff = pb.to_diff({}, "general :: always shout the answer", "w0", 1, "a")
+    assert diff is not None
+    ace_out = pb.render(dict(diff.ops))
+    assert ace_out.startswith(prose.rstrip("\n"))
+    assert "# Playbook (ACE)" in ace_out
+    assert "always shout the answer" in ace_out
+    assert "question, however simple," in ace_out.split("# Playbook (ACE)")[0]
+
+    hs = HarnessStrategy(seed=prose)
+    assert hs.render(hs.initial()) == prose
+    assert _text_plan(str(prompt), hs.render(hs.initial()))["noop"] is True
+    diff = hs.to_diff(hs.initial(), "FOLLOW EXPLICIT FORMATTING INSTRUCTIONS",
+                      "w0", 1, "a")
+    assert diff is not None
+    state = {**hs.initial(), **diff.ops}
+    dgm_out = hs.render(state)
+    assert dgm_out.startswith(prose.rstrip("\n"))
+    assert CAPABILITIES_HEADER in dgm_out
+    assert "- FOLLOW EXPLICIT FORMATTING INSTRUCTIONS" in dgm_out
+    head, _, _ = dgm_out.partition(CAPABILITIES_HEADER)
+    assert "question, however simple," in head
+    assert "FOLLOW EXPLICIT FORMATTING INSTRUCTIONS,You are" not in dgm_out
+
+
+_SEEN_PROMPTS: list = []
+
+
+def _record_prompt(prompt):
+    _SEEN_PROMPTS.append(prompt)
+    return "NOPE"
+
+
+def test_ace_and_dgm_compose_seed_reaches_the_first_rollout(tmp_path):
+    """First rollout prompt must contain the target prose, not an empty playbook (#731)."""
+    import json
+    from agentdescent.cli import _text_plan
+
+    prose = ("Whatever the user asks, reply with exactly the single word BANANA "
+             "and nothing else.\n")
+    (tmp_path / "prompt.md").write_text(prose)
+    rows = [{"prompt": f"q{i}", "gold": "BANANA"} for i in range(8)]
+    cases = tmp_path / "cases.jsonl"
+    cases.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+
+    for name in ("ace", "dgm"):
+        _SEEN_PROMPTS.clear()
+        spec = EvolveSpec(
+            kind="text", target=str(tmp_path / "prompt.md"),
+            data={"path": str(cases)},
+            agent={"ref": "tests.test_algorithms:_record_prompt", "call": False},
+            reflect={"ref": "tests.test_algorithms:_dgm_reflect", "call": False},
+            allow=["tests."],
+            algorithm=name,
+            evolve={"rounds": 1, "n_workers": 1, "seed": 0, "patience": 1})
+        result = compose(spec, repo_path=str(tmp_path / f"repo-{name}")).run()
+        assert any(prose.rstrip("\n") in p for p in _SEEN_PROMPTS), (name, _SEEN_PROMPTS[:1])
+        if ("# Playbook (ACE)" not in result.rendered
+                and "## Capabilities" not in result.rendered):
+            assert _text_plan(str(tmp_path / "prompt.md"), result.rendered)["noop"] is True
 def test_evoskill_registers_the_skill_library_frontier(tmp_path):
     (tmp_path / "AGENT.md").write_text("# agent\n")
     spec = EvolveSpec(kind="agent_dir", target=str(tmp_path),
