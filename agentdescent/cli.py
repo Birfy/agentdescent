@@ -3132,9 +3132,12 @@ def cmd_ops(a: argparse.Namespace) -> int:
                 runs_db=a.runs_db, tenant=a.tenant, workspace=a.workspace,
                 min_acceptance=a.min_acceptance,
                 max_cost_per_accepted=a.max_cost_per_accepted,
-                out=a.out, prometheus=a.prometheus)
+                out=a.out, prometheus=a.prometheus, history=a.history)
+        elif action == "history":
+            payload = surface.ops_history(
+                history=a.history, tenant=a.tenant, workspace=a.workspace)
         else:
-            raise SurfaceError("ops needs plan or publish")
+            raise SurfaceError("ops needs plan, publish or history")
     except Exception as error:  # noqa: BLE001 - user callbacks are part of the surface
         return _surface_error(a, error)
     if a.json:
@@ -3147,6 +3150,15 @@ def cmd_ops(a: argparse.Namespace) -> int:
             print("next:")
             for step in payload["next"]:
                 print(f"  {step}")
+        elif action == "history":
+            print(f"history: {payload['history']}  publishes: {payload['publishes']}")
+            print(f"decisions: {payload['decisions']}  "
+                  f"accepted: {payload['accepted']}  calls: {payload['calls']}  "
+                  f"alerts: {payload['alerts']}")
+            if payload["last"] is not None:
+                print(f"last: {payload['last_recorded_at'] or '-'}")
+            if payload["skipped"]:
+                print(f"skipped bad lines: {payload['skipped']}")
         else:
             print(f"published: {payload['published']}")
             if "metrics" in payload:
@@ -3162,6 +3174,8 @@ def cmd_ops(a: argparse.Namespace) -> int:
                 print(f"report: {payload['out']}")
             if payload.get("prometheus"):
                 print(f"prometheus: {payload['prometheus']}")
+            if payload.get("history"):
+                print(f"history: {payload['history']}")
     return 0
 
 
@@ -4267,6 +4281,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="alert above this calls/accepted value")
     sp.add_argument("--out", help="write the full JSON report here")
     sp.add_argument("--prometheus", help="write Prometheus text here")
+    sp.add_argument("--history", help="append this publish to a JSONL history")
+    sp.set_defaults(fn=cmd_ops)
+    sp = ops_sub.add_parser(
+        "history", help="summarise the JSONL history of past publishes")
+    sp.add_argument("--history", required=True, help="JSONL history to read")
+    sp.add_argument("--tenant", default=None)
+    sp.add_argument("--workspace", default=None)
     sp.set_defaults(fn=cmd_ops)
 
     s = sub.add_parser(
