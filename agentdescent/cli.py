@@ -2806,8 +2806,13 @@ def algorithms_run_payload(
     except (SpecError, ValueError) as e:
         err = _algorithms_run_missing_data_hint(str(e), cases=cases)
         # `spec` kept for compatibility; `spec_path` matches the plan shape.
+        # init's notes/warnings (the .bak-N of an overwritten spec, #725) are
+        # kept here too: a failed plan is the usual reason to re-run (#749).
         return {"ok": False, "error": err, "spec": out, "spec_path": out,
-                "next": retry_line, "_stage": "plan", "_report": report}
+                "next": retry_line,
+                "warnings": [t for k, t in report if k == "warning"],
+                "notes": [t for k, t in report if k == "note"],
+                "_stage": "plan", "_report": report}
     ok = bool(payload.get("ok", True))
     obj = dict(payload)
     obj["spec_path"] = out
@@ -2849,9 +2854,14 @@ def _cmd_algorithms_run(a: argparse.Namespace) -> int:
         return 2
     out = obj["spec_path"]
     if stage == "plan":
-        # The spec is already on disk: say so before the error (#688).
+        # The spec is already on disk: say so before the error (#688), and
+        # keep init's notes/warnings, e.g. where an overwritten spec went (#749).
         for kind_tag, text in report:
-            if kind_tag == "wrote":
+            if kind_tag == "warning":
+                print(f"warning: {text}")
+            elif kind_tag == "note":
+                print(f"note: {text}")
+            else:
                 print(text)
         print(f"error: {obj['error']}", file=sys.stderr)
         print(f"next: fix {out}, then {obj['next']}")

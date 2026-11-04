@@ -344,3 +344,37 @@ def test_algorithms_run_resolves_a_case_variant_to_the_registered_name(
     assert out.exists()
     assert json.loads(out.read_text())["algorithm"] == "gepa"
     assert f"next: agentdescent evolve {out.name}" in capsys.readouterr().out
+
+
+def test_algorithms_run_plan_failure_keeps_backup_note(tmp_path, capsys, monkeypatch):
+    """A failed plan still says where the overwritten spec went (#749)."""
+    monkeypatch.chdir(tmp_path)
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("be terse\n")
+    out = tmp_path / "out.spec.json"
+    out.write_text('{"edited": 1}\n')
+    # No cases.jsonl: the spec is written, then plan refuses it.
+    assert cli.main(["algorithms", "run", "gepa", str(prompt),
+                     "--out", str(out)]) == 2
+    captured = capsys.readouterr()
+    backup = f"{out}.bak-0"
+    assert Path(backup).read_text() == '{"edited": 1}\n'
+    assert f"wrote {out}" in captured.out
+    assert f"note: {out} already existed" in captured.out
+    assert backup in captured.out
+    assert "error:" in captured.err
+
+
+def test_algorithms_run_plan_failure_json_has_notes(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("be terse\n")
+    out = tmp_path / "out.spec.json"
+    out.write_text('{"edited": 1}\n')
+    assert cli.main(["algorithms", "run", "gepa", str(prompt),
+                     "--out", str(out), "--json"]) == 2
+    obj = json.loads(capsys.readouterr().out)
+    assert obj["ok"] is False
+    assert isinstance(obj["warnings"], list)
+    assert any(f"{out}.bak-0" in n for n in obj["notes"])
+    assert not any(k.startswith("_") for k in obj)
