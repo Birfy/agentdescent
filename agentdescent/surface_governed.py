@@ -37,7 +37,7 @@ import os
 from dataclasses import asdict, fields
 from typing import Any, Dict, Mapping, Optional, Sequence
 
-from .approval import ApprovalStore
+from .approval import ApprovalRequest, ApprovalStore
 from .governed_harness import GovernedHarnessReport, govern_harness_change
 from .promotion import PromotionRules
 from .proofs import ProofRunner
@@ -53,7 +53,100 @@ __all__ = [
     "governed_init",
     "governed_plan",
     "governed_run",
+    "approvals_list",
+    "approvals_decide",
 ]
+
+_APPROVAL_STATUSES = ("pending", "approved", "rejected", "all")
+
+
+def _approval_store(value: Any) -> ApprovalStore:
+    store = _approval(value)
+    if store is None:
+        raise SurfaceError("an approval store path is required")
+    return store
+
+
+def _approval_row(request: ApprovalRequest) -> Dict[str, Any]:
+    return {
+        "key": request.key,
+        "artifact_id": request.artifact_id,
+        "reason": request.reason,
+        "status": request.status,
+        "created_at": request.created_at,
+        "decided_at": request.decided_at,
+        "note": request.note,
+        "summary": request.summary,
+    }
+
+
+def _approval_counts(store: ApprovalStore) -> Dict[str, int]:
+    counts = {"pending": 0, "approved": 0, "rejected": 0, "total": 0}
+    for request in store.all():
+        counts[request.status] += 1
+        counts["total"] += 1
+    return counts
+
+
+def approvals_list(store: Any, *, status: Optional[str] = None
+                   ) -> Dict[str, Any]:
+    """List approval requests, newest decisions included.
+
+    ``status`` is ``pending`` (the default), ``approved``, ``rejected`` or
+    ``all``. Read-only: a missing store is an empty queue, not a file to create.
+    """
+    approval_store = _approval_store(store)
+    wanted = "pending" if status is None else require_text(status, "status")
+    if wanted not in _APPROVAL_STATUSES:
+        raise SurfaceError(
+            f"status must be one of {', '.join(_APPROVAL_STATUSES)}")
+    requests = approval_store.all()
+    rows = [request for request in requests
+            if wanted == "all" or request.status == wanted]
+    return {
+        "schema_version": SURFACE_SCHEMA_VERSION,
+        "ok": True,
+        "store": approval_store.path,
+        "status": wanted,
+        "approvals": [_approval_row(request) for request in rows],
+        "counts": _approval_counts(approval_store),
+        "next": (
+            ["agentdescent governed-harness approve --store <store> --key <key>",
+             "agentdescent governed-harness reject  --store <store> --key <key>"]
+            if wanted == "pending" and rows else []),
+    }
+
+
+def approvals_decide(store: Any, key: Any, *, approve: bool,
+                     note: str = "") -> Dict[str, Any]:
+    """Approve or reject one pending request; an unknown key is an input error.
+
+    Deliberately CLI-only: a host model must not be able to approve the change
+    it proposed for itself.
+    """
+    approval_store = _approval_store(store)
+    key = require_text(key, "key")
+    if not isinstance(approve, bool):
+        raise SurfaceError("approve must be a bool")
+    if not isinstance(note, str):
+        raise SurfaceError("note must be a string")
+    existing = approval_store.status(key)
+    if existing is None:
+        raise SurfaceError(f"no approval request for key {key!r}")
+    if existing != "pending":
+        raise SurfaceError(
+            f"approval request {key!r} is already {existing}; only pending "
+            "requests can be decided")
+    approval_store.decide(key, approve=approve, note=note)
+    request = approval_store._requests()[key]
+    return {
+        "schema_version": SURFACE_SCHEMA_VERSION,
+        "ok": True,
+        "store": approval_store.path,
+        "approval": _approval_row(request),
+        "counts": _approval_counts(approval_store),
+    }
+
 
 
 def _label(value: Any) -> str:

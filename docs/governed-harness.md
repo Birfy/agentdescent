@@ -73,6 +73,31 @@ reject or rollback exits 1.
 - Optional conformal/sequential *non-decisions* are ignored unless the rules
   require them; a conformal/sequential **reject is never dropped**.
 
+## Approval queue
+
+A pending approval used to stop the workflow with no product entry point to
+inspect or decide it. The queue is now a first-class verb:
+
+```bash
+agentdescent governed-harness approvals --store approvals.jsonl \
+  [--status pending|approved|rejected|all] [--json]
+agentdescent governed-harness approve --store approvals.jsonl --key KEY \
+  [--note "..."] [--json]
+agentdescent governed-harness reject  --store approvals.jsonl --key KEY \
+  [--note "..."] [--json]
+```
+
+`approvals` lists the requests and returns `counts` per status; a missing store
+is an empty queue, not an error. `approve`/`reject` require an existing
+**pending** key and write one append-only decision event; the next `run` of the
+same spec reads it. An unknown key or an already-decided request is an input
+error (exit 2), so a typo or a re-run from shell history cannot silently flip a
+rejection into an approval.
+
+The decide verbs are **CLI-only**, with no MCP counterpart: a host model must
+not be able to approve the change it proposed for itself. Listing is also
+CLI-only so the approval queue does not become a tool the model can poll.
+
 ## MCP
 
 The `governed_harness` tool takes the same spec object and `dry_run=true` for

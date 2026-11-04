@@ -3365,8 +3365,15 @@ def cmd_governed_harness(a: argparse.Namespace) -> int:
             payload = surface.governed_plan(a.spec)
         elif action == "run":
             payload = surface.governed_run(a.spec, out=a.out)
+        elif action == "approvals":
+            payload = surface.approvals_list(a.store, status=a.status)
+        elif action in ("approve", "reject"):
+            payload = surface.approvals_decide(
+                a.store, a.key, approve=action == "approve", note=a.note)
         else:
-            raise SurfaceError("governed-harness needs init, plan or run")
+            raise SurfaceError(
+                "governed-harness needs init, plan, run, approvals, approve "
+                "or reject")
     except Exception as error:  # noqa: BLE001 - user callbacks are part of the surface
         return _surface_error(a, error)
     if a.json:
@@ -3385,6 +3392,18 @@ def cmd_governed_harness(a: argparse.Namespace) -> int:
             print("next:")
             for step in payload["next"]:
                 print(f"  {step}")
+        elif action == "approvals":
+            counts = payload["counts"]
+            print(f"store: {payload['store']}  status: {payload['status']}  "
+                  f"pending: {counts['pending']}")
+            for approval in payload["approvals"]:
+                print(f"{approval['key']}  {approval['status']}  "
+                      f"{approval['artifact_id']}  {approval['reason']}")
+            if not payload["approvals"]:
+                print("no matching approval requests")
+        elif action in ("approve", "reject"):
+            approval = payload["approval"]
+            print(f"{approval['key']}  {approval['status']}")
         else:
             report = payload["report"]
             print(f"promoted: {payload['promoted']}  verdict: {report['verdict']}")
@@ -4394,6 +4413,24 @@ def build_parser() -> argparse.ArgumentParser:
     sp = governed_sub.add_parser("run", help="run the governed change")
     sp.add_argument("--spec", required=True, help="governed-harness JSON spec")
     sp.add_argument("--out", help="write the full JSON report here")
+    sp.set_defaults(fn=cmd_governed_harness)
+    sp = governed_sub.add_parser(
+        "approvals", help="list pending or decided approval requests")
+    sp.add_argument("--store", required=True, help="ApprovalStore JSONL")
+    sp.add_argument("--status", choices=("pending", "approved", "rejected", "all"),
+                    default="pending", help="which requests to list (default pending)")
+    sp.set_defaults(fn=cmd_governed_harness)
+    sp = governed_sub.add_parser(
+        "approve", help="approve one pending request (human-only)")
+    sp.add_argument("--store", required=True, help="ApprovalStore JSONL")
+    sp.add_argument("--key", required=True, help="approval request key")
+    sp.add_argument("--note", default="", help="why the request was approved")
+    sp.set_defaults(fn=cmd_governed_harness)
+    sp = governed_sub.add_parser(
+        "reject", help="reject one pending request (human-only)")
+    sp.add_argument("--store", required=True, help="ApprovalStore JSONL")
+    sp.add_argument("--key", required=True, help="approval request key")
+    sp.add_argument("--note", default="", help="why the request was rejected")
     sp.set_defaults(fn=cmd_governed_harness)
 
     s = sub.add_parser(
