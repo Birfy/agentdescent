@@ -295,6 +295,14 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
         "`secret_file`, never from a tool argument. A reject/defer is a normal "
         "result with `released: false`; ask the user before treating any release as "
         "final. Pass `lineage` to persist and extend the receipt graph."),
+    "release_verify": (
+        "Read-only: verify a signed release receipt written by `agentdescent "
+        "release --json`. Recomputes the HMAC over the embedded manifest, so an "
+        "edited artifact hash, evidence or signature fails; `valid: false` is a "
+        "normal result with a reason, not an error. Pass `key_id` to pin the "
+        "expected signer, and `lineage` to require the artifact node to carry the "
+        "same manifest hash. The signing secret is read only from the server's "
+        "`AGENTDESCENT_RELEASE_KEY`; the tool has no secret argument."),
     "safety": (
         "Read-only: is a consolidation archive (the rules meta runs adopted) safe to "
         "keep seeding new runs from? Returns `verdict` (safe / caution / unsafe), a "
@@ -789,6 +797,17 @@ class Tools:
         except (ReleaseSurfaceError, OSError, ValueError) as e:
             return {"ok": False, "error": str(e)}
 
+    def release_verify(self, receipt: str, *,
+                       key_id: Optional[str] = None,
+                       lineage: Optional[str] = None) -> Dict[str, Any]:
+        from .release_surface import ReleaseSurfaceError, verify_release
+
+        try:
+            return verify_release(
+                receipt, key_id=key_id, lineage=lineage)
+        except (ReleaseSurfaceError, OSError, ValueError) as e:
+            return {"ok": False, "error": str(e)}
+
     def _check_write(self, path: Optional[str], name: str) -> Optional[str]:
         from .surface_common import ensure_write_path
 
@@ -1253,6 +1272,12 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent",
             max_risk=max_risk, alpha=alpha, seed=seed,
             proxy_gains=proxy_gains, oracle_gains=oracle_gains,
             issuer=issuer, run_id=run_id, kind=kind, metadata=metadata)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["release_verify"])
+    def release_verify(receipt: str, key_id: Optional[str] = None,
+                       lineage: Optional[str] = None) -> Dict[str, Any]:
+        return t.release_verify(
+            receipt, key_id=key_id, lineage=lineage)
 
     @server.tool(description=TOOL_DESCRIPTIONS["tenant"])
     def tenant(spec: Dict[str, Any], dry_run: bool = False,

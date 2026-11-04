@@ -3386,32 +3386,64 @@ def cmd_release(a: argparse.Namespace) -> int:
     """``agentdescent release`` -- evidence-gated, signed release receipt."""
     from .release_surface import (
         ReleaseSurfaceError, load_rules, release_payload, release_text,
-        resolve_secret,
+        resolve_secret, verify_release,
     )
 
+    verb = getattr(a, "release_cmd", None)
     try:
-        rules = load_rules(
-            a.rules, min_effect=a.min_effect, max_risk=a.max_risk)
-        secret = resolve_secret(
-            secret_env=a.secret_env, secret_file=a.secret_file)
-        metadata = None
-        if a.metadata is not None:
-            try:
-                metadata = json.loads(a.metadata)
-            except ValueError as error:
+        if verb == "verify":
+            if not a.receipt:
                 raise ReleaseSurfaceError(
-                    f"--metadata is not valid JSON: {error}") from None
-            if not isinstance(metadata, dict):
-                raise ReleaseSurfaceError("--metadata must be a JSON object")
-        payload = release_payload(
-            a.before, a.after, artifact_id=a.artifact_id,
-            artifact_hash=a.artifact_hash, key_id=a.key_id, secret=secret,
-            rules=rules, lineage=a.lineage, parents=a.parents,
-            contaminated=a.contamination, approved=a.approval, risk=a.risk,
-            min_effect=a.min_effect, alpha=a.alpha, seed=a.seed,
-            proxy_gains=a.proxy_gains, oracle_gains=a.oracle_gains,
-            issuer=a.issuer, run_id=a.run_id, kind=a.kind,
-            metadata=metadata, out=a.out)
+                    "release verify needs --receipt PATH")
+            ignored = [
+                flag for flag, value in (
+                    ("--before", a.before), ("--after", a.after),
+                    ("--artifact-id", a.artifact_id),
+                    ("--artifact-hash", a.artifact_hash), ("--out", a.out))
+                if value
+            ]
+            if ignored:
+                raise ReleaseSurfaceError(
+                    "release verify does not take " + ", ".join(ignored)
+                    + "; use the release command to create a receipt")
+            payload = verify_release(
+                a.receipt, key_id=a.key_id, secret_env=a.secret_env,
+                secret_file=a.secret_file, lineage=a.lineage)
+        else:
+            missing = [
+                flag for flag, value in (
+                    ("--before", a.before), ("--after", a.after),
+                    ("--artifact-id", a.artifact_id),
+                    ("--artifact-hash", a.artifact_hash),
+                    ("--key-id", a.key_id))
+                if not value
+            ]
+            if missing:
+                raise ReleaseSurfaceError(
+                    "release needs " + ", ".join(missing)
+                    + " (or pass `release verify --receipt ...`)")
+            rules = load_rules(
+                a.rules, min_effect=a.min_effect, max_risk=a.max_risk)
+            secret = resolve_secret(
+                secret_env=a.secret_env, secret_file=a.secret_file)
+            metadata = None
+            if a.metadata is not None:
+                try:
+                    metadata = json.loads(a.metadata)
+                except ValueError as error:
+                    raise ReleaseSurfaceError(
+                        f"--metadata is not valid JSON: {error}") from None
+                if not isinstance(metadata, dict):
+                    raise ReleaseSurfaceError("--metadata must be a JSON object")
+            payload = release_payload(
+                a.before, a.after, artifact_id=a.artifact_id,
+                artifact_hash=a.artifact_hash, key_id=a.key_id, secret=secret,
+                rules=rules, lineage=a.lineage, parents=a.parents,
+                contaminated=a.contamination, approved=a.approval, risk=a.risk,
+                min_effect=a.min_effect, alpha=a.alpha, seed=a.seed,
+                proxy_gains=a.proxy_gains, oracle_gains=a.oracle_gains,
+                issuer=a.issuer, run_id=a.run_id, kind=a.kind,
+                metadata=metadata, out=a.out)
     except (ReleaseSurfaceError, OSError, ValueError) as error:
         if getattr(a, "json", False):
             _out({"ok": False, "error": str(error)}, as_json=True)
@@ -3420,9 +3452,15 @@ def cmd_release(a: argparse.Namespace) -> int:
         return 2
     if a.json:
         _out(payload, as_json=True)
+    elif verb == "verify":
+        print(f"valid: {'yes' if payload['valid'] else 'no'}")
+        print(f"reason: {payload['reason']}")
+        print(f"artifact: {payload['artifact_id']}")
+        print(f"manifest: {payload['manifest_hash']}")
     else:
         print(release_text(payload))
-    return 0 if payload["released"] else 1
+    return 0 if (payload["valid"] if verb == "verify"
+                 else payload["released"]) else 1
 
 
 def safety_payload(archive: Optional[str] = None, *,
@@ -4105,15 +4143,21 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser(
         "release",
         help="gate paired evidence and sign an accepted release receipt")
-    s.add_argument("--before", required=True, metavar="PATH",
+    s.add_argument(
+        "release_cmd", nargs="?", choices=("verify",), default=None,
+        metavar="{verify}",
+        help="verify a signed receipt instead of creating one")
+    s.add_argument("--receipt", metavar="PATH",
+                   help="release receipt JSON to verify (release verify)")
+    s.add_argument("--before", metavar="PATH",
                    help="JSON object of task -> incumbent score, or '-' for stdin")
-    s.add_argument("--after", required=True, metavar="PATH",
+    s.add_argument("--after", metavar="PATH",
                    help="JSON object of task -> candidate score, or '-' for stdin")
-    s.add_argument("--artifact-id", required=True, dest="artifact_id",
+    s.add_argument("--artifact-id", dest="artifact_id",
                    help="the released artifact id")
-    s.add_argument("--artifact-hash", required=True, dest="artifact_hash",
+    s.add_argument("--artifact-hash", dest="artifact_hash",
                    help="content hash of the artifact (also the manifest identity)")
-    s.add_argument("--key-id", required=True, dest="key_id",
+    s.add_argument("--key-id", dest="key_id",
                    help="signing key id written into the manifest")
     s.add_argument("--secret-env", dest="secret_env", default=None,
                    help="environment variable holding the HMAC secret "

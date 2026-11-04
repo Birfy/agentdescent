@@ -37,6 +37,9 @@ from dataclasses import fields, replace
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from .lineage import LineageGraph, build_lineage
+from .policy_release import (
+    ArtifactManifest, SignedEnvelope, verify_manifest,
+)
 from .promotion import PromotionRules
 from .promotion_ledger import PromotionLedger
 from .release_pipeline import ReleaseReport, release_evidence
@@ -47,6 +50,7 @@ __all__ = [
     "ReleaseSurfaceError",
     "release_payload",
     "release_text",
+    "verify_release",
     "load_scores",
     "load_rules",
     "load_lineage",
@@ -268,6 +272,172 @@ def load_lineage(path: Optional[str]) -> LineageGraph:
         return build_lineage(records)
     except (TypeError, ValueError, KeyError) as error:
         raise ReleaseSurfaceError(f"lineage {path!r} is malformed: {error}") from None
+
+
+def _receipt_release(receipt: Any) -> Dict[str, Any]:
+    """The signed ``release`` object from a receipt, or from itself."""
+    if isinstance(receipt, Mapping):
+        payload = dict(receipt)
+    elif isinstance(receipt, str):
+        path = os.path.abspath(os.path.expanduser(receipt))
+        try:
+            with open(path, encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except OSError as error:
+            raise ReleaseSurfaceError(
+                f"receipt {receipt!r} cannot be read: {error}") from None
+        except ValueError as error:
+            raise ReleaseSurfaceError(
+                f"receipt {receipt!r} is not valid JSON: {error}") from None
+        payload = _mapping(payload, "receipt")
+    else:
+        raise ReleaseSurfaceError("receipt must be a JSON object or a path")
+    release = payload.get("release") if "release" in payload else payload
+    if release is None:
+        raise ReleaseSurfaceError(
+            "receipt has no signed release; a deferred or rejected run cannot "
+            "be verified")
+    return _mapping(release, "receipt release")
+
+
+def _receipt_manifest(value: Any) -> ArtifactManifest:
+    data = _mapping(value, "receipt release.envelope.manifest")
+    allowed = {
+        "artifact_id", "content_hash", "kind", "created_at", "parents",
+        "evidence", "metadata",
+    }
+    unknown = sorted(set(data) - allowed)
+    if unknown:
+        raise ReleaseSurfaceError(
+            "unknown manifest field(s): " + ", ".join(unknown))
+    parents = data.get("parents") or ()
+    if isinstance(parents, str):
+        parents = (parents,)
+    elif isinstance(parents, Sequence) and not isinstance(
+            parents, (str, bytes)):
+        parents = tuple(str(parent) for parent in parents)
+    else:
+        raise ReleaseSurfaceError(
+            "receipt release.envelope.manifest.parents must be a list or a string")
+    evidence = data.get("evidence") or {}
+    metadata = data.get("metadata") or {}
+    if not isinstance(evidence, Mapping):
+        raise ReleaseSurfaceError(
+            "receipt release.envelope.manifest.evidence must be a JSON object")
+    if not isinstance(metadata, Mapping):
+        raise ReleaseSurfaceError(
+            "receipt release.envelope.manifest.metadata must be a JSON object")
+    try:
+        created_at = float(data.get("created_at") or 0.0)
+    except (TypeError, ValueError):
+        raise ReleaseSurfaceError(
+            "receipt release.envelope.manifest.created_at must be a number"
+        ) from None
+    try:
+        return ArtifactManifest(
+            artifact_id=_required_text(
+                data.get("artifact_id"),
+                "receipt release.envelope.manifest.artifact_id"),
+            content_hash=_required_text(
+                data.get("content_hash"),
+                "receipt release.envelope.manifest.content_hash"),
+            kind=_required_text(
+                data.get("kind"), "receipt release.envelope.manifest.kind"),
+            created_at=created_at,
+            parents=parents,
+            evidence=dict(evidence),
+            metadata=dict(metadata))
+    except (TypeError, ValueError) as error:
+        raise ReleaseSurfaceError(
+            f"receipt release.envelope.manifest is invalid: {error}") from None
+
+
+def _receipt_envelope(release: Mapping[str, Any]) -> SignedEnvelope:
+    envelope = _mapping(
+        release.get("envelope"), "receipt release.envelope")
+    manifest = _receipt_manifest(
+        envelope.get("manifest") or release.get("manifest"))
+    signed_at = envelope.get("signed_at") or 0.0
+    try:
+        signed_at = float(signed_at)
+    except (TypeError, ValueError):
+        raise ReleaseSurfaceError(
+            "receipt release.envelope.signed_at must be a number") from None
+    return SignedEnvelope(
+        manifest=manifest,
+        key_id=_required_text(
+            envelope.get("key_id"), "receipt release.envelope.key_id"),
+        signature=_required_text(
+            envelope.get("signature"), "receipt release.envelope.signature"),
+        algorithm=str(envelope.get("algorithm") or "hmac-sha256"),
+        signed_at=signed_at)
+
+
+def verify_release(receipt: Any, *, key_id: Optional[str] = None,
+                   secret_env: Optional[str] = None,
+                   secret_file: Optional[str] = None,
+                   lineage: Optional[str] = None) -> Dict[str, Any]:
+    """Verify a signed release receipt without trusting its JSON.
+
+    The receipt is what ``agentdescent release --json`` wrote (or its ``release``
+    sub-object). The signature is recomputed from the embedded manifest, so an
+    edited ``content_hash``, evidence or signature fails. ``key_id`` pins the
+    expected signer: a receipt signed by another key is invalid, not accepted.
+    ``lineage`` additionally requires the artifact's node to carry the same
+    manifest hash.
+    """
+    release = _receipt_release(receipt)
+    envelope = _receipt_envelope(release)
+    secret = resolve_secret(secret_env=secret_env, secret_file=secret_file)
+    expected_key = (None if key_id is None
+                    else _required_text(key_id, "key_id"))
+    if expected_key is not None and expected_key != envelope.key_id:
+        # Do not consult a keyring under the receipt's own key here: the point
+        # of pinning is that a receipt naming another signer is refused.
+        check = None
+        valid = False
+        reason = (f"receipt is signed by {envelope.key_id!r}, expected "
+                  f"{expected_key!r}")
+    else:
+        keyring = {expected_key or envelope.key_id: secret}
+        check = verify_manifest(envelope, keyring)
+        valid = check.valid
+        reason = check.reason
+    manifest = envelope.manifest
+    evidence = manifest.evidence
+    decision_hash = str(evidence.get("decision_hash") or "")
+    if valid and evidence.get("action") != "promote":
+        valid = False
+        reason = "the manifest's decision action is not 'promote'"
+    if valid and not (decision_hash and evidence.get("evidence_hash")):
+        valid = False
+        reason = "the manifest is missing decision_hash or evidence_hash"
+    lineage_checked = False
+    if valid and lineage is not None:
+        graph = load_lineage(lineage)
+        if manifest.artifact_id not in graph:
+            valid = False
+            reason = (f"lineage has no node for {manifest.artifact_id!r}")
+        else:
+            node = graph[manifest.artifact_id]
+            recorded = node.metadata.get("manifest_hash")
+            if recorded != manifest.manifest_hash():
+                valid = False
+                reason = "lineage manifest_hash does not match the receipt"
+            else:
+                lineage_checked = True
+    return {
+        "schema_version": RELEASE_SCHEMA_VERSION,
+        "ok": True,
+        "valid": valid,
+        "reason": reason,
+        "artifact_id": manifest.artifact_id,
+        "manifest_hash": manifest.manifest_hash(),
+        "decision_hash": decision_hash,
+        "key_id": ((check.key_id if check is not None else "")
+                   or envelope.key_id),
+        "lineage_checked": lineage_checked,
+    }
 
 
 def _atomic_write(path: str, text: str) -> None:

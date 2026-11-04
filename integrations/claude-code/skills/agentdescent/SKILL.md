@@ -296,6 +296,10 @@ does not exist on the CLI/MCP path.
   promotion writes the signed manifest and lineage. The signing secret is the
   server's `AGENTDESCENT_RELEASE_KEY`, never a tool argument. Relay the verdict
   and the reasons/missing list; do not present a deferral as a release.
+- **`release_verify`** — read-only: verify a receipt that `release` wrote.
+  Recomputes the signature over the embedded manifest, so an edited hash or
+  evidence fails. `valid: false` is a normal result with `reason`; report it
+  and do not retry as if the tool failed.
 - **`audit_trace`** — "where did this adopted rule's evidence come from?" for
   one `run_id`. A ring with no store passed in is missing evidence, not a pass.
 

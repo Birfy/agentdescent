@@ -51,6 +51,40 @@ Exit codes:
 | 1 | a normal reject/defer; the lineage was not touched |
 | 2 | invalid input (scores, rules, lineage, signing material) |
 
+## Verify a receipt
+
+A receipt is only useful if a consumer can check it without trusting the file
+that carries it. `release verify` recomputes the signature from the embedded
+manifest and re-checks the decision shape:
+
+```bash
+agentdescent release verify --receipt evidence/release.json \
+  --secret-env AGENTDESCENT_RELEASE_KEY \
+  [--key-id ci-release] [--lineage evidence/lineage.json] [--json]
+```
+
+Exit codes:
+
+| code | meaning |
+|---:|---|
+| 0 | the signature, manifest and optional lineage node are valid |
+| 1 | the receipt is well-formed but invalid (edited manifest, wrong key, bad lineage) |
+| 2 | the receipt cannot be read or is missing required fields |
+
+The command accepts either the whole object `release --json` wrote or its
+`release` sub-object. `--key-id` pins the expected signer: a receipt signed by
+another key is reported invalid rather than accepted. Pass `--key-id` in CI so a
+rotated or second key cannot be accepted silently; without it the receipt names
+its own signer and the secret is the only trust root. `--lineage` additionally
+requires the artifact's node to exist and its `manifest_hash` to match. A
+deferred or rejected run has no signed release, so verifying it is an input
+error.
+
+```bash
+# CI: fail the job on an edited receipt
+agentdescent release verify --receipt artifact/release.json --json > verify.json
+```
+
 ## What is required to release
 
 An accepted promotion is signed only when all of these exist:
@@ -150,6 +184,12 @@ agent cannot use the tool to read an arbitrary file as the key. `lineage`,
 `rules`, `proxy_gains` and `oracle_gains` remain operator-supplied paths, so
 run the server only for hosts that are trusted with its filesystem. A
 reject/defer returns `released: false` and the decision's `reasons` / `missing`.
+
+The `release_verify` tool is the read-only counterpart: pass the receipt path
+and optionally `key_id` / `lineage`; it returns `valid`, `reason`, the artifact
+and manifest hash. It has no secret argument: the key is read only from the
+server's `AGENTDESCENT_RELEASE_KEY`, so a host agent cannot choose a different
+file or environment variable to verify against.
 
 ## Why the pipeline is shaped this way
 
