@@ -19,8 +19,10 @@ agentdescent init PATH --algorithm NAME --param KEY=VALUE [--rounds N] [--worker
 `--rounds 1 --workers 1` turns the kind's default plan (for a text prompt,
 8 rounds x 8 workers) into a quick trial without editing the spec.
 
-```bash
-```
+Include cases the seed gets wrong: if the seed already scores
+the target on held-out, the run stops at once with
+`held-out reward: 1.000 -> 1.000`, nothing is learned, and
+`diagnose` reports `seed-already-solved`.
 
 To **register one named card in a single PR**, follow
 [Register a named Algorithm card](algorithm-authoring.md).

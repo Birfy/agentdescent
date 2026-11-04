@@ -1604,10 +1604,16 @@ def cmd_evolve(a: argparse.Namespace) -> int:
     payload = {"run_id": rd.run_id, "state": st.state, "final_reward": result.final_reward,
                "initial_reward": init, "stop_reason": result.stop_reason,
                "outcomes": result.outcomes(), "error": result.error, "dir": rd.path}
+    from .diagnose import SEED_SOLVED_HINT, seed_already_solved
+    seed_solved = seed_already_solved(init, result.final_reward, result.stop_reason)
+    if seed_solved:
+        payload["note"] = SEED_SOLVED_HINT
     if init is not None:
         plain = (f"{_status_line(st)}\n"
                  f"held-out reward: {init:.3f} -> {result.final_reward:.3f}  "
-                 f"outcomes: {result.outcomes()}\n{rd.path}")
+                 f"outcomes: {result.outcomes()}\n"
+                 + (f"{SEED_SOLVED_HINT}\n" if seed_solved else "")
+                 + f"{rd.path}")
     else:
         plain = (f"{_status_line(st)}\nfinal reward: {result.final_reward:.3f}  "
                  f"outcomes: {result.outcomes()}\n{rd.path}")

@@ -12,7 +12,42 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-__all__ = ["DiagnosisReport", "adopted_count", "diagnose_payload"]
+__all__ = ["DiagnosisReport", "SEED_SOLVED_HINT", "adopted_count",
+           "diagnose_payload", "seed_already_solved"]
+
+#: One-line explanation shown when the seed already scored the target (#732).
+SEED_SOLVED_HINT = ("note: the seed already scored this on held-out before any "
+                    "round, so nothing was learned -- these cases cannot tell a "
+                    "better prompt from a worse one; add cases the seed gets "
+                    "wrong, use a stricter score, or raise target_reward")
+
+_SEED_SOLVED_NEXT = (
+    "add cases the seed gets wrong (the current ones are too easy to separate "
+    "candidates)",
+    "use a stricter score/normaliser so near-misses lose reward",
+    "raise target_reward so the run does not stop at the seed's score",
+)
+
+
+def seed_already_solved(initial: Any, final: Any,
+                        stop_reason: Optional[str] = None) -> bool:
+    """Whether the seed already met the bar and the run did not improve on it.
+
+    True when the seed's held-out reward (``initial_reward``) reached the
+    target -- ``stop_reason == "target_reward"`` or a reward ``>= 0.999`` --
+    and the final reward is no higher. A run without ``initial_reward`` (older
+    runs) is never classified this way (#732).
+    """
+    try:
+        init = None if initial is None else float(initial)
+        fin = None if final is None else float(final)
+    except (TypeError, ValueError):
+        return False
+    if init is None or fin is None:
+        return False
+    if fin > init + 1e-9:
+        return False
+    return stop_reason == "target_reward" or init >= 0.999
 
 
 @dataclass(frozen=True)
@@ -137,7 +172,8 @@ def _run_failed_next(run_id: str, error: str, store: Optional[str]) -> Tuple[str
 def diagnose_payload(run_id: str, *, store: Optional[str] = None) -> DiagnosisReport:
     """Classify why a run ended where it did.
 
-    The verdicts are deliberately few: ``solved``, ``partial-improvement``,
+    The verdicts are deliberately few: ``solved``, ``seed-already-solved``,
+    ``partial-improvement``,
     ``running``, ``cancelled``, ``run-failed``, ``reflector-error``,
     ``scoring-mismatch``, ``agent-failures``, ``gate-rejected``,
     ``no-improvement`` and ``unknown``. Evidence is bounded to a few items so a
@@ -174,6 +210,16 @@ def diagnose_payload(run_id: str, *, store: Optional[str] = None) -> DiagnosisRe
     committed = adopted_count(history=payload.get("history") or None,
                               outcomes=outcomes)
     target_hit = payload.get("stop_reason") == "target_reward"
+    initial = payload.get("initial_reward")
+    if seed_already_solved(initial, final_value, payload.get("stop_reason")):
+        return DiagnosisReport(
+            run_id, "seed-already-solved",
+            f"the seed already scored {float(initial):.3f} on held-out before "
+            "any round; nothing was learned and these cases cannot tell a "
+            "better prompt from a worse one",
+            evidence={"initial_reward": float(initial),
+                      "final_reward": final_value, "outcomes": outcomes},
+            recommendations=_SEED_SOLVED_NEXT)
     if final_value is not None and (target_hit or final_value >= 0.999):
         return DiagnosisReport(run_id, "solved",
                                f"held-out reward is {final_value:.3f}",

@@ -132,7 +132,8 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
         "outcomes() histogram that says why proposals were committed or refused. Explain "
         "what changed and why; do not paste the whole tree."),
     "diagnose": (
-        "Explain why a run ended where it did: solved, partial-improvement, running, "
+        "Explain why a run ended where it did: solved, seed-already-solved, "
+        "partial-improvement, running, "
         "cancelled, run-failed, reflector-error, scoring-mismatch, agent-failures, "
         "gate-rejected, no-improvement or unknown, with bounded evidence and the next "
         "step. Call this after `show` when the run learned little, instead of guessing "

@@ -13,6 +13,7 @@ The verdicts are deliberately few and ordered so the strongest evidence wins:
 
 | Verdict | Meaning | First thing to try |
 |---|---|---|
+| `seed-already-solved` | the seed already scored the target before any round; nothing was learned | add cases the seed gets wrong, a stricter score, or a higher `target_reward` |
 | `solved` | the target was reached | review and apply |
 | `partial-improvement` | candidates committed, reward still below target | more rounds/workers |
 | `running` | the run has not finished | `status` / `watch`, then diagnose again |
