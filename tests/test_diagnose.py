@@ -134,3 +134,46 @@ def test_adopted_count_helper_prefers_history():
     assert adopted_count(outcomes={"gepa-select": 2, "below-threshold": 5}) == 2
     assert adopted_count(outcomes={"below-threshold": 5}) == 0
     assert adopted_count(history=[], outcomes={"skillopt-accept": 1}) == 1
+
+
+def test_commits_that_never_moved_held_out_reward_are_not_partial(monkeypatch):
+    """dgm-select commits every round; 0.000 -> 0.000 learned nothing (#756)."""
+    _patch(monkeypatch, {
+        "initial_reward": 0.0, "final_reward": 0.0,
+        "outcomes": {"dgm-select": 3},
+        "history": [{"round": r, "committed": 1} for r in range(3)],
+        "samples": [{"output": "1998-10-28", "gold": "28.10.1998", "reward": 0.0},
+                    {"output": "1994-05-04", "gold": "04.05.1994", "reward": 0.0}]})
+    report = diagnose_payload("r")
+    assert report.verdict != "partial-improvement"
+    assert report.verdict == "agent-failures"
+
+
+def test_a_committed_run_that_stayed_at_the_seed_score_says_so(monkeypatch):
+    _patch(monkeypatch, {
+        "initial_reward": 0.6, "final_reward": 0.6,
+        "outcomes": {"gepa-select": 2},
+        "samples": [{"output": "x", "gold": None, "reward": None}]})
+    report = diagnose_payload("r")
+    assert report.verdict == "no-improvement"
+    assert "no candidate was adopted" not in report.summary
+    assert "0.600" in report.summary and "2 committed" in report.summary
+
+
+def test_a_regression_is_not_partial_improvement(monkeypatch):
+    _patch(monkeypatch, {
+        "initial_reward": 0.5, "final_reward": 0.25,
+        "outcomes": {"committed": 1},
+        "samples": [{"output": "297", "gold": "999", "reward": 0.0}]})
+    assert diagnose_payload("r").verdict != "partial-improvement"
+
+
+def test_a_real_gain_names_both_rewards(monkeypatch):
+    _patch(monkeypatch, {
+        "initial_reward": 0.25, "final_reward": 0.75,
+        "outcomes": {"committed": 1},
+        "samples": [{"output": "297", "gold": "999", "reward": 0.0}]})
+    report = diagnose_payload("r")
+    assert report.verdict == "partial-improvement"
+    assert "0.250 -> 0.750" in report.summary
+    assert report.evidence["initial_reward"] == 0.25

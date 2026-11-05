@@ -252,12 +252,22 @@ def diagnose_payload(run_id: str, *, store: Optional[str] = None) -> DiagnosisRe
             recommendations=("inspect the scorer/normaliser; re-run `plan` "
                              "with the same data",))
 
-    if committed:
+    # A commit is only an improvement when it moved held-out reward off the
+    # seed's. Named algorithms (dgm-select, gepa-select, ...) commit parent
+    # selections every round, so a run that went 0.000 -> 0.000 with a noop
+    # artifact used to be told "partial-improvement, raise rounds" (#756).
+    initial_value = float(initial) if initial is not None else None
+    gained = (initial_value is None or final_value is None
+              or final_value > initial_value + 1e-9)
+    if committed and gained:
+        moved = (f"{initial_value:.3f} -> {final_value:.3f}"
+                 if initial_value is not None else f"{final_value:.3f}")
         return DiagnosisReport(
             run_id, "partial-improvement",
             f"committed {committed} candidate(s); held-out reward "
-            f"{final_value:.3f} is below the target",
-            evidence={"final_reward": final_value, "outcomes": outcomes,
+            f"{moved} is below the target",
+            evidence={"initial_reward": initial_value,
+                      "final_reward": final_value, "outcomes": outcomes,
                       "committed": committed},
             recommendations=("raise rounds or n_workers for another attempt",
                              "inspect the remaining failures in `show --json`"))
@@ -285,10 +295,16 @@ def diagnose_payload(run_id: str, *, store: Optional[str] = None) -> DiagnosisRe
                              "fix the skill/prompt or add cases for this failure class",))
 
     if final_value is not None and final_value >= 0.5:
+        summary = (f"held-out reward {final_value:.3f} but no candidate was adopted"
+                   if not committed else
+                   f"held-out reward stayed at {final_value:.3f} (the seed scored "
+                   f"{initial_value:.3f}); {committed} committed candidate(s) did "
+                   "not raise it")
         return DiagnosisReport(
-            run_id, "no-improvement",
-            f"held-out reward {final_value:.3f} but no candidate was adopted",
-            evidence={"final_reward": final_value, "outcomes": outcomes},
+            run_id, "no-improvement", summary,
+            evidence={"initial_reward": initial_value,
+                      "final_reward": final_value, "outcomes": outcomes,
+                      "committed": committed},
             recommendations=("raise rounds or n_workers", "inspect the outcome histogram",))
     return DiagnosisReport(
         run_id, "unknown",

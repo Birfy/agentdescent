@@ -15,7 +15,7 @@ The verdicts are deliberately few and ordered so the strongest evidence wins:
 |---|---|---|
 | `seed-already-solved` | the seed already scored the target before any round; nothing was learned | add cases the seed gets wrong, a stricter score, or a higher `target_reward` |
 | `solved` | the target was reached | review and apply |
-| `partial-improvement` | candidates committed, reward still below target | more rounds/workers |
+| `partial-improvement` | candidates committed and held-out reward rose above the seed's, still below target | more rounds/workers |
 | `running` | the run has not finished | `status` / `watch`, then diagnose again |
 | `cancelled` | the run was cancelled | resume if the answer is still wanted |
 | `run-failed` | the run reported an error | `log.txt` / `status.json`; include `propose_error` when present |
@@ -30,8 +30,11 @@ The verdicts are deliberately few and ordered so the strongest evidence wins:
   call the agent broken. `agent-failures` requires most listed samples to fail;
   rejected candidates and committed-but-partial runs are classified first.
 - `scoring-mismatch` only compares samples whose output/gold were not truncated.
-- A run that committed a candidate is reported as `partial-improvement`, never
-  as "no candidate was adopted".
+- A run that committed a candidate *and* raised held-out reward above the
+  seed's `initial_reward` is reported as `partial-improvement`, never as "no
+  candidate was adopted". Commits that left the reward where the seed had it
+  (a named algorithm's `dgm-select` / `gepa-select` parent picks commit every
+  round) fall through to the later verdicts (#756).
 - Running and cancelled runs are named instead of being diagnosed as finished.
 - `diagnose_payload` calls `show_payload(..., diff=False)`, so it does not build
   an artifact diff it would throw away.
