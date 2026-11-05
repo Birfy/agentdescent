@@ -420,7 +420,8 @@ class TopKFrontierAggregator(AggregatorProtocol):
                 committed = None
         return [MergeReport(self.aid, report_diff, False, len(cards), len(cards), 0, 0,
                             self.ctx.best_score, committed,
-                            f"frontier={len(self.ctx.frontier.members)} best={self.ctx.best_score:.3f}")]
+                            f"frontier={len(self.ctx.frontier.members)} best={self.ctx.best_score:.3f}",
+                            category="evoskill-select")]
 
 def frontier_aggregator_factory(ctx: EvoSkillContext, *,
                                 artifact_id: str = "skill_library",

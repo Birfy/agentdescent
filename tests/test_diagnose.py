@@ -102,8 +102,8 @@ def test_missing_gold_and_missing_reward_are_not_failures(monkeypatch):
 
 
 def test_named_algorithm_outcomes_count_as_adopted(monkeypatch):
-    """GEPA/SkillOpt/DGM record adopt under their own category, not committed."""
-    for category in ("gepa-select", "skillopt-accept", "dgm-select"):
+    """GEPA/SkillOpt/DGM/EvoSkill record adopt under their own category, not committed."""
+    for category in ("gepa-select", "skillopt-accept", "dgm-select", "evoskill-select"):
         _patch(monkeypatch, {
             "final_reward": 0.75, "outcomes": {category: 3},
             "samples": [{"output": "297", "gold": "999", "reward": 0.0}]})
@@ -134,6 +134,7 @@ def test_adopted_count_helper_prefers_history():
     assert adopted_count(outcomes={"gepa-select": 2, "below-threshold": 5}) == 2
     assert adopted_count(outcomes={"below-threshold": 5}) == 0
     assert adopted_count(history=[], outcomes={"skillopt-accept": 1}) == 1
+    assert adopted_count(outcomes={"evoskill-select": 2}) == 2
 
 
 def test_commits_that_never_moved_held_out_reward_are_not_partial(monkeypatch):

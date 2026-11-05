@@ -730,6 +730,21 @@ def _evoskill_reflect(prompt):
     return "Read the task carefully."
 
 
+def test_evoskill_frontier_reports_evoskill_select_category(tmp_path):
+    """Frontier merge reports must not tally as unknown (#765)."""
+    from tests.test_evolvespec import _dir_spec
+
+    spec = _dir_spec(
+        str(tmp_path), kind="agent_dir",
+        reflect={"ref": "tests.test_algorithms:_evoskill_reflect", "call": False},
+        algorithm={"name": "evoskill", "params": {"batch_size": 1}},
+        evolve={"rounds": 1, "n_workers": 1, "seed": 0})
+    result = compose(spec, repo_path=str(tmp_path / "repo")).run()
+    outcomes = result.outcomes()
+    assert "unknown" not in outcomes, outcomes
+    assert outcomes.get("evoskill-select", 0) >= 1, outcomes
+
+
 def test_skillopt_registers_the_strict_gate_optimizer():
     alg = algorithms.get("skillopt")
     assert alg.kinds == ("text",) and alg.fidelity == "mechanism_microport"

@@ -91,7 +91,7 @@ def _matches_gold(sample: Dict[str, Any]) -> bool:
 
 
 # Outcome categories that mean a candidate was adopted. Named algorithms
-# (GEPA / SkillOpt / DGM) record their own category instead of
+# (GEPA / SkillOpt / DGM / EvoSkill) record their own category instead of
 # ``MergeOutcome.COMMITTED`` ("committed"), so diagnose and the decision log
 # must recognise them too.
 _ADOPT_OUTCOME_KEYS = frozenset({
@@ -99,6 +99,7 @@ _ADOPT_OUTCOME_KEYS = frozenset({
     "gepa-select",
     "skillopt-accept",
     "dgm-select",
+    "evoskill-select",
 })
 
 
@@ -112,8 +113,8 @@ def adopted_count(
     Prefers the per-round ``committed`` totals (the same source as the CLI's
     ``+N/-M`` lines). When there is no history, falls back to outcome
     categories that mean adoption: the default ``committed`` plus the named
-    algorithm categories ``gepa-select``, ``skillopt-accept`` and
-    ``dgm-select``.
+    algorithm categories ``gepa-select``, ``skillopt-accept``, ``dgm-select`` and
+    ``evoskill-select``.
     """
     if history:
         total = 0
