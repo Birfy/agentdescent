@@ -222,11 +222,11 @@ values at `init` time instead, for example with only `ARK_API_KEY` set:
 
 ```bash
 agentdescent init ./my-skill --data cases.jsonl --out spec.json \
-  --model doubao-seed-code --base-url https://ark.cn-beijing.volces.com/api/coding/v3
+  --model deepseek-v4-flash --base-url https://ark.cn-beijing.volces.com/api/coding/v3
 ```
 
 ```json
-"reflect": {"ref": "openai_compatible", "model": "doubao-seed-code",
+"reflect": {"ref": "openai_compatible", "model": "deepseek-v4-flash",
             "api_key_env": "ARK_API_KEY",
             "default_base_url": "https://ark.cn-beijing.volces.com/api/coding/v3"}
 ```
