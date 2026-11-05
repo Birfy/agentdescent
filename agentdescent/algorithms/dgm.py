@@ -38,7 +38,7 @@ Current capabilities: {capabilities}
 
 A task failed (reward {reward:.2f}):
 {prompt}
-The agent answered:
+{gold_block}The agent answered:
 {output}
 
 Propose ONE short, general capability that would help with this class of task.
@@ -145,9 +145,17 @@ def make_propose(complete: Completion, *, threshold: float = 0.8):
     def propose(rendered, task, output, reward):
         if reward >= threshold:
             return None
+        answers = task.meta.get("answers")
+        if answers:
+            gold = "\n".join(str(answer) for answer in answers)
+        else:
+            gold_value = task.meta.get("gold", "")
+            gold = "" if gold_value is None else str(gold_value)
+        gold_block = f"Expected answer(s):\n{gold}\n" if gold else ""
         return complete(_PROPOSE_TMPL.format(
             capabilities=rendered or "(none)",
-            reward=reward, prompt=task.prompt, output=output)).strip()
+            reward=reward, prompt=task.prompt, gold_block=gold_block,
+            output=output)).strip()
     return propose
 
 

@@ -47,6 +47,9 @@ Faithful to `DGM_outer.py`:
   capability set.
 * `run` — the surrogate objective; `reward` — resolved / not.
 * `propose` — inspect the failed instance, add the most-needed capability.
+  For spec tasks, the reflection prompt includes the task's `gold` value or
+  `answers` list when available, while tasks without expected answers keep the
+  previous prompt shape.
 * `aggregator_factory` → `DGMArchiveAggregator` — the keep-all archive with staged
   eval and the sigmoid×novelty parent selection; it **commits the sampled parent
   as the dev head**, so `evolve()` mutates it open-endedly next round (not the
