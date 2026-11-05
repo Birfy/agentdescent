@@ -891,6 +891,13 @@ def write_starter_spec(
                         agent_explicit=agent_explicit, model=model,
                         base_url=base_url, key_env=key_env,
                         algorithm=algorithm, algorithm_params=params)
+    if spec["kind"] == "text":
+        from .evolvespec import text_target_dir_message
+        why = text_target_dir_message(path)
+        if why:
+            # Refuse before writing: `plan` refuses it too, and a spec over a
+            # directory used to run on the path string and crash `apply` (#755).
+            raise ValueError(why)
     if rounds is not None:
         spec["evolve"]["rounds"] = rounds
     if workers is not None:
@@ -2117,6 +2124,14 @@ def apply_payload(run_id: str, *, to: Optional[str] = None, store: Optional[str]
             "pass --to PATH to write the rule, or read it with `show`")
     dest = os.path.expanduser(to or spec.target)
     if spec.kind in ("text", "policy_slot"):
+        if os.path.isdir(dest):
+            # Same refusal for --dry-run and the real write: the dry run used to
+            # report it would write the directory, then apply traced back on
+            # IsADirectoryError (#755).
+            raise runstore.RunStoreError(
+                f"{run_id} evolved a single text artifact and {dest!r} is a "
+                "directory; pass --to FILE to write it to a file, or read it "
+                "with `show`")
         plan = _text_plan(dest, result.rendered)
         if dry_run:
             return {**plan, "dest": dest}

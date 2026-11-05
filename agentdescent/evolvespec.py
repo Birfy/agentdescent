@@ -730,6 +730,25 @@ def looks_like_path_target(target: str) -> bool:
     return any(lower.endswith(suffix) for suffix in _TEXT_PATH_SUFFIXES)
 
 
+def text_target_dir_message(target: str) -> Optional[str]:
+    """Why ``kind='text'`` cannot take ``target``, when it is an existing directory.
+
+    A text spec evolves one file's contents (or inline prompt text). An existing
+    directory used to pass with only a warning: the run spent its calls on the
+    path *string* as the prompt, ``apply --dry-run`` claimed it would write the
+    directory and ``apply`` died on ``IsADirectoryError`` (#755). A missing
+    path-looking target keeps the #706 warning; only a real directory refuses.
+    """
+    path = os.path.expanduser(str(target))
+    if not os.path.isdir(path):
+        return None
+    skill = os.path.join(str(target).rstrip("/\\"), "SKILL.md")
+    return (f"target {target!r} is a directory; kind=text evolves the text of one "
+            f"file, not a directory. Point the target at a file inside it (for "
+            f"example {skill!r}) or use --kind skill_dir / agent_dir for the "
+            "directory")
+
+
 def _read_text_target(target: str) -> str:
     path = os.path.expanduser(target)
     if os.path.isfile(path):
@@ -1089,6 +1108,10 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
         raise SpecError("algorithm: not available for kind='policy_slot'; that kind "
                         "evolves one policy slot, not a recipe")
     chosen = _parse_algorithm(spec)
+    if spec.kind == "text":
+        why = text_target_dir_message(str(spec.target))
+        if why:
+            raise SpecError(why)
 
     if spec.kind == "policy_slot":
         return _compose_policy_slot(spec, usage=usage, on_round=on_round, **overrides)
