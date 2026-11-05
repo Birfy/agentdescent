@@ -331,6 +331,15 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
         "truth does not. A `signal-lost` signal means the verifier no longer predicts the "
         "truth -- the fix is a different verifier, not more labels. If `overlapping` is "
         "true the limits do not apply and an alarm is not evidence; say so."),
+    "traces_digest": (
+        "Read-only: summarise raw agent trajectories (a JSONL/JSON array of run_id, "
+        "task_id, step, kind, name, text/payload events) into a layered evidence digest: "
+        "per-run and per-task counts, normalised failure signatures, and a token-bounded "
+        "`text` block a reflector can consume. Every signature carries the source event "
+        "ids. Pass `signature` (or `run_id`/`task_id`) to drill back into the raw events "
+        "instead. The output is deterministic and no model or network call is made; "
+        "the server reads any trace path it is given, like the other read-only path "
+        "tools."),
 }
 
 
@@ -761,6 +770,33 @@ class Tools:
                                        bias_threshold=bias_threshold)
         except MetaCommandError as e:
             return {"error": str(e)}
+
+    def traces_digest(self, events: str, *,
+                      run_id: Optional[str] = None,
+                      task_id: Optional[str] = None,
+                      signature: Optional[str] = None,
+                      limit: int = 50,
+                      max_signatures: int = 20,
+                      max_digest_chars: int = 4000) -> Dict[str, Any]:
+        from .trace_digest import (
+            TraceDigestConfig, TraceDigestError, digest_traces, drilldown,
+            load_trace_events,
+        )
+
+        try:
+            loaded = load_trace_events(events)
+            if signature is not None or run_id is not None or task_id is not None:
+                return drilldown(
+                    loaded, run_id=run_id, task_id=task_id,
+                    signature=signature, limit=limit,
+                    config=TraceDigestConfig(max_signatures=max_signatures,
+                                             max_digest_chars=max_digest_chars))
+            return digest_traces(
+                loaded, config=TraceDigestConfig(
+                    max_signatures=max_signatures,
+                    max_digest_chars=max_digest_chars)).to_dict()
+        except (TraceDigestError, OSError, ValueError) as e:
+            return {"ok": False, "error": str(e)}
 
     def release(self, before: Dict[str, float], after: Dict[str, float], *,
                 artifact_id: str, artifact_hash: str, key_id: str,
@@ -1391,6 +1427,17 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent",
                     meta_audit: Optional[str] = None, inner_audit: Optional[str] = None,
                     bias_threshold: float = 0.1) -> Dict[str, Any]:
         return t.audit_trace(run_id, archive, meta_audit, inner_audit, bias_threshold)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["traces_digest"])
+    def traces_digest(events: str, run_id: Optional[str] = None,
+                      task_id: Optional[str] = None,
+                      signature: Optional[str] = None, limit: int = 50,
+                      max_signatures: int = 20,
+                      max_digest_chars: int = 4000) -> Dict[str, Any]:
+        return t.traces_digest(
+            events, run_id=run_id, task_id=task_id, signature=signature,
+            limit=limit, max_signatures=max_signatures,
+            max_digest_chars=max_digest_chars)
 
     @server.resource("agentdescent://runs", mime_type="application/json",
                      description="Every run in the store, newest first, with its status.")

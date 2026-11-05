@@ -109,6 +109,7 @@ nav:
     - Trusted promotion: trusted-promotion.md
     - Trusted evidence: trust-evidence.md
     - Release a candidate: release.md
+    - Trajectory evidence: traces.md
     - Governed harness change: governed-harness.md
     - Meta campaign: meta-campaign.md
     - Tenant cycle: tenant.md

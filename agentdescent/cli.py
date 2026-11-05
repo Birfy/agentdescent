@@ -2674,6 +2674,56 @@ def audit_trace_payload(run_id: str, *, archive: Optional[str] = None,
                       for l in report.links]}
 
 
+def cmd_traces(a: argparse.Namespace) -> int:
+    """``agentdescent traces`` -- digest raw traces or drill into one slice."""
+    from .surface_common import atomic_write_json
+    from .trace_digest import (
+        TraceDigestConfig, TraceDigestError, digest_traces, drilldown,
+        load_trace_events,
+    )
+
+    action = getattr(a, "traces_cmd", None)
+    try:
+        events = load_trace_events(a.events)
+        if action == "digest":
+            config = TraceDigestConfig(
+                max_signatures=a.max_signatures,
+                max_digest_chars=a.max_digest_chars)
+            payload = digest_traces(events, config=config).to_dict()
+            if a.out:
+                payload["out"] = atomic_write_json(a.out, payload)
+        elif action == "show":
+            payload = drilldown(
+                events, run_id=a.run_id, task_id=a.task_id,
+                signature=a.signature, limit=a.limit)
+        else:
+            raise TraceDigestError("traces needs digest or show")
+    except (TraceDigestError, OSError, ValueError) as error:
+        return _surface_error(a, error)
+    if a.json:
+        _out(payload, as_json=True)
+    else:
+        if action == "digest":
+            print(payload["summary"])
+            for run in payload["runs"]:
+                print(f"run {run['run_id']}: {run['events']} events  "
+                      f"tasks={run['tasks']}  failures={run['failures']}  "
+                      f"reward={run['reward']}")
+            for signature in payload["signatures"]:
+                print(f"{signature['id']}  x{signature['count']}  "
+                      f"{signature['kind']}/{signature['name']}  "
+                      f"{signature['message']}")
+            if payload.get("out"):
+                print(f"digest: {payload['out']}")
+        else:
+            print(f"events: {payload['count']}")
+            for event in payload["events"]:
+                print(f"{event['run_id']}/{event['task_id']} "
+                      f"step={event['step']} {event['kind']}/{event['name']}  "
+                      f"{event['text'][:200]}")
+    return 0
+
+
 def cmd_audit(a: argparse.Namespace) -> int:
     """``agentdescent audit <run_id> --archive PATH`` -- trace one adoption
     through its evidence rings."""
@@ -4106,6 +4156,29 @@ def build_parser() -> argparse.ArgumentParser:
                    help="module:attribute harness_evidence callable for the harness ring")
     s.add_argument("--bias-threshold", type=float, default=0.1, dest="bias_threshold")
     s.set_defaults(fn=cmd_audit)
+
+    s = sub.add_parser(
+        "traces", help="summarise raw agent trajectories or drill into them")
+    traces_sub = s.add_subparsers(dest="traces_cmd", required=True)
+    sp = traces_sub.add_parser("digest", help="build a layered evidence digest")
+    sp.add_argument("--events", required=True,
+                    help="trajectory JSONL or JSON array")
+    sp.add_argument("--max-signatures", type=int, default=20,
+                    dest="max_signatures")
+    sp.add_argument("--max-chars", type=int, default=4000,
+                    dest="max_digest_chars",
+                    help="upper bound on the prompt-ready digest text")
+    sp.add_argument("--out", help="write the JSON digest here")
+    sp.set_defaults(fn=cmd_traces)
+    sp = traces_sub.add_parser("show", help="show raw events behind a slice")
+    sp.add_argument("--events", required=True,
+                    help="trajectory JSONL or JSON array")
+    sp.add_argument("--run-id", dest="run_id", default=None)
+    sp.add_argument("--task-id", dest="task_id", default=None)
+    sp.add_argument("--signature", default=None,
+                    help="failure signature id from `traces digest`")
+    sp.add_argument("--limit", type=int, default=50)
+    sp.set_defaults(fn=cmd_traces)
 
     s = sub.add_parser("doctor", help="which agents, keys and optional pieces are available")
     s.add_argument("--home", help="the host's home directory (default: the real one)")

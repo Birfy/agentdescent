@@ -302,6 +302,10 @@ does not exist on the CLI/MCP path.
   and do not retry as if the tool failed.
 - **`audit_trace`** — "where did this adopted rule's evidence come from?" for
   one `run_id`. A ring with no store passed in is missing evidence, not a pass.
+- **`traces_digest`** — read-only: turn raw trajectory JSONL into a layered
+  digest (run/task counts, normalised failure signatures, bounded prompt text)
+  and drill back into the source events by signature id. Use it before asking a
+  reflector to diagnose a long run; do not paste the raw trace.
 
 ## When the user wants a governed campaign
 
