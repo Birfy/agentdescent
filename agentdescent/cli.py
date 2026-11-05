@@ -3345,8 +3345,13 @@ def cmd_tenant(a: argparse.Namespace) -> int:
             payload = surface.tenant_plan(a.spec)
         elif action == "run":
             payload = surface.tenant_run(a.spec, out=a.out)
+        elif action == "report":
+            payload = surface.tenant_report(
+                registry=a.registry, tenant=a.tenant,
+                workspace=a.workspace, principal=a.principal,
+                audit_limit=a.audit_limit)
         else:
-            raise SurfaceError("tenant needs init, plan or run")
+            raise SurfaceError("tenant needs init, plan, run or report")
     except Exception as error:  # noqa: BLE001 - user callbacks are part of the surface
         return _surface_error(a, error)
     if a.json:
@@ -3364,6 +3369,19 @@ def cmd_tenant(a: argparse.Namespace) -> int:
             print("next:")
             for step in payload["next"]:
                 print(f"  {step}")
+        elif action == "report":
+            print(f"registry: {payload['registry']}  "
+                  f"workspaces: {payload['counts']['workspaces']}  "
+                  f"principals: {payload['counts']['principals']}")
+            for row in payload["workspaces"]:
+                print(f"{row['tenant']}/{row['workspace']}  {row['name']}  "
+                      f"tokens={row['usage']['tokens']}  "
+                      f"cost={row['usage']['cost']}  "
+                      f"active={row['usage']['active']}")
+            if payload["audit"] is None:
+                print(f"audit: {payload['audit_note']}")
+            else:
+                print(f"audit: {len(payload['audit'])} event(s)")
         else:
             report = payload["report"]
             print(f"complete: {report['complete']}  usage: {report['usage']}")
@@ -4527,6 +4545,17 @@ def build_parser() -> argparse.ArgumentParser:
     sp = tenant_sub.add_parser("run", help="run one quota-checked cycle")
     sp.add_argument("--spec", required=True, help="tenant JSON spec")
     sp.add_argument("--out", help="write the full JSON report here")
+    sp.set_defaults(fn=cmd_tenant)
+    sp = tenant_sub.add_parser(
+        "report", help="inspect a persistent workspace registry")
+    sp.add_argument("--registry", required=True,
+                    help="workspace registry JSON written by tenant run")
+    sp.add_argument("--tenant", default=None)
+    sp.add_argument("--workspace", default=None)
+    sp.add_argument("--principal", default=None,
+                    help="actor whose audit:read decides whether audit is shown")
+    sp.add_argument("--audit-limit", type=int, default=20, dest="audit_limit",
+                    help="how many recent audit events to return (default 20)")
     sp.set_defaults(fn=cmd_tenant)
 
     s = sub.add_parser("serve", help="serve a read-only run panel on loopback, for a host UI")

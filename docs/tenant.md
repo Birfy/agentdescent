@@ -73,3 +73,34 @@ runs; without it, the registry is in-memory and per-invocation. `tokens` and
 `cost` are required explicitly, so a typo cannot turn a metered cycle into a
 free one. For real multi-process tenancy, replace the JSON snapshot with the
 persistent adapter described in `docs/governance.md`.
+
+## Inspect a registry
+
+A persistent registry accumulates quota usage and audit events across runs, but
+until now there was no read entry point:
+
+```bash
+agentdescent tenant report --registry workspaces.json \
+  [--tenant T] [--workspace W] [--principal P] [--audit-limit 20] [--json]
+```
+
+The report is read-only and answers "how much has this workspace used, and who
+did what recently?":
+
+- `workspaces` — tenant, workspace, name, quota and accumulated `usage`
+  (`tokens`, `cost`, `active`);
+- `principals` — principal, tenant and per-workspace roles;
+- `audit` — the most recent events, but only when `--principal` names an actor
+  with `audit:read` in that tenant/workspace. A viewer or an operator gets
+  `audit: null` plus an `audit_note`; the report never widens a role.
+
+`active` is the number of reservations currently held. The registry is a
+single-writer JSON snapshot: a process killed hard between `reserve` and
+`commit`/`release` (SIGKILL, power loss) can leave an `active` reservation
+behind, and with `max_concurrent=1` that blocks the workspace until the file is
+edited. The report makes the stale count visible; clean it up by editing the
+snapshot or by using a new registry file.
+
+The registry file must already exist: a report never creates an empty one. This
+is CLI-only on purpose, so a host model cannot read the local audit trail. To
+grant audit access, give the principal the `approver`, `admin` or `owner` role.

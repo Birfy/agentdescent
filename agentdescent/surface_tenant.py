@@ -31,7 +31,7 @@ from .workspaces import (
     WorkspaceRegistry,
 )
 
-__all__ = ["tenant_init", "tenant_plan", "tenant_run"]
+__all__ = ["tenant_init", "tenant_plan", "tenant_run", "tenant_report"]
 
 _TENANT_KEYS = ("schema_version", "platform", "tenant", "workspace",
                 "workspace_name", "principal", "roles", "quota", "tokens",
@@ -280,6 +280,114 @@ def tenant_run(path: Any, *, out: Optional[str] = None,
     if out is not None:
         payload["out"] = atomic_write_json(out, payload)
     return payload
+
+
+def tenant_report(*, registry: Any, tenant: Optional[str] = None,
+                  workspace: Optional[str] = None,
+                  principal: Optional[str] = None,
+                  audit_limit: int = 20) -> Dict[str, Any]:
+    """Read a persistent registry: workspaces, quota usage, roles and audit.
+
+    The registry file must already exist; a report never creates an empty one.
+    ``audit`` is returned only when ``principal`` has ``audit:read`` in the
+    tenant (and workspace, when given); otherwise it is ``None`` with a note.
+    Nothing is written, so a report can be run while a cycle is idle.
+    """
+    path = os.path.abspath(os.path.expanduser(require_text(registry, "registry")))
+    if not os.path.isfile(path):
+        raise SurfaceError(
+            f"registry {registry!r} does not exist; run a tenant cycle with "
+            "registry=<path> first")
+    if (isinstance(audit_limit, bool) or not isinstance(audit_limit, int)
+            or audit_limit < 0):
+        raise SurfaceError("audit_limit must be an int >= 0")
+    tenant = None if tenant is None else require_text(tenant, "tenant")
+    workspace = None if workspace is None else require_text(
+        workspace, "workspace")
+    principal = None if principal is None else require_text(
+        principal, "principal")
+    try:
+        from .workspace_store import PersistentWorkspaceRegistry
+
+        loaded = PersistentWorkspaceRegistry(path)
+    except (OSError, ValueError, TypeError, KeyError) as error:
+        raise SurfaceError(
+            f"registry {registry!r} is not readable: {error}") from None
+
+    snapshot = loaded.to_dict()
+    usage = {(row["tenant_id"], row["workspace_id"]): {
+        "tokens": row.get("tokens", 0.0),
+        "cost": row.get("cost", 0.0),
+        "active": row.get("active", 0),
+    } for row in snapshot.get("usage", ())}
+    workspaces = []
+    for row in snapshot.get("workspaces", ()):
+        if tenant is not None and row["tenant_id"] != tenant:
+            continue
+        if workspace is not None and row["workspace_id"] != workspace:
+            continue
+        key = (row["tenant_id"], row["workspace_id"])
+        workspaces.append({
+            "tenant": row["tenant_id"],
+            "workspace": row["workspace_id"],
+            "name": row.get("name", ""),
+            "quota": row.get("quota", {}),
+            "usage": usage.get(key, {
+                "tokens": 0.0, "cost": 0.0, "active": 0}),
+        })
+    principals = []
+    for row in snapshot.get("principals", ()):
+        if tenant is not None and row["tenant_id"] != tenant:
+            continue
+        if principal is not None and row["principal_id"] != principal:
+            continue
+        principals.append({
+            "principal": row["principal_id"],
+            "tenant": row["tenant_id"],
+            "roles": row.get("roles", {}),
+        })
+
+    audit = None
+    audit_note = None
+    if principal is None:
+        audit_note = (
+            "pass --principal with audit:read to include audit events")
+    else:
+        scope_tenant = tenant
+        if scope_tenant is None:
+            try:
+                scope_tenant = loaded.get_principal(principal).tenant_id
+            except KeyError:
+                scope_tenant = None
+        if scope_tenant is None:
+            audit_note = f"principal {principal!r} is not in the registry"
+        else:
+            try:
+                events = loaded.audit_events(
+                    principal, tenant_id=scope_tenant, workspace_id=workspace)
+            except Exception as error:  # noqa: BLE001 - a missing role is a report
+                audit_note = f"audit not available: {error}"
+            else:
+                rows = [event.to_dict() for event in events]
+                audit = [] if audit_limit == 0 else rows[-audit_limit:]
+
+    return {
+        "schema_version": SURFACE_SCHEMA_VERSION,
+        "ok": True,
+        "registry": path,
+        "tenant": tenant,
+        "workspace": workspace,
+        "principal": principal,
+        "workspaces": workspaces,
+        "principals": principals,
+        "audit": audit,
+        "audit_note": audit_note,
+        "counts": {
+            "workspaces": len(workspaces),
+            "principals": len(principals),
+            "audit": len(audit or ()),
+        },
+    }
 
 
 def tenant_init(out: Any, *, demo: bool = False) -> Dict[str, Any]:
