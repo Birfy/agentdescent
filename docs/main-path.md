@@ -45,8 +45,10 @@ paired scores -> TrustEvidence -> PromotionDecision -> signed ReleaseRecord
 | admission (optional) | `policy_release` (signed manifest + admission, not a second decision engine) |
 
 `agentdescent release` and the MCP `release` tool are the product surface.
-Do not hand-wire the three steps in application code; use `release_pipeline` or
-the CLI.
+`agentdescent release verify` (and MCP `release_verify`) checks the signed
+receipt independently: it recomputes the signature over the embedded manifest
+and can pin the expected key id and lineage node. Do not hand-wire the three
+steps in application code; use `release_pipeline` or the CLI.
 
 ## Path C — continuous platform
 
@@ -68,15 +70,19 @@ LoopKernel (durable) -> RSIPlatform (five layers) -> PlatformCampaign (multi-cyc
 when you need a single session with acceptance/decision logging; use
 `RSIPlatform` when the five layers must hand off to each other.
 
+`agentdescent platform status` (and MCP `platform_status`) reads a finished
+campaign's run database without the compute, foundry or experience callbacks;
+it only inspects the durable run store.
+
 ## Advanced layers (supported, narrower)
 
 | layer | canonical modules | surface |
 |---|---|---|
 | capability growth | `task_pipeline`, `capability_scout`, `capability_foundry`, `capability_archive`, `capability_loop` | `agentdescent capability` |
-| tenancy | `workspaces`, `tenant_platform` | `agentdescent tenant` |
-| operations | `ops_fabric` (write), `ops_console` (read), `rsi_metrics`, `rsi_telemetry`, `campaign_ops` | `agentdescent ops` |
+| tenancy | `workspaces`, `tenant_platform` | `agentdescent tenant` (`plan`, `run`) |
+| operations | `ops_fabric` (write), `ops_console` (read), `rsi_metrics`, `rsi_telemetry`, `campaign_ops` | `agentdescent ops` (`plan`, `publish`, `history`) |
 | meta-learning | `meta` (including `continuous_meta_run`), `meta_curriculum`, `meta_population`, `meta_campaign`, `meta_audit`, `meta_exam`, `verified_seed` | `agentdescent meta-campaign`, `exam`, `audit` |
-| governed harness | `safe_selfmod`, `proofs`, `approval`, `safety_controller`, `governed_harness` | `agentdescent governed-harness` |
+| governed harness | `safe_selfmod`, `proofs`, `approval`, `safety_controller`, `governed_harness` | `agentdescent governed-harness` (`plan`, `run`, `approvals`, `approve`, `reject`) |
 
 These are not “extra algorithms”; they are the control, evidence and memory
 layers around the three paths.
