@@ -27,14 +27,15 @@ from .surface_common import (
 from . import surface_platform
 from .tenant_platform import TenantPlatform
 from .workspaces import (
-    Permission, Principal, Quota, Role, Workspace, WorkspaceRegistry,
+    Permission, PermissionDenied, Principal, Quota, Role, Workspace,
+    WorkspaceRegistry,
 )
 
 __all__ = ["tenant_init", "tenant_plan", "tenant_run"]
 
 _TENANT_KEYS = ("schema_version", "platform", "tenant", "workspace",
                 "workspace_name", "principal", "roles", "quota", "tokens",
-                "cost", "usage_of", "worker_id")
+                "cost", "usage_of", "worker_id", "registry")
 
 
 def _label(value: Any) -> str:
@@ -119,10 +120,85 @@ def _tenancy(spec: Mapping[str, Any], *,
         "worker_id": str(spec.get("worker_id") or "tenant-worker"),
         "usage_of": usage_of,
         "platform": platform_spec,
+        "registry": (os.path.abspath(os.path.expanduser(require_text(
+            spec.get("registry"), "registry"))) if spec.get("registry") else None),
     }
 
 
-def _registry(tenancy: Mapping[str, Any]) -> Tuple[WorkspaceRegistry, Principal]:
+def _check_persisted(registry: WorkspaceRegistry,
+                    tenancy: Mapping[str, Any], *,
+                    has_workspace: bool, has_principal: bool) -> None:
+    if has_workspace:
+        existing = registry.get_workspace(
+            tenancy["tenant"], tenancy["workspace"])
+        if existing.quota != tenancy["quota"]:
+            raise SurfaceError(
+                "registry has quota " + str(asdict(existing.quota))
+                + f" for {tenancy['tenant']}/{tenancy['workspace']}, spec says "
+                + str(asdict(tenancy["quota"]))
+                + "; edit the registry or use a new file")
+    if has_principal:
+        roles = tuple(sorted(registry.get_principal(
+            tenancy["principal"]).roles_for(tenancy["workspace"])))
+        wanted = tuple(sorted(tenancy["roles"]))
+        if roles != wanted:
+            raise SurfaceError(
+                f"registry has roles {roles} for {tenancy['principal']}@"
+                f"{tenancy['workspace']}, spec says {wanted}; edit the "
+                "registry or use a new file")
+
+
+def _registry(tenancy: Mapping[str, Any], *, persist: bool
+              ) -> Tuple[WorkspaceRegistry, Principal]:
+    path = tenancy.get("registry")
+    if path and os.path.isfile(path):
+        from .workspace_store import PersistentWorkspaceRegistry
+
+        registry = PersistentWorkspaceRegistry(path)
+        has_workspace = registry.workspace_exists(
+            tenancy["tenant"], tenancy["workspace"])
+        has_principal = registry.principal_exists(tenancy["principal"])
+        if has_workspace or has_principal:
+            _check_persisted(registry, tenancy, has_workspace=has_workspace,
+                             has_principal=has_principal)
+        if has_workspace and has_principal:
+            return registry, registry.get_principal(tenancy["principal"])
+        if not persist:
+            # A plan must not mutate the file. Work on an in-memory copy so
+            # persisted usage/quota stay visible, and add the missing half only
+            # in memory.
+            planned = WorkspaceRegistry.from_dict(registry.to_dict())
+            if not has_workspace:
+                planned.add_workspace(Workspace(
+                    tenancy["tenant"], tenancy["workspace"],
+                    tenancy["workspace_name"], tenancy["quota"]))
+            if not has_principal:
+                planned.add_principal(Principal(
+                    tenancy["principal"], tenancy["tenant"],
+                    {tenancy["workspace"]: tenancy["roles"]}))
+            return planned, planned.get_principal(tenancy["principal"])
+        if not has_workspace:
+            registry.add_workspace(Workspace(
+                tenancy["tenant"], tenancy["workspace"],
+                tenancy["workspace_name"], tenancy["quota"]))
+        if not has_principal:
+            registry.add_principal(Principal(
+                tenancy["principal"], tenancy["tenant"],
+                {tenancy["workspace"]: tenancy["roles"]}))
+        return registry, registry.get_principal(tenancy["principal"])
+
+    if persist and path:
+        from .workspace_store import PersistentWorkspaceRegistry
+
+        registry = PersistentWorkspaceRegistry(path)
+        registry.add_workspace(Workspace(
+            tenancy["tenant"], tenancy["workspace"],
+            tenancy["workspace_name"], tenancy["quota"]))
+        registry.add_principal(Principal(
+            tenancy["principal"], tenancy["tenant"],
+            {tenancy["workspace"]: tenancy["roles"]}))
+        return registry, registry.get_principal(tenancy["principal"])
+
     registry = WorkspaceRegistry()
     registry.add_workspace(Workspace(
         tenancy["tenant"], tenancy["workspace"], tenancy["workspace_name"],
@@ -139,7 +215,15 @@ def tenant_plan(path: Any, *, allow: Optional[Sequence[str]] = None
     spec = load_spec(path)
     tenancy = _tenancy(spec, allow=allow)
     checked = surface_platform._validate(tenancy["platform"], allow=allow)
-    registry, principal = _registry(tenancy)
+    registry, principal = _registry(tenancy, persist=False)
+    try:
+        persisted_usage = registry.usage(
+            principal.principal_id, tenancy["tenant"],
+            tenancy["workspace"]).to_dict()
+    except (PermissionDenied, KeyError):
+        # A role without quota:read sees no usage; a missing workspace in the
+        # in-memory plan is likewise reported as unknown rather than fatal.
+        persisted_usage = None
     permissions = registry.permissions(
         principal.principal_id, tenancy["workspace"])
     if Permission.RUN_WRITE not in permissions:
@@ -156,6 +240,8 @@ def tenant_plan(path: Any, *, allow: Optional[Sequence[str]] = None
         "roles": list(tenancy["roles"]),
         "quota": asdict(tenancy["quota"]),
         "reserve": {"tokens": tenancy["tokens"], "cost": tenancy["cost"]},
+        "registry": tenancy["registry"],
+        "usage": persisted_usage,
         "runs_db": checked["runs_db"],
         "platform": checked["platform"],
         "next": ["agentdescent tenant run --spec <spec.json>"],
@@ -168,7 +254,7 @@ def tenant_run(path: Any, *, out: Optional[str] = None,
     tenancy = _tenancy(spec, allow=allow)
     platform, _, callbacks = surface_platform._build(
         tenancy["platform"], allow=allow)
-    registry, principal = _registry(tenancy)
+    registry, principal = _registry(tenancy, persist=True)
     tenant = TenantPlatform(
         platform, registry, principal, workspace_id=tenancy["workspace"],
         usage_of=tenancy["usage_of"])

@@ -820,6 +820,8 @@ class Tools:
 
         try:
             platform_spec = spec.get("platform") if isinstance(spec, dict) else None
+            if isinstance(spec, dict):
+                self._check_write(spec.get("registry"), "registry")
             if isinstance(platform_spec, dict):
                 self._check_write(
                     platform_spec.get("runs_db") or platform_spec.get("store"),

@@ -33,7 +33,7 @@ import threading
 import time
 import uuid
 from types import MappingProxyType
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
 __all__ = [
@@ -221,6 +221,92 @@ class WorkspaceRegistry:
         self._reservations: Dict[str, QuotaReservation] = {}
         self._audit: List[AuditEvent] = []
         self._lock = threading.RLock()
+
+    def to_dict(self) -> Dict[str, Any]:
+        """A JSON-safe snapshot of every tenant, principal, usage and audit row."""
+        return {
+            "schema_version": 1,
+            "workspaces": [
+                {"tenant_id": workspace.tenant_id,
+                 "workspace_id": workspace.workspace_id,
+                 "name": workspace.name,
+                 "quota": asdict(workspace.quota),
+                 "metadata": dict(workspace.metadata)}
+                for workspace in self._workspaces.values()
+            ],
+            "principals": [
+                {"principal_id": principal.principal_id,
+                 "tenant_id": principal.tenant_id,
+                 "roles": {workspace: list(roles) for workspace, roles
+                           in principal.roles.items()},
+                 "metadata": dict(principal.metadata)}
+                for principal in self._principals.values()
+            ],
+            "usage": [
+                {"tenant_id": tenant, "workspace_id": workspace,
+                 "tokens": usage.tokens, "cost": usage.cost,
+                 "active": usage.active}
+                for (tenant, workspace), usage in self._usage.items()
+            ],
+            "reservations": [asdict(row) for row in self._reservations.values()],
+            "audit": [event.to_dict() for event in self._audit],
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any], *,
+                  clock: Optional[Any] = None) -> "WorkspaceRegistry":
+        """Restore a snapshot without re-recording the registration audit events."""
+        if not isinstance(payload, Mapping):
+            raise ValueError("workspace registry snapshot must be an object")
+        if int(payload.get("schema_version", 1)) != 1:
+            raise ValueError(
+                "unsupported workspace registry schema_version "
+                f"{payload.get('schema_version')!r}")
+        registry = cls(clock=clock)
+        for row in payload.get("workspaces", ()):
+            data = dict(row)
+            workspace = Workspace(
+                data["tenant_id"], data["workspace_id"], data["name"],
+                Quota(**data.get("quota", {})), data.get("metadata") or {})
+            key = (workspace.tenant_id, workspace.workspace_id)
+            registry._workspaces[key] = workspace
+            # A workspace without a usage row starts at zero; the loop below
+            # overwrites this when the snapshot carries usage.
+            registry._usage[key] = QuotaUsage()
+        for row in payload.get("principals", ()):
+            data = dict(row)
+            principal = Principal(
+                data["principal_id"], data["tenant_id"],
+                {workspace: tuple(roles) for workspace, roles
+                 in (data.get("roles") or {}).items()},
+                data.get("metadata") or {})
+            registry._principals[principal.principal_id] = principal
+        for row in payload.get("usage", ()):
+            data = dict(row)
+            key = (data["tenant_id"], data["workspace_id"])
+            registry._usage[key] = QuotaUsage(
+                tokens=float(data.get("tokens", 0.0)),
+                cost=float(data.get("cost", 0.0)),
+                active=int(data.get("active", 0)))
+        for row in payload.get("reservations", ()):
+            data = dict(row)
+            reservation = QuotaReservation(**data)
+            registry._reservations[reservation.reservation_id] = reservation
+        registry._audit = [AuditEvent(**dict(row))
+                           for row in payload.get("audit", ())]
+        return registry
+
+    def workspace_exists(self, tenant_id: str, workspace_id: str) -> bool:
+        return (tenant_id, workspace_id) in self._workspaces
+
+    def principal_exists(self, principal_id: str) -> bool:
+        return principal_id in self._principals
+
+    def get_workspace(self, tenant_id: str, workspace_id: str) -> Workspace:
+        return self._workspace(tenant_id, workspace_id)
+
+    def get_principal(self, principal_id: str) -> Principal:
+        return self._principal(principal_id)
 
     # -- registration --------------------------------------------------------
 
