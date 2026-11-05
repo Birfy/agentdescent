@@ -734,7 +734,21 @@ def init_agent_unknown(ref: str) -> Optional[str]:
            "or a custom 'module:attribute'")
     guess = ref.strip().lower().replace("-", "_")
     if guess in agents:
-        msg += f" (did you mean `--agent {guess}`?)"
+        return msg + f" (did you mean `--agent {guess}`?)"
+    # An `install` host name or alias (#752): point it at its worker ref, or
+    # say plainly that the host has none.
+    from .integrations import HOST_CLI, canonical_host
+
+    host = canonical_host(ref)
+    if host in HOST_CLI:
+        worker = host.replace("-", "_")
+        if worker in agents:
+            msg += f" (did you mean `--agent {worker}`? `{ref}` is the install host name)"
+        else:
+            msg += (f"; `{ref}` is an install host with no worker CLI, so pick a "
+                    "worker that runs on its computer (`agentdescent doctor` lists "
+                    "them), e.g. `--agent openai_compatible --model M --key-env K`, "
+                    "or omit --agent for the default")
     return msg
 
 

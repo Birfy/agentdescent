@@ -104,3 +104,30 @@ def test_known_agent_refs_still_accepted(ws, ref):
     kind = ["--kind", "text"] if ref == "echo" else []
     assert _init(target, *kind, "--agent", ref) == 0
     assert json.loads((ws / "spec.json").read_text())["agent"]["ref"] == ref
+
+
+@pytest.mark.parametrize("ref,worker", [("deepseek-harness", "dsh"), ("DeepSeek_Harness", "dsh"),
+                                        ("claudecode", "claude_code"), ("open-code", "opencode")])
+def test_install_host_alias_points_at_worker(ws, capsys, ref, worker):
+    # `install` folds these aliases to a host whose worker ref differs (#752).
+    assert _init(str(ws / "my-skill"), "--agent", ref) == 2
+    assert not (ws / "spec.json").exists()
+    assert f"did you mean `--agent {worker}`?" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("ref", ["grok-bot", "grok", "Grok_Bot"])
+def test_grok_bot_host_explains_no_worker(ws, capsys, ref):
+    rc = cli.main(["algorithms", "run", "ace", str(ws / "prompt.txt"),
+                   "--agent", ref, "--out", "spec.json"])
+    assert rc == 2
+    assert not (ws / "spec.json").exists()
+    err = capsys.readouterr().err
+    assert f"--agent {ref}: not a known agent" in err
+    assert "install host with no worker CLI" in err
+    assert "openai_compatible" in err and "did you mean" not in err
+
+
+def test_plain_unknown_agent_gets_no_host_hint(ws, capsys):
+    assert _init(str(ws / "my-skill"), "--agent", "bogus") == 2
+    err = capsys.readouterr().err
+    assert "install host" not in err and "did you mean" not in err
